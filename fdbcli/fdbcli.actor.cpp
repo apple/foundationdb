@@ -50,6 +50,8 @@
 #include "versions.h"
 #endif
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
@@ -1450,14 +1452,14 @@ int printStatusFromJSON( std::string const& jsonFileName ) {
 }
 
 ACTOR Future<Void> timeWarning( double when, const char* msg ) {
-	Void _ = wait( delay(when) );
+	wait( delay(when) );
 	fputs( msg, stderr );
 
 	return Void();
 }
 
 ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> clusterFile, bool displayDatabaseAvailable = true) {
-	Void _ = wait(f);
+	wait(f);
 	StatusObject s = wait(StatusClient::statusFetcher(clusterFile));
 	printf("\n");
 	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
@@ -1469,7 +1471,7 @@ ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
 		when (T t = wait(f)) { return t; }
-		when (Void _ = wait(interrupt)) {
+		when (wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
 		}
@@ -1479,13 +1481,13 @@ ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, Standalone<StringRef> name, bool doCheckStatus ) {
 	state Database db = wait( cluster->createDatabase(name) );
 	if (doCheckStatus) {
-		Void _ = wait( makeInterruptable( checkStatus( Void(), ccf )) );
+		wait( makeInterruptable( checkStatus( Void(), ccf )) );
 	}
 	return db;
 }
 
 ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) {
-	Void _ = wait( makeInterruptable( tr->commit() ) );
+	wait( makeInterruptable( tr->commit() ) );
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
 		printf("Committed (%" PRId64 ")\n", ver);
@@ -1701,7 +1703,7 @@ ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 		}
 	}
 
-	Void _ = wait( makeInterruptable(includeServers(db, addresses)) );
+	wait( makeInterruptable(includeServers(db, addresses)) );
 	return false;
 };
 
@@ -1827,14 +1829,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 		}
 
-		Void _ = wait( makeInterruptable(excludeServers(db,addresses)) );
+		wait( makeInterruptable(excludeServers(db,addresses)) );
 
 		printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
 		printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
 
 		if(warn.isValid())
 			warn.cancel();
-		Void _ = wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
+		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<uint32_t, std::set<uint16_t>> workerPorts;
@@ -1914,7 +1916,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 		return true;
 	}
 
-	Void _ = wait( makeInterruptable(setClass(db,addr,processClass)) );
+	wait( makeInterruptable(setClass(db,addr,processClass)) );
 	return false;
 };
 
@@ -2415,7 +2417,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitconnected")) {
-					Void _ = wait( makeInterruptable( cluster->onConnected() ) );
+					wait( makeInterruptable( cluster->onConnected() ) );
 					continue;
 				}
 
@@ -2529,7 +2531,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						Void _ = wait( commitTransaction( tr ) );
+						wait( commitTransaction( tr ) );
 						intrans = false;
 						options = &globalOptions;
 					}
@@ -2639,7 +2641,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					}
-					Void _ = wait( makeInterruptable( forceRecovery( ccf ) ) );
+					wait( makeInterruptable( forceRecovery( ccf ) ) );
 					continue;
 				}
 
@@ -2665,7 +2667,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 							state Future<Optional<Standalone<StringRef>>> sampleRateFuture = tr->get(fdbClientInfoTxnSampleRate);
 							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture = tr->get(fdbClientInfoTxnSizeLimit);
-							Void _ = wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
+							wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
 							std::string sampleRateStr = "default", sizeLimitStr = "default";
 							if (sampleRateFuture.get().present()) {
 								const double sampleRateDbl = BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
@@ -2716,7 +2718,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
 							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
 							if (!intrans) {
-								Void _ = wait( commitTransaction( tr ) );
+								wait( commitTransaction( tr ) );
 							}
 							continue;
 						}
@@ -2803,7 +2805,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								}
 							}
 							if (!is_error) {
-								Void _ = wait(waitForAll(all_profiler_responses));
+								wait(waitForAll(all_profiler_responses));
 								for (int i = 0; i < all_profiler_responses.size(); i++) {
 									const ErrorOr<Void>& err = all_profiler_responses[i].get();
 									if (err.isError()) {
@@ -2972,7 +2974,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
-							Void _ = wait( commitTransaction( tr ) );
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
@@ -2993,7 +2995,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->clear(tokens[1]);
 
 						if (!intrans) {
-							Void _ = wait( commitTransaction( tr ) );
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
@@ -3014,7 +3016,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
-							Void _ = wait( commitTransaction( tr ) );
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
@@ -3156,7 +3158,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 }
 
 ACTOR Future<Void> timeExit(double duration) {
-	Void _ = wait(delay(duration));
+	wait(delay(duration));
 	fprintf(stderr, "Specified timeout reached -- exiting...\n");
 	return Void();
 }

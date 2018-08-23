@@ -101,8 +101,8 @@ namespace HTTP {
 	ACTOR Future<int> read_into_string(Reference<IConnection> conn, std::string *buf, int maxlen) {
 		loop {
 			// Wait for connection to have something to read
-			Void _ = wait(conn->onReadable());
-			Void _ = wait( delay( 0, TaskReadSocket ) );
+			wait(conn->onReadable());
+			wait( delay( 0, TaskReadSocket ) );
 
 			// Read into buffer
 			int originalSize = buf->size();
@@ -203,7 +203,7 @@ namespace HTTP {
 		// Read headers
 		r->headers.clear();
 
-		Void _ = wait(read_http_response_headers(conn, &r->headers, &buf, &pos));
+		wait(read_http_response_headers(conn, &r->headers, &buf, &pos));
 
 		auto i = r->headers.find("Content-Length");
 		if(i != r->headers.end())
@@ -230,7 +230,7 @@ namespace HTTP {
 			pos = 0;
 
 			// Read until there are at least contentLen bytes available at pos
-			Void _ = wait(read_fixed_into_string(conn, r->contentLen, &r->content, pos));
+			wait(read_fixed_into_string(conn, r->contentLen, &r->content, pos));
 
 			// There shouldn't be any bytes after content.
 			if(r->content.size() != r->contentLen)
@@ -256,7 +256,7 @@ namespace HTTP {
 					break;
 
 				// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
-				Void _ = wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
+				wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
 				pos += chunkLen;
 
 				// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
@@ -272,7 +272,7 @@ namespace HTTP {
 			r->contentLen = pos;
 
 			// Next is the post-chunk header block, so read that.
-			Void _ = wait(read_http_response_headers(conn, &r->headers, &r->content, &pos));
+			wait(read_http_response_headers(conn, &r->headers, &r->content, &pos));
 
 			// If the header parsing did not consume all of the buffer then something is wrong
 			if(pos != r->content.size())
@@ -330,8 +330,8 @@ namespace HTTP {
 			state double send_start = timer();
 
 			loop {
-				Void _ = wait(conn->onWritable());
-				Void _ = wait( delay( 0, TaskWriteSocket ) );
+				wait(conn->onWritable());
+				wait( delay( 0, TaskWriteSocket ) );
 
 				// If we already got a response, before finishing sending the request, then close the connection,
 				// set the Connection header to "close" as a hint to the caller that this connection can't be used
@@ -344,7 +344,7 @@ namespace HTTP {
 				}
 
 				state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
-				Void _ = wait(sendRate->getAllowance(trySend));
+				wait(sendRate->getAllowance(trySend));
 				int len = conn->write(pContent->getUnsent(), trySend);
 				if(pSent != nullptr)
 					*pSent += len;
@@ -355,7 +355,7 @@ namespace HTTP {
 					break;
 			}
 
-			Void _ = wait(responseReading);
+			wait(responseReading);
 
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)

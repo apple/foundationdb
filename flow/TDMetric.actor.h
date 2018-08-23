@@ -27,7 +27,6 @@
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
         #define FLOW_TDMETRIC_ACTOR_H
 
-#include "actorcompiler.h"
 #include "flow.h"
 #include "IndexedSet.h"
 #include "network.h"
@@ -36,6 +35,7 @@
 #include "CompressedInt.h"
 #include <algorithm>
 #include <functional>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricNameRef {
 	MetricNameRef() {}
@@ -1369,5 +1369,7 @@ typedef MetricHandle<StringMetric> StringMetricHandle;
 
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
+
+#include "flow/unactorcompiler.h"
 
 #endif

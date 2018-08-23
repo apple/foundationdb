@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
@@ -45,7 +45,7 @@ struct DummyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start( DummyWorkload* self, Database cx) {
 		if (self->displayDelay > 0.0)
-			Void _ = wait(delay(self->displayDelay));
+			wait(delay(self->displayDelay));
 		g_simulator.displayWorkers();
 		return Void();
 	}

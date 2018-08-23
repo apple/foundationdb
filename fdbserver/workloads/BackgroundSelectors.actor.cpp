@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 KeySelector randomizedSelector(const KeyRef &key, bool orEqual, int offset ) {
 	if( orEqual && g_random->random01() > 0.5 )
@@ -64,7 +64,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 			self->clients.push_back(
 				timeout(
 				self->backgroundSelectorWorker( cx, self ), self->testDuration, Void()) );
-		Void _ = wait( waitForAll( self->clients ) );
+		wait( waitForAll( self->clients ) );
 		return Void();
 	}
 
@@ -124,12 +124,12 @@ struct BackgroundSelectorWorkload : TestWorkload {
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 				}
 			}
 
 			loop {
-				Void _ = wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
+				wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
 				tr.reset();
 				startDrift = direction * g_random->randomInt( self->minDrift, self->maxDrift );
 				endDrift   = direction * g_random->randomInt( self->minDrift, self->maxDrift );
@@ -187,7 +187,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 						++self->retries;
 					}
 				}

@@ -20,7 +20,6 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "flow/actorcompiler.h"
 #include "IKeyValueStore.h"
 #include "CoroFlow.h"
 #include "Knobs.h"
@@ -33,6 +32,7 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "flow/ThreadPrimitives.h"
 #include "template_fdb.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
 	#define sqlite3_mutex_enter(x)
@@ -1782,7 +1782,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			Void _ = wait( delay(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL) );
+			wait( delay(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL) );
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
@@ -1807,7 +1807,7 @@ private:
 
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
-			Void _ = wait( self->readThreads->getError() || self->writeThread->getError() );
+			wait( self->readThreads->getError() || self->writeThread->getError() );
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -1825,10 +1825,10 @@ private:
 			self->starting.cancel();
 			self->cleaning.cancel();
 			self->logging.cancel();
-			Void _ = wait( self->readThreads->stop() && self->writeThread->stop() );
+			wait( self->readThreads->stop() && self->writeThread->stop() );
 			if (deleteOnClose) {
-				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename, true ) );
-				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename + "-wal", false ) );
+				wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename, true ) );
+				wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename + "-wal", false ) );
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
@@ -1850,13 +1850,13 @@ IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, Key
 
 ACTOR Future<Void> cleanPeriodically( KeyValueStoreSQLite* self ) {
 	loop {
-		Void _ = wait( delayJittered(SERVER_KNOBS->CLEANING_INTERVAL) );
-		Void _ = wait( self->doClean() );
+		wait( delayJittered(SERVER_KNOBS->CLEANING_INTERVAL) );
+		wait( self->doClean() );
 	}
 }
 
 ACTOR static Future<Void> startReadThreadsWhen( KeyValueStoreSQLite* kv, Future<Void> onReady, UID id ) {
-	Void _ = wait(onReady);
+	wait(onReady);
 	kv->startReadThreads();
 	return Void();
 }
@@ -2010,10 +2010,10 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	Optional<Value> _ = wait(store->readValue(StringRef()));
 
 	if(store->getError().isError())
-		Void _ = wait(store->getError());
+		wait(store->getError());
 	Future<Void> c = store->onClosed();
 	store->close();
-	Void _ = wait(c);
+	wait(c);
 
 	return Void();
 }

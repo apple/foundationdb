@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-
 #include "fdbrpc/IAsyncFile.h"
 #include "AsyncFile.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DiskDurabilityWorkload : public AsyncFileWorkload
 {
@@ -36,7 +35,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		Reference<FlowLock> lock;
 
 		ACTOR static Future<Void> test_impl(FileBlock *self, Reference<AsyncFileHandle> file, int pages, Reference<AsyncFileBuffer> buffer) {
-			Void _ = wait(self->lock->take());
+			wait(self->lock->take());
 
 			state int64_t offset = (int64_t)self->blockNum * pages * _PAGE_SIZE;
 			state int size = pages * _PAGE_SIZE;
@@ -67,7 +66,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 				arr[i] = newData;
 			}
 
-			Void _ = wait(file->file->write(buffer->buffer, size, offset));
+			wait(file->file->write(buffer->buffer, size, offset));
 			self->lock->release(1);
 			self->lastData = newData;
 			return Void();
@@ -158,14 +157,14 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		state int logfp = (int)ceil(log2(self->filePages));
 		loop {
 			int block = intHash(std::min<int>(g_random->randomInt(0, 1 << g_random->randomInt(0, logfp)), self->filePages - 1)) % self->filePages;
-			Void _ = wait(self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer));
+			wait(self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer));
 		}
 	}
 
 	ACTOR static Future<Void> syncLoop(DiskDurabilityWorkload *self) {
 		loop {
-			Void _ = wait(delay(g_random->random01() * self->syncInterval));
-			Void _ = wait(self->fileHandle->file->sync());
+			wait(delay(g_random->random01() * self->syncInterval));
+			wait(self->fileHandle->file->sync());
 		}
 	}
 
@@ -181,7 +180,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		for(int i = 0; i < self->writers; ++i)
 			tasks.push_back(worker(self));
 
-		Void _ = wait(timeout(waitForAll(tasks), self->testDuration, Void()));
+		wait(timeout(waitForAll(tasks), self->testDuration, Void()));
 
 		return Void();
 	}

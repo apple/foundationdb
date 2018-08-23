@@ -19,7 +19,6 @@
  */
 
 #include <fstream>
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -39,6 +38,7 @@
 #ifndef WIN32
 #include "versions.h"
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max
 #undef min
@@ -127,7 +127,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.backupAgents == ISimulator::WaitForType) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupToFile) {
@@ -139,7 +139,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 		agentFutures.push_back(fileAgent.run(cx, &backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator.backupAgents == ISimulator::BackupToFile) {
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		}
 
 		for(auto it : agentFutures) {
@@ -147,7 +147,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 		}
 	}
 
-	Void _= wait(Future<Void>(Never()));
+	wait(Future<Void>(Never()));
 	throw internal_error();
 }
 
@@ -155,7 +155,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.drAgents == ISimulator::WaitForType) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	if (g_simulator.drAgents == ISimulator::BackupToDB) {
@@ -178,7 +178,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		agentFutures.push_back(dbAgent.run(extraDB, &dr2PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator.drAgents == ISimulator::BackupToDB) {
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		}
 
 		TraceEvent("StoppingDrAgents");
@@ -188,7 +188,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		}
 	}
 
-	Void _= wait(Future<Void>(Never()));
+	wait(Future<Void>(Never()));
 	throw internal_error();
 }
 
@@ -222,10 +222,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			.detailext("ZoneId", localities.zoneId())
 			.detail("WaitTime", waitTime).detail("Port", port);
 
-		Void _ = wait( delay( waitTime ) );
+		wait( delay( waitTime ) );
 
 		state ISimulator::ProcessInfo *process =  g_simulator.newProcess( "Server", ip, port, localities, processClass, dataFolder->c_str(), coordFolder->c_str() );
-		Void _ = wait( g_simulator.onProcess(process, TaskDefaultYield) );	// Now switch execution to the process on which we will run
+		wait( g_simulator.onProcess(process, TaskDefaultYield) );	// Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
 
 		try {
@@ -260,7 +260,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				Future<Void> backup = runBackupAgents ? runBackup(connFile) : Future<Void>(Never());
 				Future<Void> dr = runBackupAgents ? runDr(connFile) : Future<Void>(Never());
 
-				Void _ = wait(listen || fd || success(onShutdown) || backup || dr);
+				wait(listen || fd || success(onShutdown) || backup || dr);
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set then somewhere an io_timeout was converted to a different error.
 				if(g_network->isSimulated() && e.code() != error_code_io_timeout && (bool)g_network->global(INetwork::enASIOTimedOut))
@@ -297,9 +297,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			.detail("Excluded", process->excluded)
 			.detail("Rebooting", process->rebooting)
 			.detailext("ZoneId", localities.zoneId());
-		Void _ = wait( g_simulator.onProcess( simProcess ) );
+		wait( g_simulator.onProcess( simProcess ) );
 
-		Void _ = wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));  // One last chance for the process to clean up?
+		wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));  // One last chance for the process to clean up?
 
 		g_simulator.destroyProcess( process );  // Leak memory here; the process may be used in other parts of the simulation
 
@@ -432,7 +432,7 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("DataHall", localities.dataHallId())
 				.detail("Locality", localities.toString());
 
-			Void _ = wait( waitForAll( processes ) );
+			wait( waitForAll( processes ) );
 
 			TraceEvent("SimulatedMachineRebootStart", randomId)
 				.detail("Folder0", myFolders[0])
@@ -455,7 +455,7 @@ ACTOR Future<Void> simulatedMachine(
 			for(auto fileItr = files.begin(); fileItr != files.end(); ++fileItr)
 				killFutures.push_back((*fileItr)->kill());
 
-			Void _ = wait( waitForAll( killFutures ) );
+			wait( waitForAll( killFutures ) );
 
 			state std::set<std::string> filenames;
 			state std::string closingStr;
@@ -512,7 +512,7 @@ ACTOR Future<Void> simulatedMachine(
 					ASSERT( false );
 				}
 
-				Void _ = wait( delay( backoff ) );
+				wait( delay( backoff ) );
 				backoff = std::min( backoff + 1.0, 6.0 );
 			}
 
@@ -547,7 +547,7 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("DataHall", localities.dataHallId())
 				.detail("MachineIPs", toIPVectorString(ips));
 
-			Void _ = wait( delay( rebootTime ) );
+			wait( delay( rebootTime ) );
 
 			if( swap ) {
 				auto& avail = availableFolders[localities.dcId()];
@@ -665,7 +665,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
 		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
-	Void _ = wait(delay(1.0));
+	wait(delay(1.0));
 
 	return Void();
 }
@@ -1226,7 +1226,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int minimumReplication = 0;
 	checkExtraDB(testFile, extraDB, minimumReplication);
 
-	Void _ = wait( g_simulator.onProcess( g_simulator.newProcess(
+	wait( g_simulator.onProcess( g_simulator.newProcess(
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(1);
@@ -1239,17 +1239,17 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, tlsOptions, extraDB), 100.0 ) );
+			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, tlsOptions, extraDB), 100.0 ) );
 		}
 		else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication, tlsOptions );
-			Void _ = wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
+			wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, g_random->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		Void _ = wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
+		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}

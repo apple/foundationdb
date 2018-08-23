@@ -158,7 +158,7 @@ ACTOR Future<Void> krmSetRangeCoalescing( Transaction *tr, Key mapPrefix, KeyRan
 	state vector<Future<Standalone<RangeResultRef>>> keys;
 	keys.push_back(tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, true));
 	keys.push_back(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, true));
-	Void _ = wait(waitForAll(keys));
+	wait(waitForAll(keys));
 
 	//Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();

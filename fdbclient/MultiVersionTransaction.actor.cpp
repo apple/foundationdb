@@ -25,6 +25,8 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
 		throw Error(e);
@@ -910,12 +912,13 @@ void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientIn
 			}
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 			if(e.code() == error_code_external_client_already_loaded) {
+				TraceEvent(SevInfo, "ExternalClientAlreadyLoaded").error(e).detail("LibPath", c->second->libPath);
 				c = externalClients.erase(c);
 				continue;
 			}
 			else {
+				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 				c->second->failed = true;
 				newFailure = true;
 			}
@@ -1565,13 +1568,13 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 		f = undestroyed[fNum];
 		
 		while(!f->isReady() && start+5 >= now()) {
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		}
 
 		ASSERT(f->isReady());
 	}
 
-	Void _ = wait(delay(1.0));
+	wait(delay(1.0));
 
 	for(fNum = 0; fNum < undestroyed.size(); ++fNum) {
 		f = undestroyed[fNum];
@@ -1674,7 +1677,7 @@ TEST_CASE( "fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1745,7 +1748,7 @@ TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	done = false;
@@ -1753,7 +1756,7 @@ TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1783,7 +1786,7 @@ TEST_CASE( "fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1816,7 +1819,7 @@ TEST_CASE( "fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();

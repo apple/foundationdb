@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
@@ -29,6 +28,7 @@
 #define state
 #undef max
 #undef min
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SaveAndKillWorkload : TestWorkload {
 
@@ -53,7 +53,7 @@ struct SaveAndKillWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start( SaveAndKillWorkload* self) {
 		state int i;
-		Void _ = wait(delay(g_random->random01()*self->testDuration));
+		wait(delay(g_random->random01()*self->testDuration));
 
 		CSimpleIni ini;
 		ini.SetUnicode();
@@ -116,7 +116,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		}
 
 		for (i = 0; i<100; i++) {
-			Void _ = wait(delay(0.0));
+			wait(delay(0.0));
 		}
 
 		g_simulator.stop();

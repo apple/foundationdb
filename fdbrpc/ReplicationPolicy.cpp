@@ -84,7 +84,7 @@ bool IReplicationPolicy::validateFull(
 		auto	missingEntry = totalSolution[lastSolutionIndex];
 		totalSolution[lastSolutionIndex] = totalSolution.back();
 		totalSolution.pop_back();
-		for (int index = 0; index < solutionSet.size(); index ++) {
+		for (int index = 0; index < solutionSet.size() && index < totalSolution.size(); index ++) {
 			if (g_replicationdebug > 3) {
 				auto fromServer = fromServers->getRecordViaEntry(missingEntry);
 				printf("Test remove entry:   %s   test:%3d of%3lu\n", fromServers->getEntryInfo(missingEntry).c_str(), index+1, solutionSet.size());

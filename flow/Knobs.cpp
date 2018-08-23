@@ -59,6 +59,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
+	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
 	//AsyncFileCached

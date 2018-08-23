@@ -29,6 +29,7 @@
 
 #include "flow/flow.h"
 #include "IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range requested
 class AsyncFileReadAheadCache : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
@@ -45,7 +46,7 @@ public:
 
 	// Read from the underlying file to a CacheBlock
 	ACTOR static Future<Reference<CacheBlock>> readBlock(AsyncFileReadAheadCache *f, int length, int64_t offset) {
-		Void _ = wait(f->m_max_concurrent_reads.take());
+		wait(f->m_max_concurrent_reads.take());
 
 		state Reference<CacheBlock> block(new CacheBlock(length));
 		try {
@@ -192,4 +193,5 @@ public:
 
 };
 
+#include "flow/unactorcompiler.h"
 #endif

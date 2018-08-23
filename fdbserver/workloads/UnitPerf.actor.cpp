@@ -24,7 +24,7 @@
 
 ACTOR Future<Void> sleepyActor(double interval, int* counter) {
 	loop {
-		Void _ = wait( delay( interval ) );
+		wait( delay( interval ) );
 		++*counter;
 	}
 }
@@ -37,7 +37,7 @@ ACTOR Future<Void> unitPerfTest() {
 	for(int i=0; i<100000; i++)
 		sleepy.push_back( sleepyActor( .1, &counter ) );
 
-	Void _ = wait( delay(10) );
+	wait( delay(10) );
 	sleepy.clear();
 	TraceEvent("Completed").detail("Count", counter);
 	printf("Completed: %d\n", counter);

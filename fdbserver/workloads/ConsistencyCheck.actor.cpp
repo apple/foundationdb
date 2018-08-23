@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/IRandom.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -31,6 +30,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ConsistencyCheckWorkload : TestWorkload
 {
@@ -105,12 +105,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		if(self->firstClient && self->performQuiescentChecks)
 		{
 			if(g_network->isSimulated()) {
-				Void _ = wait( timeKeeperSetDisable(cx) );
+				wait( timeKeeperSetDisable(cx) );
 			}
 
 			try
 			{
-				Void _ = wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
 			}
 			catch(Error& e)
 			{
@@ -155,11 +155,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload *self)
 	{
 		loop {
-			Void _ = wait(self->runCheck(cx, self));
+			wait(self->runCheck(cx, self));
 			if(!self->indefinite)
 				break;
 			self->repetitions++;
-			Void _ = wait(delay(5.0));
+			wait(delay(5.0));
 		}
 		return Void();
 	}
@@ -188,7 +188,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							configuration.set(res[i].key,res[i].value);
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 				}
 
@@ -325,7 +325,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
-				when(Void _ = wait(waitForAll(keyServerLocationFutures))) {
+				when(wait(waitForAll(keyServerLocationFutures))) {
 					//Read the key server location results
 					for (int i = 0; i < keyServerLocationFutures.size(); i++)
 					{
@@ -352,11 +352,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 						}
 					} // End of For	
 				}
-				when(Void _ = wait(cx->onMasterProxiesChanged())) { }
+				when(wait(cx->onMasterProxiesChanged())) { }
 			} // End of choose		
 			
 			if (!keyServersInsertedForThisIteration) // Retry the entire workflow
-				Void _ = wait(delay(1.0));
+				wait(delay(1.0));
 
 		} // End of while
 
@@ -397,7 +397,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						keyValueFutures.push_back(shards[i].second[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 
-					Void _ = wait(waitForAll(keyValueFutures));
+					wait(waitForAll(keyValueFutures));
 
 					int firstValidStorageServer = -1;
 
@@ -498,7 +498,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			//Wait for the storage servers to respond
-			Void _ = wait(waitForAll(metricFutures));
+			wait(waitForAll(metricFutures));
 
 			int firstValidStorageServer = -1;
 
@@ -554,7 +554,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				StorageMetrics metrics = wait( tr.getStorageMetrics( KeyRangeRef(allKeys.begin, keyServersPrefix), 100000 ) );
 				return metrics.bytes;
 			} catch( Error &e ) {
-				Void _ = wait( tr.onError( e ) );
+				wait( tr.onError( e ) );
 			}
 		}
 	}
@@ -653,7 +653,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					break;
 				}
 				catch(Error &e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 
@@ -718,7 +718,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 						}
 
-						Void _ = wait(waitForAll(keyValueFutures));
+						wait(waitForAll(keyValueFutures));
 
 						//Read the resulting entries
 						state int firstValidServer = -1;
@@ -892,7 +892,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
 						if(self->rateLimit > 0)
 						{
-								Void _ = wait(rateLimiter->getAllowance(totalReadAmount));
+								wait(rateLimiter->getAllowance(totalReadAmount));
 						}
 						bytesReadInRange += totalReadAmount;
 

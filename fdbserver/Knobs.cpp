@@ -63,6 +63,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
 	init( VERSIONS_PER_BATCH,                 VERSIONS_PER_SECOND/20 ); if( randomize && BUGGIFY ) VERSIONS_PER_BATCH = std::max<int64_t>(1,VERSIONS_PER_SECOND/1000);
+	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
@@ -211,6 +212,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
 	init( MAX_NOTIFICATIONS,                                  100000 );
+	init( MIN_NOTIFICATIONS,                                     100 );
+	init( NOTIFICATION_FULL_CLEAR_TIME,                      10000.0 );
 	init( CANDIDATE_MIN_DELAY,                                  0.05 );
 	init( CANDIDATE_MAX_DELAY,                                   1.0 );
 	init( CANDIDATE_GROWTH_RATE,                                 1.2 );
@@ -322,10 +325,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
-	init( TARGET_BYTES_PER_TLOG,                              2000e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
+	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
 	init( SPRING_BYTES_TLOG,								   400e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG = 200e3;
 	init( TLOG_SPILL_THRESHOLD,                               1500e6 ); if( smallTlogTarget ) TLOG_SPILL_THRESHOLD = 1500e3; if( randomize && BUGGIFY ) TLOG_SPILL_THRESHOLD = 0;
 	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 3000e3;
+	init( TLOG_RECOVER_MEMORY_LIMIT, TARGET_BYTES_PER_TLOG + SPRING_BYTES_TLOG );
 
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );
 

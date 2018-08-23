@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <ctime>
 #include "workloads.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
-#include <time.h>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern IKeyValueStore *makeDummyKeyValueStore();
 
@@ -176,7 +176,7 @@ ACTOR Future<Void> testKVReadSaturation( KVTest* test, Histogram<float>* latency
 		Optional<Value> val = wait( test->store->readValue(test->randomKey()) );
 		latency->addSample( timer() - begin );
 		++*count;
-		Void _ = wait(delay(0));
+		wait(delay(0));
 	}
 }
 
@@ -184,7 +184,7 @@ ACTOR Future<Void> testKVCommit( KVTest* test, Histogram<float>* latency, PerfIn
 	state Version v = test->lastSet;
 	test->lastCommit = v;
 	state double begin = timer();
-	Void _ = wait( test->store->commit() );
+	wait( test->store->commit() );
 	++*count;
 	latency->addSample( timer() - begin );
 	test->lastDurable = std::max( test->lastDurable, v );
@@ -290,12 +290,12 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		for(i=0; i<workload->nodeCount; i++) {
 			test.store->set( KeyValueRef( test.makeKey( i ), wr.toStringRef() ) );
 			if (!((i+1) % 10000) || i+1==workload->nodeCount) {
-				Void _ = wait( lastCommit );
+				wait( lastCommit );
 				lastCommit = test.store->commit();
 				printf("ETA: %f seconds\n", (timer()-setupBegin) / i * (workload->nodeCount-i));
 			}
 		}
-		Void _ = wait( lastCommit );
+		wait( lastCommit );
 		workload->setupTook = timer()-setupBegin;
 		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook);
 	}
@@ -314,13 +314,13 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 					++workload->sets;
 				}
 				++commitsStarted;
-				Void _ = wait( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
+				wait( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
 			}
 		} else {
 			vector<Future<Void>> actors;
 			for(int a=0; a<100; a++)
 				actors.push_back( testKVReadSaturation( &test, &workload->readLatency, &workload->reads ) );
-			Void _ = wait( timeout( waitForAll(actors), workload->testDuration, Void() ) );
+			wait( timeout( waitForAll(actors), workload->testDuration, Void() ) );
 		}
 	} else {
 		while (t < stopAt) {
@@ -347,7 +347,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 				}
 				if (t >= end) break;
 			}
-			Void _ = wait( delayUntil(t) );
+			wait( delayUntil(t) );
 		}
 	}
 
@@ -356,7 +356,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		t = timer();
 		for(i = 0; i < workload->nodeCount; i+=chunk) {
 			test.store->clear( KeyRangeRef(  test.makeKey( i ),  test.makeKey( i + chunk ) ) );
-			Void _ = wait( test.store->commit() );
+			wait( test.store->commit() );
 		}
 		TraceEvent("KVStoreClear").detail("Took", timer() - t);
 	}
@@ -368,7 +368,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	state KVTest test( workload->nodeCount, !workload->filename.size(), workload->keyBytes );
 	state Error err;
 
-	//Void _ = wait( delay(1) );
+	//wait( delay(1) );
 	TraceEvent("GO");
 
 	UID id = g_random->randomUniqueID();
@@ -387,8 +387,8 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	state Future<Void> main = testKVStoreMain( workload, &test );
 	try {
 		choose {
-			when ( Void _ = wait( main ) ) { }
-			when ( Void _ = wait( test.store->getError() ) ) { ASSERT( false ); }
+			when ( wait( main ) ) { }
+			when ( wait( test.store->getError() ) ) { ASSERT( false ); }
 		}
 	} catch (Error& e) {
 		err = e;
@@ -397,7 +397,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 
 	Future<Void> c = test.store->onClosed();
 	test.close();
-	Void _ = wait( c );
+	wait( c );
 	if (err.code() != invalid_error_code) throw err;
 	return Void();
 }

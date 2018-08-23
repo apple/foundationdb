@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "FailureMonitor.h"
-
+#include "networksender.actor.h"
 
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
@@ -367,7 +367,5 @@ void load(Ar& ar, RequestStream<T>& value) {
 	value = RequestStream<T>(endpoint);
 }
 
-
-
 #endif
-#include "genericactors.actor.g.h"
+#include "genericactors.actor.h"
