@@ -25,6 +25,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -72,7 +73,7 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarnAlways, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
@@ -402,3 +403,5 @@ struct ByteSampleInfo {
 //Determines whether a key-value pair should be included in a byte sample
 //Also returns size information about the sample
 ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+
+#include "flow/unactorcompiler.h"

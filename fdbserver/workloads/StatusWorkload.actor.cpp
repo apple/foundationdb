@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern bool noUnseed;
 
@@ -240,7 +240,7 @@ struct StatusWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop{
-			Void _ = wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;

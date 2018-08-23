@@ -75,7 +75,7 @@ namespace FDB {
 				tr->set(recent.get(candidate).key(), ValueRef());
 				// }
 
-				Void _ = wait(success(latestCounter) && success(candidateValue));
+				wait(success(latestCounter) && success(candidateValue));
 				int64_t currentWindowStart = 0;
 				if(latestCounter.get().size() > 0) {
 					currentWindowStart = counters.unpack(latestCounter.get()[0].key).getInt(0);

@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "FlowLineNoise.h"
 #include "flow/IThreadPool.h"
 
@@ -35,6 +34,7 @@
 #else
     #define HAVE_LINENOISE 0
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LineNoiseReader : IThreadPoolReceiver {
     virtual void init() {}
@@ -150,7 +150,7 @@ ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
         }
     });
 
-    Void _ = wait(result.getFuture());
+    wait(result.getFuture());
     return Void();
 }
 

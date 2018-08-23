@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {
@@ -111,11 +111,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 							tr->clear(targetRange);
 						}
 					}
-					Void _ = wait(backupAgent->submitBackup(tr, tag, backupRanges, false, self->backupPrefix, StringRef()));
-					Void _ = wait(tr->commit());
+					wait(backupAgent->submitBackup(tr, tag, backupRanges, false, self->backupPrefix, StringRef()));
+					wait(tr->commit());
 					break;
 				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
@@ -160,7 +160,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				if ((taskCount) && (0)) {
 					TraceEvent("DRU_EndingNonzeroTaskCount").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
-					Void _ = wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
 				}
 
 				loop {
@@ -169,7 +169,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					TraceEvent("DRU_NonzeroTaskWait").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 					printf("%.6f Wait #%4d for %lld tasks to end\n", now(), waitCycles, (long long) taskCount);
 
-					Void _ = wait(delay(20.0));
+					wait(delay(20.0));
 					tr->commit();
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
@@ -234,12 +234,12 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 			catch (Error &e) {
 				TraceEvent("DRU_CheckError").error(e);
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
 		if (displaySystemKeys) {
-			Void _ = wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+			wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
 		}
 
 		return Void();
@@ -249,13 +249,13 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 
 		try{
-			Void _ = wait(delay(self->backupAfter));
+			wait(delay(self->backupAfter));
 
 			TraceEvent("DRU_DoBackup").detail("Tag", printable(self->backupTag));
 			state Future<Void> b = doBackup(self, &backupAgent, self->extraDB, self->backupTag, self->backupRanges);
 
 			TraceEvent("DRU_DoBackupWait").detail("BackupTag", printable(self->backupTag));
-			Void _ = wait(b);
+			wait(b);
 			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
 		}
 		catch (Error& e) {
@@ -283,7 +283,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						state Future<Standalone<RangeResultRef>> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
 						state Future<Standalone<RangeResultRef>> bkpFuture = tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
-						Void _ = wait(success(srcFuture) && success(bkpFuture));
+						wait(success(srcFuture) && success(bkpFuture));
 
 						auto src = srcFuture.get().begin();
 						auto bkp = bkpFuture.get().begin();
@@ -332,7 +332,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					break;
 				}
 				catch (Error &e) {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -349,7 +349,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 		state Future<Void> stopDifferential = delay(self->stopDifferentialAfter);
 		state Future<Void> waitUpgrade = backupAgent.waitUpgradeToLatestDrVersion(self->extraDB, self->backupTag);
-		Void _ = wait(success(stopDifferential) && success(waitUpgrade));
+		wait(success(stopDifferential) && success(waitUpgrade));
 		TraceEvent("DRU_WaitDifferentialEnd").detail("Tag", printable(self->backupTag));
 
 		try {
@@ -368,13 +368,13 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					BinaryReader br(backupKeysPacked.get(), IncludeVersion());
 					prevBackupRanges = Standalone<VectorRef<KeyRangeRef>>();
 					br >> prevBackupRanges;
-					Void _ = wait( lockDatabase(tr, logUid) );
+					wait( lockDatabase(tr, logUid) );
 					tr->addWriteConflictRange(singleKeyRange(StringRef()));
-					Void _ = wait( tr->commit() );
+					wait( tr->commit() );
 					commitVersion = tr->getCommittedVersion();
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr->onError(e) );
+					wait( tr->onError(e) );
 				}
 			}
 
@@ -392,21 +392,21 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						break;
 
 					state Future<Void> versionWatch = versionCheckTr.watch(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
-					Void _ = wait(versionCheckTr.commit());
-					Void _ = wait(versionWatch);
+					wait(versionCheckTr.commit());
+					wait(versionWatch);
 					versionCheckTr.reset();
 				} catch( Error &e ) {
-					Void _ = wait(versionCheckTr.onError(e));
+					wait(versionCheckTr.onError(e));
 				}
 			}
 
 			TraceEvent("DRU_DiffRanges");
-			Void _ = wait( diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB ) );
+			wait( diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB ) );
 
 			// abort backup
 			TraceEvent("DRU_AbortBackup").detail("Tag", printable(self->backupTag));
-			Void _ = wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
-			Void _ = wait( unlockDatabase(self->extraDB, logUid) );
+			wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
+			wait( unlockDatabase(self->extraDB, logUid) );
 
 			// restore database
 			TraceEvent("DRU_PrepareRestore").detail("RestoreTag", printable(self->restoreTag));
@@ -422,11 +422,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 							tr2->clear(r);
 						}
 					}
-					Void _ = wait( tr2->commit() );
+					wait( tr2->commit() );
 					break;
 				} catch( Error &e ) {
 					TraceEvent("DRU_RestoreSetupError").error(e, true);
-					Void _ = wait( tr2->onError(e) );
+					wait( tr2->onError(e) );
 				}
 			}
 
@@ -438,7 +438,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			// start restoring db
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
-				Void _ = wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
+				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			}
 			catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
@@ -447,11 +447,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 
 			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
-			Void _ = wait(restoreAgent.unlockBackup(cx, self->restoreTag));
-			Void _ = wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
+			wait(restoreAgent.unlockBackup(cx, self->restoreTag));
+			wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 
 			state UID restoreUid = wait(restoreAgent.getLogUid(cx, self->restoreTag));
-			Void _ = wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent));
+			wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent));
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 

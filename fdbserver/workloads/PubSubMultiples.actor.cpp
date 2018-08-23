@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	double testDuration, messagesPerSecond;
@@ -81,10 +81,10 @@ struct PubSubMultiplesWorkload : TestWorkload {
 					tr.set( self->keyForFeed( offset ), self->valueForUInt( feeds[idx] ) );
 					tr.set( self->keyForInbox( offset ), self->valueForUInt( inboxes[idx] ) );
 				}
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch(Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -95,7 +95,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		vector<Future<Void>> actors;
 		for(int i=0; i<self->actorCount; i++)
 			actors.push_back( self->createNodeSwath( self, i, cx->clone() ) );
-		Void _ = wait( waitForAll( actors ) );
+		wait( waitForAll( actors ) );
 		TraceEvent("PSMNodesCreated").detail("ClientIdx", self->clientId);
 		return Void();
 	}
@@ -114,7 +114,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		vector<Future<Void>> subscribers;
 		for(int i=0; i<self->actorCount; i++)
 			subscribers.push_back( self->createSubscriptions( self, i, cx ) );
-		Void _ = wait( waitForAll( subscribers ) );
+		wait( waitForAll( subscribers ) );
 
 		state Future<Void> sender = self->messageSender( self, cx );
 		return Void();

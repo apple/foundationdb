@@ -19,8 +19,9 @@
  */
 
 
-#include "actorcompiler.h"
+#include "flow/flow.h"
 #include "XmlTraceLogFormatter.h"
+#include "actorcompiler.h"
 
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();

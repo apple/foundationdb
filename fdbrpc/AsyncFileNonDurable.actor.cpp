@@ -23,13 +23,13 @@
 std::map<std::string, Future<Void>> AsyncFileNonDurable::filesBeingDeleted;
 
 ACTOR Future<Void> sendOnProcess( ISimulator::ProcessInfo* process, Promise<Void> promise, int taskID ) {
-	Void _ = wait( g_simulator.onProcess( process, taskID ) );
+	wait( g_simulator.onProcess( process, taskID ) );
 	promise.send(Void());
 	return Void();
 }
 
 ACTOR Future<Void> sendErrorOnProcess( ISimulator::ProcessInfo* process, Promise<Void> promise, Error e, int taskID ) {
-	Void _ = wait( g_simulator.onProcess( process, taskID ) );
+	wait( g_simulator.onProcess( process, taskID ) );
 	promise.sendError(e);
 	return Void();
 }

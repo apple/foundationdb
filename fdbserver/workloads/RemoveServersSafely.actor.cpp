@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <>
 std::string describe( uint32_t const& item ) {
@@ -247,7 +247,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		int	randomIndex;
 		bool bCanKillProcess;
 		ISimulator::ProcessInfo*	randomProcess;
-		auto deadProcess = processesDead.back();
 		for (int killsLeft = killProcArray.size(); killsLeft > 0; killsLeft --)
 		{
 			// Select a random kill process
@@ -284,7 +283,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> workloadMain( RemoveServersSafelyWorkload* self, Database cx, double waitSeconds,
 			std::set<AddressExclusion> toKill1, std::set<AddressExclusion> toKill2 ) {
-		Void _ = wait( delay( waitSeconds ) );
+		wait( delay( waitSeconds ) );
 
 		// Removing the first set of machines might legitimately bring the database down, so a timeout is not an error
 		state std::vector<NetworkAddress> firstCoordinators;
@@ -305,7 +304,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (!bClearedFirst) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill").detail("Step", "include all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
-			Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 			self->includeAddresses(toKill1);
 			TraceEvent("RemoveAndKill").detail("Step", "included all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
@@ -323,7 +322,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// so we expect to succeed after a finite amount of time
 		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("ToKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
 			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-		Void _ = wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
+		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
 
 		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 
@@ -331,7 +330,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (BUGGIFY) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill").detail("Step", "include all second").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
-			Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 			self->includeAddresses(toKill2);
 			TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
@@ -390,7 +389,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// First clear the exclusion list and exclude the given list
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "include all").detail("ClusterAvailable", g_simulator.isAvailable());
-		Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+		wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "included all").detail("ClusterAvailable", g_simulator.isAvailable());
 		// Reinclude the addresses that were excluded, if present
 		if (pIncAddrs) {
@@ -404,14 +403,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		killProcArray = self->getProcesses(toKill);
 
 		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("ToKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
-		Void _ = wait( excludeServers( cx, toKillArray ) );
+		wait( excludeServers( cx, toKillArray ) );
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough servers left
 		// alive to do a coordinators auto (?)
 		if (toKill.size()) {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "Wait For Server Exclusion").detail("Addresses", describe(toKill)).detail("ClusterAvailable", g_simulator.isAvailable());
-			Void _ = wait( waitForExcludedServers( cx, toKillArray ) );
+			wait( waitForExcludedServers( cx, toKillArray ) );
 
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("DesiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
 

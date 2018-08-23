@@ -19,7 +19,6 @@
  */
 
 #include <fstream>
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -36,6 +35,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace std;
 
@@ -121,13 +121,13 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix) {
 
 ACTOR Future<Void> poisson( double *last, double meanInterval ) {
 	*last += meanInterval*-log( g_random->random01() );
-	Void _ = wait( delayUntil( *last ) );
+	wait( delayUntil( *last ) );
 	return Void();
 }
 
 ACTOR Future<Void> uniform( double *last, double meanInterval ) {
 	*last += meanInterval;
-	Void _ = wait( delayUntil( *last ) );
+	wait( delayUntil( *last ) );
 	return Void();
 }
 
@@ -341,7 +341,7 @@ ACTOR Future<Void> databaseWarmer( Database cx ) {
 	loop {
 		state Transaction tr( cx );
 		Version v = wait( tr.getReadVersion() );
-		Void _ = wait( delay( 0.25 ) );
+		wait( delay( 0.25 ) );
 	}
 }
 
@@ -355,26 +355,26 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + g_random->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return Void();
 		} catch( Error& e ) {
 			TraceEvent("PingingDatabaseTransactionError").error(e);
-			Void _ = wait( tr.onError( e ) );
+			wait( tr.onError( e ) );
 		}
 	}
 }
 
 ACTOR Future<Void> testDatabaseLiveness( Database cx, double databasePingDelay, string context, double startDelay = 0.0 ) {
-	Void _ = wait( delay( startDelay ) );
+	wait( delay( startDelay ) );
 	loop {
 		try {
 			state double start = now();
 			TraceEvent(("PingingDatabaseLiveness_" + context).c_str());
-			Void _ = wait( timeoutError( pingDatabase( cx ), databasePingDelay ) );
+			wait( timeoutError( pingDatabase( cx ), databasePingDelay ) );
 			double pingTime = now() - start;
 			ASSERT( pingTime > 0 );
 			TraceEvent(("PingingDatabaseLivenessDone_" + context).c_str()).detail("TimeTaken", pingTime);
-			Void _ = wait( delay( databasePingDelay - pingTime ) );
+			wait( delay( databasePingDelay - pingTime ) );
 		} catch( Error& e ) {
 			if( e.code() != error_code_actor_cancelled )
 				TraceEvent(SevError, ("PingingDatabaseLivenessError_" + context).c_str()).error(e)
@@ -413,7 +413,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			setupReq = req;
 			if (!setupResult.present()) {
 				try {
-					Void _ = wait( workload->setup(cx) || databaseError );
+					wait( workload->setup(cx) || databaseError );
 					TraceEvent("TestSetupComplete", workIface.id()).detail("Workload", workload->description());
 					setupResult = Void();
 				} catch (Error& e) {
@@ -429,7 +429,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			if (!startResult.present()) {
 				try {
 					TraceEvent("TestStarting", workIface.id()).detail("Workload", workload->description());
-					Void _ = wait( workload->start(cx) || databaseError );
+					wait( workload->start(cx) || databaseError );
 					startResult = Void();
 				} catch( Error& e ) {
 					startResult = operation_failed();
@@ -505,7 +505,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 			Database _cx = wait(cluster->createDatabase(database, locality));
 			cx = _cx;
 
-			Void _ = wait( delay(1.0) );
+			wait( delay(1.0) );
 		}
 
 		// add test for "done" ?
@@ -524,7 +524,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 			test = timeoutError(test,work.timeout);
 		}
 
-		Void _ = wait(test);
+		wait(test);
 		
 		endRole(workIface.id(), "Tester", "Complete");
 	} catch (Error& e) {
@@ -551,7 +551,7 @@ ACTOR Future<Void> testerServerCore( TesterInterface interf, Reference<ClusterCo
 
 	TraceEvent("StartingTesterServerCore", interf.id());
 	loop choose {
-		when (Void _ = wait(workerFatalError)) {}
+		when (wait(workerFatalError)) {}
 		when (WorkloadRequest work = waitNext( interf.recruitments.getFuture() )) {
 			addWorkload.send(testerServerWorkload(work, ccf, dbInfo, locality));
 		}
@@ -567,12 +567,12 @@ ACTOR Future<Void> clearData( Database cx ) {
 			tr.clear( normalKeys );
 			tr.makeSelfConflicting();
 			Version v = wait( tr.getReadVersion() );  // required since we use addReadConflictRange but not get
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			TraceEvent("TesterClearingDatabase").detail("AtVersion", tr.getCommittedVersion());
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError").error(e);
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	return Void();
@@ -661,7 +661,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		TraceEvent("TestSetupStart").detail("WorkloadTitle", printable(spec.title));
 		for(int i= 0; i < workloads.size(); i++)
 			setups.push_back( workloads[i].setup.template getReply<Void>() );
-		Void _ = wait( waitForAll( setups ) );
+		wait( waitForAll( setups ) );
 		TraceEvent("TestSetupComplete").detail("WorkloadTitle", printable(spec.title));
 	}
 
@@ -671,14 +671,14 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		std::vector< Future<Void> > starts;
 		for(int i= 0; i < workloads.size(); i++)
 			starts.push_back( workloads[i].start.template getReply<Void>() );
-		Void _ = wait( waitForAll( starts ) );
+		wait( waitForAll( starts ) );
 		printf("%s complete\n", printable(spec.title).c_str());
 		TraceEvent("TestComplete").detail("WorkloadTitle", printable(spec.title));
 	}
 
 	if( spec.phases & TestWorkload::CHECK ) {
 		if( spec.useDB && ( spec.phases & TestWorkload::EXECUTION ) ) {
-			Void _ = wait( delay(3.0) );
+			wait( delay(3.0) );
 		}
 
 		state std::vector< Future<bool> > checks;
@@ -686,7 +686,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		printf("checking tests...\n");
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back( workloads[i].check.template getReply<bool>() );
-		Void _ = wait( waitForAll( checks ) );
+		wait( waitForAll( checks ) );
 		
 		for(int i = 0; i < checks.size(); i++) {
 			if(checks[i].get())
@@ -702,7 +702,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", printable(spec.title));
 		for(int i= 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReply<vector<PerfMetric>>() );
-		Void _ = wait( waitForAllReady( metricTasks ) );
+		wait( waitForAllReady( metricTasks ) );
 		int failedMetrics = 0;
 		for(int i = 0; i < metricTasks.size(); i++) {
 			if(!metricTasks[i].isError())
@@ -772,7 +772,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
-		Void _ = wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
+		wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
 	}
 }
 
@@ -803,20 +803,20 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	if( spec.useDB ) {
 		if( spec.dumpAfterTest ) {
 			try {
-				Void _ = wait( timeoutError( dumpDatabase( cx, "dump after " + printable(spec.title) + ".html", allKeys ), 30.0 ) );
+				wait( timeoutError( dumpDatabase( cx, "dump after " + printable(spec.title) + ".html", allKeys ), 30.0 ) );
 			} catch (Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to dump database");
 				ok = false;
 			}
 
-			Void _ = wait( delay(1.0) );
+			wait( delay(1.0) );
 		}
 
 		//Run the consistency check workload
 		if(spec.runConsistencyCheck) {
 			try {
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
-				Void _ = wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
+				wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
 			}
 			catch(Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
@@ -838,13 +838,13 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	if( spec.useDB && spec.clearAfterTest ) {
 		try {
 			TraceEvent("TesterClearingDatabase");
-			Void _ = wait( timeoutError(clearData(cx), 1000.0) );
+			wait( timeoutError(clearData(cx), 1000.0) );
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
 			throw;   // If we didn't do this, we don't want any later tests to run on this DB
 		}
 
-		Void _ = wait( delay(1.0) );
+		wait( delay(1.0) );
 	}
 
 	return ok;
@@ -1044,7 +1044,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	//Change the configuration (and/or create the database) if necessary
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
-			Void _ = wait(timeoutError(changeConfiguration(cx, testers, database, startingConfiguration), 2000.0));
+			wait(timeoutError(changeConfiguration(cx, testers, database, startingConfiguration), 2000.0));
 		}
 		catch(Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
@@ -1054,7 +1054,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks").detail("DatabasePingDelay", databasePingDelay).detail("StartDelay", startDelay);
 		try {
-			Void _ = wait( quietDatabase( cx, dbInfo, "Start") || 
+			wait( quietDatabase( cx, dbInfo, "Start") || 
 				( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseStart", startDelay ) ) );
 		} catch( Error& e ) {
 			TraceEvent("QuietDatabaseStartExternalError").error(e);
@@ -1075,7 +1075,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
 			try {
-				Void _ = wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
+				wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
 					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
 			} catch( Error& e ) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);
@@ -1101,10 +1101,10 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 					workers = w;
 					break; 
 				}
-				Void _ = wait( delay(SERVER_KNOBS->WORKER_POLL_DELAY) );
+				wait( delay(SERVER_KNOBS->WORKER_POLL_DELAY) );
 			}
-			when( Void _ = wait( cc->onChange() ) ) {}
-			when( Void _ = wait( testerTimeout ) ) {
+			when( wait( cc->onChange() ) ) {}
+			when( wait( testerTimeout ) ) {
 				TraceEvent(SevError, "TesterRecruitmentTimeout");
 				throw timed_out();
 			}
@@ -1115,7 +1115,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	for(int i=0; i<workers.size(); i++)
 		ts.push_back(workers[i].first.testerInterface);
 
-	Void _ = wait( runTests( cc, ci, ts, tests, startingConfiguration, locality) );
+	wait( runTests( cc, ci, ts, tests, startingConfiguration, locality) );
 	return Void();
 }
 
@@ -1172,7 +1172,7 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	}
 
 	choose {
-		when (Void _ = wait(tests)) { return Void(); }
-		when (Void _ = wait(quorum(actors, 1))) { ASSERT(false); throw internal_error(); }
+		when (wait(tests)) { return Void(); }
+		when (wait(quorum(actors, 1))) { ASSERT(false); throw internal_error(); }
 	}
 }

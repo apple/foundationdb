@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
 struct CpuProfilerWorkload : TestWorkload
@@ -95,7 +95,7 @@ struct CpuProfilerWorkload : TestWorkload
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}
 
-			Void _ = wait(waitForAll(replies));
+			wait(waitForAll(replies));
 
 			//Check that all workers succeeded if turning the profiler on
 			if(enabled)
@@ -116,18 +116,18 @@ struct CpuProfilerWorkload : TestWorkload
 
 	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload *self)
 	{
-		Void _ = wait(delay(self->initialDelay));
+		wait(delay(self->initialDelay));
 		if(self->clientId == 0)
 			TraceEvent("SignalProfilerOn");
-		Void _ = wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
+		wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
 
 		//If a duration was given, let the duration elapse and then shut the profiler off
 		if(self->duration > 0)
 		{
-			Void _ = wait(delay(self->duration));
+			wait(delay(self->duration));
 			if(self->clientId == 0)
 				TraceEvent("SignalProfilerOff");
-			Void _ = wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
+			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
 		return Void();
@@ -145,7 +145,7 @@ struct CpuProfilerWorkload : TestWorkload
 		{
 			if(self->clientId == 0)
 				TraceEvent("SignalProfilerOff");
-			Void _ = wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
+			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
 		return self->success;

@@ -33,6 +33,8 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 
 */
 
+#include <cstdint>
+#include <cstddef>
 #include "flow.h"
 #include "TDMetric.actor.h"
 

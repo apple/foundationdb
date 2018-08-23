@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-
 #include "fdbrpc/IAsyncFile.h"
 #include "AsyncFile.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AsyncFileWriteWorkload : public AsyncFileWorkload
 {
@@ -83,7 +82,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 		if(self->sequential)
 			initialSize = 0;
 
-		Void _ = wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, initialSize));
+		wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, initialSize));
 
 		int64_t fileSize = wait(self->fileHandle->file->size());
 		if(fileSize != 0)
@@ -105,13 +104,13 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 		state StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		Void _ = wait(timeout(self->runWriteTest(self), self->testDuration, Void()));
+		wait(timeout(self->runWriteTest(self), self->testDuration, Void()));
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		//Try to let the IO complete so we can clean up after them
-		Void _ = wait(timeout(waitForAll(self->writeFutures), 10, Void()));
+		wait(timeout(waitForAll(self->writeFutures), 10, Void()));
 
 		return Void();
 	}
@@ -153,8 +152,8 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 					offset = (int64_t)(g_random->random01() * (self->fileSize - 1));
 			}
 
-			Void _ = wait(waitForAll(self->writeFutures));
-			Void _ = wait(prevSync);
+			wait(waitForAll(self->writeFutures));
+			wait(prevSync);
 			prevSync = self->fileHandle->file->sync();
 
 			self->writeFutures.clear();

@@ -56,7 +56,7 @@ ACTOR Future<Void> _test() {
 	for ( i = 0; i < 100000; i++ ) {
 		Version v = wait( versions[i] );
 	}
-	// Void _ = wait( waitForAllReady( versions ) );
+	// wait( waitForAllReady( versions ) );
 	printf("Elapsed: %lf\n", timer_monotonic() - starttime );
 
 	tr->set( LiteralStringRef("foo"), LiteralStringRef("bar") );
@@ -124,7 +124,7 @@ namespace FDB {
 		Future<Void> onReady = ready.getFuture();
 
 		throw_on_error( fdb_future_set_callback( f->f, backToFutureCallback, ready.extractRawPointer() ) );
-		Void _ = wait( onReady );
+		wait( onReady );
 
 		return convertValue( f );
 	}
