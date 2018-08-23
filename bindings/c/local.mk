@@ -38,7 +38,7 @@ endif
 ifeq ($(PLATFORM),freebsd)
   fdb_c_CFLAGS += -fPIC
   fdb_c_LIBS += -lm -lpthread -lrt -lexecinfo -ldevstat -lkvm
-  fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -Wl,-z,nodelete
+  fdb_c_LDFLAGS += -lc++ -Wl,--version-script=bindings/c/fdb_c.map -Wl,-z,nodelete
   fdb_c_tests_LIBS += -lpthread
 endif
 

@@ -55,7 +55,7 @@ else ifeq ($(PLATFORM),FreeBSD)
 
   CFLAGS += -stdlib=libc++ -Wno-error=unused-command-line-argument
   CXXFLAGS += -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-varargs
-
+	
   BOOSTDIR ?= /usr/local/include
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
@@ -68,7 +68,7 @@ else ifeq ($(PLATFORM),Darwin)
 
   CFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
   CXXFLAGS += -mmacosx-version-min=10.7 -std=c++11 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-varargs
-
+	
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_52_0
