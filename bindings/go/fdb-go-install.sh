@@ -210,18 +210,18 @@ else
             if [[ -d "${fdbdir}" ]] ; then
                 echo "Directory ${fdbdir} already exists ; checking out appropriate tag"
                 cmd1=( 'git' '-C' "${fdbdir}" 'fetch' 'origin' )
-                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "release-${FDBVER}" )
+                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "${FDBVER}" )
 
                 if ! echo "${cmd1[*]}" || ! "${cmd1[@]}" ; then
                     let status="${status} + 1"
                     echo "Could not pull latest changes from origin"
                 elif ! echo "${cmd2[*]}" ||  ! "${cmd2[@]}" ; then
                     let status="${status} + 1"
-                    echo "Could not checkout tag release-${FDBVER}."
+                    echo "Could not checkout tag ${FDBVER}."
                 fi
             else
                 echo "Downloading foundation repository into ${destdir}:"
-                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "release-${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
+                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
 
                 echo "${cmd[*]}"
                 if ! "${cmd[@]}" ; then
