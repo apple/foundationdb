@@ -17,6 +17,7 @@ if(UNIX)
   else()
     set(LIBSUFFIX "")
   endif()
+  set(FDB_LIB_NOSUFFIX "lib")
   if(DIR_LAYOUT MATCHES "STANDALONE")
     set(FDB_LIB_DIR "lib${LIBSUFFIX}")
     set(FDB_LIBEXEC_DIR "${FDB_LIB_DIR}")
@@ -29,6 +30,7 @@ if(UNIX)
     set(CPACK_GENERATOR productbuild)
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")
     set(FDB_LIB_DIR "usr/local/lib")
+    set(FDB_LIB_NOSUFFIX "usr/lib")
     set(FDB_LIBEXEC_DIR "usr/local/libexec")
     set(FDB_BIN_DIR "usr/local/bin")
     set(FDB_SBIN_DIR "usr/local/sbin")
@@ -48,6 +50,7 @@ if(UNIX)
     set(CMAKE_INSTALL_PREFIX "/")
     set(CPACK_PACKAGING_INSTALL_PREFIX "/")
     set(FDB_LIB_DIR "usr/lib${LIBSUFFIX}")
+    set(FDB_LIB_NOSUFFIX "usr/lib")
     set(FDB_LIBEXEC_DIR "${FDB_LIB_DIR}")
     set(FDB_BIN_DIR "usr/bin")
     set(FDB_SBIN_DIR "usr/sbin")
@@ -139,6 +142,15 @@ if(INSTALL_LAYOUT MATCHES "DEB")
 
   set(CPACK_DEBIAN_server_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11), python (>= 2.6)")
   set(CPACK_DEBIAN_clients_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11)")
+  set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://www.foundationdb.org")
+  set(CPACK_DEBIAN_clients_PACKAGE_CONTROL_EXTRA
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-clients/postinst)
+  set(CPACK_DEBIAN_server_PACKAGE_CONTROL_EXTRA
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/conffiles
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/preinst
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postinst
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/prerm
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postrm)
 endif()
 
 ################################################################################
@@ -153,7 +165,12 @@ set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
   DESTINATION ${FDB_CONFIG_DIR}
   COMPONENT server)
-if(INSTALL_LAYOUT MATCHES "RPM")
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
+  DESTINATION "usr/lib/foundationdb"
+  COMPONENT server)
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
+  DESTINATION "usr/lib/foundationdb")
+if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
     ${CMAKE_BINARY_DIR}/packaging/rpm)
   install(
@@ -176,13 +193,17 @@ if(INSTALL_LAYOUT MATCHES "RPM")
       DESTINATION "lib/systemd/system"
       COMPONENT server)
   else()
-    install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-      DESTINATION "usr/lib/foundationdb"
-      COMPONENT server)
-    install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
-      DESTINATION "etc/rc.d/init.d"
-      RENAME "foundationdb"
-      COMPONENT server)
+    if(INSTALL_LAYOUT MATCHES "RPM")
+      install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+        DESTINATION "etc/rc.d/init.d"
+        RENAME "foundationdb"
+        COMPONENT server)
+    else()
+      install(FILES ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+        DESTINATION "etc/init.d"
+        RENAME "foundationdb"
+        COMPONENT server)
+    endif()
   endif()
 endif()
 
