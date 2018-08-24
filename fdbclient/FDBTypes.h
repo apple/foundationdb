@@ -33,7 +33,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4}; //The TLog and LogRouter require these number to be as compact as possible
+enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
@@ -139,6 +139,7 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 }
 
 std::string printable( const StringRef& val );
+std::string printable( const std::string& val );
 std::string printable( const Optional<StringRef>& val );
 std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
@@ -601,7 +602,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> dcId, vector<Optional<Key>> dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {

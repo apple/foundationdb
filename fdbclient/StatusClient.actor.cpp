@@ -267,7 +267,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskCoordinationReply));
 
-		Void _ = wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
+		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
 
 		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
@@ -325,7 +325,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> 
 		description += ClusterConnectionFile(f->getFilename()).getConnectionString().toString().c_str();
 		description += "\nThe current connection string is: ";
 		description += f->getConnectionString().toString().c_str();
-		description += "\nVerify cluster file is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
+		description += "\nVerify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
 		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
 	}
 
@@ -338,7 +338,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 	state Future<Void> clusterTimeout = delay(30.0);
 	state Optional<StatusObject> oStatusObj;
 
-	Void _ = wait(delay(0.0)); //make sure the cluster controller is marked as not failed
+	wait(delay(0.0)); //make sure the cluster controller is marked as not failed
 
 	state Future<ErrorOr<StatusReply>> statusReply = cI.databaseStatus.tryGetReply(req);
 	loop{
@@ -356,7 +356,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 				}
 				break;
 			}
-			when(Void _ = wait(clusterTimeout)){
+			when(wait(clusterTimeout)){
 				messages->push_back(makeMessage("status_incomplete_timeout", "Timed out fetching cluster status."));
 				break;
 			}
@@ -377,8 +377,9 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	try {
 		// Lots of the JSON reads in this code could throw, and that's OK, isAvailable and isHealthy will be
 		// at the states we want them to be in (currently)
+		std::string recoveryStateName = cluster.at("recovery_state.name").get_str();
 		isAvailable = client.at("coordinators.quorum_reachable").get_bool()
-			&& ( cluster.at("recovery_state.name") == "fully_recovered" || "remote_recovered" )
+			&& ( recoveryStateName == "accepting_commits" || recoveryStateName == "all_logs_recruited" || recoveryStateName == "storage_recovered" || recoveryStateName == "fully_recovered" )
 			&& cluster.at("database_available").get_bool();
 
 		if (isAvailable)
@@ -483,8 +484,8 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 					break;
 				}
 				choose{
-					when(Void _ = wait(clusterInterface->onChange())) {}
-					when(Void _ = wait(interfaceTimeout)) {
+					when(wait(clusterInterface->onChange())) {}
+					when(wait(interfaceTimeout)) {
 						clientMessages.push_back(makeMessage("no_cluster_controller", "Unable to locate a cluster controller within 2 seconds.  Check that there are server processes running."));
 						break;
 					}

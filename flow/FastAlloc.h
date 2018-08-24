@@ -149,6 +149,7 @@ private:
 };
 
 void releaseAllThreadMagazines();
+int64_t getTotalUnusedAllocatedMemory();
 void setFastAllocatorThreadInitFunction( void (*)() );  // The given function will be called at least once in each thread that allocates from a FastAllocator.  Currently just one such function is tracked.
 
 template<int X>

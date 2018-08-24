@@ -67,20 +67,20 @@ Here's a basic implementation of the model:
     import java.util.Random;
 
     public class MicroPriority {
-        
+
         private static final FDB fdb;
         private static final Database db;
         private static final Subspace pq;
         private static final Random randno;
-        
+
         static{
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             pq = new Subspace(Tuple.from("P"));
-            
+
             randno = new Random();
         }
-        
+
         public static void push(TransactionContext tcx, final Object value, final int priority){
             tcx.run((Transaction tr) -> {
                 byte[] rands = new byte[20];
@@ -90,22 +90,22 @@ Here's a basic implementation of the model:
                 return null;
             });
         }
-        
+
         private static long nextCount(TransactionContext tcx, final int priority){
             return tcx.run((Transaction tr) -> {
                 for(KeyValue kv : tr.snapshot().getRange(pq.subspace(Tuple.from(priority)).range(),1,true)){
                     return 1l + (long)pq.subspace(Tuple.from(priority)).unpack(kv.getKey()).get(0);
                 }
-               
+
                 return 0l; // None previously with this priority.
             });
         }
-        
+
         // Pop--assumes min priority queue..
         public static Object pop(TransactionContext tcx){
             return pop(tcx,false);
         }
-        
+
         // Pop--allows for either max or min priority queue.
         public static Object pop(TransactionContext tcx, final boolean max){
             return tcx.run((Transaction tr) -> {
@@ -113,16 +113,16 @@ Here's a basic implementation of the model:
                     tr.clear(kv.getKey());
                     return Tuple.fromBytes(kv.getValue()).get(0);
                 }
-                
+
                 return null;
             });
         }
-        
+
         // Peek--assumes min priority queue.
         public static Object peek(TransactionContext tcx){
             return peek(tcx,false);
         }
-        
+
         // Peek--allows for either max or min priority queue.
         public static Object peek(TransactionContext tcx, final boolean max){
             return tcx.run((Transaction tr) -> {
@@ -130,8 +130,8 @@ Here's a basic implementation of the model:
                 for(KeyValue kv : tr.getRange(r.begin, r.end, 1, max)){
                     return Tuple.fromBytes(kv.getValue()).get(0);
                 }
-                
-                return null; 
+
+                return null;
             });
         }
     }

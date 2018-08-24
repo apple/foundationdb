@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 	bool testFailed = false;
@@ -106,13 +106,13 @@ public:
 		// Do operation on Storage Server
 		loop{
 			try {
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->clear(key); return Void(); }));
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val, opType); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->clear(key); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val, opType); return Void(); }));
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
-				Void _ = wait(delay(1));
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
+				wait(delay(1));
 			}
 		}
 		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
@@ -120,7 +120,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -130,7 +130,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 		return Void();
@@ -144,13 +144,13 @@ public:
 		// Do operation on Storage Server
 		loop {
 			try {
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->clear(key); return Void(); }));
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val, opType); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->clear(key); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val, opType); return Void(); }));
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
-				Void _ = wait(delay(1));
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
+				wait(delay(1));
 			}
 		}
 		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
@@ -158,7 +158,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -168,7 +168,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 		return Void();
@@ -192,20 +192,20 @@ public:
 		// Do operation on Storage Server
 		loop{
 			try {
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->set(key, existingVal); return Void(); }));
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, otherVal, opType); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->set(key, existingVal); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, otherVal, opType); return Void(); }));
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
-				Void _ = wait(delay(1));
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
+				wait(delay(1));
 			}
 		}
 		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 		ASSERT(outputVal.present());
 		Value output = outputVal.get();
 		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
 			self->testFailed = true;
 		}
 
@@ -214,7 +214,7 @@ public:
 		ASSERT(outputVal.present());
 		Value output = outputVal.get();
 		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
 			self->testFailed = true;
 		}
 		return Void();
@@ -234,14 +234,14 @@ public:
 		loop{
 			try {
 				// Set the key to a random value
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->set(key, val1); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->set(key, val1); return Void(); }));
 				// Do atomic op
-				Void _ = wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val2, opType); return Void(); }));
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { tr->atomicOp(key, val2, opType); return Void(); }));
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
-				Void _ = wait(delay(1));
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
+				wait(delay(1));
 			}
 		}
 		// Compare result
@@ -250,7 +250,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("opOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -261,7 +261,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("opOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -272,20 +272,20 @@ public:
 		state int currentApiVersion = getApiVersion(cx);
 		state Key key = self->getTestKey("test_key_min_");
 
-		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("opType", "MIN");
+		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "MIN");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500");
-		Void _ = wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::Min, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
+		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::Min, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
 
 		// Current API Version 
 		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Current Api Version").detail("Version", currentApiVersion);
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Min, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Min, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
 
 		return Void();
 	}
@@ -294,9 +294,9 @@ public:
 		state Key key = self->getTestKey("test_key_max_");
 
 		TraceEvent(SevInfo, "Running Atomic Op MAX Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -305,20 +305,20 @@ public:
 		state int currentApiVersion = getApiVersion(cx);
 		state Key key = self->getTestKey("test_key_and_");
 
-		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("opType", "AND");
+		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "AND");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500");
-		Void _ = wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::And, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
+		wait(self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::And, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
 
 		// Current API Version 
 		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Current Api Version").detail("Version", currentApiVersion);
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::And, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::And, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value { uint64_t zeroVal = 0;  if (v2.size() == 0) return StringRef(); else return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal)); }));
 
 		return Void();
 	}
@@ -327,9 +327,9 @@ public:
 		state Key key = self->getTestKey("test_key_or_");
 
 		TraceEvent(SevInfo, "Running Atomic Op OR Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Or, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Or, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -338,9 +338,9 @@ public:
 		state Key key = self->getTestKey("test_key_xor_");
 
 		TraceEvent(SevInfo, "Running Atomic Op XOR Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -348,9 +348,9 @@ public:
 	ACTOR Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state Key key = self->getTestKey("test_key_add_");
 		TraceEvent(SevInfo, "Running Atomic Op ADD Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::AddValue, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2;  }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::AddValue, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2;  }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
 		return Void();
 	}
@@ -359,9 +359,9 @@ public:
 		state Key key = self->getTestKey("test_key_byte_min_");
 
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MIN Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMin, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) { return StringRef((const uint8_t *)&val1, sizeof(val1)) < StringRef((const uint8_t *)&val2, sizeof(val2)) ? val1 : val2; }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMin, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) { return StringRef((const uint8_t *)&val1, sizeof(val1)) < StringRef((const uint8_t *)&val2, sizeof(val2)) ? val1 : val2; }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); }));
 
 		return Void();
 	}
@@ -370,9 +370,9 @@ public:
 		state Key key = self->getTestKey("test_key_byte_max_");
 
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MAX Correctness Current Api Version");
-		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMax, key));
-		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) { return StringRef((const uint8_t *)&val1, sizeof(val1)) > StringRef((const uint8_t *)&val2, sizeof(val2)) ? val1 : val2; }));
-		Void _ = wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; }));
+		wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMax, key));
+		wait(self->testAtomicOpApi(cx, self, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) { return StringRef((const uint8_t *)&val1, sizeof(val1)) > StringRef((const uint8_t *)&val2, sizeof(val2)) ? val1 : val2; }));
+		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; }));
 
 		return Void();
 	}

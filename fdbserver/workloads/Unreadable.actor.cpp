@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct UnreadableWorkload : TestWorkload {
 	uint64_t nodeCount;
@@ -59,7 +59,7 @@ struct UnreadableWorkload : TestWorkload {
 		if (forward) {
 			for (auto it : unreadableRanges) {
 				if (it.value()) {
-					//TraceEvent("RYWT_checkingRange1").detail("range", printable(range)).detail("unreadableRange", printable(it.range()));
+					//TraceEvent("RYWT_CheckingRange1").detail("Range", printable(range)).detail("UnreadableRange", printable(it.range()));
 					return it.range().begin;
 				}
 			}
@@ -72,7 +72,7 @@ struct UnreadableWorkload : TestWorkload {
 
 			for (; it != itEnd; --it) {
 				if (it.value()) {
-					//TraceEvent("RYWT_checkingRange2").detail("range", printable(range)).detail("unreadableRange", printable(it.range()));
+					//TraceEvent("RYWT_CheckingRange2").detail("Range", printable(range)).detail("UnreadableRange", printable(it.range()));
 					return it.range().end;
 				}
 			}
@@ -131,11 +131,11 @@ struct UnreadableWorkload : TestWorkload {
 		
 		/*
 		for (auto it : setMap) {
-			TraceEvent("RYWT_setMapContents").detail("key", printable(it.first));
+			TraceEvent("RYWT_SetMapContents").detail("Key", printable(it.first));
 		}
 
 		for (auto it : unreadableMap.ranges()) {
-			TraceEvent("RYWT_unreadableMapContents").detail("key", printable(it.range())).detail("value", it.value());
+			TraceEvent("RYWT_UnreadableMapContents").detail("Key", printable(it.range())).detail("Value", it.value());
 		}
 		*/
 
@@ -150,7 +150,7 @@ struct UnreadableWorkload : TestWorkload {
 			return;
 		}
 
-		//TraceEvent("RYWT_checkUnreadability").detail("begin", begin.toString()).detail("end", end.toString());
+		//TraceEvent("RYWT_CheckUnreadability").detail("Begin", begin.toString()).detail("End", end.toString());
 
 		KeySelector resolvedBegin = begin;
 		KeySelector resolvedEnd = end;
@@ -158,7 +158,7 @@ struct UnreadableWorkload : TestWorkload {
 		resolveKeySelector(setMap, unreadableMap, resolvedBegin);
 		resolveKeySelector(setMap, unreadableMap, resolvedEnd);
 
-		//TraceEvent("RYWT_checkUnreadability2").detail("resolvedBegin", resolvedBegin.toString()).detail("resolvedEnd", resolvedEnd.toString());
+		//TraceEvent("RYWT_CheckUnreadability2").detail("ResolvedBegin", resolvedBegin.toString()).detail("ResolvedEnd", resolvedEnd.toString());
 
 		if ((resolvedBegin.offset >= resolvedEnd.offset && resolvedBegin.getKey() >= resolvedEnd.getKey()) ||
 			(resolvedBegin.offset >= end.offset && resolvedBegin.getKey() >= end.getKey()) ||
@@ -185,7 +185,7 @@ struct UnreadableWorkload : TestWorkload {
 				++itemCount;
 			}
 
-			//TraceEvent("RYWT_modifiedEnd").detail("setItem", printable(setItem->first)).detail("resolvedEnd", printable(resolvedEnd.getKey())).detail("limit", limit).detail("itemCount", resolvedBegin.getKey() == normalKeys.begin ? 0 : 1 + std::min(0, resolvedEnd.offset - 1));
+			//TraceEvent("RYWT_ModifiedEnd").detail("SetItem", printable(setItem->first)).detail("ResolvedEnd", printable(resolvedEnd.getKey())).detail("Limit", limit).detail("ItemCount", resolvedBegin.getKey() == normalKeys.begin ? 0 : 1 + std::min(0, resolvedEnd.offset - 1));
 
 			KeyRef keyAfterSet = keyAfter(setItem->first, resolvedEnd.arena());
 			if (keyAfterSet <= resolvedEnd.getKey()) {
@@ -225,7 +225,7 @@ struct UnreadableWorkload : TestWorkload {
 				++itemCount;
 			}
 
-			//TraceEvent("RYWT_modifiedBegin").detail("setItem", printable(setItem->first)).detail("resolvedBegin", printable(resolvedBegin.getKey())).detail("limit", limit).detail("itemCount", -1*std::max(0, resolvedBegin.offset - 1));
+			//TraceEvent("RYWT_ModifiedBegin").detail("SetItem", printable(setItem->first)).detail("ResolvedBegin", printable(resolvedBegin.getKey())).detail("Limit", limit).detail("ItemCount", -1*std::max(0, resolvedBegin.offset - 1));
 
 			if (setItem->first >= resolvedBegin.getKey()) {
 				if (std::max(begin.getKey(), resolvedBegin.getKey()) > std::min(end.getKey(), resolvedEnd.getKey())) {
@@ -274,7 +274,7 @@ struct UnreadableWorkload : TestWorkload {
 				}
 			}
 
-			//TraceEvent("RYWT_checkUnreadability3").detail("setNext", printable(setNext->first)).detail("unreadableNext", printable(unreadableNext));
+			//TraceEvent("RYWT_CheckUnreadability3").detail("SetNext", printable(setNext->first)).detail("UnreadableNext", printable(unreadableNext));
 			if (setNext->first >= unreadableNext) {
 				//RYW resolves the end key selector, even though it does not need the exact key to answer the query.
 				return;
@@ -287,7 +287,7 @@ struct UnreadableWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, UnreadableWorkload* self) {
 		state int testCount = 0;
 		for (; testCount < 100; testCount++) {
-			//TraceEvent("RYWT_start").detail("testCount", testCount);
+			//TraceEvent("RYWT_Start").detail("TestCount", testCount);
 			state ReadYourWritesTransaction tr(cx);
 			state Arena arena;
 
@@ -314,31 +314,31 @@ struct UnreadableWorkload : TestWorkload {
 					value = RandomTestImpl::getRandomValue(arena);
 					tr.set(key, value);
 					setMap[key] = value;
-					//TraceEvent("RYWT_set").detail("key", printable(key));
+					//TraceEvent("RYWT_Set").detail("Key", printable(key));
 				}
 				else if (r == 11) {
 					range = RandomTestImpl::getRandomRange(arena);
 					tr.addReadConflictRange(range);
-					//TraceEvent("RYWT_addReadConflictRange").detail("range", printable(range));
+					//TraceEvent("RYWT_AddReadConflictRange").detail("Range", printable(range));
 				}
 				else if (r == 12) {
 					range = RandomTestImpl::getRandomRange(arena);
 					tr.addWriteConflictRange(range);
-					//TraceEvent("RYWT_addWriteConflictRange").detail("range", printable(range));
+					//TraceEvent("RYWT_AddWriteConflictRange").detail("Range", printable(range));
 				}
 				else if (r == 13) {
 					range = RandomTestImpl::getRandomRange(arena);
 					tr.clear(range);
 					unreadableMap.insert(range, false);
 					setMap.erase(setMap.lower_bound(range.begin), setMap.lower_bound(range.end));
-					//TraceEvent("RYWT_clear").detail("range", printable(range));
+					//TraceEvent("RYWT_Clear").detail("Range", printable(range));
 				}
 				else if (r == 14) {
 					key = RandomTestImpl::getRandomKey(arena);
 					value = RandomTestImpl::getRandomVersionstampValue(arena);
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedValue);
 					unreadableMap.insert(key, true);
-					//TraceEvent("RYWT_setVersionstampValue").detail("key", printable(key));
+					//TraceEvent("RYWT_SetVersionstampValue").detail("Key", printable(key));
 				}
 				else if (r == 15) {
 					key = RandomTestImpl::getRandomVersionstampKey(arena);
@@ -346,7 +346,7 @@ struct UnreadableWorkload : TestWorkload {
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedKey);
 					range = getVersionstampKeyRange(arena, key, allKeys.end);
 					unreadableMap.insert(range, true);
-					//TraceEvent("RYWT_setVersionstampKey").detail("range", printable(range));
+					//TraceEvent("RYWT_SetVersionstampKey").detail("Range", printable(range));
 				}
 				else if (r == 16) {
 					range = RandomTestImpl::getRandomRange(arena);
@@ -361,14 +361,14 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
-						//TraceEvent("RYWT_getRange").detail("range", printable(range)).detail("isUnreadable", value.isError());
+						//TraceEvent("RYWT_GetRange").detail("Range", printable(range)).detail("IsUnreadable", value.isError());
 						if (snapshot)
 							ASSERT(!value.isError());
 						else
 							ASSERT(containsUnreadable(unreadableMap, range, true).present() == value.isError());
 					}
 					else {
-						//TraceEvent("RYWT_reset1").error(value.getError(), true);
+						//TraceEvent("RYWT_Reset1").error(value.getError(), true);
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
@@ -388,7 +388,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					//TraceEvent("RYWT_getRangeBefore").detail("reverse", reverse).detail("begin", begin.toString()).detail("end", end.toString()).detail("limit", limit);
+					//TraceEvent("RYWT_GetRangeBefore").detail("Reverse", reverse).detail("Begin", begin.toString()).detail("End", end.toString()).detail("Limit", limit);
 					ErrorOr<Standalone<RangeResultRef>> value = wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
 
 					if (snapshot)
@@ -397,16 +397,16 @@ struct UnreadableWorkload : TestWorkload {
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						/*
 						Standalone<RangeResultRef> result = value.get();
-						TraceEvent("RYWT_getKeySelRange ok")
-							.detail("begin", begin.toString())
-							.detail("end", end.toString())
-							.detail("size", result.size())
-							.detail("reverse", reverse);
+						TraceEvent("RYWT_GetKeySelRangeOk")
+							.detail("Begin", begin.toString())
+							.detail("End", end.toString())
+							.detail("Size", result.size())
+							.detail("Reverse", reverse);
 						for (auto it : result) {
-							TraceEvent("RYWT_getKeySelRange returned").detail("key", printable(it.key));
+							TraceEvent("RYWT_GetKeySelRange returned").detail("Key", printable(it.key));
 						}
 						*/
-						//TraceEvent("RYWT_getKeySelRange unreadable").detail("begin", begin.toString()).detail("end", end.toString()).detail("reverse", reverse);
+						//TraceEvent("RYWT_GetKeySelRangeUnreadable").detail("Begin", begin.toString()).detail("End", end.toString()).detail("Reverse", reverse);
 						if (snapshot) {
 							ASSERT(!isUnreadable);
 						}
@@ -415,7 +415,7 @@ struct UnreadableWorkload : TestWorkload {
 						}
 					}
 					else {
-						//TraceEvent("RYWT_getKeySelRange reset");
+						//TraceEvent("RYWT_GetKeySelRangeReset");
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);
@@ -438,7 +438,7 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
-						//TraceEvent("RYWT_get").detail("key", printable(key)).detail("isUnreadable", value.isError());
+						//TraceEvent("RYWT_Get").detail("Key", printable(key)).detail("IsUnreadable", value.isError());
 						if (snapshot) {
 							ASSERT(!value.isError());
 						}
@@ -447,7 +447,7 @@ struct UnreadableWorkload : TestWorkload {
 						}
 					}
 					else {
-						//TraceEvent("RYWT_reset3");
+						//TraceEvent("RYWT_Reset3");
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);

@@ -9,7 +9,7 @@ Introduction
 
 Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.
 
-By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is provided in FoundationDB via a plugin-based architecture. This document will describe the basic TLS capabilities of FoundationDB and document the default plugin, which is based on `LibreSSL <https://www.libressl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
+By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on `LibreSSL <https://www.libressl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
 
 
 Setting Up FoundationDB to use TLS
@@ -20,9 +20,9 @@ Setting Up FoundationDB to use TLS
 Enabling TLS in a new cluster
 -----------------------------
 
-To set a new cluster to use TLS, use the ``-t`` flag on ``make-public.py``::
+To set a new cluster to use TLS, use the ``-t`` flag on ``make_public.py``::
 
-    user@host1$ sudo /usr/lib/foundationdb/make-public.py -t
+    user@host1$ sudo /usr/lib/foundationdb/make_public.py -t
     /etc/foundationdb/fdb.cluster is now using address 10.0.1.1 (TLS enabled)
 
 This will configure the new cluster to communicate with TLS.
@@ -42,23 +42,26 @@ Enabling TLS on an existing (non-TLS) cluster cannot be accomplished without dow
 
 3) Restart the cluster and the clients.
 
-.. _configuring-tls-plugin:
+.. _configuring-tls:
 
-Configuring the TLS Plugin
+Configuring TLS
 ==========================
 
-The location and operation of the TLS plugin are configured through four settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:
+The operation of TLS is configured through five settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:
 
 ======================== ==================== ============================ ==================================================
 Command-line Option      Client Option        Environment Variable         Purpose
 ======================== ==================== ============================ ==================================================
-``tls_plugin``           ``TLS_plugin``       ``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``tls_certificate_file`` ``TLS_cert_path``    ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
-                                                                           can be loaded, used by the plugin
+                                                                           can be loaded
 ``tls_key_file``         ``TLS_key_path``     ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
-                                                                           key, used by the plugin
+                                                                           key
 ``tls_verify_peers``     ``TLS_verify_peers`` ``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
-                                                                           certificates and sessions, used by the plugin
+                                                                           certificates and sessions
+``tls_password``         ``TLS_password``     ``FDB_TLS_PASSWORD``         The byte-string representing the passcode for
+                                                                           unencrypting the private key
+``tls_ca_file``          ``TLS_ca_path``      ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
+                                                                           to trust
 ======================== ==================== ============================ ==================================================
 
 The value for each setting can be specified in more than one way.  The actual valued used is determined in the following order:
@@ -69,21 +72,10 @@ The value for each setting can be specified in more than one way.  The actual va
 
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
-The settings for certificate file, key file, and peer verification are interpreted by the loaded plugin.
+The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.
 
 Default Values
 --------------
-
-Plugin default location
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Similarly, if a value is not specified for the parameter ``tls_plugin``, the file will be specified by the environment variable ``FDB_TLS_PLUGIN`` or, if this variable is not set, the system-dependent location:
-
-  * Linux: ``/usr/lib/foundationdb/plugins/FDBLibTLS.so``
-  * macOS: ``/usr/local/foundationdb/plugins/FDBLibTLS.dylib``
-  * Windows: ``C:\Program Files\foundationdb\plugins\FDBLibTLS.dll``
-
-On Windows, this location will be relative to the chosen installation location. The environment variable ``FOUNDATIONDB_INSTALL_PATH`` will be used in place of ``C:\Program Files\foundationdb\`` to determine this location.
 
 Certificate file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -97,26 +89,34 @@ The default behavior when the certificate or key file is not specified is to loo
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default peer verification is the empty string.
+The default peer verification is ``Check.Valid=1``.
+
+Default Password
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There is no default password. If no password is specified, it is assumed that the private key is unencrypted.
+
+CA file default location
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If a value is not specified, the software searches for certs in the default openssl certs location.
 
 Parameters and client bindings
 ------------------------------
 
-When loading a TLS plugin from a non-default location when using a client binding, the ``TLS_PLUGIN`` network option must be specified before any other TLS option. Because a loaded TLS plugin is allowed to reject the values specified in the other options, the plugin load operation will be forced by specifying one of the other options, if it not already specified.
-
-The default LibreSSL-based plugin
+The default LibreSSL-based implementation
 =================================
 
-FoundationDB offers a TLS plugin based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.
+FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.
 
-For the plugin to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
+For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
 
 If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.
 
 Formats
 -------
 
-The LibreSSL plugin can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
+LibreSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
 
 Required files
 --------------
@@ -132,7 +132,7 @@ A file must be supplied that contains an ordered list of certificates. The first
 
 All but the last certificate are provided to peers during TLS handshake as the certificate chain.
 
-The last certificate in the list is the trusted certificate. All processes that want to communicate must have the same trusted certificate.
+The last certificate in the list is the trusted certificate.
 
 .. note:: If the certificate list contains only one certificate, that certificate *must* be self-signed and will be used as both the certificate chain and the trusted certificate.
 
@@ -152,6 +152,8 @@ The key file must contain the private key corresponding to the process' own cert
   -----BEGIN PRIVATE KEY-----
   xxxxxxxxxxxxxxx
   -----END PRIVATE KEY-----
+
+It can optionally be encrypted by the password provided to tls_password.
 
 Certificate creation
 --------------------
@@ -173,7 +175,7 @@ A FoundationDB server or client will only communicate with peers that present a 
 Certificate field verification
 ------------------------------
 
-With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient.
+With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments or concatenating them with ``|``. All ``,`` or ``|`` in the verify peers fields should be escaped with ``\``.
 
 Turning down the validation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -183,29 +185,31 @@ If the default checking of the certificate chain is too stringent, the verificat
 =====================  =============================================================
 Setting                Result
 =====================  =============================================================
-``Check.Valid=0``      Sets the current process to disable all further verification 
+``Check.Valid=0``      Sets the current process to disable all further verification
                        of a peer certificate.
-``Check.Unexpired=0``  Disables date checking of peer certificates. If the clocks in 
-                       the cluster and between the clients and servers are not to be 
-                       trusted, setting this value to ``0`` can allow communications 
+``Check.Unexpired=0``  Disables date checking of peer certificates. If the clocks in
+                       the cluster and between the clients and servers are not to be
+                       trusted, setting this value to ``0`` can allow communications
                        to proceed.
 =====================  =============================================================
 
 Adding verification requirements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field=value``. Only certain fields from a DN can be matched against.
+Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field[<>]?=value``. Only certain fields from a DN can be matched against.
 
-======  ===================
-Field   Well known name
-======  ===================
-``CN``  Common Name
-``C``   County
-``L``   Locality
-``ST``  State
-``O``   Organization
-``OU``  Organizational Unit
-======  ===================
+=======  ===================
+Field    Well known name
+=======  ===================
+``CN``   Common Name
+``C``    County
+``L``    Locality
+``ST``   State
+``O``    Organization
+``OU``   Organizational Unit
+``UID``  Unique Identifier
+``DC``   Domain Component
+=======  ===================
 
 The field of each condition may optionally have a DN prefix, which is otherwise considered to be for the Subject DN.
 
@@ -214,22 +218,87 @@ Prefix                        DN
 ============================= ========
 ``S.``, ``Subject.``, or none Subject
 ``I.``, or ``Issuer.``        Issuer
+``R.``, or ``Root.``          Root
 ============================= ========
+
+Additionally, the verification can be restricted to certificates signed by a given root CA with the field ``Root.CN``. This allows you to have different requirements for different root chains.
 
 The value of a condition must be specified in a form derived from a subset of `RFC 4514 <http://www.ietf.org/rfc/rfc4514.txt>`_. Specifically, the "raw" notation (a value starting with the ``#`` character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field's value must exactly match the value in the peer's certificate.
 
 By default, the fields of a peer certificate's DNs are not examined.
 
+In addition to DNs, restrictions can be placed against X509 extensions. They are specified in the same fashion as DN requirements.  The supported extensions are:
+
+==================  ========================
+Field               Well known name
+==================  ========================
+``subjectAltName``  Subject Alternative Name
+==================  ========================
+
+Within a subject alternative name requirement, the value specified is required to have the form ``prefix:value``, where the prefix specifies the type of value being matched against.  The following prefixes are supported.
+
+======  ===========================
+Prefix  Well known name
+======  ===========================
+DNS     Domain Name
+URI     Uniform Resource Identifier
+IP      IP Address
+EMAIL   Email Address
+======  ============================
+
+The following operators are supported:
+
+=========  ============
+Operator   Match Type
+=========  ============
+``=``      Exact Match
+``>=``     Prefix Match
+``<=``     Suffix Match
+=========  ============
+
 Verification Examples
 ^^^^^^^^^^^^^^^^^^^^^
 
-A verification string can be of the form::
+Let's consider a certificate, whose abridged contents is::
 
-  Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\, LLC
+    Certificate:
+        Data:
+            Version: 3 (0x2)
+            Serial Number: 12938646789571341173 (0xb38f4eb406a5eb75)
+        Signature Algorithm: sha1WithRSAEncryption
+            Issuer: C=US, ST=California, L=Cupertino, O=Apple Inc., OU=FDB Team
+            Subject: C=US, ST=California, L=Cupertino, O=Apple Inc., OU=FDB Team
+            X509v3 extensions:
+                X509v3 Subject Alternative Name: 
+                    DNS:test.foundationdb.org
+                    DNS:prod.foundationdb.com
 
-This verification string would:
+A verification string of::
+
+  Check.Unexpired=0,I.C=US,C=US,S.O=Apple Inc.
+
+Would pass, and:
 
 * Skip the check on all peer certificates that the certificate is not yet expired
-* Require that the Issuer have a Country field of ``US``
-* Require that the Subject have a Country field of ``US``
-* Require that the Subject have a Organization field of ``XYZCorp, LLC``
+* Require that the Issuer has a Country field of ``US``
+* Require that the Subject has a Country field of ``US``
+* Require that the Subject has a Organization field of ``Apple Inc.``
+
+A verification string of::
+
+  S.OU>=FDB,S.OU<=Team,S.subjectAltName=DNS:test.foundationdb.org
+
+Would pass, and:
+
+* Require that the Subject has an Organization field that starts with ``FDB``
+* Require that the Subject has an Organization field that ends with ``Team``
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS with a value of ``test.foundationdb.org``.
+
+A verification string of::
+
+  S.subjectAltName>=DNS:prod.,S.subjectAltName<=DNS:.org
+
+Would pass, and:
+
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value ``prod.``.
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.com``.

@@ -5,7 +5,7 @@ CFLAGS ?= -O2 -g
 
 CXXFLAGS ?= -std=c++0x
 
-CFLAGS += -I/usr/local/include
+CFLAGS += -I/usr/local/include -I../flow -I../fdbrpc
 LDFLAGS += -L/usr/local/lib
 
 LIBS += -ltls -lssl -lcrypto
@@ -69,7 +69,7 @@ $(error Unknown platform $(PLATFORM))
 endif
 
 PLUGIN := FDBLibTLS.$(DYEXT)
-OBJECTS := FDBLibTLSPlugin.o FDBLibTLSPolicy.o FDBLibTLSSession.o
+OBJECTS := FDBLibTLSPlugin.o FDBLibTLSPolicy.o FDBLibTLSSession.o FDBLibTLSVerify.o
 LINKLINE := $(CXXFLAGS) $(CFLAGS) $(LDFLAGS) $(OBJECTS) $(LINK_LDFLAGS) -o $(PLUGIN)
 
 all: $(PLUGIN)

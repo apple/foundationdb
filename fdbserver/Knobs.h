@@ -31,6 +31,14 @@ static const int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public Knobs {
 public:
+	// Versions
+	int64_t VERSIONS_PER_SECOND;
+	int64_t MAX_VERSIONS_IN_FLIGHT;
+	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
+	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+
 	// TLogs
 	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
@@ -58,14 +66,8 @@ public:
 	double PEEK_TRACKER_EXPIRATION_TIME;
 	int PARALLEL_GET_MORE_REQUESTS;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
-
-	// Versions
-	int MAX_VERSIONS_IN_FLIGHT;
-	int MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	int MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-
-	int VERSIONS_PER_SECOND;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	int64_t VERSIONS_PER_BATCH;
+	int CONCURRENT_LOG_ROUTER_READS;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -96,6 +98,7 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
+	double CHECK_TEAM_DELAY;
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -111,6 +114,7 @@ public:
 	double FREE_SPACE_RATIO_CUTOFF;
 	double FREE_SPACE_RATIO_DD_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
+	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
 	int64_t DD_SHARD_SIZE_GRANULARITY_SIM;
 	int DD_MOVE_KEYS_PARALLELISM;
@@ -149,7 +153,13 @@ public:
 	int SPRING_CLEANING_MIN_VACUUM_PAGES;
 	int SPRING_CLEANING_MAX_VACUUM_PAGES;
 
+	// KeyValueStoreMemory
+	int64_t REPLACE_CONTENTS_BYTES;
+
 	// Leader election
+	int MAX_NOTIFICATIONS;
+	int MIN_NOTIFICATIONS;
+	double NOTIFICATION_FULL_CLEAR_TIME;
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;
 	double CANDIDATE_GROWTH_RATE;
@@ -175,6 +185,9 @@ public:
 	int    COMMIT_TRANSACTION_BATCH_BYTES_MAX;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE;
 	double COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER;
+	int64_t COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
+	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
+	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 
 	double TRANSACTION_BUDGET_TIME;
 	double RESOLVER_COALESCE_TIME;
@@ -182,12 +195,13 @@ public:
 	double PROXY_SPIN_DELAY;
 
 	// Master Server
-	double MASTER_LOGGING_DELAY;
 	double COMMIT_SLEEP_TIME;
 	double MIN_BALANCE_TIME;
 	int64_t MIN_BALANCE_DIFFERENCE;
 	double SECONDS_BEFORE_NO_FAILURE_DELAY;
 	int64_t MAX_TXS_SEND_MEMORY;
+	int64_t MAX_RECOVERY_VERSIONS;
+	double MAX_RECOVERY_TIME;
 
 	// Resolver
 	int64_t SAMPLE_OFFSET_PER_KEY;
@@ -196,6 +210,7 @@ public:
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
 	//Cluster Controller
+	double CLUSTER_CONTROLLER_LOGGING_DELAY;
 	double MASTER_FAILURE_REACTION_TIME;
 	double MASTER_FAILURE_SLOPE_DURING_RECOVERY;
 	int WORKER_COORDINATION_PING_DELAY;
@@ -203,11 +218,15 @@ public:
 	double SHUTDOWN_TIMEOUT;
 	double MASTER_SPIN_DELAY;
 	double CC_CHANGE_DELAY;
+	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
+	double WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WORKER_FAILURE_TIME;
-	double CHECK_BETTER_MASTER_INTERVAL;
+	double CHECK_OUTSTANDING_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+	double VERSION_LAG_METRIC_INTERVAL;
+	int64_t MAX_VERSION_DIFFERENCE;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -233,6 +252,7 @@ public:
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
+	int64_t SERVER_MEM_LIMIT;
 
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
@@ -246,6 +266,8 @@ public:
 	int64_t TARGET_BYTES_PER_TLOG;
 	double SPRING_BYTES_TLOG;
 	int64_t TLOG_SPILL_THRESHOLD;
+	int64_t TLOG_HARD_LIMIT_BYTES;
+	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

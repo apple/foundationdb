@@ -493,9 +493,11 @@ namespace actorcompiler
         WhenStatement ParseWhenStatement(TokenRange toks)
         {
             var expr = toks.Consume("when")
-                           .First(NonWhitespace)
+                           .SkipWhile(Whitespace)
+                           .First()
                            .Assert("Expected (", t => t.Value == "(")
-                           .GetMatchingRangeIn(toks);
+                           .GetMatchingRangeIn(toks)
+                           .SkipWhile(Whitespace);
 
             return new WhenStatement {
                 wait = ParseWaitStatement(expr),
@@ -538,24 +540,40 @@ namespace actorcompiler
                 ws.resultIsState = true;
                 toks = toks.Consume("state");
             }
-
-            Token name;
-            TokenRange type, initializer;
-            bool constructorSyntax;
-            ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
-
-            ws.result = new VarDeclaration
+            TokenRange initializer;
+            if (toks.First().Value == "wait" || toks.First().Value == "waitNext")
             {
-                name = name.Value,
-                type = str(NormalizeWhitespace(type)),
-                initializer = "",
-                initializerConstructorSyntax = false
-            };
+                initializer = toks.RevSkipWhile(t=>t.Value==";");
+                ws.result = new VarDeclaration {
+                        name = "_",
+                        type = "Void",
+                        initializer = "",
+                        initializerConstructorSyntax = false
+                };
+            } else {
+                Token name;
+                TokenRange type;
+                bool constructorSyntax;
+                ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
 
-            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration");
+                string typestring = str(NormalizeWhitespace(type));
+                if (typestring == "Void") {
+                    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
+                }
+
+                ws.result = new VarDeclaration
+                {
+                    name = name.Value,
+                    type = str(NormalizeWhitespace(type)),
+                    initializer = "",
+                    initializerConstructorSyntax = false
+                };
+            }
+
+            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
 
             var waitParams = initializer
-                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.", 
+                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1", 
                         t=> {
                             if (t.Value=="wait") return true;
                             if (t.Value=="waitNext") { ws.isWaitNext = true; return true; }
@@ -563,8 +581,9 @@ namespace actorcompiler
                         })
                 .SkipWhile(Whitespace).First().Assert("Expected (", t => t.Value == "(")
                 .GetMatchingRangeIn(initializer);
-            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace))
-                throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.");
+            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace)) {
+                throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.2");
+            }
 
             ws.futureExpression = str(NormalizeWhitespace(waitParams));
             return ws;
@@ -874,13 +893,13 @@ namespace actorcompiler
                     case "\r\n": LineCount++; break;
                     case "\n": LineCount++; break;
                 }
-                if (tokens[i].Value.StartsWith("/*")) LineCount += tokens[i].Value.Count(c=>c=='\n');
                 if (BraceDepth < 0) throw new Error(LineCount, "Mismatched braces");
                 if (ParenDepth < 0) throw new Error(LineCount, "Mismatched parenthesis");
                 tokens[i].Position = i;
                 tokens[i].SourceLine = LineCount;
                 tokens[i].BraceDepth = BraceDepth;
                 tokens[i].ParenDepth = ParenDepth;
+                if (tokens[i].Value.StartsWith("/*")) LineCount += tokens[i].Value.Count(c=>c=='\n');
                 switch (tokens[i].Value)
                 {
                     case "{": BraceDepth++; if (BraceDepth==1) lastBrace = tokens[i]; break;

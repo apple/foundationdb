@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/TesterInterface.h"
@@ -27,6 +26,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef FLOW_ACOMPILER_STATE
 #define FLOW_ACOMPILER_STATE 1
@@ -170,7 +170,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			g_network->startThread(self->threadStart, threadInfo[i]);
 		}
 
-		Void _ = wait(delay(self->threadDuration));
+		wait(delay(self->threadDuration));
 
 		// Signals the threads to stop
 		self->mutex.enter();
@@ -179,7 +179,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			
 		for(i = 0; i < threadInfo.size(); ++i) {
 			try {
-				Void _ = wait(threadInfo[i]->done.getFuture());
+				wait(threadInfo[i]->done.getFuture());
 			}
 			catch(Error &e) {
 				self->success = false;

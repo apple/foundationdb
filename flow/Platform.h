@@ -53,8 +53,14 @@
 #error Compiling on unknown platform
 #endif
 
-#if defined(__linux__) && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
-#error GCC 4.5.0 or later required on this platform
+#if defined(__linux__)
+#  if defined(__clang__)
+#    if ((__clang_major__ * 100 + __clang_minor__) < 303)
+#      error Clang 3.3 or later is required on this platform
+#    endif
+#  elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
+#    error GCC 4.5.0 or later required on this platform
+#  endif
 #endif
 
 #if defined(_WIN32) && (_MSC_VER < 1600)
@@ -296,7 +302,7 @@ bool deleteFile( std::string const& filename );
 void renameFile( std::string const& fromPath, std::string const& toPath );
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace( std::string const& path, std::string const& content );
+void atomicReplace( std::string const& path, std::string const& content, bool textmode = true );
 
 // Read a file into memory
 std::string readFileBytes( std::string const& filename, int maxSize );
@@ -495,6 +501,16 @@ inline static void* aligned_alloc(size_t alignment, size_t size) { return memali
 #elif defined(__APPLE__)
 #include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
+	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
+	// also requires this, in addition it requires alignment to be a multiple of sizeof(void *).
+	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
+	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
+	// powers of 2 of any size will fail as they would on other platforms.  This change does not
+	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
+	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
+	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
+		alignment = sizeof(void *);
+	}
 	void* ptr = nullptr;
 	posix_memalign(&ptr, alignment, size);
 	return ptr;
@@ -518,6 +534,17 @@ void* loadFunction(void* lib, const char* func_name);
 #else
 #define EXTERNC
 #endif // __cplusplus
+
+/*
+ * Multiply Defined Symbol (support for weak function declaration).
+ */
+#ifndef MULTIPLY_DEFINED_SYMBOL
+#if defined(_MSC_VER)
+#define MULTIPLY_DEFINED_SYMBOL
+#else
+#define MULTIPLY_DEFINED_SYMBOL __attribute__((weak))
+#endif
+#endif
 
 // Logs a critical error message and exits the program
 EXTERNC void criticalError(int exitCode, const char *type, const char *message);

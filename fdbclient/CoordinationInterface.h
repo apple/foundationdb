@@ -93,7 +93,7 @@ private:
 
 struct LeaderInfo {
 	UID changeID;
-	uint64_t mask = ~(127ll << 57);
+	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
 	bool forward;  // If true, serializedInfo is a connection string instead!
 
@@ -110,22 +110,14 @@ struct LeaderInfo {
 
 	// All but the first 7 bits are used to represent process id
 	bool equalInternalId(LeaderInfo const& leaderInfo) const {
-		if ( (changeID.first() & mask) == (leaderInfo.changeID.first() & mask) && changeID.second() == leaderInfo.changeID.second() ) {
-			return true;
-		} else {
-			return false;
-		}
+		return ((changeID.first() & mask) == (leaderInfo.changeID.first() & mask)) && changeID.second() == leaderInfo.changeID.second();
 	}
 
-	// Change leader only if 
+	// Change leader only if
 	// 1. the candidate has better process class fitness and the candidate is not the leader
-	// 2. the leader process class fitness become worse
+	// 2. the leader process class fitness becomes worse
 	bool leaderChangeRequired(LeaderInfo const& candidate) const {
-		if ( ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate)) ) {
-			return true;
-		} else {
-			return false;
-		}
+		return ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate));
 	}
 
 	template <class Ar>

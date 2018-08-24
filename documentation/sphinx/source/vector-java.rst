@@ -75,20 +75,20 @@ Here’s the basic pattern:
         private static final FDB fdb;
         private static final Database db;
         private static final Subspace vector;
-        
+
         static {
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             vector = new Subspace(Tuple.from("V"));
         }
-        
+
         public static Object get(TransactionContext tcx, final long index){
             return tcx.run(tr -> {
                 return Tuple.fromBytes(tr.get(vector.pack(
                                 Tuple.from(index))).get()).get(0);
             });
         }
-        
+
         public static void set(TransactionContext tcx, final long index, final Object value){
             tcx.run(tr -> {
                 tr.set(vector.pack(Tuple.from(index)), Tuple.from(value).pack());

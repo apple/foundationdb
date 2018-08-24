@@ -25,6 +25,8 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
 		throw Error(e);
@@ -336,7 +338,21 @@ void DLApi::setupNetwork() {
 }
 
 void DLApi::runNetwork() {
-	throwIfError(api->runNetwork());
+	auto e = api->runNetwork();
+
+	for(auto &hook : threadCompletionHooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
+	}
+
+	throwIfError(e);
 }
 
 void DLApi::stopNetwork() {
@@ -353,6 +369,11 @@ ThreadFuture<Reference<ICluster>> DLApi::createCluster(const char *clusterFilePa
 		api->futureGetCluster(f, &cluster);
 		return Reference<ICluster>(new DLCluster(Reference<FdbCApi>::addRef(api), cluster));
 	});
+}
+
+void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
+	MutexHolder holder(lock);
+	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
 }
 
 // MultiVersionTransaction
@@ -596,7 +617,7 @@ void MultiVersionDatabase::DatabaseState::fire(const Void &unused, int& userPara
 					}
 					catch(Error &e) {
 						optionFailed = true;
-						TraceEvent(SevError, "DatabaseVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).error(e);
+						TraceEvent(SevError, "DatabaseVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second));
 					}
 				}
 
@@ -792,7 +813,7 @@ void MultiVersionCluster::Connector::error(const Error& e, int& userParam) {
 		// TODO: is it right to abandon this connection attempt?
 		client->failed = true;
 		MultiVersionApi::api->updateSupportedVersions();
-		TraceEvent(SevError, "ClusterConnectionError").detail("ClientLibrary", this->client->libPath).error(e);
+		TraceEvent(SevError, "ClusterConnectionError").error(e).detail("ClientLibrary", this->client->libPath);
 	}
 
 	delref();
@@ -831,7 +852,7 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath).error(e);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();
@@ -891,12 +912,13 @@ void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientIn
 			}
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ExternalClientFailure").detail("LibPath", c->second->libPath).error(e);
 			if(e.code() == error_code_external_client_already_loaded) {
+				TraceEvent(SevInfo, "ExternalClientAlreadyLoaded").error(e).detail("LibPath", c->second->libPath);
 				c = externalClients.erase(c);
 				continue;
 			}
 			else {
+				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 				c->second->failed = true;
 				newFailure = true;
 			}
@@ -1140,19 +1162,6 @@ THREAD_FUNC_RETURN runNetworkThread(void *param) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 	}
 
-	std::vector<std::pair<void (*)(void*), void*>> &hooks = ((ClientInfo*)param)->threadCompletionHooks;
-	for(auto &hook : hooks) {
-		try {
-			hook.first(hook.second);
-		}
-		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		}
-		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
-		}
-	}
-
 	THREAD_RETURN;
 }
 
@@ -1174,29 +1183,7 @@ void MultiVersionApi::runNetwork() {
 		});
 	}
 
-	Error *runErr = NULL;
-	try {
-		localClient->api->runNetwork();
-	}
-	catch(Error &e) {
-		runErr = &e;
-	}
-
-	for(auto &hook : localClient->threadCompletionHooks) {
-		try {
-			hook.first(hook.second);
-		}
-		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		}
-		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
-		}
-	}
-
-	if(runErr != NULL) {
-		throw *runErr;
-	}
+	localClient->api->runNetwork();
 
 	for(auto h : handles) {
 		waitThread(h);
@@ -1220,7 +1207,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 }
 
-void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
@@ -1228,13 +1215,12 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 	}
 	lock.leave();
 
-	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
-	threadCompletionHooks.push_back(hookPair);
+	localClient->api->addNetworkThreadCompletionHook(hook, hookParameter);
 
 	if(!bypassMultiClientApi) {
-		for( auto it : externalClients ) {
-			it.second->threadCompletionHooks.push_back(hookPair);
-		}
+		runOnExternalClients([hook, hookParameter](Reference<ClientInfo> client) {
+			client->api->addNetworkThreadCompletionHook(hook, hookParameter);
+		});
 	}
 }
 
@@ -1257,7 +1243,7 @@ ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clu
 	}
 	else {
 		for( auto it : externalClients ) {
-			TraceEvent("CreatingClusterOnExternalClient").detail("LibraryPath", it.second->libPath).detail("failed", it.second->failed);
+			TraceEvent("CreatingClusterOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
 		}
 		return mapThreadFuture<Reference<ICluster>, Reference<ICluster>>(clusterFuture, [this, clusterFile](ErrorOr<Reference<ICluster>> cluster) {
 			if(cluster.isError()) {
@@ -1359,7 +1345,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 				}
 			}
 			catch(Error &e) {
-				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed").detail("Option", option.second.name).detail("Value", valueStr).error(e);
+				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed").error(e).detail("Option", option.second.name).detail("Value", valueStr);
 				throw environment_variable_network_option_failed();
 			}
 		}
@@ -1582,13 +1568,13 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 		f = undestroyed[fNum];
 		
 		while(!f->isReady() && start+5 >= now()) {
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		}
 
 		ASSERT(f->isReady());
 	}
 
-	Void _ = wait(delay(1.0));
+	wait(delay(1.0));
 
 	for(fNum = 0; fNum < undestroyed.size(); ++fNum) {
 		f = undestroyed[fNum];
@@ -1691,7 +1677,7 @@ TEST_CASE( "fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1762,7 +1748,7 @@ TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	done = false;
@@ -1770,7 +1756,7 @@ TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<DLTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1800,7 +1786,7 @@ TEST_CASE( "fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();
@@ -1833,7 +1819,7 @@ TEST_CASE( "fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
 	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 
 	while(!done) {
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	return Void();

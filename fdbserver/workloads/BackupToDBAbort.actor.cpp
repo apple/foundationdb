@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
 	double abortDelay;
@@ -56,7 +56,7 @@ struct BackupToDBAbort : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1");
-			Void _ = wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
+			wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
 			TraceEvent("BDBA_Submit2");
 		} catch( Error &e ) {
 			if( e.code() != error_code_backup_duplicate )
@@ -73,16 +73,16 @@ struct BackupToDBAbort : TestWorkload {
 	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
 
-		TraceEvent("BDBA_Start").detail("delay", self->abortDelay);
-		Void _ = wait(delay(self->abortDelay));
+		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
+		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("BDBA_Lock");
-		Void _ = wait(lockDatabase(cx, self->lockid));
+		wait(lockDatabase(cx, self->lockid));
 		TraceEvent("BDBA_Abort");
-		Void _ = wait(backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
+		wait(backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
 		TraceEvent("BDBA_Unlock");
-		Void _ = wait(backupAgent.unlockBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
+		wait(backupAgent.unlockBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
 		TraceEvent("BDBA_End");
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
@@ -97,7 +97,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_UnlockPrimary");
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.
-		Void _ = wait(unlockDatabase(cx, self->lockid));
+		wait(unlockDatabase(cx, self->lockid));
 		return true;
 	}
 

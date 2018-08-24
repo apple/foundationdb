@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/QuietDatabase.h"
 
 #include "workloads.h"
 #include "ApiWorkload.h"
 #include "MemoryKeyValueStore.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enum of API operation types used in the random test
 enum OperationType {
@@ -139,7 +139,7 @@ public:
 		types.push_back(THREAD_SAFE);
 		types.push_back(MULTI_VERSION);
 
-		Void _ = wait(self->chooseTransactionFactory(cx, types));
+		wait(self->chooseTransactionFactory(cx, types));
 
 		return Void();
 	}
@@ -150,12 +150,12 @@ public:
 
 	ACTOR Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, ApiCorrectnessWorkload *self) {
 		//Run the scripted test for a maximum of 10 minutes
-		Void _scripted = wait(timeout(self->runScriptedTest(self, data), 600, Void()));
+		wait(timeout(self->runScriptedTest(self, data), 600, Void()));
 
 		if(!self->hasFailed()) {
-			//Return database to original state (for a maximum of 1200 seconds)
+			//Return database to original state (for a maximum of 1800 seconds)
 			try {
-				Void _ = wait(timeoutError(::success(self->runSet(data, self)), 1200));
+				wait(timeoutError(::success(self->runSet(data, self)), 1800));
 			}
 			catch(Error &e) {
 				if(e.code() == error_code_timed_out) {
@@ -169,7 +169,7 @@ public:
 			}
 
 			//Run the random test for the user-specified duration
-			Void _random = wait(timeout(self->runRandomTest(self, data), self->randomTestDuration, Void()));
+			wait(timeout(self->runRandomTest(self, data), self->randomTestDuration, Void()));
 		}
 
 		return Void();
@@ -327,7 +327,7 @@ public:
 						transaction->set(data[i].key, data[i].value);
 					}
 
-					Void _ = wait(transaction->commit());
+					wait(transaction->commit());
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size()); i++)
 						debugMutation("ApiCorrectnessSet", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, data[i].key, data[i].value));
 
@@ -335,7 +335,7 @@ public:
 					break;
 				}
 				catch(Error &e) {
-					Void _  = wait(transaction->onError(e));
+					wait(transaction->onError(e));
 				}
 			}
 		}
@@ -375,7 +375,7 @@ public:
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size()); i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
 
-					Void _ = wait(waitForAll(dbValueFutures));
+					wait(waitForAll(dbValueFutures));
 
 					for(int i = 0; i < dbValueFutures.size(); i++)
 						values.push_back(dbValueFutures[i].get());
@@ -385,7 +385,7 @@ public:
 					break;
 				}
 				catch(Error &e) {
-					Void _ = wait(transaction->onError(e));
+					wait(transaction->onError(e));
 				}
 			}
 		}
@@ -440,7 +440,7 @@ public:
 				break;
 			}
 			catch(Error &e) {
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 
@@ -538,7 +538,7 @@ public:
 				break;
 			}
 			catch(Error &e) {
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 
@@ -572,7 +572,7 @@ public:
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, selectors.size()); i++)
 						dbKeyFutures.push_back(transaction->getKey(selectors[i]));
 
-					Void _ = wait(waitForAll(dbKeyFutures));
+					wait(waitForAll(dbKeyFutures));
 
 					for(int i = 0; i < dbKeyFutures.size(); i++)
 						keys.push_back_deep(keys.arena(), dbKeyFutures[i].get());
@@ -582,7 +582,7 @@ public:
 					break;
 				}
 				catch(Error &e) {
-					Void _ = wait(transaction->onError(e));
+					wait(transaction->onError(e));
 				}
 			}
 		}
@@ -619,7 +619,7 @@ public:
 							break;
 						}
 						catch(Error &e) {
-							Void _ = wait(tr->onError(e));
+							wait(tr->onError(e));
 						}
 					}
 
@@ -659,7 +659,7 @@ public:
 						transaction->clear(keys[i]);
 					}
 
-					Void _ = wait(transaction->commit());
+					wait(transaction->commit());
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size()); i++)
 						debugMutation("ApiCorrectnessClear", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, keys[i], StringRef()));
 
@@ -667,7 +667,7 @@ public:
 					break;
 				}
 				catch(Error &e) {
-					Void _ = wait(transaction->onError(e));
+					wait(transaction->onError(e));
 				}
 			}
 		}
@@ -711,12 +711,12 @@ public:
 					transaction->addReadConflictRange(range);
 				}
 				transaction->clear(range);
-				Void _ = wait(transaction->commit());
+				wait(transaction->commit());
 				debugKeyRange("ApiCorrectnessClear", transaction->getCommittedVersion(), range);
 				break;
 			}
 			catch(Error &e) {
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 

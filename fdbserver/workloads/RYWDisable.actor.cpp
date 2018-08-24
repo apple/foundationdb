@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RYWDisableWorkload : TestWorkload {
 	int nodes, keyBytes;
@@ -86,7 +86,7 @@ struct RYWDisableWorkload : TestWorkload {
 						ASSERT(e.code() == error_code_client_invalid_operation);
 					}
 
-					Void _ = wait( delay(0.1) );
+					wait( delay(0.1) );
 					
 					if( now() - testStart > self->testDuration )
 						return Void();
@@ -96,7 +96,7 @@ struct RYWDisableWorkload : TestWorkload {
 
 					tr.reset();
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

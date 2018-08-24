@@ -18,22 +18,22 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "FailureMonitor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> waitForStateEqual( IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status ) {
 	loop {
 		Future<Void> change = monitor->onStateChanged(endpoint);
 		if (monitor->getState(endpoint) == status)
 			return Void();
-		Void _ = wait( change );
+		wait( change );
 	}
 }
 
 ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint endpoint, double sustainedFailureDuration, double slope ) {
 	state double startT = now();
 	loop {
-		Void _ = wait( monitor->onFailed( endpoint ) );
+		wait( monitor->onFailed( endpoint ) );
 		if(monitor->permanentlyFailed(endpoint))
 			return Void();
 
@@ -44,8 +44,8 @@ ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint 
 		if(waitDelay < std::min(FLOW_KNOBS->CLIENT_REQUEST_INTERVAL, FLOW_KNOBS->SERVER_REQUEST_INTERVAL)) //We will not get a failure monitoring update in this amount of time, so there is no point in waiting for changes
 			waitDelay = 0;
 		choose {
-			when (Void _ = wait( monitor->onStateEqual( endpoint, FailureStatus(false) ) )) {}  // SOMEDAY: Use onStateChanged() for efficiency
-			when (Void _ = wait( delay(waitDelay) )) {
+			when (wait( monitor->onStateEqual( endpoint, FailureStatus(false) ) )) {}  // SOMEDAY: Use onStateChanged() for efficiency
+			when (wait( delay(waitDelay) )) {
 				return Void();
 			}
 		}
@@ -92,7 +92,7 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
-	TraceEvent("EndpointNotFound").detail("Address", endpoint.address).detail("Token", endpoint.token).suppressFor(1.0);
+	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.address).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }
 

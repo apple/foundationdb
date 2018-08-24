@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SidebandMessage {
 	uint64_t key;
@@ -103,10 +103,10 @@ struct SidebandWorkload : TestWorkload {
 					break;
 				}
 				tr.set( format("Sideband/Client/%d", self->clientId), serializedInterface );
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
@@ -126,7 +126,7 @@ struct SidebandWorkload : TestWorkload {
 				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
 				return sideband;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -136,7 +136,7 @@ struct SidebandWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop {
-			Void _ = wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
+			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
 			state Transaction tr(cx);
 			state uint64_t key = g_random->randomUniqueID().hash();
 			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
@@ -149,12 +149,12 @@ struct SidebandWorkload : TestWorkload {
 						break;
 					}
 					tr.set( messageKey, LiteralStringRef("deadbeef") );
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					commitVersion = tr.getCommittedVersion();
 					break;
 				}
 				catch( Error& e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 				}
 			}
 			++self->messages;
@@ -179,7 +179,7 @@ struct SidebandWorkload : TestWorkload {
 					}
 					break;
 				} catch( Error& e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

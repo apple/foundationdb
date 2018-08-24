@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {
 	int actorCount, metricCount;
@@ -61,7 +61,7 @@ struct MetricLoggingWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( MetricLoggingWorkload* self, Database cx ) {
-		Void _ = wait( delay(2.0) );
+		wait( delay(2.0) );
 		for( int i = 0; i < self->metricCount; i++ ) {
 			if( self->testBool ) {
 				self->boolMetrics[i]->setConfig(true);
@@ -101,7 +101,7 @@ struct MetricLoggingWorkload : TestWorkload {
 				}
 				++self->changes;
 			}
-			Void _ = wait( yield() );
+			wait( yield() );
 		}
 	}
 };

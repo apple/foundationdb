@@ -35,8 +35,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 
-	init( FAILURE_MAX_DELAY,                      10.0 ); if( randomize && BUGGIFY ) FAILURE_MAX_DELAY = 5.0;
-	init( FAILURE_MIN_DELAY,                       5.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 2.0;
+	init( FAILURE_MAX_DELAY,                       5.0 );
+	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 
@@ -48,6 +48,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = g_random->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
+	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -116,13 +117,13 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
-	init( BACKUP_TASKS_PER_AGENT,                   20 );
+	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
-	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
+	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
@@ -166,6 +167,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
+
+	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,       200 );
+	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
+	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
+	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);

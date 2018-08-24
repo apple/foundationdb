@@ -67,13 +67,13 @@ Here’s a basic implementation of the recipe.
         private static final Subspace docSpace;
         private static final long EMPTY_OBJECT = -2;
         private static final long EMPTY_ARRAY = -1;
-        
+
         static {
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             docSpace = new Subspace(Tuple.from("D"));
         }
-        
+
         @SuppressWarnings("unchecked")
         private static ArrayList<Tuple> toTuplesSwitch(Object o){
             if(o instanceof ArrayList){
@@ -84,7 +84,7 @@ Here’s a basic implementation of the recipe.
                 return toTuples(o);
             }
         }
-        
+
         private static ArrayList<Tuple> toTuples(ArrayList<Object> item){
             if(item.isEmpty()){
                 ArrayList<Tuple> val = new ArrayList<Tuple>();
@@ -100,7 +100,7 @@ Here’s a basic implementation of the recipe.
                 return val;
             }
         }
-        
+
         private static ArrayList<Tuple> toTuples(Map<Object,Object> item){
             if(item.isEmpty()){
                 ArrayList<Tuple> val = new ArrayList<Tuple>();
@@ -116,13 +116,13 @@ Here’s a basic implementation of the recipe.
                 return val;
             }
         }
-        
+
         private static ArrayList<Tuple> toTuples(Object item){
             ArrayList<Tuple> val = new ArrayList<Tuple>();
             val.add(Tuple.from(item));
             return val;
         }
-        
+
         private static ArrayList<Tuple> getTruncated(ArrayList<Tuple> vals){
             ArrayList<Tuple> list = new ArrayList<Tuple>();
             for(Tuple val : vals){
@@ -130,26 +130,26 @@ Here’s a basic implementation of the recipe.
             }
             return list;
         }
-        
+
         private static Object fromTuples(ArrayList<Tuple> tuples){
             if(tuples == null){
                 return null;
             }
-            
+
             Tuple first = tuples.get(0); // Determine kind of object from
                                          // first tuple.
             if(first.size() == 1){
                 return first.get(0); // Primitive type.
             }
-            
+
             if(first.equals(Tuple.from(EMPTY_OBJECT, null))){
                 return new HashMap<Object,Object>(); // Empty map.
             }
-            
+
             if(first.equals(Tuple.from(EMPTY_ARRAY))){
                 return new ArrayList<Object>(); // Empty list.
             }
-            
+
             HashMap<Object,ArrayList<Tuple>> groups = new HashMap<Object,ArrayList<Tuple>>();
             for(Tuple t : tuples){
                 if(groups.containsKey(t.get(0))){
@@ -160,7 +160,7 @@ Here’s a basic implementation of the recipe.
                     groups.put(t.get(0),list);
                 }
             }
-            
+
             if(first.get(0).equals(0l)){
                 // Array.
                 ArrayList<Object> array = new ArrayList<Object>();
@@ -184,17 +184,17 @@ Here’s a basic implementation of the recipe.
                     doc.put("doc_id", getNewID(tr));
                 }
                 for(Tuple t : toTuples(doc)){
-                    tr.set(docSpace.pack(Tuple.from(doc.get("doc_id")).addAll(t.popBack())), 
+                    tr.set(docSpace.pack(Tuple.from(doc.get("doc_id")).addAll(t.popBack())),
                             Tuple.from(t.get(t.size() - 1)).pack());
                 }
                 return doc.get("doc_id");
             });
         }
-        
+
         public static Object getDoc(TransactionContext tcx, final Object ID){
             return getDoc(tcx, ID, Tuple.from());
         }
-        
+
         public static Object getDoc(TransactionContext tcx, final Object ID, final Tuple prefix){
             return tcx.run(tr -> {
                 Future<byte[]> v = tr.get(docSpace.pack(Tuple.from(ID).addAll(prefix)));
@@ -213,7 +213,7 @@ Here’s a basic implementation of the recipe.
                 }
             });
         }
-        
+
         private static int getNewID(TransactionContext tcx){
             return tcx.run(tr -> {
                 boolean found = false;

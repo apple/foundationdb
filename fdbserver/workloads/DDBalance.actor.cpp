@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DDBalanceWorkload : TestWorkload {
 	int actorsPerClient, nodesPerActor, moversPerClient, currentbin, binCount, writesPerTransaction, keySpaceDriftFactor;
@@ -68,7 +68,7 @@ struct DDBalanceWorkload : TestWorkload {
 			self->clients.push_back(
 				timeout(
 				self->ddBalanceMover( cx, self, c ), self->testDuration, Void()) );
-		Void _ = wait( waitForAll( self->clients ) );
+		wait( waitForAll( self->clients ) );
 		return Void();
 	}
 
@@ -114,11 +114,11 @@ struct DDBalanceWorkload : TestWorkload {
 					int moverid = n % self->moversPerClient;
 					setActors.push_back(self->setKeyIfNotPresent(&tr, self->key(self->currentbin,objectnum,moverid,self->clientId), self->value(objectnum)));
 				}
-				Void _ = wait( waitForAll(setActors) );
-				Void _ = wait( tr.commit() );
+				wait( waitForAll(setActors) );
+				wait( tr.commit() );
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -137,11 +137,11 @@ struct DDBalanceWorkload : TestWorkload {
 				fs.push_back( self->ddbalanceSetupRange(cx, self, order[i], order[i]+10));
 				i++;
 			}
-			Void _ = wait( waitForAll(fs) );
+			wait( waitForAll(fs) );
 		}
 
 		if( self->warmingDelay > 0 ) {
-			Void _ = wait( timeout( databaseWarmer( cx ), self->warmingDelay, Void() ) );
+			wait( timeout( databaseWarmer( cx ), self->warmingDelay, Void() ) );
 		}
 
 		return Void();
@@ -159,7 +159,7 @@ struct DDBalanceWorkload : TestWorkload {
 		state int moves;
 		state int maxMovedAmount = 0;
 		for(i = begin; i < end;) {
-			Void _ = wait( poisson( lastTime, delay ) );
+			wait( poisson( lastTime, delay ) );
 			state double tstart = now();
 			state Transaction tr(cx);
 			loop {
@@ -183,10 +183,10 @@ struct DDBalanceWorkload : TestWorkload {
 								.detail("CurrentBin", sourceBin).detail("NextBin", destinationBin);
 						}
 					}
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 					if( self->shouldRecord( clientBegin ) )
 						++self->retries;
 					i = startvalue;
@@ -202,7 +202,7 @@ struct DDBalanceWorkload : TestWorkload {
 		}
 
 		if(maxMovedAmount < end-begin) {
-				TraceEvent(SevError, "LostKeys").detail("maxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
+				TraceEvent(SevError, "LostKeys").detail("MaxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
 								.detail("CurrentBin", sourceBin).detail("NextBin", destinationBin);
 				ASSERT( false );
 		}
@@ -227,7 +227,7 @@ struct DDBalanceWorkload : TestWorkload {
 			vector<Future<Void>> fs;
 			for(i=0; i < self->actorsPerClient / self->moversPerClient; i++)
 				fs.push_back( self->ddBalanceWorker(cx, self, moverId, currentBin, nextBin, i*self->nodesPerActor, (i+1)*self->nodesPerActor, clientBegin, &lastTime, 1.0 / self->transactionsPerSecond));
-			Void _ = wait( waitForAll(fs) );
+			wait( waitForAll(fs) );
 
 			currentBin = nextBin;
 			key_space_drift += self->keySpaceDriftFactor;

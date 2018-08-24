@@ -15,16 +15,18 @@
     <ClCompile Include="FDBLibTLSPlugin.cpp" />
     <ClInclude Include="FDBLibTLSPolicy.h" />
     <ClCompile Include="FDBLibTLSPolicy.cpp" />
+    <ClInclude Include="FDBLibTLSVerify.h" />
+    <ClCompile Include="FDBLibTLSVerify.cpp" />
     <ClInclude Include="FDBLibTLSSession.h" />
     <ClCompile Include="FDBLibTLSSession.cpp" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+		<ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v140_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+		<ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v140_xp</PlatformToolset>
   </PropertyGroup>

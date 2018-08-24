@@ -105,7 +105,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		if (clientId == 0) {
 			samplingProbability = getOption(options, LiteralStringRef("samplingProbability"), g_random->random01() / 10); //rand range 0 - 0.1
 			trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"), g_random->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
-			TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("samplingProbability", samplingProbability).detail("trInfoSizeLimit", trInfoSizeLimit);
+			TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("SamplingProbability", samplingProbability).detail("TrInfoSizeLimit", trInfoSizeLimit);
 		}
 	}
 
@@ -160,13 +160,13 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 					if (trInfoChunks.find(trId) == trInfoChunks.end()) {
 						// Some of the earlier chunks for this trId should have been deleted.
 						// Discard this chunk as it is of not much use
-						TraceEvent(SevInfo, "ClientTransactionProfilingSomeChunksMissing").detail("trId", trId);
+						TraceEvent(SevInfo, "ClientTransactionProfilingSomeChunksMissing").detail("TrId", trId);
 					}
 					else {
 						// Check if it is the expected chunk. Otherwise discard the whole transaction entry.
 						// There are scenarios (eg., when deletion is happening) where some chunks get missed.
 						if (chunkNum != trInfoChunks.find(trId)->second.size() + 1) {
-							TraceEvent(SevInfo, "ClientTransactionProfilingChunksMissing").detail("trId", trId);
+							TraceEvent(SevInfo, "ClientTransactionProfilingChunksMissing").detail("TrId", trId);
 							trInfoChunks.erase(trId);
 						}
 						else {
@@ -192,7 +192,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
 
-		Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
 						{
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -205,9 +205,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, ClientTransactionProfileCorrectnessWorkload* self) {
-		Void _ = wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0));  // Disable sampling
+		wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0));  // Disable sampling
 		// FIXME: Better way to ensure that all client profile data has been flushed to the database
-		Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+		wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 
 		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state int64_t counter;
@@ -224,20 +224,24 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		state KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
 		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
+		state int keysLimit = 10;
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, 10));
+				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, keysLimit));
 				if (kvRange.empty())
 					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());
 				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
 				begin = firstGreaterThan(kvRange.back().key);
+				tr.reset();
 			}
 			catch (Error& e) {
-				Void _ = wait(tr.onError(e));
+				if (e.code() == error_code_transaction_too_old)
+					keysLimit = std::max(1, keysLimit / 2);
+				wait(tr.onError(e));
 			}
 		}
 
@@ -248,11 +252,11 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		}
 		// FIXME: Find a way to check that contentsSize is not greater than a certain limit.
 		//if (counter != contentsSize) {
-		//	TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("counter", counter).detail("contentsSize", contentsSize);
+		//	TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("Counter", counter).detail("ContentsSize", contentsSize);
 		//	return false;
 		//}
-		TraceEvent(SevInfo, "ClientTransactionProfilingCtrval").detail("counter", counter);
-		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("contentsSize", contentsSize);
+		TraceEvent(SevInfo, "ClientTransactionProfilingCtrval").detail("Counter", counter);
+		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("ContentsSize", contentsSize);
 
 		// Check if the data format is as expected
 		return self->checkTxInfoEntriesFormat(txInfoEntries);

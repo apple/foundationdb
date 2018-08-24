@@ -74,6 +74,10 @@ Future< Void > Net2FileSystem::deleteFile( std::string filename, bool mustBeDura
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
+Future< std::time_t > Net2FileSystem::lastWriteTime( std::string filename ) {
+	return Net2AsyncFile::lastWriteTime( filename );
+}
+
 void Net2FileSystem::newFileSystem(double ioTimeout, std::string fileSystemPath)
 {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));

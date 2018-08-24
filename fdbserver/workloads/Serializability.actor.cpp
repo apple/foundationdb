@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SerializabilityWorkload : TestWorkload {
 	double testDuration;
@@ -76,7 +76,7 @@ struct SerializabilityWorkload : TestWorkload {
 
 		maxClearSize = g_random->randomInt(10, 2*nodes);
 		if( clientId == 0 )
-			TraceEvent("SerializabilityConfiguration").detail("nodes", nodes).detail("adjacentKeys", adjacentKeys).detail("valueSizeMin", valueSizeRange.first).detail("valueSizeMax", valueSizeRange.second).detail("maxClearSize", maxClearSize);
+			TraceEvent("SerializabilityConfiguration").detail("Nodes", nodes).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
 	}
 
 	virtual std::string description() { return "Serializability"; }
@@ -239,45 +239,45 @@ struct SerializabilityWorkload : TestWorkload {
 		for(; opNum < ops.size(); opNum++) {
 			if(ops[opNum].getKeyOp.present()) {
 				auto& op = ops[opNum].getKeyOp.get();
-				//TraceEvent("SRL_getKey").detail("key", op.key.toString()).detail("snapshot", op.snapshot);
+				//TraceEvent("SRL_GetKey").detail("Key", op.key.toString()).detail("Snapshot", op.snapshot);
 				getKeyFutures->push_back(tr->getKey(op.key, op.snapshot));
 				if (op.snapshot && !checkSnapshotReads)
 					dontCheck(*getKeyFutures);
 			} else if(ops[opNum].getOp.present()) {
 				auto& op = ops[opNum].getOp.get();
-				//TraceEvent("SRL_get").detail("key", printable(op.key)).detail("snapshot", op.snapshot);
+				//TraceEvent("SRL_Get").detail("Key", printable(op.key)).detail("Snapshot", op.snapshot);
 				getFutures->push_back(tr->get(op.key, op.snapshot));
 				if (op.snapshot && !checkSnapshotReads)
 					dontCheck(*getFutures);
 			} else if(ops[opNum].getRangeOp.present()) {
 				auto& op = ops[opNum].getRangeOp.get();
-				//TraceEvent("SRL_getRange").detail("begin", op.begin.toString()).detail("end", op.end.toString()).detail("limit", op.limit).detail("snapshot", op.snapshot).detail("reverse", op.reverse);
+				//TraceEvent("SRL_GetRange").detail("Begin", op.begin.toString()).detail("End", op.end.toString()).detail("Limit", op.limit).detail("Snapshot", op.snapshot).detail("Reverse", op.reverse);
 				getRangeFutures->push_back(tr->getRange(op.begin, op.end, op.limit, op.snapshot, op.reverse));
 				if (op.snapshot && !checkSnapshotReads)
 					dontCheck(*getRangeFutures);
 			} else if(ops[opNum].mutationOp.present()) {
 				auto& op = ops[opNum].mutationOp.get();
 				if(op.type == MutationRef::SetValue) {
-					//TraceEvent("SRL_set").detail("mutation", op.toString());
+					//TraceEvent("SRL_Set").detail("Mutation", op.toString());
 					tr->set(op.param1, op.param2);
 				} else if(op.type == MutationRef::ClearRange) {
-					//TraceEvent("SRL_clear").detail("mutation", op.toString());
+					//TraceEvent("SRL_Clear").detail("Mutation", op.toString());
 					tr->clear(KeyRangeRef(op.param1, op.param2));
 				} else {
-					//TraceEvent("SRL_atomicOp").detail("mutation", op.toString());
+					//TraceEvent("SRL_AtomicOp").detail("Mutation", op.toString());
 					tr->atomicOp(op.param1, op.param2, op.type);
 				}
 			} else if(ops[opNum].readConflictOp.present()) {
 				auto& op = ops[opNum].readConflictOp.get();
-				//TraceEvent("SRL_readConflict").detail("range", printable(op));
+				//TraceEvent("SRL_ReadConflict").detail("Range", printable(op));
 				tr->addReadConflictRange(op);
 			} else if(ops[opNum].watchOp.present()) {
 				auto& op = ops[opNum].watchOp.get();
-				//TraceEvent("SRL_watch").detail("key", printable(op));
+				//TraceEvent("SRL_Watch").detail("Key", printable(op));
 				watchFutures->push_back(tr->watch(op));
 			} else if(ops[opNum].writeConflictOp.present()) {
 				auto& op = ops[opNum].writeConflictOp.get();
-				//TraceEvent("SRL_writeConflict").detail("range", printable(op));
+				//TraceEvent("SRL_WriteConflict").detail("Range", printable(op));
 				tr->addWriteConflictRange(op);
 			}
 
@@ -286,16 +286,16 @@ struct SerializabilityWorkload : TestWorkload {
 				state int waitType = g_random->randomInt(0, 4);
 				loop {
 					if(waitType == 0 && getFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getFutures) ) );
+						wait( ::success( g_random->randomChoice(*getFutures) ) );
 						break;
 					} else if(waitType == 1 && getKeyFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getKeyFutures) ) );
+						wait( ::success( g_random->randomChoice(*getKeyFutures) ) );
 						break;
 					} else if(waitType == 2 && getRangeFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getRangeFutures) ) );
+						wait( ::success( g_random->randomChoice(*getRangeFutures) ) );
 						break;
 					} else if(waitType == 3) {
-						Void _ = wait( delay(0.001*g_random->random01()));
+						wait( delay(0.001*g_random->random01()));
 						break;
 					}
 					waitType = (waitType + 1) % 4;
@@ -320,8 +320,8 @@ struct SerializabilityWorkload : TestWorkload {
 		tr.clear(normalKeys);
 		for(auto kv : data)
 			tr.set(kv.key, kv.value);
-		Void _ = wait( tr.commit() );
-		//TraceEvent("SRL_reset");
+		wait( tr.commit() );
+		//TraceEvent("SRL_Reset");
 		return Void();
 	}
 
@@ -354,7 +354,7 @@ struct SerializabilityWorkload : TestWorkload {
 					Key key = self->getRandomKey();
 					Value value = self->getRandomValue();
 					initialData.push_back_deep(initialData.arena(), KeyValueRef(key, value));
-					//TraceEvent("SRL_init").detail("key", printable(key)).detail("value", printable(value));
+					//TraceEvent("SRL_Init").detail("Key", printable(key)).detail("Value", printable(value));
 				}
 		
 				//Generate three random transactions
@@ -363,56 +363,56 @@ struct SerializabilityWorkload : TestWorkload {
 				state std::vector<TransactionOperation> c = self->randomTransaction();
 
 				//reset database to known state
-				Void _ = wait( resetDatabase(cx, initialData) );
+				wait( resetDatabase(cx, initialData) );
 
-				Void _ = wait( runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
-				Void _ = wait( tr[0].commit() );
+				wait( runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( tr[0].commit() );
 
-				//TraceEvent("SRL_finished_a");
+				//TraceEvent("SRL_FinishedA");
 		
-				Void _ = wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
-				Void _ = wait( tr[1].commit() );
+				wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( tr[1].commit() );
 
-				//TraceEvent("SRL_finished_b");
+				//TraceEvent("SRL_FinishedB");
 
-				Void _ = wait( runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
-				Void _ = wait( tr[2].commit() );
+				wait( runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
+				wait( tr[2].commit() );
 
 				//get contents of database
 				state Standalone<RangeResultRef> result1 = wait( getDatabaseContents(cx, self->nodes) );
 
 				//reset database to known state
-				Void _ = wait( resetDatabase(cx, initialData) );
+				wait( resetDatabase(cx, initialData) );
 
-				Void _ = wait( runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				Void _ = wait( runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				Void _ = wait( runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
-				Void _ = wait( tr[3].commit() );
-				Void _ = wait( tr[4].commit() );
+				wait( runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
+				wait( tr[3].commit() );
+				wait( tr[4].commit() );
 
 				//get contents of database
 				Standalone<RangeResultRef> result2 = wait( getDatabaseContents(cx, self->nodes) );
 
 				if(result1.size() != result2.size()) {
-					TraceEvent(SevError, "SRL_resultMismatch").detail("size1", result1.size()).detail("size2", result2.size());
+					TraceEvent(SevError, "SRL_ResultMismatch").detail("Size1", result1.size()).detail("Size2", result2.size());
 
 					for(auto kv : result1)
-						TraceEvent("SRL_result1").detail("kv", printable(kv));
+						TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 					for(auto kv : result2)
-						TraceEvent("SRL_result2").detail("kv", printable(kv));
+						TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 					ASSERT(false);
 				}
 
 				for(int i = 0; i < result1.size(); i++) {
 					if(result1[i] != result2[i]) {
-						TraceEvent(SevError, "SRL_resultMismatch").detail("i", i).detail("result1", printable(result1[i])).detail("result2", printable(result2[i]))
-							.detail("result1Value", printable(result1[i].value)).detail("result2Value", printable(result2[i].value));
+						TraceEvent(SevError, "SRL_ResultMismatch").detail("I", i).detail("Result1", printable(result1[i])).detail("Result2", printable(result2[i]))
+							.detail("Result1Value", printable(result1[i].value)).detail("Result2Value", printable(result2[i].value));
 
 						for(auto kv : result1)
-							TraceEvent("SRL_result1").detail("kv", printable(kv));
+							TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 						for(auto kv : result2)
-							TraceEvent("SRL_result2").detail("kv", printable(kv));
+							TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 						ASSERT(false);
 					}
@@ -440,25 +440,25 @@ struct SerializabilityWorkload : TestWorkload {
 
 				for(int i = 0; i < getRangeFutures[0].size(); i++) {
 					if(getRangeFutures[0][i].get().size() != getRangeFutures[3][i].get().size()) {
-						TraceEvent(SevError, "SRL_resultMismatch").detail("size1", getRangeFutures[0][i].get().size()).detail("size2",  getRangeFutures[3][i].get().size());
+						TraceEvent(SevError, "SRL_ResultMismatch").detail("Size1", getRangeFutures[0][i].get().size()).detail("Size2",  getRangeFutures[3][i].get().size());
 
 						for(auto kv : getRangeFutures[0][i].get())
-							TraceEvent("SRL_result1").detail("kv", printable(kv));
+							TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 						for(auto kv : getRangeFutures[3][i].get())
-							TraceEvent("SRL_result2").detail("kv", printable(kv));
+							TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 						ASSERT(false);
 					}
 
 					for(int j = 0; j < getRangeFutures[0][i].get().size(); j++) {
 						if(getRangeFutures[0][i].get()[j] !=  getRangeFutures[3][i].get()[j]) {
-							TraceEvent(SevError, "SRL_resultMismatch").detail("j", j).detail("result1", printable(getRangeFutures[0][i].get()[j])).detail("result2", printable( getRangeFutures[3][i].get()[j]))
-								.detail("result1Value", printable(getRangeFutures[0][i].get()[j].value)).detail("result2Value", printable( getRangeFutures[3][i].get()[j].value));
+							TraceEvent(SevError, "SRL_ResultMismatch").detail("J", j).detail("Result1", printable(getRangeFutures[0][i].get()[j])).detail("Result2", printable( getRangeFutures[3][i].get()[j]))
+								.detail("Result1Value", printable(getRangeFutures[0][i].get()[j].value)).detail("Result2Value", printable( getRangeFutures[3][i].get()[j].value));
 
 							for(auto kv : getRangeFutures[0][i].get())
-								TraceEvent("SRL_result1").detail("kv", printable(kv));
+								TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 							for(auto kv :  getRangeFutures[3][i].get())
-								TraceEvent("SRL_result2").detail("kv", printable(kv));
+								TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 							ASSERT(false);
 						}
@@ -473,25 +473,25 @@ struct SerializabilityWorkload : TestWorkload {
 
 				for(int i = 0; i < getRangeFutures[2].size(); i++) {
 					if(getRangeFutures[2][i].get().size() != getRangeFutures[4][i].get().size()) {
-						TraceEvent(SevError, "SRL_resultMismatch").detail("size1", getRangeFutures[2][i].get().size()).detail("size2",  getRangeFutures[4][i].get().size());
+						TraceEvent(SevError, "SRL_ResultMismatch").detail("Size1", getRangeFutures[2][i].get().size()).detail("Size2",  getRangeFutures[4][i].get().size());
 
 						for(auto kv : getRangeFutures[2][i].get())
-							TraceEvent("SRL_result1").detail("kv", printable(kv));
+							TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 						for(auto kv :  getRangeFutures[4][i].get())
-							TraceEvent("SRL_result2").detail("kv", printable(kv));
+							TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 						ASSERT(false);
 					}
 
 					for(int j = 0; j < getRangeFutures[2][i].get().size(); j++) {
 						if(getRangeFutures[2][i].get()[j] !=  getRangeFutures[4][i].get()[j]) {
-							TraceEvent(SevError, "SRL_resultMismatch").detail("j", j).detail("result1", printable(getRangeFutures[2][i].get()[j])).detail("result2", printable( getRangeFutures[4][i].get()[j]))
-								.detail("result1Value", printable(getRangeFutures[2][i].get()[j].value)).detail("result2Value", printable( getRangeFutures[4][i].get()[j].value));
+							TraceEvent(SevError, "SRL_ResultMismatch").detail("J", j).detail("Result1", printable(getRangeFutures[2][i].get()[j])).detail("Result2", printable( getRangeFutures[4][i].get()[j]))
+								.detail("Result1Value", printable(getRangeFutures[2][i].get()[j].value)).detail("Result2Value", printable( getRangeFutures[4][i].get()[j].value));
 
 							for(auto kv : getRangeFutures[2][i].get())
-								TraceEvent("SRL_result1").detail("kv", printable(kv));
+								TraceEvent("SRL_Result1").detail("Kv", printable(kv));
 							for(auto kv :  getRangeFutures[4][i].get())
-								TraceEvent("SRL_result2").detail("kv", printable(kv));
+								TraceEvent("SRL_Result2").detail("Kv", printable(kv));
 
 							ASSERT(false);
 						}
@@ -501,7 +501,7 @@ struct SerializabilityWorkload : TestWorkload {
 				}
 			} catch( Error &e ) {
 				state ReadYourWritesTransaction trErr(cx);
-				Void _ = wait( trErr.onError(e) );
+				wait( trErr.onError(e) );
 			}
 		}
 	}

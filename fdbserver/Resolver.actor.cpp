@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "ResolverInterface.h"
@@ -31,6 +30,7 @@
 #include "ConflictSet.h"
 #include "StorageMetrics.h"
 #include "fdbclient/SystemData.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
 struct ProxyRequestsInfo {
@@ -90,11 +90,11 @@ ACTOR Future<Void> resolveBatch(
 
 	while( self->totalStateBytes.get() > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT && self->recentStateTransactionSizes.size() && 
 		proxyInfo.lastVersion > self->recentStateTransactionSizes.front().first && req.version > self->neededVersion.get() ) {
-		/*TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("stateBytes", self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionSizes.size())
-			.detail("lastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion", self->neededVersion.get())
-			.detail("recentStateVer", self->recentStateTransactions.begin()->key);*/
+		/*TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes", self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionSizes.size())
+			.detail("LastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion", self->neededVersion.get())
+			.detail("RecentStateVer", self->recentStateTransactions.begin()->key);*/
 
-		Void _ = wait( self->totalStateBytes.onChange() || self->neededVersion.onChange() );
+		wait( self->totalStateBytes.onChange() || self->neededVersion.onChange() );
 	}
 
 	if(debugID.present()) {
@@ -107,15 +107,15 @@ ACTOR Future<Void> resolveBatch(
 		}
 
 		choose {
-			when(Void _ = wait(self->version.whenAtLeast(req.prevVersion))) {
+			when(wait(self->version.whenAtLeast(req.prevVersion))) {
 				break;
 			}
-			when(Void _ = wait(self->checkNeededVersion.onTrigger())) { }
+			when(wait(self->checkNeededVersion.onTrigger())) { }
 		}
 	}
 
 	if (check_yield(TaskDefaultEndpoint)) {
-		Void _ = wait( delay( 0, TaskLowPriority ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
+		wait( delay( 0, TaskLowPriority ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
 		g_network->setCurrentTask(TaskDefaultEndpoint);
 	}
 
@@ -282,8 +282,8 @@ ACTOR Future<Void> resolverCore(
 			rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key) : KeyRangeRef(rep.key, req.range.end));
 			req.reply.send(rep);
 		}
-		when ( Void _ = wait( actors.getResult() ) ) {}
-		when (Void _ = wait(doPollMetrics) ) {
+		when ( wait( actors.getResult() ) ) {}
+		when (wait(doPollMetrics) ) {
 			self->iopsSample.poll();
 			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
 		}
@@ -294,7 +294,7 @@ ACTOR Future<Void> checkRemoved( Reference<AsyncVar<ServerDBInfo>> db, uint64_t 
 	loop {
 		if ( db->get().recoveryCount >= recoveryCount && !std::count(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) )
 			throw worker_removed();
-		Void _ = wait( db->onChange() );
+		wait( db->onChange() );
 	}
 }
 
@@ -306,8 +306,8 @@ ACTOR Future<Void> resolver(
 	try {
 		state Future<Void> core = resolverCore( resolver, initReq );
 		loop choose {
-			when( Void _ = wait( core ) ) { return Void(); }
-			when( Void _ = wait( checkRemoved( db, initReq.recoveryCount, resolver ) ) ) {}
+			when( wait( core ) ) { return Void(); }
+			when( wait( checkRemoved( db, initReq.recoveryCount, resolver ) ) ) {}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {

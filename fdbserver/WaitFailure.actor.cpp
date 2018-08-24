@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/Deque.h"
 #include "Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){
 	// when this actor is cancelled, the promises in the queue will send broken_promise
@@ -46,11 +46,11 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 			if (!x.present()) return Void();
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
 			if (w > 0)
-				Void _ = wait( delay( w, taskID ) );
+				wait( delay( w, taskID ) );
 		} catch (Error &e){
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevError, "waitFailureClientError").error(e);
+			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}
@@ -61,20 +61,20 @@ ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFail
 		try {	
 			failed->set( IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed() );
 			if( failed->get() ) {
-				Void _ = wait( IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint()) );
+				wait( IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint()) );
 			} else {
 				state double start = now();
 				ErrorOr<Void> x = wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
 				if (x.present()) {
 					double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
 					if (w > 0)
-						Void _ = wait( delay( w, taskID ) );
+						wait( delay( w, taskID ) );
 				}
 			}
 		} catch (Error &e){
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevError, "waitFailureClientError").error(e);
+			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SelectorCorrectnessWorkload : TestWorkload {
 	int minOperationsPerTransaction,maxOperationsPerTransaction,maxKeySpace,maxOffset;
@@ -75,10 +75,10 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				try {
 					for(int i = 0; i < self->maxKeySpace; i+=2) tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		} else {
@@ -90,10 +90,10 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						if(g_random->random01() > 0.5)
 							tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -164,7 +164,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						offsetB = g_random->randomInt( 1, self->maxOffset );
 						reverse = g_random->random01() > 0.5 ? false : true;
 
-						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("onEqualA",onEqualA).detail("onEqualB",onEqualB).detail("offsetA",offsetA).detail("offsetB",offsetB).detail("direction",direction);
+						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
 						state int expectedSize = (std::min( abmax + 2*offsetB - (abmax%2==1 ? 1 : (onEqualB ? 0 : 2)), self->maxKeySpace ) - ( std::max( abmin + 2*offsetA - (abmin%2==1 ? 1 : (onEqualA ? 0 : 2)), 0 ) ))/2;
 
 						if(self->testReadYourWrites) {
@@ -180,7 +180,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 									outStr = outStr + keyStr + " ";
 								}
 
-								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("size", trueSize).detail("expected",expectedSize).detail("data",outStr).detail("dataSize", getRangeTest.size());
+								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("Size", trueSize).detail("Expected",expectedSize).detail("Data",outStr).detail("DataSize", getRangeTest.size());
 							}
 						} else {
 							Standalone<RangeResultRef> getRangeTest = wait( tr.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB), 2*(self->maxKeySpace+self->maxOffset), false, reverse ) );
@@ -195,7 +195,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 									outStr = outStr + keyStr + " ";
 								}
 								
-								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("size", trueSize).detail("expected",expectedSize).detail("data",outStr).detail("dataSize", getRangeTest.size());
+								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("Size", trueSize).detail("Expected",expectedSize).detail("Data",outStr).detail("DataSize", getRangeTest.size());
 							}
 						}
 					}
@@ -205,7 +205,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				trRYOW.reset();
 				++self->transactions;
 			} catch (Error& e) {
-				Void _ = wait( trRYOW.onError(e) );
+				wait( trRYOW.onError(e) );
 				trRYOW.reset();
 				++self->retries;
 			}

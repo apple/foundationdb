@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {
@@ -58,7 +58,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("AS_Submit1");
-			Void _ = wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
+			wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
 			TraceEvent("AS_Submit2");
 		} catch( Error &e ) {
 			if( e.code() != error_code_backup_duplicate )
@@ -92,7 +92,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 					loop {
 						state Future<Standalone<RangeResultRef>> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
 						state Future<Standalone<RangeResultRef>> bkpFuture = tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
-						Void _ = wait(success(srcFuture) && success(bkpFuture));
+						wait(success(srcFuture) && success(bkpFuture));
 
 						auto src = srcFuture.get().begin();
 						auto bkp = bkpFuture.get().begin();
@@ -100,13 +100,13 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
 							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
 							if (src->key != bkpKey && src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchKeyAndValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchKeyAndValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							else if (src->key != bkpKey) {
-								TraceEvent(SevError, "MismatchKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							else if (src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							begin = std::min(src->key, bkpKey);
 							if (src->key == bkpKey) {
@@ -121,12 +121,12 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 							}
 						}
 						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
-							TraceEvent(SevError, "MissingBkpKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value));
+							TraceEvent(SevError, "MissingBkpKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value));
 							begin = src->key;
 							++src;
 						}
 						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
-							TraceEvent(SevError, "MissingSrcKey").detail("bkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("bkpVal", printable(bkp->value));
+							TraceEvent(SevError, "MissingSrcKey").detail("BkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("BkpVal", printable(bkp->value));
 							begin = bkp->key;
 							++bkp;
 						}
@@ -141,7 +141,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 					break;
 				}
 				catch (Error &e) {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -156,21 +156,21 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Wait1");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready1");
-		Void _ = wait( delay(g_random->random01()*self->switch1delay) );
+		wait( delay(g_random->random01()*self->switch1delay) );
 		TraceEvent("AS_Switch1");
-		Void _ = wait( backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
+		wait( backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait2");
 		int _ = wait( restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready2");
-		Void _ = wait( delay(g_random->random01()*self->switch2delay) );
+		wait( delay(g_random->random01()*self->switch2delay) );
 		TraceEvent("AS_Switch2");
-		Void _ = wait( restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
+		wait( restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait3");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready3");
-		Void _ = wait( delay(g_random->random01()*self->stopDelay) );
+		wait( delay(g_random->random01()*self->stopDelay) );
 		TraceEvent("AS_Abort");
-		Void _ = wait( backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()) );
+		wait( backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()) );
 		TraceEvent("AS_Done");
 
 		// SOMEDAY: Remove after backup agents can exist quiescently

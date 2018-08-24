@@ -25,6 +25,7 @@ set(FDBRPC_SRCS
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp
+  networksender.actor.h
   Platform.cpp
   QueueModel.cpp
   ReplicationPolicy.cpp

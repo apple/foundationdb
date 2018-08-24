@@ -28,6 +28,7 @@
 	#define FDBCLIENT_VERSIONEDMAP_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Tree>
 Future<Void> deferredCleanupActor( std::vector<Tree> toFree, int taskID = 7000 ) {
@@ -42,10 +43,11 @@ Future<Void> deferredCleanupActor( std::vector<Tree> toFree, int taskID = 7000 )
 		}
 
 		if(++freeCount % 100 == 0)
-			Void _ = wait( yield(taskID) );
+			wait( yield(taskID) );
 	}
 
 	return Void();
 }
 
+#include "flow/unactorcompiler.h"
 #endif

@@ -60,36 +60,36 @@ Here’s a simple implementation of the basic table pattern:
         private static final Subspace table;
         private static final Subspace rowIndex;
         private static final Subspace colIndex;
-        
+
         static {
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             table = new Subspace(Tuple.from("T"));
             rowIndex = table.subspace(Tuple.from("R"));
             colIndex = table.subspace(Tuple.from("C"));
         }
-        
+
         // Packing and unpacking helper functions.
         private static byte[] pack(Object value){
             return Tuple.from(value).pack();
         }
-        
+
         private static Object unpack(byte[] value){
             return Tuple.fromBytes(value).get(0);
         }
-        
-        public static void setCell(TransactionContext tcx, final String row, 
+
+        public static void setCell(TransactionContext tcx, final String row,
                                     final String column, final Object value){
             tcx.run(tr -> {
                 tr.set(rowIndex.subspace(Tuple.from(row, column)).getKey(),
                         pack(value));
-                tr.set(colIndex.subspace(Tuple.from(column,row)).getKey(), 
+                tr.set(colIndex.subspace(Tuple.from(column,row)).getKey(),
                         pack(value));
-                
+
                 return null;
             });
         }
-        
+
         public static Object getCell(TransactionContext tcx, final String row,
                                     final String column){
             return tcx.run(tr -> {
@@ -97,19 +97,19 @@ Here’s a simple implementation of the basic table pattern:
                         Tuple.from(row,column)).getKey()).get());
             });
         }
-        
+
         public static void setRow(TransactionContext tcx, final String row,
                                     final Map<String,Object> cols){
             tcx.run(tr -> {
                 tr.clear(rowIndex.subspace(Tuple.from(row)).range());
-                
+
                 for(Map.Entry<String,Object> cv : cols.entrySet()){
                     setCell(tr, row, cv.getKey(), cv.getValue());
                 }
                 return null;
             });
         }
-        
+
         public static void setColumn(TransactionContext tcx, final String column,
                                         final Map<String,Object> rows){
             tcx.run(tr -> {
@@ -120,34 +120,34 @@ Here’s a simple implementation of the basic table pattern:
                 return null;
             });
         }
-        
+
         public static TreeMap<String,Object> getRow(TransactionContext tcx,
                                                     final String row){
             return tcx.run(tr -> {
                 TreeMap<String,Object> cols = new TreeMap<String,Object>();
-                
+
                 for(KeyValue kv : tr.getRange(
                         rowIndex.subspace(Tuple.from(row)).range())){
                     cols.put(rowIndex.unpack(kv.getKey()).getString(1),
                             unpack(kv.getValue()));
                 }
-                
+
                 return cols;
             });
         }
-        
-        
+
+
         public static TreeMap<String,Object> getColumn(TransactionContext tcx,
                                                     final String column){
             return tcx.run(tr -> {
                 TreeMap<String,Object> rows = new TreeMap<String,Object>();
-                
+
                 for(KeyValue kv : tr.getRange(
                         colIndex.subspace(Tuple.from(column)).range())){
                     rows.put(colIndex.unpack(kv.getKey()).getString(1),
                             unpack(kv.getValue()));
                 }
-                
+
                 return rows;
             });
         }

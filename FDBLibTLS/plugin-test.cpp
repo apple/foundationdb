@@ -48,29 +48,26 @@ static std::string load_file(std::string path)
 	return ss.str();
 }
 
-struct FDBLibTLSClientServerTest {
-	FDBLibTLSClientServerTest(bool client_success, bool server_success, std::string client_path, std::string server_path, std::string client_verify, std::string server_verify):
-		client_success(client_success), server_success(server_success), client_verify(client_verify), server_verify(server_verify) {
-		client_data = load_file(TESTDATA + client_path);
-		server_data = load_file(TESTDATA + server_path);
-	}
-	~FDBLibTLSClientServerTest() {}
+struct client_server_test {
+	std::string ca_path;
 
 	bool client_success;
-	bool server_success;
+	std::string client_path;
+	const char* client_password;
+	std::vector<std::string> client_verify;
+	const char* servername;
 
-	std::string client_data;
-	std::string client_verify;
-	std::string server_data;
-	std::string server_verify;
+	bool server_success;
+	std::string server_path;
+	const char* server_password;
+	std::vector<std::string> server_verify;
 };
 
 struct FDBLibTLSPluginTest {
-        FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf);
-        ~FDBLibTLSPluginTest();
+	FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin);
+	~FDBLibTLSPluginTest();
 
-        Reference<ITLSPlugin> plugin;
-        ITLSLogFunc logf;
+	Reference<ITLSPlugin> plugin;
 
 	boost::circular_buffer<uint8_t> client_buffer;
 	boost::circular_buffer<uint8_t> server_buffer;
@@ -83,18 +80,18 @@ struct FDBLibTLSPluginTest {
 	int server_write(const uint8_t* buf, int len);
 
 	Reference<ITLSPolicy> create_policy(void);
-	Reference<ITLSSession> create_client_session(Reference<ITLSPolicy> policy);
+	Reference<ITLSSession> create_client_session(Reference<ITLSPolicy> policy, const char* servername);
 	Reference<ITLSSession> create_server_session(Reference<ITLSPolicy> policy);
 
 	void circular_reset(void);
 	void circular_self_test(void);
 
-	int client_server_test(FDBLibTLSClientServerTest const& cst);
+	int client_server_test(const struct client_server_test *cst);
 	int set_cert_data_test(void);
 };
 
-FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf) :
-	plugin(plugin), logf(logf)
+FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin) :
+	plugin(plugin)
 {
 	circular_reset();
 	circular_self_test();
@@ -204,7 +201,7 @@ void FDBLibTLSPluginTest::circular_self_test()
 
 Reference<ITLSPolicy> FDBLibTLSPluginTest::create_policy(void)
 {
-	return Reference<ITLSPolicy>(plugin->create_policy((ITLSLogFunc)logf));
+	return Reference<ITLSPolicy>(plugin->create_policy());
 }
 
 static int client_send_func(void* ctx, const uint8_t* buf, int len) {
@@ -225,9 +222,9 @@ static int client_recv_func(void* ctx, uint8_t* buf, int len) {
 	}
 }
 
-Reference<ITLSSession> FDBLibTLSPluginTest::create_client_session(Reference<ITLSPolicy> policy)
+Reference<ITLSSession> FDBLibTLSPluginTest::create_client_session(Reference<ITLSPolicy> policy, const char* servername)
 {
-	return Reference<ITLSSession>(policy->create_session(true, client_send_func, this, client_recv_func, this, NULL));
+	return Reference<ITLSSession>(policy->create_session(true, servername, client_send_func, this, client_recv_func, this, NULL));
 }
 
 static int server_send_func(void* ctx, const uint8_t* buf, int len) {
@@ -250,42 +247,74 @@ static int server_recv_func(void* ctx, uint8_t* buf, int len) {
 
 Reference<ITLSSession> FDBLibTLSPluginTest::create_server_session(Reference<ITLSPolicy> policy)
 {
-	return Reference<ITLSSession>(policy->create_session(false, server_send_func, this, server_recv_func, this, NULL));
+	return Reference<ITLSSession>(policy->create_session(false, NULL, server_send_func, this, server_recv_func, this, NULL));
 }
 
-int FDBLibTLSPluginTest::client_server_test(FDBLibTLSClientServerTest const& cst)
+#define MAX_VERIFY_RULES 5
+
+static void convert_verify_peers(const std::vector<std::string> *verify_rules, const uint8_t *verify_peers[], int verify_peers_len[]) {
+	if (verify_rules->size() > MAX_VERIFY_RULES)
+		throw std::runtime_error("verify");
+	int i = 0;
+	for (auto &verify_rule: *verify_rules) {
+		verify_peers[i] = (const uint8_t *)&verify_rule[0];
+		verify_peers_len[i] = verify_rule.size();
+		i++;
+	}
+}
+
+int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst)
 {
+	const uint8_t *verify_peers[MAX_VERIFY_RULES];
+	int verify_peers_len[MAX_VERIFY_RULES];
+
 	circular_reset();
 
+	std::string ca_data = load_file(TESTDATA + cst->ca_path);
+	std::string client_data = load_file(TESTDATA + cst->client_path);
+	std::string server_data = load_file(TESTDATA + cst->server_path);
+
 	Reference<ITLSPolicy> client_policy = create_policy();
-	if (!client_policy->set_cert_data((const uint8_t*)&cst.client_data[0], cst.client_data.size())) {
+	if (!client_policy->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size())) {
+		std::cerr << "FAIL: failed to set client ca data\n";
+		return 1;
+	}
+	if (!client_policy->set_cert_data((const uint8_t*)&client_data[0], client_data.size())) {
 		std::cerr << "FAIL: failed to set client cert data\n";
 		return 1;
 	}
-	if (!client_policy->set_key_data((const uint8_t*)&cst.client_data[0], cst.client_data.size())) {
+	if (!client_policy->set_key_data((const uint8_t*)&client_data[0], client_data.size(), cst->client_password)) {
 		std::cerr << "FAIL: failed to set client key data\n";
 		return 1;
 	}
-	if (!client_policy->set_verify_peers((const uint8_t*)&cst.client_verify[0], cst.client_verify.size())) {
-		std::cerr << "FAIL: failed to set client key data\n";
-		return 1;
+	if (!cst->client_verify.empty()) {
+		convert_verify_peers(&cst->client_verify, verify_peers, verify_peers_len);
+		if (!client_policy->set_verify_peers(cst->client_verify.size(), verify_peers, verify_peers_len)) {
+			std::cerr << "FAIL: failed to set client verify peers\n";
+			return 1;
+		}
 	}
 
 	Reference<ITLSPolicy> server_policy = create_policy();
-	if (!server_policy->set_cert_data((const uint8_t*)&cst.server_data[0], cst.server_data.size())) {
+	if (!server_policy->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size())) {
+		std::cerr << "FAIL: failed to set server ca data\n";
+		return 1;
+	}
+	if (!server_policy->set_cert_data((const uint8_t*)&server_data[0], server_data.size())) {
 		std::cerr << "FAIL: failed to set server cert data\n";
 		return 1;
 	}
-	if (!server_policy->set_key_data((const uint8_t*)&cst.server_data[0], cst.server_data.size())) {
+	if (!server_policy->set_key_data((const uint8_t*)&server_data[0], server_data.size(), cst->server_password)) {
 		std::cerr << "FAIL: failed to set server key data\n";
 		return 1;
 	}
-	if (!server_policy->set_verify_peers((const uint8_t*)&cst.server_verify[0], cst.server_verify.size())) {
-		std::cerr << "FAIL: failed to set client key data\n";
+	convert_verify_peers(&cst->server_verify, verify_peers, verify_peers_len);
+	if (!server_policy->set_verify_peers(cst->server_verify.size(), verify_peers, verify_peers_len)) {
+		std::cerr << "FAIL: failed to set server verify peers\n";
 		return 1;
 	}
 
-	Reference<ITLSSession> client_session = create_client_session(client_policy);
+	Reference<ITLSSession> client_session = create_client_session(client_policy, cst->servername);
 	Reference<ITLSSession> server_session = create_server_session(server_policy);
 
 	if (client_session.getPtr() == NULL || server_session.getPtr() == NULL)
@@ -302,7 +331,7 @@ int FDBLibTLSPluginTest::client_server_test(FDBLibTLSClientServerTest const& cst
 			if (rc == ITLSSession::SUCCESS) {
 				client_done = true;
 			} else if (rc == ITLSSession::FAILED) {
-				if (cst.client_success) {
+				if (cst->client_success) {
 					std::cerr << "FAIL: failed to complete client handshake\n";
 					return 1;
 				} else {
@@ -320,7 +349,7 @@ int FDBLibTLSPluginTest::client_server_test(FDBLibTLSClientServerTest const& cst
 			if (rc == ITLSSession::SUCCESS) {
 				server_done = true;
 			} else if (rc == ITLSSession::FAILED) {
-				if (cst.server_success) {
+				if (cst->server_success) {
 					std::cerr << "FAIL: failed to complete server handshake\n";
 					return 1;
 				} else {
@@ -340,11 +369,15 @@ int FDBLibTLSPluginTest::client_server_test(FDBLibTLSClientServerTest const& cst
 		return 1;
 	}
 
-	if (!cst.client_success && !client_failed)
+	if (!cst->client_success && !client_failed) {
 		std::cerr << "FAIL: client handshake succeeded when it should have failed\n";
-	if (!cst.server_success && !server_failed)
+		return 1;
+	}
+	if (!cst->server_success && !server_failed) {
 		std::cerr << "FAIL: server handshake succeeded when it should have failed\n";
-	if (!cst.client_success || !cst.server_success)
+		return 1;
+	}
+	if (!cst->client_success || !cst->server_success)
 		return 0;
 
 	std::cerr << "INFO: handshake completed successfully\n";
@@ -455,7 +488,7 @@ int FDBLibTLSPluginTest::client_server_test(FDBLibTLSClientServerTest const& cst
 	return 0;
 }
 
-static void logf(const char* event, void* uid, int is_error, ...) {
+static void logf(const char* event, void* uid, bool is_error, ...) {
 	va_list args;
 
 	std::string log_type ("INFO");
@@ -476,6 +509,634 @@ static void logf(const char* event, void* uid, int is_error, ...) {
 
 	va_end(args);
 }
+
+const struct client_server_test client_server_tests[] = {
+	// Single root CA.
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+
+	// Multiple root CAs.
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = true,
+		.client_path = "test-client-4.pem",
+		.client_password = "fdb321",
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = "fdb123",
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-2.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {""},
+	},
+
+	// Expired certificates.
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-3.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-3.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"Check.Unexpired=0"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-3.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-3.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Unexpired=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"Check.Valid=0"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-3.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-3.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1", "I.CN=FDB LibTLS Plugin Test Intermediate CA 2,Check.Unexpired=0"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-3.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1,Check.Unexpired=0", "I.CN=FDB LibTLS Plugin Test Intermediate CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-3.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+
+	// Match on specific subject and/or issuer.
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"C=US"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"C=US"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"C=AU"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"C=US", "C=AU"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"C=US", "C=JP"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\04\\>"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\81 \\<\\01\\+\\02=\\04\\>"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\04"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {"CN=FDB LibTLS Plugin Test Client 1"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"CN=FDB LibTLS Plugin Test Client 1"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {""},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O=Apple Pty Limited,OU=FDC Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O=Apple Inc.,OU=FDB Team"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O=Apple Pty Limited,OU=FDB Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O=Apple Inc.,OU=FDC Team"},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O=Apple Pty Limited,OU=FDC Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDB Team"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDB Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDC Team"},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDC Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>,I.CN=FDB LibTLS Plugin Test Intermediate CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1,O=Apple Inc.,I.C=US,S.C=US"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>,I.CN=FDB LibTLS Plugin Test Intermediate CA 1"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {"I.CN=FDB LibTLS Plugin Test Intermediate CA 1,O=Apple Inc.,I.C=US,S.C=US"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-2.pem",
+		.server_password = NULL,
+		.server_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+	},
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+	},
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1", "R.CN=FDB LibTLS Plugin Test Root CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+	},
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 2"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {"R.CN=FDB LibTLS Plugin Test Root CA 1"},
+	},
+	{
+		.ca_path = "test-ca-all.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {"R.OU=FDB Team"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-4.pem",
+		.server_password = "fdb123",
+		.server_verify = {"R.OU=FDB Team"},
+	},
+
+	// Client performing name validation via servername.
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {},
+		.servername = "test.foundationdb.org",
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-1.pem",
+		.client_password = NULL,
+		.client_verify = {},
+		.servername = "www.foundationdb.org",
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {""},
+	},
+
+	// Prefix and Suffix Matching
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O>=Apple Inc.,OU>=FDB"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O<=Limited,OU<=Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O<=Apple Inc.,OU<=FDB"},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O>=Limited,OU>=Team"},
+	},
+
+	// Subject Alternative Name
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName=DNS:test.foundationdb.org"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName>=DNS:test."},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=DNS:.org"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=DNS:.com"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=EMAIL:.com"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+};
 
 int main(int argc, char **argv)
 {
@@ -502,81 +1163,12 @@ int main(int argc, char **argv)
 
 	Reference<ITLSPlugin> plugin = Reference<ITLSPlugin>((ITLSPlugin *)getPlugin(ITLSPlugin::get_plugin_type_name_and_version()));
 
-	std::vector<FDBLibTLSClientServerTest> tests = {
-		// Valid - all use single root CA.
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-1-server.pem", "", ""),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem", "", ""),
-		FDBLibTLSClientServerTest(true, true, "test-2-client.pem", "test-2-server.pem", "", ""),
-		FDBLibTLSClientServerTest(true, true, "test-2-client.pem", "test-1-server.pem", "", ""),
-
-		// Certificates terminate at different intermediate CAs.
-		FDBLibTLSClientServerTest(false, false, "test-4-client.pem", "test-5-server.pem", "", ""),
-		FDBLibTLSClientServerTest(false, false, "test-5-client.pem", "test-4-server.pem", "", ""),
-		FDBLibTLSClientServerTest(true, true, "test-4-client.pem", "test-5-server.pem",
-			"Check.Valid=0", "Check.Valid=0"),
-		FDBLibTLSClientServerTest(true, true, "test-5-client.pem", "test-4-server.pem",
-			"Check.Valid=0", "Check.Valid=0"),
-
-		// Expired certificates.
-		FDBLibTLSClientServerTest(false, false, "test-1-client.pem", "test-3-server.pem", "", ""),
-		FDBLibTLSClientServerTest(false, false, "test-3-client.pem", "test-1-server.pem", "", ""),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-3-server.pem", "Check.Unexpired=0", ""),
-		FDBLibTLSClientServerTest(true, true, "test-3-client.pem", "test-1-server.pem", "", "Check.Unexpired=0"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-3-server.pem", "Check.Valid=0", ""),
-		FDBLibTLSClientServerTest(true, true, "test-3-client.pem", "test-1-server.pem", "", "Check.Valid=0"),
-
-		// Match on specific subject and/or issuer.
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-1-server.pem", "C=US", ""),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-2-server.pem", "C=US", ""),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem", "C=AU", ""),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>", ""),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\04\\>", ""),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\81 \\<\\01\\+\\02=\\04\\>", ""),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\04", ""),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>",
-			"CN=FDB LibTLS Plugin Test Client 1"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-1-server.pem",
-			"", "CN=FDB LibTLS Plugin Test Client 1"),
-		FDBLibTLSClientServerTest(true, false, "test-2-client.pem", "test-1-server.pem",
-			"", "O=Apple Pty Limited,OU=FDC Team"),
-		FDBLibTLSClientServerTest(true, true, "test-2-client.pem", "test-1-server.pem",
-			"O=Apple Inc.,OU=FDB Team", "O=Apple Pty Limited,OU=FDB Team"),
-		FDBLibTLSClientServerTest(false, false, "test-2-client.pem", "test-1-server.pem",
-			"O=Apple Inc.,OU=FDC Team", "O=Apple Pty Limited,OU=FDC Team"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-1-server.pem",
-			"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDB Team",
-			"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDB Team"),
-		FDBLibTLSClientServerTest(false, false, "test-1-client.pem", "test-1-server.pem",
-			"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDC Team",
-			"I.C=US,I.ST=California,I.L=Cupertino,I.O=Apple Inc.,I.OU=FDC Team"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-1-server.pem",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-1-server.pem",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 2",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 2",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1"),
-		FDBLibTLSClientServerTest(true, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>,I.CN=FDB LibTLS Plugin Test Intermediate CA 2",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1,O=Apple Inc.,I.C=US,S.C=US"),
-		FDBLibTLSClientServerTest(false, true, "test-1-client.pem", "test-2-server.pem",
-			"CN=FDB LibTLS Plugin Test Server 2\\, \\80 \\<\\01\\+\\02=\\03\\>,I.CN=FDB LibTLS Plugin Test Intermediate CA 1",
-			"I.CN=FDB LibTLS Plugin Test Intermediate CA 1,O=Apple Inc.,I.C=US,S.C=US"),
-	};
-
-	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin, (ITLSLogFunc)logf);
+	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin);
 
 	int test_num = 1;
-	for (auto &test: tests) {
+	for (auto &cst: client_server_tests) {
 		std::cerr << "== Test " << test_num++ << " ==\n";
-		failed |= pt->client_server_test(test);
+		failed |= pt->client_server_test(&cst);
 	}
 
 	delete pt;

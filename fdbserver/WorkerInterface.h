@@ -74,27 +74,36 @@ struct InitializeTLogRequest {
 	Version knownCommittedVersion;
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
+	std::vector<Tag> allTags;
 	KeyValueStoreType storeType;
-	Optional<Tag> remoteTag;
+	Tag remoteTag;
+	int8_t locality;
+	bool isPrimary;
+	Version startVersion;
+	int logRouterTags;
+
 	ReplyPromise< struct TLogInterface > reply;
 
 	InitializeTLogRequest() {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & reply;
 	}
 };
 
 struct InitializeLogRouterRequest {
 	uint64_t recoveryCount;
-	int logSet;
 	Tag routerTag;
+	Version startVersion;
+	std::vector<LocalityData> tLogLocalities;
+	IRepPolicyRef tLogPolicy;
+	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & logSet & reply;
+		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & locality & reply;
 	}
 };
 
@@ -102,12 +111,13 @@ struct InitializeLogRouterRequest {
 struct RecruitMasterRequest {
 	Arena arena;
 	LifetimeToken lifetime;
+	bool forceRecovery;
 	ReplyPromise< struct MasterInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & lifetime & reply & arena;
+		ar & lifetime & forceRecovery & reply & arena;
 	}
 };
 
@@ -136,12 +146,22 @@ struct InitializeResolverRequest {
 	}
 };
 
+struct InitializeStorageReply {
+	StorageServerInterface interf;
+	Version addedVersion;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & interf & addedVersion;
+	}
+};
+
 struct InitializeStorageRequest {
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
-	ReplyPromise< struct StorageServerInterface > reply;
+	ReplyPromise< InitializeStorageReply > reply;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -208,7 +228,7 @@ struct SetMetricsLogRateRequest {
 struct EventLogRequest {
 	bool getLastError;
 	Standalone<StringRef> eventName;
-	ReplyPromise< Standalone<StringRef> > reply;
+	ReplyPromise< TraceEventFields > reply;
 
 	EventLogRequest() : getLastError(true) {}
 	explicit EventLogRequest( Standalone<StringRef> eventName ) : eventName( eventName ), getLastError( false ) {}
@@ -270,15 +290,15 @@ class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int 
 Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& a, Reference<AsyncVar<Optional<struct ClusterInterface>>> const& b );
 
 Future<Void> fdbd( Reference<ClusterConnectionFile> const&, LocalityData const& localities, ProcessClass const& processClass, std::string const& dataFolder, std::string const& coordFolder, int64_t const& memoryLimit, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo );
+Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix, Promise<Void> const& recoveredDiskFiles );
+Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, Future<Void> const& recoveredDiskFiles );
 
 // These servers are started by workerServer
 Future<Void> storageServer(
 				class IKeyValueStore* const& persistentData,
 				StorageServerInterface const& ssi,
 				Tag const& seedTag,
-				ReplyPromise<StorageServerInterface> const& recruitReply,
+				ReplyPromise<InitializeStorageReply> const& recruitReply,
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder );
 Future<Void> storageServer(
@@ -287,7 +307,7 @@ Future<Void> storageServer(
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder,
 				Promise<Void> const& recovered);  // changes pssi->id() to be the recovered ID
-Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime );
+Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
 Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
 Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
 Future<Void> debugQueryServer( DebugQueryRequest const& req );

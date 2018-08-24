@@ -85,24 +85,24 @@ In this example, we’re storing user data based on user ID but sometimes need t
         private static final Database db;
         private static final Subspace main;
         private static final Subspace index;
-        
+
         static {
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             main = new Subspace(Tuple.from("user"));
             index = new Subspace(Tuple.from("zipcode_index"));
         }
-        
+
         // TODO These three methods (setUser, getUser, and getUserIDsInRegion)
         // are all in the recipe book.
         public static void setUser(TransactionContext tcx, final String ID, final String name, final String zipcode){
-            tcx.run(tr -> 
+            tcx.run(tr ->
                 tr.set(main.pack(Tuple.from(ID,zipcode)), Tuple.from(name).pack());
                 tr.set(index.pack(Tuple.from(zipcode,ID)), Tuple.from().pack());
                 return null;
             });
         }
-        
+
         // Normal lookup.
         public static String getUser(TransactionContext tcx, final String ID){
             return tcx.run(tr -> {
@@ -113,7 +113,7 @@ In this example, we’re storing user data based on user ID but sometimes need t
                 return "";
             });
         }
-        
+
         // Index lookup.
         public static ArrayList<String> getUserIDsInRegion(TransactionContext tcx, final String zipcode){
             return tcx.run(tr -> {

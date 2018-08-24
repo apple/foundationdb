@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern bool noUnseed;
 
@@ -57,7 +57,7 @@ struct StatusWorkload : TestWorkload {
 		return Void();
 	}
 	virtual Future<Void> start(Database const& cx) {
-		//if (clientId != 0)
+		if (clientId != 0)
 			return Void();
 		Reference<Cluster> cluster = cx->cluster;
 		if (!cluster) {
@@ -109,10 +109,10 @@ struct StatusWorkload : TestWorkload {
 				}
 			}
 		} catch (std::exception& e) {
-			TraceEvent(SevError,"schemaCoverageRequirementsException").detail("What", e.what());
+			TraceEvent(SevError,"SchemaCoverageRequirementsException").detail("What", e.what());
 			throw unknown_error();
 		} catch (...) {
-			TraceEvent(SevError,"schemaCoverageRequirementsException");
+			TraceEvent(SevError,"SchemaCoverageRequirementsException");
 			throw unknown_error();
 		}
 	}
@@ -140,7 +140,7 @@ struct StatusWorkload : TestWorkload {
 				schemaCoverage(spath);
 
 				if (!schema.count(key)) {
-					TraceEvent(sev, "SchemaMismatch").detail("path", kpath).detail("schema_path", spath);
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaPath", spath);
 					ok = false;
 					continue;
 				}
@@ -157,13 +157,13 @@ struct StatusWorkload : TestWorkload {
 							break;
 						}
 					if (!any_match) {
-						TraceEvent(sev, "SchemaMismatch").detail("path", kpath).detail("SchemaEnumItems", enum_values.size()).detail("Value", json_spirit::write_string(rv));
+						TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaEnumItems", enum_values.size()).detail("Value", json_spirit::write_string(rv));
 						schemaCoverage(spath + ".$enum." + json_spirit::write_string(rv));
 						ok = false;
 					}
 				} else if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$map")) {
 					if (rv.type() != json_spirit::obj_type) {
-						TraceEvent(sev, "SchemaMismatch").detail("path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+						TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
 						ok = false;
 						continue;
 					}
@@ -181,7 +181,7 @@ struct StatusWorkload : TestWorkload {
 						auto vpath = kpath + "[" + value_pair.first + "]";
 						auto upath = spath + ".$map";
 						if (value_pair.second.type() != json_spirit::obj_type) {
-							TraceEvent(sev, "SchemaMismatch").detail("path", vpath).detail("ValueType", value_pair.second.type());
+							TraceEvent(sev, "SchemaMismatch").detail("Path", vpath).detail("ValueType", value_pair.second.type());
 							ok = false;
 							continue;
 						}
@@ -191,7 +191,7 @@ struct StatusWorkload : TestWorkload {
 				} else {
 					// The schema entry isn't an operator, so it asserts a type and (depending on the type) recursive schema definition
 					if (normJSONType(sv.type()) != normJSONType(rv.type())) {
-						TraceEvent(sev, "SchemaMismatch").detail("path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+						TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
 						ok = false;
 						continue;
 					}
@@ -201,7 +201,7 @@ struct StatusWorkload : TestWorkload {
 						if (!schema_array.size()) {
 							// An empty schema array means that the value array is required to be empty
 							if (value_array.size()) {
-								TraceEvent(sev, "SchemaMismatch").detail("path", kpath).detail("SchemaSize", schema_array.size()).detail("ValueSize", value_array.size());
+								TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaSize", schema_array.size()).detail("ValueSize", value_array.size());
 								ok = false;
 								continue;
 							}
@@ -211,7 +211,7 @@ struct StatusWorkload : TestWorkload {
 							int index = 0;
 							for(auto &value_item : value_array) {
 								if (value_item.type() != json_spirit::obj_type) {
-									TraceEvent(sev, "SchemaMismatch").detail("path", kpath + format("[%d]",index)).detail("ValueType", value_item.type());
+									TraceEvent(sev, "SchemaMismatch").detail("Path", kpath + format("[%d]",index)).detail("ValueType", value_item.type());
 									ok = false;
 									continue;
 								}
@@ -240,7 +240,7 @@ struct StatusWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop{
-			Void _ = wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;

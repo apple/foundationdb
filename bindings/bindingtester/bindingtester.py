@@ -141,7 +141,7 @@ def choose_api_version(selected_api_version, tester_min_version, tester_max_vers
             api_version = min_version
         elif random.random() < 0.9:
             api_version = random.choice([v for v in [13, 14, 16, 21, 22, 23, 100, 200, 300, 400, 410, 420, 430,
-                                                     440, 450, 460, 500, 510, 520] if v >= min_version and v <= max_version])
+                                                     440, 450, 460, 500, 510, 520, 600] if v >= min_version and v <= max_version])
         else:
             api_version = random.randint(min_version, max_version)
 
@@ -184,6 +184,8 @@ class TestRunner(object):
 
         # Test types should be intersection of all tester supported types
         self.args.types = reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers))
+
+        self.args.no_directory_snapshot_ops = self.args.no_directory_snapshot_ops or any([not tester.directory_snapshot_ops_enabled for tester in self.testers])
 
     def print_test(self):
         test_instructions = self._generate_test()
@@ -424,6 +426,8 @@ def parse_args(argv):
     # SOMEDAY: this applies only to the scripted test. Should we invoke test files specifically (as in circus),
     # or invoke them here and allow tests to add arguments?
     parser.add_argument('--no-threads', action='store_true', help='Disables the START_THREAD instruction in the scripted test.')
+    
+    parser.add_argument('--no-directory-snapshot-ops', action='store_true', help='Disables snapshot operations for directory instructions.')
 
     return parser.parse_args(argv)
 

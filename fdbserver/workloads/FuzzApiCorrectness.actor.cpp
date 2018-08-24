@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ActorCollection.h"
-#include "workloads.h"
-
 #include <limits.h>
 #include <mutex>
 #include <functional>
 #include <sstream>
+
+#include "fdbserver/TesterInterface.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ActorCollection.h"
+#include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace ph = std::placeholders;
 
@@ -68,15 +68,15 @@ struct ExceptionContract {
 		{
 			Severity s = (i->second == Possible) ? SevWarn : SevInfo;
 			TraceEvent evt(s, func.c_str());
-			evt.error(e).detail("thrown", true)
-				.detail("expected", i->second == Possible ? "possible" : "always").backtrace();
+			evt.error(e).detail("Thrown", true)
+				.detail("Expected", i->second == Possible ? "possible" : "always").backtrace();
 			if (augment)
 				augment(evt);
 			return;
 		}
 
 		TraceEvent evt(SevError, func.c_str());
-		evt.error(e).detail("thrown", true).detail("expected", "never").backtrace();
+		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
 		if (augment)
 			augment(evt);
 		throw e;
@@ -87,7 +87,7 @@ struct ExceptionContract {
 		for (auto i : expected) {
 			if (i.second == Always) {
 				TraceEvent evt(SevError, func.c_str());
-				evt.detail("thrown", false).detail("expected", "always").error(Error::fromUnvalidatedCode(i.first)).backtrace();
+				evt.error(Error::fromUnvalidatedCode(i.first)).detail("Thrown", false).detail("Expected", "always").backtrace();
 				if (augment)
 					augment(evt);
 			}
@@ -145,13 +145,13 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		maxClearSize = 1<<g_random->randomInt(0, 20);
 		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
 		TraceEvent("FuzzApiCorrectnessConfiguration")
-			.detail("nodes", nodes)
-			.detail("initialKeyDensity", initialKeyDensity)
-			.detail("adjacentKeys", adjacentKeys)
-			.detail("valueSizeMin", valueSizeRange.first)
-			.detail("valueSizeRange", valueSizeRange.second)
-			.detail("maxClearSize", maxClearSize)
-			.detail("useSystemKeys", useSystemKeys);
+			.detail("Nodes", nodes)
+			.detail("InitialKeyDensity", initialKeyDensity)
+			.detail("AdjacentKeys", adjacentKeys)
+			.detail("ValueSizeMin", valueSizeRange.first)
+			.detail("ValueSizeRange", valueSizeRange.second)
+			.detail("MaxClearSize", maxClearSize)
+			.detail("UseSystemKeys", useSystemKeys);
 
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "Net2_LargePacket").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
@@ -226,18 +226,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								}
 							}
 						}
-						Void _ = wait( unsafeThreadFutureToFuture( tr->commit() ) );
-						//TraceEvent("WDRInitBatch").detail("i", i).detail("CommittedVersion", tr->getCommittedVersion());
+						wait( unsafeThreadFutureToFuture( tr->commit() ) );
+						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( unsafeThreadFutureToFuture( tr->onError( e ) ) );
+						wait( unsafeThreadFutureToFuture( tr->onError( e ) ) );
 					}
 				}
 			}
 
 			loop {
 				try {
-					Void _ = wait( self->randomTransaction( cx, self ) && delay( self->numOps * .001 ) );
+					wait( self->randomTransaction( cx, self ) && delay( self->numOps * .001 ) );
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
 						throw e;
@@ -287,21 +287,21 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							operations.push_back(testCases[operationType](++self->operationId, self, tr));
 						} catch( Error &e ) {
 							TraceEvent(SevWarn, "IgnoredOperation").error(e)
-								.detail("operation", operationType).detail("id", self->operationId);
+								.detail("Operation", operationType).detail("Id", self->operationId);
 						}
 					}
 
 					// Wait for a random op to complete.
 					if( waitLocation < operations.size() ) {
 						int waitOp = g_random->randomInt(waitLocation,operations.size());
-						Void _ = wait( operations[waitOp] );
-						Void _ = wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
+						wait( operations[waitOp] );
+						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
-				Void _ = wait( waitForAll( operations ) );
+				wait( waitForAll( operations ) );
 				try {
-					Void _ = wait( timeoutError( unsafeThreadFutureToFuture( tr->commit() ), 30) );
+					wait( timeoutError( unsafeThreadFutureToFuture( tr->commit() ), 30) );
 				}
 				catch( Error &e ) {
 					if(e.code() == error_code_client_invalid_operation ||
@@ -322,7 +322,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					throw not_committed();
 				}
 				try {
-					Void _ = wait( unsafeThreadFutureToFuture( tr->onError(e) ) );
+					wait( unsafeThreadFutureToFuture( tr->onError(e) ) );
 				} catch( Error &e ) {
 					if( e.code() == error_code_transaction_timed_out ) {
 						throw not_committed();
@@ -358,7 +358,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			// we can get the result.
 			state std::vector<ThreadFuture<Void> >::iterator i;
 			for (i = self->pre_steps.begin(); i != self->pre_steps.end(); ++i) {
-				Void _ = wait(unsafeThreadFutureToFuture( *i ));
+				wait(unsafeThreadFutureToFuture( *i ));
 			}
 
 			value_type result = wait( future );
@@ -373,7 +373,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		virtual ThreadFuture<value_type> createFuture( Reference<ITransaction> tr ) = 0;
 		virtual Void errorCheck(Reference<ITransaction> tr, value_type result) { return Void(); }
-		virtual void augmentTrace(TraceEvent &e) const { e.detail("id", id); }
+		virtual void augmentTrace(TraceEvent &e) const { e.detail("Id", id); }
 
 	protected:
 		unsigned int id;
@@ -577,7 +577,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("version", v);
+			e.detail("Version", v);
 		}
 	};
 
@@ -600,7 +600,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key));
+			e.detail("Key", printable(key));
 		}
 	};
 
@@ -623,7 +623,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("keysel", keysel.toString());
+			e.detail("KeySel", keysel.toString());
 		}
 	};
 
@@ -661,7 +661,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("keysel1", keysel1.toString()).detail("keysel2", keysel2.toString()).detail("limit", limit);
+			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString()).detail("Limit", limit);
 		}
 	};
 
@@ -690,10 +690,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("keysel1", keysel1.toString()).detail("keysel2", keysel2.toString());
+			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString());
 			std::stringstream ss;
 			ss << "(" << limits.rows << ", " << limits.minRows << ", " << limits.bytes << ")";
-			e.detail("limits", ss.str());
+			e.detail("Limits", ss.str());
 		}
 	};
 
@@ -732,7 +732,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2)).detail("limit", limit);
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2)).detail("Limit", limit);
 		}
 	};
 
@@ -762,10 +762,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2));
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 			std::stringstream ss;
 			ss << "(" << limits.rows << ", " << limits.minRows << ", " << limits.bytes << ")";
-			e.detail("limits", ss.str());
+			e.detail("Limits", ss.str());
 		}
 	};
 
@@ -786,7 +786,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key));
+			e.detail("Key", printable(key));
 		}
 	};
 
@@ -811,7 +811,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2));
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
 	};
 
@@ -820,7 +820,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Key key;
 		Value value;
 		uint8_t op;
-		int16_t pos;
+		int32_t pos;
 
 		TestAtomicOp(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestAtomicOp") {
 			key = makeKey();
@@ -853,8 +853,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 
 			pos = -1;
-			if(op == MutationRef::SetVersionstampedKey && key.size() >= 2) {
-				pos = littleEndian16(*(int16_t*)&key.end()[-2]);
+			if(op == MutationRef::SetVersionstampedKey && key.size() >= 4) {
+				pos = littleEndian32(*(int32_t*)&key.end()[-4]);
+			}
+			if(op == MutationRef::SetVersionstampedValue && value.size() >= 4) {
+				pos = littleEndian32(*(int32_t*)&value.end()[-4]);
 			}
 
 			contract = {
@@ -865,8 +868,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(
-							(op == MutationRef::SetVersionstampedValue && value.size() < 10) ||
-							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 2))) )
+							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 4)) ||
+							(op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4))) )
 			};
 		}
 
@@ -876,7 +879,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key)).detail("value", printable(value)).detail("op", op).detail("pos", pos);
+			e.detail("Key", printable(key)).detail("Value", printable(value)).detail("Op", op).detail("Pos", pos);
 		}
 	};
 
@@ -905,7 +908,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key)).detail("value", printable(value));
+			e.detail("Key", printable(key)).detail("Value", printable(value));
 		}
 	};
 
@@ -934,7 +937,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2));
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
 	};
 
@@ -963,7 +966,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2));
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
 	};
 
@@ -988,7 +991,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key));
+			e.detail("Key", printable(key));
 		}
 	};
 
@@ -1014,7 +1017,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key", printable(key));
+			e.detail("Key", printable(key));
 		}
 	};
 
@@ -1039,7 +1042,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("key1", printable(key1)).detail("key2", printable(key2));
+			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
 	};
 
@@ -1100,7 +1103,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("op", op).detail("val", printable(val));
+			e.detail("Op", op).detail("Val", printable(val));
 		}
 	};
 
@@ -1129,7 +1132,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent &e) const {
 			base_type::augmentTrace(e);
-			e.detail("errorcode", errorcode);
+			e.detail("ErrorCode", errorcode);
 		}
 	};
 

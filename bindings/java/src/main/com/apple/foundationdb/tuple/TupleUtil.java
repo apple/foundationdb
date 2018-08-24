@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import com.apple.foundationdb.FDB;
+
 class TupleUtil {
 	private static final byte nil = 0x00;
 	private static final BigInteger[] size_limits;
@@ -537,10 +539,10 @@ class TupleUtil {
 	}
 
 	static List<Object> unpack(byte[] bytes, int start, int length) {
-		List<Object> items = new LinkedList<Object>();
+		List<Object> items = new LinkedList<>();
 		int pos = start;
 		int end = start + length;
-		while(pos < bytes.length) {
+		while(pos < end) {
 			DecodeResult decoded = decode(bytes, pos, end);
 			items.add(decoded.o);
 			pos = decoded.end;
@@ -569,7 +571,7 @@ class TupleUtil {
 	}
 
 	static byte[] pack(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<byte[]>(2 * items.size() + (prefix == null ? 0 : 1));
+		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 0 : 1));
 		EncodeResult result = encodeAll(items, prefix, encoded);
 		if(result.versionPos > 0) {
 			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
@@ -579,7 +581,7 @@ class TupleUtil {
 	}
 
 	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<byte[]>(2 * items.size() + (prefix == null ? 1 : 2));
+		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 1 : 2));
 		EncodeResult result = encodeAll(items, prefix, encoded);
 		if(result.versionPos < 0) {
 			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
@@ -587,7 +589,11 @@ class TupleUtil {
 			if(result.versionPos > 0xffff) {
 				throw new IllegalArgumentException("Tuple has incomplete version at position " + result.versionPos + " which is greater than the maximum " + 0xffff);
 			}
-			encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+			if (FDB.instance().getAPIVersion() < 520) {
+				encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+			} else {
+				encoded.add(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(result.versionPos).array());
+			}
 			return ByteArrayUtil.join(null, encoded);
 		}
 	}

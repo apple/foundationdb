@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
 
@@ -94,7 +94,7 @@ struct WatchesWorkload : TestWorkload {
 			if( i % self->clientCount == self->clientId )
 				setupActors.push_back( self->watcherInit( cx, self->keyForIndex(self->nodeOrder[i]), self->keyForIndex(self->nodeOrder[i+1]), self->extraPerNode ) );
 
-		Void _ = wait( waitForAll( setupActors ) );
+		wait( waitForAll( setupActors ) );
 		
 		for(int i=0; i<self->nodes; i++)
 			if( i % self->clientCount == self->clientId )
@@ -112,14 +112,14 @@ struct WatchesWorkload : TestWorkload {
 					Key extraKey = KeyRef(watchKey.toString() + format( "%d", extraLoc+i ));
 					Value extraValue = ValueRef(std::string( 100, '.' ));
 					tr.set(extraKey, extraValue);
-					//TraceEvent("watcherInitialSetupExtra").detail("key", printable(extraKey)).detail("value", printable(extraValue));
+					//TraceEvent("WatcherInitialSetupExtra").detail("Key", printable(extraKey)).detail("Value", printable(extraValue));
 				}
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				extraLoc += 1000;
-				//TraceEvent("watcherInitialSetup").detail("watch", printable(watchKey)).detail("ver", tr.getCommittedVersion());
+				//TraceEvent("WatcherInitialSetup").detail("Watch", printable(watchKey)).detail("Ver", tr.getCommittedVersion());
 			} catch( Error &e ) {
-				//TraceEvent("watcherInitialSetupError").detail("ExtraLoc", extraLoc).error(e);
-				Void _ = wait( tr.onError(e) );
+				//TraceEvent("WatcherInitialSetupError").error(e).detail("ExtraLoc", extraLoc);
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -137,7 +137,7 @@ struct WatchesWorkload : TestWorkload {
 					Optional<Value> setValue = wait( setValueFuture );
 					
 					if( lastValue.present() && lastValue.get() == watchValue) {
-						TraceEvent(SevError, "watcherTriggeredWithoutChanging").detail("watchKey", printable( watchKey )).detail("setKey", printable( setKey )).detail("watchValue", printable( watchValue )).detail("setValue", printable( setValue )).detail("readVersion", tr.getReadVersion().get());
+						TraceEvent(SevError, "WatcherTriggeredWithoutChanging").detail("WatchKey", printable( watchKey )).detail("SetKey", printable( setKey )).detail("WatchValue", printable( watchValue )).detail("SetValue", printable( setValue )).detail("ReadVersion", tr.getReadVersion().get());
 					}
 
 					lastValue = Optional<Optional<Value>>();
@@ -147,20 +147,20 @@ struct WatchesWorkload : TestWorkload {
 							tr.set( setKey, watchValue.get() );
 						else
 							tr.clear( setKey );
-						//TraceEvent("watcherSetStart").detail("watch", printable(watchKey)).detail("set", printable(setKey)).detail("value", printable( watchValue ) );
-						Void _ = wait( tr.commit() );
-						//TraceEvent("watcherSetFinish").detail("watch", printable(watchKey)).detail("set", printable(setKey)).detail("value", printable( watchValue ) ).detail("ver", tr.getCommittedVersion());
+						//TraceEvent("WatcherSetStart").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) );
+						wait( tr.commit() );
+						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr.getCommittedVersion());
 					} else {
-						//TraceEvent("watcherWatch").detail("watch", printable(watchKey));
+						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
 						state Future<Void> watchFuture = tr.watch( Reference<Watch>( new Watch(watchKey, watchValue) ) );
-						Void _ = wait( tr.commit() );
-						Void _ = wait( watchFuture );
+						wait( tr.commit() );
+						wait( watchFuture );
 						if( watchValue.present() )
 							lastValue = watchValue;
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -198,11 +198,11 @@ struct WatchesWorkload : TestWorkload {
 					else
 						tr.clear( startKey );
 
-					Void _ = wait( tr.commit() );
-					//TraceEvent("watcherInitialSet").detail("start", printable(startKey)).detail("end", printable(endKey)).detail("value", printable( expectedValue ) ).detail("ver", tr.getCommittedVersion()).detail("readVer", readVer);
+					wait( tr.commit() );
+					//TraceEvent("WatcherInitialSet").detail("Start", printable(startKey)).detail("End", printable(endKey)).detail("Value", printable( expectedValue ) ).detail("Ver", tr.getCommittedVersion()).detail("ReadVer", readVer);
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 
@@ -219,15 +219,15 @@ struct WatchesWorkload : TestWorkload {
 							break;
 						}
 						if( !firstAttempt || endValue != startValue ) {
-							TraceEvent(SevError, "watcherError").detail("firstAttempt", firstAttempt).detail("startValue", printable( startValue )).detail("endValue", printable( endValue )).detail("expectedValue", printable(expectedValue)).detail("endVersion", tr2.getReadVersion().get()); 
+							TraceEvent(SevError, "WatcherError").detail("FirstAttempt", firstAttempt).detail("StartValue", printable( startValue )).detail("EndValue", printable( endValue )).detail("ExpectedValue", printable(expectedValue)).detail("EndVersion", tr2.getReadVersion().get()); 
 						}
 						state Future<Void> watchFuture = tr2.watch( Reference<Watch>( new Watch(endKey, startValue) ) );
-						Void _ = wait( tr2.commit() );
-						Void _ = wait( watchFuture );
+						wait( tr2.commit() );
+						wait( watchFuture );
 						firstAttempt = false;
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr2.onError(e) );
+						wait( tr2.onError(e) );
 					}
 				}
 				if( finished )
@@ -237,7 +237,7 @@ struct WatchesWorkload : TestWorkload {
 			++self->cycles;
 
 			if( g_network->isSimulated() )
-				Void _ = wait( delay( g_random->random01() < 0.5 ? 0 : g_random->random01() * 60 ) );
+				wait( delay( g_random->random01() < 0.5 ? 0 : g_random->random01() * 60 ) );
 
 			if( now() - startTime > self->testDuration )
 				break;

@@ -80,7 +80,7 @@ FOR /F "tokens=1" %%i in ('hg.exe id') do copy /Y "$(TargetPath)" "$(TargetPath)
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalOptions>/bigobj @..\..\flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -95,7 +95,7 @@ FOR /F "tokens=1" %%i in ('hg.exe id') do copy /Y "$(TargetPath)" "$(TargetPath)
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/bigobj @..\..\flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>

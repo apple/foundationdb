@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "FailureMonitor.h"
-
+#include "networksender.actor.h"
 
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
@@ -34,10 +34,15 @@ struct FlowReceiver : private NetworkMessageReceiver {
 	bool m_isLocalEndpoint;
 
 	FlowReceiver() : m_isLocalEndpoint(false) {}
-	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {}
+	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
+		FlowTransport::transport().addPeerReference(endpoint, this);
+	}
 	~FlowReceiver() {
-		if (m_isLocalEndpoint)
+		if (m_isLocalEndpoint) {
 			FlowTransport::transport().removeEndpoint(endpoint, this);
+		} else {
+			FlowTransport::transport().removePeerReference(endpoint, this);
+		}
 	}
 
 	bool isLocalEndpoint() { return m_isLocalEndpoint; }
@@ -361,8 +366,6 @@ void load(Ar& ar, RequestStream<T>& value) {
 	FlowTransport::transport().loadEndpoint(ar, endpoint);
 	value = RequestStream<T>(endpoint);
 }
-
-
 
 #endif
 #include "fdbrpc/genericactors.actor.g.h"

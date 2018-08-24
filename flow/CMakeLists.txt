@@ -18,6 +18,8 @@ set(FLOW_SRCS
   FastRef.h
   FaultInjection.cpp
   FaultInjection.h
+  FileTraceLogWriter.h
+  FileTraceLogWriter.cpp
   Hash3.c
   Hash3.h
   IDispatched.h
@@ -67,7 +69,9 @@ set(FLOW_SRCS
   serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
-  version.cpp)
+  version.cpp
+  XmlTraceLogFormatter.h
+  XmlTraceLogFormatter.cpp)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
@@ -81,6 +85,7 @@ if (NOT APPLE)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+target_compile_definitions(flow PUBLIC TLS_DISABLED)
 
 if(APPLE)
   find_library(IO_KIT IOKit)

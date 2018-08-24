@@ -185,9 +185,9 @@ static bool valgrindCheck( const void* data, int bytes, const char* context ) {
 static inline bool valgrindCheck( const void* data, int bytes, const char* context ) { return true; }
 #endif
 
-extern uint64_t currentProtocolVersion;
-extern uint64_t minValidProtocolVersion;
-extern uint64_t compatibleProtocolVersionMask;
+extern const uint64_t currentProtocolVersion;
+extern const uint64_t minValidProtocolVersion;
+extern const uint64_t compatibleProtocolVersionMask;
 
 struct _IncludeVersion {
 	uint64_t v;
@@ -204,7 +204,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (v < minValidProtocolVersion) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
@@ -212,7 +212,7 @@ struct _IncludeVersion {
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		ar.setProtocolVersion(v);

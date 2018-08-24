@@ -12,6 +12,8 @@ set(FDBCLIENT_SRCS
   CommitTransaction.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
+  DatabaseConfiguration.h
+  DatabaseConfiguration.cpp
   DatabaseContext.h
   EventTypes.actor.h
   FailureMonitorClient.actor.cpp

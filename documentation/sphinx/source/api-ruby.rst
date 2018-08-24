@@ -78,7 +78,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 510
+    FDB.api_version 600
     db = FDB.open
 
 .. function:: open( cluster_file=nil, db_name="DB" ) -> Database
@@ -176,7 +176,7 @@ Cluster objects
 Keys and values
 ===============
 
-|keys-values-blurb| 
+|keys-values-blurb|
 
 |keys-values-other-types-blurb|
 
@@ -498,9 +498,9 @@ Writing data
 
 .. method:: Transaction.[]=(key, value) -> nil
 
-    Alias of :meth:`Transaction.set`. 
+    Alias of :meth:`Transaction.set`.
 
-    .. note:: Although the above method returns nil, assignments in Ruby evaluate to the value assigned, so the expression ``tr[key] = value`` will return ``value``. 
+    .. note:: Although the above method returns nil, assignments in Ruby evaluate to the value assigned, so the expression ``tr[key] = value`` will return ``value``.
 
 .. method:: Transaction.clear(key) -> nil
 
@@ -564,7 +564,7 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.byte_max(key, param) -> nil
 
     |atomic-byte-max|
-    
+
 .. method:: Transaction.min(key, param) -> nil
 
     |atomic-min1|
@@ -574,7 +574,7 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.byte_min(key, param) -> nil
 
     |atomic-byte-min|
-    
+
 .. method:: Transaction.set_versionstamped_key(key, param) -> nil
 
     |atomic-set-versionstamped-key-1|
@@ -990,12 +990,12 @@ In the FoundationDB Ruby API, a tuple is an :class:`Enumerable` of elements of t
 | (single-precision)   | ``v.value.kind_of? Float`` and ``v.value`` fits inside an IEEE 754 32-bit   |                                                                              |
 |                      | floating-point number.                                                      |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
-| Floating point number| Any value ``v`` where ``v.kind_of? Float``                                  | ``Float``                                                                    | 
-| (double-precision)   |                                                                             |                                                                              | 
+| Floating point number| Any value ``v`` where ``v.kind_of? Float``                                  | ``Float``                                                                    |
+| (double-precision)   |                                                                             |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
 | Boolean              | Any value ``v`` where ``v.kind_of? Boolean``                                | ``Boolean``                                                                  |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
-| UUID                 | Any value ``v`` where ``v.kind_of? FDB::Tuple::UUID`` where                 | :class:`FDB::Tuple::UUID`                                                    | 
+| UUID                 | Any value ``v`` where ``v.kind_of? FDB::Tuple::UUID`` where                 | :class:`FDB::Tuple::UUID`                                                    |
 |                      | ``v.data.kind_of? String`` and ``v.data.encoding`` is ``Encoding::BINARY``  |                                                                              |
 |                      | and ``v.data.length == 16``                                                 |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
@@ -1211,7 +1211,7 @@ Directories
 .. method:: DirectoryLayer.exists?(db_or_tr, path) -> bool
 
     |directory-exists-blurb|
-    
+
 .. method:: DirectoryLayer.layer() -> String
 
     |directory-get-layer-blurb|

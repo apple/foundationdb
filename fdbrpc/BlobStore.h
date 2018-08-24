@@ -48,12 +48,17 @@ public:
 
 	struct BlobKnobs {
 		BlobKnobs();
-		int connect_tries,
+		int secure_connection,
+			connect_tries,
 			connect_timeout,
 			max_connection_life,
 			request_tries,
 			request_timeout,
 			requests_per_second,
+			list_requests_per_second,
+			write_requests_per_second,
+			read_requests_per_second,
+			delete_requests_per_second,
 			multipart_max_part_size,
 			multipart_min_part_size,
 			concurrent_requests,
@@ -70,12 +75,17 @@ public:
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
 			return {
+				"secure_connection (or sc)             Set 1 for secure connection and 0 for insecure connection.",
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
 				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP response other than 429 is received.",
 				"request_timeout (or rto)              Number of seconds to wait for a request to succeed after a connection is established.",
 				"requests_per_second (or rps)          Max number of requests to start per second.",
+				"list_requests_per_second (or lrps)    Max number of list requests to start per second.",
+				"write_requests_per_second (or wrps)   Max number of write requests to start per second.",
+				"read_requests_per_second (or rrps)    Max number of read requests to start per second.",
+				"delete_requests_per_second (or drps)  Max number of delete requests to start per second.",
 				"multipart_max_part_size (or maxps)    Max part size for multipart uploads.",
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
 				"concurrent_requests (or cr)           Max number of total requests in progress at once, regardless of operation-specific concurrency limits.",
@@ -95,6 +105,10 @@ public:
 	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &secret, BlobKnobs const &knobs = BlobKnobs())
 	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
 		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
+		requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
+		requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
+		requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
+		requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
 		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
@@ -133,6 +147,10 @@ public:
 
 	// Speed and concurrency limits
 	Reference<IRateControl> requestRate;
+	Reference<IRateControl> requestRateList;
+	Reference<IRateControl> requestRateWrite;
+	Reference<IRateControl> requestRateRead;
+	Reference<IRateControl> requestRateDelete;
 	Reference<IRateControl> sendRate;
 	Reference<IRateControl> recvRate;
 	FlowLock concurrentRequests;

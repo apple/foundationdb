@@ -34,7 +34,7 @@ fdb.api_version(FDB_API_VERSION)
 
 
 class ScriptedTest(Test):
-    TEST_API_VERSION = 520
+    TEST_API_VERSION = 600
 
     def __init__(self, subspace):
         super(ScriptedTest, self).__init__(subspace, ScriptedTest.TEST_API_VERSION, ScriptedTest.TEST_API_VERSION)
@@ -53,6 +53,8 @@ class ScriptedTest(Test):
         # the entire test
         if args.bisect:
             raise Exception('Scripted tests cannot be bisected')
+
+        self.api_version = args.api_version
 
     def generate(self, args, thread_number):
         self.results = []
@@ -272,11 +274,16 @@ class ScriptedTest(Test):
 
         stampKey = 'stampedXXXXXXXXXXsuffix'
         stampKeyIndex = stampKey.find('XXXXXXXXXX')
-        stampKeyStr = chr(stampKeyIndex % 256) + chr(stampKeyIndex / 256)
-        main_thread.push_args(u'SET_VERSIONSTAMPED_KEY', stampKey + stampKeyStr, 'stampedBar')
+        main_thread.push_args(u'SET_VERSIONSTAMPED_KEY', self.versionstamp_key(stampKey, stampKeyIndex), 'stampedBar')
         main_thread.append('ATOMIC_OP')
-        main_thread.push_args(u'SET_VERSIONSTAMPED_VALUE', 'stampedValue', 'XXXXXXXXXX')
+        main_thread.push_args(u'SET_VERSIONSTAMPED_VALUE', 'stampedValue', self.versionstamp_value('XXXXXXXXXX'))
         main_thread.append('ATOMIC_OP')
+
+        if self.api_version >= 520:
+            stampValue = 'stampedXXXXXXXXXXsuffix'
+            stampValueIndex = stampValue.find('XXXXXXXXXX')
+            main_thread.push_args(u'SET_VERSIONSTAMPED_VALUE', 'stampedValue2', self.versionstamp_value(stampValue, stampValueIndex))
+            main_thread.append('ATOMIC_OP')
 
         main_thread.push_args('suffix')
         main_thread.append('GET_VERSIONSTAMP')
@@ -295,6 +302,12 @@ class ScriptedTest(Test):
         main_thread.append('CONCAT')
         main_thread.append('GET')
         self.add_result(main_thread, args, 'stampedBar')
+
+        if self.api_version >= 520:
+            main_thread.push_args('stampedValue2')
+            main_thread.append('GET')
+            main_thread.append('GET')
+            self.add_result(main_thread, args, 'stampedBar')
 
         main_thread.append('GET_VERSIONSTAMP')
         test_util.blocking_commit(main_thread)

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 520
+#define FDB_API_VERSION 600
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"
@@ -42,7 +42,10 @@ int g_api_version = 0;
 #define CLUSTER(c) ((ICluster*)c)
 #define TXN(t) ((ITransaction*)t)
 
-#define API (MultiVersionApi::api)
+/* 
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
 
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */

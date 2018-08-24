@@ -1,11 +1,28 @@
-FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR)
-FDBLibTLS_STATIC_LIBS := -ltls -lssl -lcrypto
-FDBLibTLS_LDFLAGS := -L/usr/local/lib -static-libstdc++ -static-libgcc -lrt
-FDBLibTLS_LDFLAGS += -Wl,-soname,FDBLibTLS.so -Wl,--version-script=FDBLibTLS/FDBLibTLS.map
+#
+# local.mk
+#
+# This source file is part of the FoundationDB open source project
+#
+# Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-# The plugin isn't a typical library, so it feels more sensible to have a copy
-# of it in bin/.
-bin/FDBLibTLS.$(DLEXT): lib/libFDBLibTLS.$(DLEXT)
-	@cp $< $@
+# -*- mode: makefile; -*-
 
-TARGETS += bin/FDBLibTLS.$(DLEXT)
+FDBLibTLS_BUILD_SOURCES +=
+
+
+FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR) -Iflow -Ifdbrpc -DUSE_UCONTEXT
+
+lib/libFDBLibTLS.a: bin/coverage.FDBLibTLS.xml

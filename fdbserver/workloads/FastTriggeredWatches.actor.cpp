@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
 	int nodes, keyBytes;
@@ -57,10 +57,10 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			try {
 				for(int i = 0; i < self->nodes; i+=2) tr.set(self->keyForIndex(i), self->defaultValue);
 
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -75,20 +75,20 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	ACTOR Future<Version> setter( Database cx, Key key, Optional<Value> value ) {
 		state ReadYourWritesTransaction tr( cx );
-		Void _ = wait( delay( g_random->random01() ) );
+		wait( delay( g_random->random01() ) );
 		loop {
 			try {
 				if( value.present() )
 					tr.set( key, value.get() );
 				else
 					tr.clear( key );
-				//TraceEvent("FTWSetBegin").detail("key", printable(key)).detail("value", printable(value));
-				Void _ = wait( tr.commit() );
-				//TraceEvent("FTWSetEnd").detail("key", printable(key)).detail("value", printable(value)).detail("ver", tr.getCommittedVersion());
+				//TraceEvent("FTWSetBegin").detail("Key", printable(key)).detail("Value", printable(value));
+				wait( tr.commit() );
+				//TraceEvent("FTWSetEnd").detail("Key", printable(key)).detail("Value", printable(value)).detail("Ver", tr.getCommittedVersion());
 				return tr.getCommittedVersion();
 			} catch( Error &e ) {
-				//TraceEvent("FTWSetError").detail("key", printable(key)).detail("value", printable(value)).error(e);
-				Void _ = wait( tr.onError(e) );
+				//TraceEvent("FTWSetError").error(e).detail("Key", printable(key)).detail("Value", printable(value));
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -106,7 +106,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				if( g_random->random01() > 0.5 )
 					setValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 )));
 				state Future<Version> setFuture = self->setter( cx, setKey, setValue );
-				Void _ = wait( delay( g_random->random01() ) );
+				wait( delay( g_random->random01() ) );
 				loop {
 					state ReadYourWritesTransaction tr( cx );
 
@@ -117,23 +117,23 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
-						//TraceEvent("FTWGet").detail("key", printable(setKey)).detail("value", printable(val)).detail("ver", tr.getReadVersion().get());
+						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
 						if( val == setValue )
 							break;
 						ASSERT( first );
 						state Future<Void> watchFuture = tr.watch( setKey );
-						Void _ = wait( tr.commit() );
-						//TraceEvent("FTWStartWatch").detail("key", printable(setKey));
-						Void _ = wait( watchFuture );
+						wait( tr.commit() );
+						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
+						wait( watchFuture );
 						watchEnd = now();
 						first = false;
 					} catch( Error &e ) {
-						//TraceEvent("FTWWatchError").detail("key", printable(setKey)).error(e);
-						Void _ = wait( tr.onError(e) );
+						//TraceEvent("FTWWatchError").error(e).detail("Key", printable(setKey));
+						wait( tr.onError(e) );
 					}
 				}
 				Version ver = wait( setFuture );
-				//TraceEvent("FTWWatchDone").detail("key", printable(setKey));
+				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				ASSERT( lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT || lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND*(12+getDuration) );
 
 				if( now() - testStart > self->testDuration )

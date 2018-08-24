@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -77,8 +77,8 @@ public:
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
-		bool isExcluded() const { return !excluded; }
-		bool isCleared() const { return !cleared; }
+		bool isExcluded() const { return excluded; }
+		bool isCleared() const { return cleared; }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -102,8 +102,8 @@ public:
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d cleared: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded, cleared); }
+			return format("name: %s address: %d.%d.%d.%d:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -149,11 +149,12 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
@@ -280,12 +281,17 @@ public:
 	IRepPolicyRef tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
 	Optional<Standalone<StringRef>> primaryDcId;
-	bool hasRemoteReplication;
 	IRepPolicyRef remoteTLogPolicy;
+	int32_t usableRegions;
+	std::string disablePrimary;
+	std::string disableRemote;
+	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
 	IRepPolicyRef satelliteTLogPolicy;
+	IRepPolicyRef satelliteTLogPolicyFallback;
 	int32_t satelliteTLogWriteAntiQuorum;
+	int32_t satelliteTLogWriteAntiQuorumFallback;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
@@ -336,11 +342,13 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 	// Opens a file for asynchronous I/O
+	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+
+	virtual Future< std::time_t > lastWriteTime( std::string filename );
 
 	Sim2FileSystem() {}
 

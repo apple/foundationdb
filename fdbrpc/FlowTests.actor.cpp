@@ -20,12 +20,12 @@
 
 // Unit tests for the flow language and libraries
 
-#include "flow/actorcompiler.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "fdbrpc.h"
 #include "IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
 
@@ -75,17 +75,17 @@ ACTOR static Future<Void> emptyActor() {
 }
 
 ACTOR static void oneWaitVoidActor(Future<Void> f) {
-	Void _ = wait(f);
+	wait(f);
 }
 
 ACTOR static Future<Void> oneWaitActor(Future<Void> f) {
-	Void _ = wait(f);
+	wait(f);
 	return Void();
 }
 
 Future<Void> g_cheese;
 ACTOR static Future<Void> cheeseWaitActor() {
-	Void _ = wait(g_cheese);
+	wait(g_cheese);
 	return Void();
 }
 
@@ -109,8 +109,8 @@ ACTOR static Future<int> addOneActor(Future<int> in) {
 
 ACTOR static Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
 	choose{
-		when(Void _ = wait(f)) {}
-		when(Void _ = wait(g)) {}
+		when(wait(f)) {}
+		when(wait(g)) {}
 	}
 	return Void();
 }
@@ -209,11 +209,11 @@ ACTOR static Future<NonserializableThing> testNonserializableThing() {
 
 ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
 	try {
-		Void _ = wait(Future<Void>(Never()));
+		wait(Future<Void>(Never()));
 	} catch( Error &e ) {
 		state Error err = e;
 		try {
-			Void _ = wait(Future<Void>(Never()));
+			wait(Future<Void>(Never()));
 		} catch( Error &e ) {
 			*exits = true;
 			throw;
@@ -241,7 +241,7 @@ TEST_CASE("flow/flow/cancel1")
 ACTOR static Future<Void> noteCancel(int* cancelled) {
 	*cancelled = 0;
 	try {
-		Void _ = wait(Future<Void>(Never()));
+		wait(Future<Void>(Never()));
 		throw internal_error();
 	}
 	catch (...) {
@@ -1069,7 +1069,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/randomized")
 	state int it;
 	for (it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		Void _ = wait(yield());
+		wait(yield());
 	}
 	return Void();
 }
@@ -1080,7 +1080,7 @@ TEST_CASE("flow/flow/AsyncMap/randomized")
 	state int it;
 	for (it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		Void _ = wait(yield());
+		wait(yield());
 	}
 	return Void();
 }
@@ -1098,11 +1098,11 @@ TEST_CASE("flow/flow/YieldedAsyncMap/basic")
 	//yam.triggerRange(0, 4);
 
 	state Future<Void> y2 = yam.onChange(1);
-	Void _ = wait(reportErrors(y0, "y0"));
-	Void _ = wait(reportErrors(y1, "y1"));
-	Void _ = wait(reportErrors(y1a, "y1a"));
-	Void _ = wait(reportErrors(y1b, "y1b"));
-	Void _ = wait(reportErrors(timeout(y2, 5, Void()), "y2"));
+	wait(reportErrors(y0, "Y0"));
+	wait(reportErrors(y1, "Y1"));
+	wait(reportErrors(y1a, "Y1a"));
+	wait(reportErrors(y1b, "Y1b"));
+	wait(reportErrors(timeout(y2, 5, Void()), "Y2"));
 
 	return Void();
 }
@@ -1147,7 +1147,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
 		},
 		delay(1)));
 
-	Void _ = wait(y1);
+	wait(y1);
 	printf("Got y1\n");
 	y2.cancel();
 
@@ -1175,9 +1175,9 @@ TEST_CASE("flow/flow/AsyncVar/basic")
 ACTOR static Future<Void> waitAfterCancel( int* output ) {
 	*output = 0;
 	try {
-		Void _ = wait( Never() );
+		wait( Never() );
 	} catch (...) {
-		Void _ = wait( (*output=1, Future<Void>(Void())) );
+		wait( (*output=1, Future<Void>(Void())) );
 	}
 	ASSERT(false);
 	return Void();

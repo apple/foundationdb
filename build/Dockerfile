@@ -22,7 +22,7 @@ RUN cd /opt/ && wget https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.6.4
     gpg --import libressl.asc && gpg --verify libressl-2.6.4.tar.gz.asc libressl-2.6.4.tar.gz &&\
     tar -xzf libressl-2.6.4.tar.gz && cd libressl-2.6.4 &&\
     ./configure CFLAGS="-fPIC -O3" && make -j4 && make install &&\
-    cd /opt/ # && rm -r libressl-2.6.4/ libressl-2.6.4.tar.gz libressl-2.6.4.tar.gz.asc libressl.asc
+    cd /opt/ && rm -r libressl-2.6.4/ libressl-2.6.4.tar.gz libressl-2.6.4.tar.gz.asc libressl.asc
 
 RUN LANGUAGE=en_US.UTF-8 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 locale-gen en_US.UTF-8
 
@@ -33,3 +33,6 @@ ENV TARGET_LIBC_VERSION=$TARGET_LIBC_VERSION
 
 ARG CC=/usr/bin/gcc
 ENV CC=$CC
+
+ARG LIBRARY_PATH=/usr/local/lib
+ENV LIBRARY_PATH=$LD_FLAGS

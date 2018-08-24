@@ -4,13 +4,13 @@
                       http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.apple.cie.foundationdb</groupId>
+  <groupId>org.foundationdb</groupId>
   <artifactId>NAME</artifactId>
   <version>VERSION</version>
   <packaging>jar</packaging>
 
   <name>foundationdb-java</name>
-  <description>Java bindings for the FoundationDB database. These bindings require the FoundationDB client, which is under a different license. The client can be obtained from https://www.foundationdb.org/downloads/fdb-c/.</description>
+  <description>Java bindings for the FoundationDB database. These bindings require the FoundationDB client, which is under a different license. The client can be obtained from https://www.foundationdb.org/download/.</description>
   <inceptionYear>2010</inceptionYear>
   <url>https://www.foundationdb.org</url>
 
@@ -18,13 +18,13 @@
     <name>FoundationDB</name>
     <url>https://www.foundationdb.org</url>
   </organization>
-  
+
   <developers>
     <developer>
         <name>FoundationDB</name>
     </developer>
   </developers>
-  
+
   <scm>
     <url>http://0.0.0.0</url>
   </scm>

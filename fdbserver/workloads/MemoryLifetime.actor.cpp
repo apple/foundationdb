@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -26,6 +25,7 @@
 #include "workloads.h"
 #include "BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
 
@@ -72,7 +72,7 @@ struct MemoryLifetime : KVWorkload {
 
 	ACTOR Future<Void> _setup( Database cx, MemoryLifetime* self) {
 		state Promise<double> loadTime;
-		Void _ = wait( bulkSetup( cx, self, self->nodeCount, loadTime ) );
+		wait( bulkSetup( cx, self, self->nodeCount, loadTime ) );
 		return Void();
 	}
 
@@ -90,12 +90,12 @@ struct MemoryLifetime : KVWorkload {
 					state Value getRange_newValue = self->randomValue();
 					state bool getRange_isSnapshot = g_random->random01() < 0.5;
 
-					//TraceEvent("MemoryLifetimeCheck").detail("isReverse", getRange_isReverse).detail("startKey", printable(getRange_startKey)).detail("randomStart", getRange_randomStart).detail("newValue", getRange_newValue.size()).detail("isSnapshot", getRange_isSnapshot);
+					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", getRange_isReverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", getRange_isSnapshot);
 					if(getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
 					state Standalone<RangeResultRef> getRange_res1 = wait( tr.getRange(getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse) );
 					tr = ReadYourWritesTransaction(cx);
-					Void _ = wait( delay(0.01) );
+					wait( delay(0.01) );
 					if(getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
 					Standalone<RangeResultRef> getRange_res2 = wait( tr.getRange(getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse) );
@@ -103,16 +103,16 @@ struct MemoryLifetime : KVWorkload {
 					for(int i = 0; i < getRange_res1.size(); i++) {
 						if(getRange_res1[i].key != getRange_res2[i].key) {
 							TraceEvent(SevError, "MemoryLifetimeCheckKeyError")
-								.detail("key1", printable(getRange_res1[i].key)).detail("key2", printable(getRange_res2[i].key))
-								.detail("value1", getRange_res1[i].value.size()).detail("value2", getRange_res2[i].value.size())
-								.detail("i", i).detail("size", getRange_res2.size());
+								.detail("Key1", printable(getRange_res1[i].key)).detail("Key2", printable(getRange_res2[i].key))
+								.detail("Value1", getRange_res1[i].value.size()).detail("Value2", getRange_res2[i].value.size())
+								.detail("I", i).detail("Size", getRange_res2.size());
 							ASSERT(false);
 						}
 						if(getRange_res1[i].value != getRange_res2[i].value) {
 							TraceEvent(SevError, "MemoryLifetimeCheckValueError")
-								.detail("key1", printable(getRange_res1[i].key)).detail("key2", printable(getRange_res2[i].key))
-								.detail("value1", getRange_res1[i].value.size()).detail("value2", getRange_res2[i].value.size())
-								.detail("i", i).detail("size", getRange_res2.size());
+								.detail("Key1", printable(getRange_res1[i].key)).detail("Key2", printable(getRange_res2[i].key))
+								.detail("Value1", getRange_res1[i].value.size()).detail("Value2", getRange_res2[i].value.size())
+								.detail("I", i).detail("Size", getRange_res2.size());
 							ASSERT(false);
 						}
 					}
@@ -126,7 +126,7 @@ struct MemoryLifetime : KVWorkload {
 						tr.set(get_startKey, get_newValue);
 					state Optional<Value> get_res1 = wait( tr.get(get_startKey, get_isSnapshot) );
 					tr = ReadYourWritesTransaction(cx);
-					Void _ = wait( delay(0.01) );
+					wait( delay(0.01) );
 					if(get_randomStart)
 						tr.set(get_startKey, get_newValue);
 					Optional<Value> get_res2 = wait( tr.get(get_startKey, get_isSnapshot) );
@@ -141,7 +141,7 @@ struct MemoryLifetime : KVWorkload {
 						tr.set(getKey_selector.getKey(), getKey_newValue);
 					state Key getKey_res1 = wait( tr.getKey(getKey_selector, getKey_isSnapshot) );
 					tr = ReadYourWritesTransaction(cx);
-					Void _ = wait( delay(0.01) );
+					wait( delay(0.01) );
 					if(getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
 					Key getKey_res2 = wait( tr.getKey(getKey_selector, getKey_isSnapshot) );
@@ -150,7 +150,7 @@ struct MemoryLifetime : KVWorkload {
 					state Key getAddress_startKey = self->getRandomKey();
 					state Standalone<VectorRef<const char*>> getAddress_res1 = wait( tr.getAddressesForKey(getAddress_startKey) );
 					tr = ReadYourWritesTransaction(cx);
-					Void _ = wait( delay(0.01) );
+					wait( delay(0.01) );
 					//we cannot check the contents like other operations so just touch all the values to make sure we dont crash
 					for(int i = 0; i < getAddress_res1.size(); i++) {
 						int a,b,c,d,count=-1;
@@ -160,7 +160,7 @@ struct MemoryLifetime : KVWorkload {
 				if(now() - startTime > self->testDuration)
 					return Void();
 			} catch(Error &e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}

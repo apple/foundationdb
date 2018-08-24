@@ -18,10 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-
 #include "ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //Clears the keyspace used by this test
 ACTOR Future<Void> clearKeyspace(ApiWorkload *self) {
@@ -32,11 +31,11 @@ ACTOR Future<Void> clearKeyspace(ApiWorkload *self) {
 									   StringRef(format("%010d", self->clientPrefixInt+1))));
 
 			transaction->clear(range);
-			Void _ = wait(transaction->commit());
+			wait(transaction->commit());
 			return Void();
 		}
 		catch(Error &e) {
-			Void _ = wait(transaction->onError(e));
+			wait(transaction->onError(e));
 		}
 	}
 }
@@ -49,8 +48,8 @@ ACTOR Future<Void> setup(Database cx, ApiWorkload *self) {
 	self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, cx, false));
 
 	//Clear keyspace before running
-	Void _ = wait(timeoutError(self->clearKeyspace(), 600));
-	Void _ = wait(self->performSetup(cx));
+	wait(timeoutError(self->clearKeyspace(), 600));
+	wait(self->performSetup(cx));
 
 	return Void();
 }
@@ -72,7 +71,7 @@ ACTOR Future<Void> start(Database cx, ApiWorkload *self) {
 	data.append_deep(data.arena(), bigKeyData.begin(), bigKeyData.size());
 
 	try {
-		Void _ = wait(self->performTest(cx, data));
+		wait(self->performTest(cx, data));
 	}
 	catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
@@ -181,7 +180,7 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload *self) {
 			}
 			catch(Error &e)
 			{
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 	}

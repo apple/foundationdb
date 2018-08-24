@@ -18,11 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "MoveKeys.h"
 #include "Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::min;
 using std::max;
@@ -46,7 +47,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 			lock.myOwner = g_random->randomUniqueID();
 			return lock;
 		} catch (Error &e){
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 			TEST(true);  // takeMoveKeysLock retry
 		}
 	}
@@ -94,9 +95,9 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<Version> > fReply, UID uid, Version version ) {
-	ErrorOr<Version> reply = wait( fReply );
-	if (!reply.present() || reply.get() < version)
+ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<std::pair<Version,Version>> > fReply, UID uid, Version version ) {
+	ErrorOr<std::pair<Version,Version>> reply = wait( fReply );
+	if (!reply.present() || reply.get().first < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
 }
@@ -168,13 +169,11 @@ ACTOR Future<vector<vector<Optional<UID>>>> findReadWriteDestinations(Standalone
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
 // Set serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member of servers OR if the source list is sufficiently degraded)
-ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> servers,
-								 MoveKeysLock lock, int durableStorageQuorum,
-								 FlowLock *startMoveKeysLock, UID relocationIntervalId ) {
+ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> servers, MoveKeysLock lock, FlowLock *startMoveKeysLock, UID relocationIntervalId ) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	//state TraceInterval waitInterval("");
 
-	Void _ = wait( startMoveKeysLock->take( TaskDataDistributionLaunch ) );
+	wait( startMoveKeysLock->take( TaskDataDistributionLaunch ) );
 	state FlowLock::Releaser releaser( *startMoveKeysLock );
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
@@ -207,7 +206,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					tr.info.taskID = TaskMoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					Void _ = wait( checkMoveKeysLock(&tr, lock) );
+					wait( checkMoveKeysLock(&tr, lock) );
 
 					vector< Future< Optional<Value> > > serverListEntries;
 					for(int s=0; s<servers.size(); s++)
@@ -298,9 +297,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						actors.push_back( krmSetRangeCoalescing( &tr, serverKeysPrefixFor( servers[i] ), currentKeys, allKeys, serverKeysTrue) );
 					}
 
-					Void _ = wait( waitForAll( actors ) );
+					wait( waitForAll( actors ) );
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 
 					/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
 						.detail("CommitVersion", tr.getCommittedVersion())
@@ -312,14 +311,14 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					state Error err = e;
 					if (err.code() == error_code_move_to_removed_server)
 						throw;
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 
 					if(retries%10 == 0) {
-						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "startMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
+							.error(err)
 							.detail("Keys", printable(keys))
 							.detail("BeginKey", printable(begin))
-							.detail("NumTries", retries)
-							.error(err);
+							.detail("NumTries", retries);
 					}
 				}
 			}
@@ -342,20 +341,20 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 	return Void();
 }
 
-ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode){
+ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, Version recoveryVersion, GetShardStateRequest::waitMode mode){
 	loop {
 		try {
-			Version rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
-			if (rep >= minVersion) {
+			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
+			if (rep.first >= minVersion && (recoveryVersion == invalidVersion || rep.second >= recoveryVersion)) {
 				return Void();
 			}
-			Void _ = wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );
+			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );
 		}
 		catch (Error& e) {
 			if( e.code() != error_code_timed_out ) {
 				if (e.code() != error_code_broken_promise)
 					throw e;
-				Void _ = wait(Never());  // Never return: A storage server which has failed will never be ready
+				wait(Never());  // Never return: A storage server which has failed will never be ready
 				throw internal_error();  // does not happen
 			}
 		}
@@ -368,7 +367,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 
 	loop {
 		try {
-			if (BUGGIFY) Void _ = wait(delay(5));
+			if (BUGGIFY) wait(delay(5));
 
 			tr.info.taskID = TaskMoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -386,10 +385,10 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
 				ASSERT( si.id() == dest[s] );
-				requests.push_back( waitForShardReady( si, keys, tr.getReadVersion().get(), GetShardStateRequest::FETCHING ) );
+				requests.push_back( waitForShardReady( si, keys, tr.getReadVersion().get(), invalidVersion, GetShardStateRequest::FETCHING ) );
 			}
 
-			Void _ = wait( timeoutError( waitForAll( requests ),
+			wait( timeoutError( waitForAll( requests ),
 					SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, TaskMoveKeys ) );
 
 			dataMovementComplete.send(Void());
@@ -398,7 +397,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 			if( e.code() == error_code_timed_out )
 				tr.reset();
 			else
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 		}
 	}
 }
@@ -407,8 +406,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 // keyServers[k].dest must be the same for all k in keys
 // Set serverKeys[dest][keys] = true; serverKeys[src][keys] = false for all src not in dest
 // Should be cancelled and restarted if keyServers[keys].dest changes (?so this is no longer true?)
-ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam,
-		MoveKeysLock lock, int durableStorageQuorum, FlowLock *finishMoveKeysParallelismLock, UID relocationIntervalId )
+ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam, MoveKeysLock lock, FlowLock *finishMoveKeysParallelismLock, Version recoveryVersion, bool hasRemote, UID relocationIntervalId )
 {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
@@ -435,10 +433,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					releaser.release();
-					Void _ = wait( finishMoveKeysParallelismLock->take( TaskDataDistributionLaunch ) );
+					wait( finishMoveKeysParallelismLock->take( TaskDataDistributionLaunch ) );
 					releaser = FlowLock::Releaser( *finishMoveKeysParallelismLock );
 
-					Void _ = wait( checkMoveKeysLock(&tr, lock) );
+					wait( checkMoveKeysLock(&tr, lock) );
 
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 					state Standalone<RangeResultRef> keyServers = wait( krmGetRanges( &tr, keyServersPrefix, currentKeys, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES ) );
@@ -473,8 +471,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						} else {
 							for(int i = 0; i < completeSrc.size(); i++) {
 								if(!srcSet.count(completeSrc[i])) {
-									std::swap(completeSrc[i--], completeSrc.back());
-									completeSrc.pop_back();
+									swapAndPop(&completeSrc, i--);
 								}
 							}
 						}
@@ -523,8 +520,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 						for(int i = 0; i < completeSrc.size(); i++) {
 							if(!srcSet.count(completeSrc[i])) {
-								std::swap(completeSrc[i--], completeSrc.back());
-								completeSrc.pop_back();
+								swapAndPop(&completeSrc, i--);
 							}
 						}
 
@@ -550,13 +546,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						break;
 					}
 
-					if (dest.size() < durableStorageQuorum) {
-						TraceEvent(SevError,"FinishMoveKeysError", relocationIntervalId)
-							.detailf("Reason", "dest size too small (%d)", dest.size());
-						ASSERT(false);
-					}
-
-					waitInterval = TraceInterval("RelocateShard_FinishMoveKeys_WaitDurable");
+					waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
 					TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
 						.detail("KeyBegin", printable(keys.begin))
 						.detail("KeyEnd", printable(keys.end));
@@ -568,7 +558,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					state vector<UID> newDestinations;
 					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 					for(auto& it : dest) {
-						if(!completeSrcSet.count(it)) {
+						if(!hasRemote || !completeSrcSet.count(it)) {
 							newDestinations.push_back(it);
 						}
 					}
@@ -590,10 +580,8 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					}
 
 					for(int s=0; s<storageServerInterfaces.size(); s++)
-						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
-					Void _ = wait( timeout(
-						smartQuorum( serverReady, std::max<int>(0, durableStorageQuorum - (dest.size() - newDestinations.size())), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, TaskMoveKeys ),
-						SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
+						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), recoveryVersion, GetShardStateRequest::READABLE) );
+					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
 					int count = dest.size() - newDestinations.size();
 					for(int s=0; s<serverReady.size(); s++)
 						count += serverReady[s].isReady() && !serverReady[s].isError();
@@ -601,10 +589,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					//printf("  fMK: moved data to %d/%d servers\n", count, serverReady.size());
 					TraceEvent(SevDebug, waitInterval.end(), relocationIntervalId).detail("ReadyServers", count);
 
-					if( count >= durableStorageQuorum ) {
+					if( count == dest.size() ) {
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per server)
-						Void _ = wait( krmSetRangeCoalescing( &tr, keyServersPrefix, currentKeys, keys, keyServersValue( dest ) ) );
+						wait( krmSetRangeCoalescing( &tr, keyServersPrefix, currentKeys, keys, keyServersValue( dest ) ) );
 
 						std::set<UID>::iterator asi = allServers.begin();
 						std::vector<Future<Void>> actors;
@@ -614,8 +602,8 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 							++asi;
 						}
 
-						Void _ = wait(waitForAll(actors));
-						Void _ = wait( tr.commit() );
+						wait(waitForAll(actors));
+						wait( tr.commit() );
 
 						begin = endKey;
 						break;
@@ -624,10 +612,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 				} catch (Error& error) {
 					if (error.code() == error_code_actor_cancelled) throw;
 					state Error err = error;
-					Void _ = wait( tr.onError(error) );
+					wait( tr.onError(error) );
 					retries++;
 					if(retries%10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_finishMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId)
 							.error(err)
 							.detail("KeyBegin", printable(keys.begin))
 							.detail("KeyEnd", printable(keys.end))
@@ -659,14 +647,15 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 			state Future<Optional<Value>> fExclIP = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip ))) );
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			Void _ = wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) );
+			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) && success(fHistoryTags) );
 
 			// If we have been added to the excluded state servers list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present())
 				throw recruitment_failed();
 
-			if(fTagLocalities.get().more || fTags.get().more)
+			if(fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
 				ASSERT(false);
 
 			int8_t maxTagLocality = 0;
@@ -697,6 +686,12 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 					usedTags.push_back(t.id);
 				}
 			}
+			for(auto& it : fHistoryTags.get()) {
+				Tag t = decodeServerTagValue( it.value );
+				if(t.locality == locality) {
+					usedTags.push_back(t.id);
+				}
+			}
 			std::sort(usedTags.begin(), usedTags.end());
 
 			int usedIdx = 0;
@@ -717,9 +712,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 			KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(tag));
 			tr.addReadConflictRange( conflictRange );
 			tr.addWriteConflictRange( conflictRange );
-			tr.atomicOp( serverMaxTagKeyFor(locality), serverTagMaxValue(tag), MutationRef::Max );
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return std::make_pair(tr.getCommittedVersion(), tag);
 		} catch (Error& e) {
 			if(e.code() == error_code_commit_unknown_result)
@@ -729,7 +723,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				maxSkipTags = SERVER_KNOBS->MAX_SKIP_TAGS;
 			}
 
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -756,23 +750,24 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Void _ = wait( checkMoveKeysLock(&tr, lock) );
+			wait( checkMoveKeysLock(&tr, lock) );
 			TraceEvent("RemoveStorageServerLocked").detail("ServerID", serverID).detail("Version", tr.getReadVersion().get());
 
 			state bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
 			if (!canRemove) {
 				TEST(true); // The caller had a transaction in flight that assigned keys to the server.  Wait for it to reverse its mistake.
 				TraceEvent(SevWarn,"NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
-				Void _ = wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
+				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
 				tr.reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("canRemove", canRemove);
+				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
 
 				state Future<Optional<Value>> fListKey = tr.get( serverListKeyFor(serverID) );
-				state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY );
+				state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY );
 				state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
 
-				Void _ = wait( success(fListKey) && success(fTags) && success(fTagLocalities) );
+				wait( success(fListKey) && success(fTags) && success(fHistoryTags) && success(fTagLocalities) );
 
 				if (!fListKey.get().present()) {
 					if (retry) {
@@ -793,6 +788,10 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 						allLocalities.insert(t.locality);
 					}
 				}
+				for(auto& it : fHistoryTags.get()) {
+					Tag t = decodeServerTagValue( it.value );
+					allLocalities.insert(t.locality);
+				}
 
 				if(locality >= 0 && !allLocalities.count(locality) ) {
 					for(auto& it : fTagLocalities.get()) {
@@ -807,12 +806,12 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				tr.clear( serverTagKeyFor(serverID) );
 				tr.clear( serverTagHistoryRangeFor(serverID) );
 				retry = true;
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				return Void();
 			}
 		} catch (Error& e) {
 			state Error err = e;
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
@@ -824,19 +823,20 @@ ACTOR Future<Void> moveKeys(
 	vector<UID> destinationTeam,
 	vector<UID> healthyDestinations,
 	MoveKeysLock lock,
-	int durableStorageQuorum,
 	Promise<Void> dataMovementComplete,
 	FlowLock *startMoveKeysParallelismLock,
 	FlowLock *finishMoveKeysParallelismLock,
+	Version recoveryVersion,
+	bool hasRemote,
 	UID relocationIntervalId)
 {
 	ASSERT( destinationTeam.size() );
 	std::sort( destinationTeam.begin(), destinationTeam.end() );
-	Void _ = wait( startMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, startMoveKeysParallelismLock, relocationIntervalId ) );
+	wait( startMoveKeys( cx, keys, destinationTeam, lock, startMoveKeysParallelismLock, relocationIntervalId ) );
 
 	state Future<Void> completionSignaller = checkFetchingState( cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId );
 
-	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, relocationIntervalId ) );
+	wait( finishMoveKeys( cx, keys, destinationTeam, lock, finishMoveKeysParallelismLock, recoveryVersion, hasRemote, relocationIntervalId ) );
 
 	//This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
@@ -873,9 +873,6 @@ void seedShardServers(
 	for(int s=0; s<servers.size(); s++) {
 		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
 		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
-	}
-	for(auto it : dcId_locality) {
-		tr.set(arena, serverMaxTagKeyFor(it.second.locality), serverTagMaxValue(Tag(it.second.locality, it.second.id-1)));
 	}
 
 	std::vector<UID> serverIds;

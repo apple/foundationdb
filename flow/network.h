@@ -41,6 +41,7 @@ enum {
 	TaskFailureMonitor = 8700,
 	TaskResolutionMetrics = 8700,
 	TaskClusterController = 8650,
+	TaskProxyCommitDispatcher = 8640,
 	TaskTLogQueuingMetrics = 8620,
 	TaskTLogPop = 8610,
 	TaskTLogPeekReply = 8600,
@@ -53,7 +54,6 @@ enum {
 	TaskProxyCommit = 8540,
 	TaskTLogConfirmRunningReply = 8530,
 	TaskTLogConfirmRunning = 8520,
-	TaskProxyGetKeyServersLocations = 8515,
 	TaskProxyGRVTimer = 8510,
 	TaskProxyGetConsistentReadVersion = 8500,
 	TaskDefaultPromiseEndpoint = 8000,
@@ -68,7 +68,6 @@ enum {
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
-	TaskBatchCopy = 2900,
 	TaskLowPriority = 2000,
 
 	TaskMinPriority = 1000
@@ -270,7 +269,7 @@ public:
 	// security to override only these operations without having to delegate everything in INetwork.
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of connection problems!
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr ) = 0;
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host = "") = 0;
 
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service ) = 0;

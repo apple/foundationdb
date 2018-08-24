@@ -33,7 +33,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(510);
+	API *fdb = FDB::API::selectAPIVersion(600);
 	auto c = fdb->createCluster( std::string() );
 	auto db = c->createDatabase();
 	state Reference<Transaction> tr( new Transaction(db) );
@@ -56,7 +56,7 @@ ACTOR Future<Void> _test() {
 	for ( i = 0; i < 100000; i++ ) {
 		Version v = wait( versions[i] );
 	}
-	// Void _ = wait( waitForAllReady( versions ) );
+	// wait( waitForAllReady( versions ) );
 	printf("Elapsed: %lf\n", timer_monotonic() - starttime );
 
 	tr->set( LiteralStringRef("foo"), LiteralStringRef("bar") );
@@ -77,7 +77,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(510);
+	API *fdb = FDB::API::selectAPIVersion(600);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
@@ -124,7 +124,7 @@ namespace FDB {
 		Future<Void> onReady = ready.getFuture();
 
 		throw_on_error( fdb_future_set_callback( f->f, backToFutureCallback, ready.extractRawPointer() ) );
-		Void _ = wait( onReady );
+		wait( onReady );
 
 		return convertValue( f );
 	}

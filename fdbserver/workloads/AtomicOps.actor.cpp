@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
@@ -45,7 +45,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version (500) with a 10% probability
 		// Actual change of api Version happens in setup
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
-		TraceEvent("AtomicOpsApiVersion500").detail("apiVersion500", apiVersion500);
+		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
 		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
@@ -87,7 +87,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		default:
 			ASSERT(false);
 		}
-		TraceEvent("AtomicWorkload").detail("opType", opType);
+		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
 
 	virtual std::string description() { return "AtomicOps"; }
@@ -130,10 +130,10 @@ struct AtomicOpsWorkload : TestWorkload {
 						uint64_t intValue = 0;
 						tr.set(StringRef(format("ops%08x%08x",g,i)), StringRef((const uint8_t*) &intValue, sizeof(intValue)));
 					}
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -143,7 +143,7 @@ struct AtomicOpsWorkload : TestWorkload {
 	ACTOR Future<Void> atomicOpWorker( Database cx, AtomicOpsWorkload* self, double delay ) {
 		state double lastTime = now();
 		loop {
-			Void _ = wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
@@ -152,10 +152,10 @@ struct AtomicOpsWorkload : TestWorkload {
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
 					tr.atomicOp(StringRef(format("ops%08x%08x",group,g_random->randomInt(0,self->nodeCount/100))), val, self->opType);
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -188,7 +188,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					}
 
 					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-						TraceEvent(SevError, "LogMismatch").detail("logResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("opsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+						TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
 					}
 
 					if( self->opType == MutationRef::AddValue ) {
@@ -202,12 +202,12 @@ struct AtomicOpsWorkload : TestWorkload {
 							logResult += intValue;
 						}
 						if(logResult != opsResult) {
-							TraceEvent(SevError, "LogAddMismatch").detail("logResult", logResult).detail("opResult", opsResult).detail("opsResultStr", printable(opsResultStr)).detail("size", opsResultStr.size());
+							TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
 						}
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

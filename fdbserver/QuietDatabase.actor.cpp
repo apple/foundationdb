@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -29,6 +28,7 @@
 #include "ServerDBInfo.h"
 #include "Status.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {
@@ -36,7 +36,7 @@ ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Refer
 			when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( flags ) ) ) ) ) {
 				return w;
 			}
-			when( Void _ = wait( dbInfo->onChange() ) ) {}
+			when( wait( dbInfo->onChange() ) ) {}
 		}
 	}
 }
@@ -50,7 +50,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("masterId", dbInfo->get().master.id()).detail("workerId", workers[i].first.id());
+				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
 				return workers[i].first;
 			}
 		}
@@ -60,7 +60,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 			.detail("Master", dbInfo->get().master.id()).detail("MasterAddress", dbInfo->get().master.address())
 			.detail("WorkerCount", workers.size());
 
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 }
 
@@ -68,13 +68,13 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker ) {
 	try {
 		TraceEvent("DataInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
-		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/TotalDataInFlight" ) ) ), 1.0 ) );
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
 		int64_t dataInFlight;
-		sscanf(extractAttribute(md.toString(), "TotalBytes").c_str(), "%lld", &dataInFlight);
+		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
 		return dataInFlight;
 	} catch( Error &e ) {
-		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataInFlight");
+		TraceEvent("QuietDatabaseFailure", masterWorker.id()).error(e).detail("Reason", "Failed to extract DataInFlight");
 		throw;
 	}
 
@@ -89,13 +89,13 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBI
 }
 
 //Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
-int64_t getQueueSize( Standalone<StringRef> md ) {
+int64_t getQueueSize( TraceEventFields md ) {
 	double inputRate, durableRate;
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(extractAttribute(md.toString(), "bytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(extractAttribute(md.toString(), "bytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
@@ -110,7 +110,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 		workersMap[worker.first.address()] = worker.first;
 	}
 
-	state std::vector<Future<Standalone<StringRef>>> messages;
+	state std::vector<Future<TraceEventFields>> messages;
 	state std::vector<TLogInterface> tlogs = dbInfo->get().logSystemConfig.allPresentLogs();
 	for(int i = 0; i < tlogs.size(); i++) {
 		auto itr = workersMap.find(tlogs[i].address());
@@ -121,7 +121,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 		messages.push_back( timeoutError(itr->second.eventLogRequest.getReply(
 			EventLogRequest( StringRef(tlogs[i].id().toString() + "/TLogMetrics") ) ), 1.0 ) );
 	}
-	Void _ = wait( waitForAll( messages ) );
+	wait( waitForAll( messages ) );
 
 	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName))
 		.detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
@@ -162,7 +162,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			return servers;
 		}
 		catch(Error &e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -182,7 +182,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 		workersMap[worker.first.address()] = worker.first;
 	}
 
-	state std::vector<Future<Standalone<StringRef>>> messages;
+	state std::vector<Future<TraceEventFields>> messages;
 	for(int i = 0; i < servers.size(); i++) {
 		auto itr = workersMap.find(servers[i].address());
 		if(itr == workersMap.end()) {
@@ -193,7 +193,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 			EventLogRequest( StringRef(servers[i].id().toString() + "/StorageMetrics") ) ), 1.0 ) );
 	}
 
-	Void _ = wait( waitForAll(messages) );
+	wait( waitForAll(messages) );
 
 	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
@@ -224,17 +224,17 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> movingDataMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields movingDataMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData") ) ), 1.0 ) );
 
-		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "GotString").detail("Result", printable(movingDataMessage)).detail("TrackLatest", printable( StringRef( cx->dbName.toString() + "/MovingData") ) );
+		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "GotString")/*.detail("Result", printable(movingDataMessage))*/.detail("TrackLatest", printable( StringRef( cx->dbName.toString() + "/MovingData") ) );
 
 		int64_t inQueue;
-		sscanf(extractAttribute(movingDataMessage.toString(), "InQueue").c_str(), "%lld", &inQueue);
+		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
 
 		if(reportInFlight) {
 			int64_t inFlight;
-			sscanf(extractAttribute(movingDataMessage.toString(), "InFlight").c_str(), "%lld", &inFlight);
+			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%lld", &inFlight);
 			inQueue += inFlight;
 		}
 
@@ -258,10 +258,10 @@ ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface maste
 	try {
 		TraceEvent("DataDistributionActive").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> activeMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields activeMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/DDTrackerStarting") ) ), 1.0 ) );
 
-		return extractAttribute(activeMessage.toString(), "State") == "Active";
+		return activeMessage.getValue("State") == "Active";
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataDistributionActive");
 		throw;
@@ -273,24 +273,51 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	try {
 		TraceEvent("StorageServersRecruiting").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> recruitingMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields recruitingMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/StorageServerRecruitment_" + dbInfo->get().master.id().toString()) ) ), 1.0 ) );
 
-		return extractAttribute(recruitingMessage.toString(), "State") == "Recruiting";
+		return recruitingMessage.getValue("State") == "Recruiting";
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract StorageServersRecruiting").detail("MasterID", dbInfo->get().master.id());
 		throw;
 	}
 }
 
+ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
+	if(g_network->isSimulated()) {
+		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
+		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
+
+		ASSERT(!primaryDead || !remoteDead);
+		if(primaryDead || remoteDead) {
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate");
+			g_simulator.usableRegions = 1;
+			ConfigurationResult::Type _ = wait( changeConfig( cx, (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1" ) );
+			while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+				wait( dbInfo->onChange() );
+			}
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Usable_Regions");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
+	wait( delay(time) );
+	wait( repairDeadDatacenter(cx, dbInfo, context) );
+	return Void();
+}
+
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
 	//In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if(g_network->isSimulated())
-		Void _ = wait(delay(5.0));
+		wait(delay(5.0));
 
 	//Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
@@ -308,18 +335,18 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, masterWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, dbInfo, masterWorker );
 
-			Void _ = wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
+			wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
 							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
 			TraceEvent(("QuietDatabase" + phase).c_str())
-				.detail("dataInFlight", dataInFlight.get()).detail("maxTLogQueueSize", tLogQueueSize.get()).detail("dataDistributionQueueSize", dataDistributionQueueSize.get())
-				.detail("maxStorageQueueSize", storageQueueSize.get()).detail("dataDistributionActive", dataDistributionActive.get())
-				.detail("storageServersRecruiting", storageServersRecruiting.get());
+				.detail("DataInFlight", dataInFlight.get()).detail("MaxTLogQueueSize", tLogQueueSize.get()).detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+				.detail("MaxStorageQueueSize", storageQueueSize.get()).detail("DataDistributionActive", dataDistributionActive.get())
+				.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
 			if( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate
 				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true) {
 
-				Void _ = wait( delay( 1.0 ) );
+				wait( delay( 1.0 ) );
 				numSuccesses = 0;
 			} else {
 				if(++numSuccesses == 3) {
@@ -327,7 +354,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 					break;
 				}
 				else
-					Void _ = wait(delay( 2.0 ) );
+					wait(delay( 2.0 ) );
 			}
 		} catch (Error& e) {
 			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
@@ -338,7 +365,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				throw;
 
 			TraceEvent(("QuietDatabase" + phase + "Retry").c_str()).error(e);
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 			numSuccesses = 0;
 		}
 	}

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LockDatabaseWorkload : TestWorkload {
 	double lockAfter, unlockAfter;
@@ -59,13 +59,13 @@ struct LockDatabaseWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				Void _ = wait( lockDatabase(&tr, lockID) );
+				wait( lockDatabase(&tr, lockID) );
 				state Standalone<RangeResultRef> data = wait( tr.getRange(normalKeys, 50000) );
 				ASSERT(!data.more);
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				return data;
 			} catch( Error &e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -79,24 +79,24 @@ struct LockDatabaseWorkload : TestWorkload {
 				if(!val.present())
 					return Void();
 				
-				Void _ = wait( unlockDatabase(&tr, lockID) );
+				wait( unlockDatabase(&tr, lockID) );
 				state Standalone<RangeResultRef> data2 = wait( tr.getRange(normalKeys, 50000) );
 				if(data.size() != data2.size()) {
-					TraceEvent(SevError, "DataChangedWhileLocked").detail("beforeSize", data.size()).detail("afterSize", data2.size());
+					TraceEvent(SevError, "DataChangedWhileLocked").detail("BeforeSize", data.size()).detail("AfterSize", data2.size());
 					self->ok = false;
 				} else if(data != data2) {
-					TraceEvent(SevError, "DataChangedWhileLocked").detail("size", data.size());
+					TraceEvent(SevError, "DataChangedWhileLocked").detail("Size", data.size());
 					for(int i = 0; i < data.size(); i++) {
 						if( data[i] != data2[i] ) {
-							TraceEvent(SevError, "DataChangedWhileLocked").detail("i", i).detail("before", printable(data[i])).detail("after", printable(data2[i]));
+							TraceEvent(SevError, "DataChangedWhileLocked").detail("I", i).detail("Before", printable(data[i])).detail("After", printable(data2[i]));
 						}
 					}
 					self->ok = false;
 				}
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				return Void();
 			} catch( Error &e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -110,19 +110,19 @@ struct LockDatabaseWorkload : TestWorkload {
 				self->ok = false;
 				return Void();
 			} catch( Error &e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
 
 	ACTOR static Future<Void> lockWorker( Database cx, LockDatabaseWorkload* self ) {
 		state UID lockID = g_random->randomUniqueID();
-		Void _ = wait(delay(self->lockAfter));
+		wait(delay(self->lockAfter));
 		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self, lockID));
 		state Future<Void> checker = checkLocked(cx, self);
-		Void _ = wait(delay(self->unlockAfter - self->lockAfter));
+		wait(delay(self->unlockAfter - self->lockAfter));
 		checker.cancel();
-		Void _ = wait(unlockAndCheck(cx, self, lockID, data));
+		wait(unlockAndCheck(cx, self, lockID, data));
 
 		return Void();
 	}

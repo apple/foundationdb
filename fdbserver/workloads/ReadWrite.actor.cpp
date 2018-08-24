@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <boost/lexical_cast.hpp>
+
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -28,8 +29,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-
-#include <boost/lexical_cast.hpp>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
 static Future<Version> nextRV;
@@ -42,7 +42,7 @@ ACTOR static Future<Version> getNextRV(Database db) {
 			Version v = wait( tr.getReadVersion() );
 			return v;
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -225,10 +225,10 @@ struct ReadWriteWorkload : KVWorkload {
 					std::vector<Future<ErrorOr<Void>>> dumpRequests;
 					for( int i = 0; i < workerList.get().size(); i++)
 						dumpRequests.push_back( workerList.get()[i].first.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
-					Void _ = wait( waitForAll( dumpRequests ) );
+					wait( waitForAll( dumpRequests ) );
 					return true;
 				}
-				Void _ = wait( delay( 1.0 ) );
+				wait( delay( 1.0 ) );
 			}
 		} catch( Error &e ) {
 			TraceEvent(SevError, "FailedToDumpWorkers").error(e);
@@ -311,12 +311,12 @@ struct ReadWriteWorkload : KVWorkload {
 
 		loop {
 			elapsed += self->periodicLoggingInterval;
-			Void _ = wait( delayUntil(start + elapsed) );
+			wait( delayUntil(start + elapsed) );
 
-			TraceEvent("RW_RowReadLatency").detail("mean", self->readLatencies.mean()).detail("median", 1000 * self->readLatencies.median()).detail("percentile5", 1000 * self->readLatencies.percentile(.05)).detail("percentile95", 1000 * self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
-			TraceEvent("RW_GRVLatency").detail("mean", 1000 * self->GRVLatencies.mean()).detail("median", 1000 * self->GRVLatencies.median()).detail("percentile5", 1000 * self->GRVLatencies.percentile(.05)).detail("percentile95", 1000 * self->GRVLatencies.percentile(.95));
-			TraceEvent("RW_CommitLatency").detail("mean", 1000 * self->commitLatencies.mean()).detail("median", 1000 * self->commitLatencies.median()).detail("percentile5", 1000 * self->commitLatencies.percentile(.05)).detail("percentile95", 1000 * self->commitLatencies.percentile(.95));
-			TraceEvent("RW_TotalLatency").detail("mean", 1000 * self->latencies.mean()).detail("median", 1000 * self->latencies.median()).detail("percentile5", 1000 * self->latencies.percentile(.05)).detail("percentile95", 1000 * self->latencies.percentile(.95));
+			TraceEvent("RW_RowReadLatency").detail("Mean", self->readLatencies.mean()).detail("Median", self->readLatencies.median()).detail("Percentile5", self->readLatencies.percentile(.05)).detail("Percentile95", self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
+			TraceEvent("RW_GRVLatency").detail("Mean", self->GRVLatencies.mean()).detail("Median", self->GRVLatencies.median()).detail("Percentile5", self->GRVLatencies.percentile(.05)).detail("Percentile95", self->GRVLatencies.percentile(.95));
+			TraceEvent("RW_CommitLatency").detail("Mean", self->commitLatencies.mean()).detail("Median", self->commitLatencies.median()).detail("Percentile5", self->commitLatencies.percentile(.05)).detail("Percentile95", self->commitLatencies.percentile(.95));
+			TraceEvent("RW_TotalLatency").detail("Mean", self->latencies.mean()).detail("Median", self->latencies.median()).detail("Percentile5", self->latencies.percentile(.05)).detail("Percentile95", self->latencies.percentile(.95));
 
 			int64_t ops = (self->aTransactions.getValue() * (self->readsPerTransactionA+self->writesPerTransactionA)) + 
 						  (self->bTransactions.getValue() * (self->readsPerTransactionB+self->writesPerTransactionB));
@@ -422,12 +422,12 @@ struct ReadWriteWorkload : KVWorkload {
 					readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])), &self->readLatencies, &self->readLatencyTotal, &self->readLatencyCount, self->readMetric, shouldRecord));
 				}
 			}
-			Void _ = wait( waitForAll( readers ) );
+			wait( waitForAll( readers ) );
 		} else {
 			state int op;
 			for(op = 0; op < keys.size(); op++ ) {
 				++self->totalReadsMetric;
-				Void _ = wait( logLatency( tr->get( self->keyForIndex( keys[op] ) ), &self->readLatencies, &self->readLatencyTotal, &self->readLatencyCount, self->readMetric, shouldRecord) );
+				wait( logLatency( tr->get( self->keyForIndex( keys[op] ) ), &self->readLatencies, &self->readLatencyTotal, &self->readLatencyCount, self->readMetric, shouldRecord) );
 			}
 		}
 		return Void();
@@ -440,7 +440,7 @@ struct ReadWriteWorkload : KVWorkload {
 		state Promise<double> loadTime;
 		state Promise<vector<pair<uint64_t, double> > > ratesAtKeyCounts;
 
-		Void _ = wait( bulkSetup( cx, self, self->nodeCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay, self->maxInsertRate, 
+		wait( bulkSetup( cx, self, self->nodeCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay, self->maxInsertRate, 
 								  self->insertionCountsToMeasure, ratesAtKeyCounts ) );
 
 		self->loadTime = loadTime.getFuture().get();
@@ -457,15 +457,15 @@ struct ReadWriteWorkload : KVWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				Void _ = wait( self->readOp( &tr, keys, self, false ) );
-				Void _ = wait( tr.warmRange( cx, allKeys ) );
+				wait( self->readOp( &tr, keys, self, false ) );
+				wait( tr.warmRange( cx, allKeys ) );
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError( e ) );
+				wait( tr.onError( e ) );
 			}
 		}
 
-		Void _ = wait( delay( std::max(0.1, 1.0 - (now() - startTime) ) ) );
+		wait( delay( std::max(0.1, 1.0 - (now() - startTime) ) ) );
 
 		vector<Future<Void>> clients;
 		if(self->enableReadLatencyLogging)
@@ -483,7 +483,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 		if (!self->cancelWorkersAtDuration) self->clients = clients; // Don't cancel them until check()
 
-		Void _ = wait( self->cancelWorkersAtDuration ? timeout( waitForAll( clients ), self->testDuration, Void() ) : delay( self->testDuration ) );
+		wait( self->cancelWorkersAtDuration ? timeout( waitForAll( clients ), self->testDuration, Void() ) : delay( self->testDuration ) );
 		return Void();
 	}
 
@@ -520,18 +520,18 @@ struct ReadWriteWorkload : KVWorkload {
 		state UID debugID;
 
 		if (self->rampUpConcurrency) {
-			Void _  = wait( ::delay( self->testDuration/2 * (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount) ) );
+			wait( ::delay( self->testDuration/2 * (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount) ) );
 			TraceEvent("ClientStarting").detail("ActorIndex", clientIndex).detail("ClientIndex", self->clientId).detail("NumActors", clientIndex*self->clientCount + self->clientId + 1);
 		}
 
 		loop {
-			Void _ = wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 
 			if (self->rampUpConcurrency) {
 				if (now() - startTime >= self->testDuration/2 * (2 - (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount))) {
 					TraceEvent("ClientStopping").detail("ActorIndex", clientIndex).detail("ClientIndex", self->clientId)
 						.detail("NumActors", clientIndex*self->clientCount + self->clientId);
-					Void _ = wait(Never());
+					wait(Never());
 				}
 			}
 
@@ -591,7 +591,7 @@ struct ReadWriteWorkload : KVWorkload {
 							self->GRVLatencies.addSample(grvLatency);
 
 						state double readStart = now();
-						Void _ = wait(self->readOp(&tr, keys, self, self->shouldRecord()));
+						wait(self->readOp(&tr, keys, self, self->shouldRecord()));
 
 						double readLatency = now() - readStart;
 						if( self->shouldRecord() )
@@ -615,7 +615,7 @@ struct ReadWriteWorkload : KVWorkload {
 							tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
 
 						state double commitStart = now();
-						Void _ = wait(tr.commit());
+						wait(tr.commit());
 
 						double commitLatency = now() - commitStart;
 						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
@@ -628,7 +628,7 @@ struct ReadWriteWorkload : KVWorkload {
 						self->transactionFailureMetric->errorCode = e.code();
 						self->transactionFailureMetric->log();
 
-						Void _ = wait(tr.onError(e));
+						wait(tr.onError(e));
 
 						++self->transactionSuccessMetric->retries;
 						++self->totalRetriesMetric;

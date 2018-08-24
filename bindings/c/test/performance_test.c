@@ -44,7 +44,6 @@ fdb_error_t waitError(FDBFuture *f) {
 
 struct RunResult run(struct ResultSet *rs, FDBDatabase *db, struct RunResult (*func)(struct ResultSet*, FDBTransaction*)) {
 	FDBTransaction *tr = NULL;
-	checkError(fdb_database_create_transaction(db, &tr), "create transaction", rs);
 	fdb_error_t e = fdb_database_create_transaction(db, &tr);
 	checkError(e, "create transaction", rs);
 
@@ -62,9 +61,11 @@ struct RunResult run(struct ResultSet *rs, FDBDatabase *db, struct RunResult (*f
 			fdb_error_t retryE = waitError(f);
 			fdb_future_destroy(f);
 			if (retryE) {
+				fdb_transaction_destroy(tr);
 				return (struct RunResult) {0, retryE};
 			}
 		} else {
+			fdb_transaction_destroy(tr);
 			return r;
 		}
 	}
@@ -602,7 +603,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	checkError(fdb_select_api_version(520), "select API version", rs);
+	checkError(fdb_select_api_version(600), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
 	valueStr = (uint8_t*)malloc((sizeof(uint8_t))*valueSize);

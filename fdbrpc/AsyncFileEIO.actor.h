@@ -31,14 +31,15 @@
 #elif !defined(FLOW_ASYNCFILEEIO_ACTOR_H)
 	#define FLOW_ASYNCFILEEIO_ACTOR_H
 
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include "eio.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 #include "IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
-
-#include <fcntl.h>
-#include <sys/stat.h>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
@@ -75,7 +76,7 @@ public:
 
 		state Promise<Void> p;
 		state eio_req* r = eio_open( open_filename.c_str(), openFlags(flags), mode, 0, eio_callback, &p );
-		try { Void _ = wait( p.getFuture() ); } catch (...) { eio_cancel(r); throw; }
+		try { wait( p.getFuture() ); } catch (...) { eio_cancel(r); throw; }
 		if (r->result < 0) {
 			errno = r->errorno;
 			bool notFound = errno == ENOENT;
@@ -83,10 +84,10 @@ public:
 			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError().detail("File", filename).detail("Flags", flags).detail("Mode", mode);
 			throw e;
 		}
-		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("fd", r->result).detail("Flags", flags).suppressFor(1.0);
+		TraceEvent("AsyncFileOpened").suppressFor(1.0).detail("Filename", filename).detail("Fd", r->result).detail("Flags", flags);
 
 		if ((flags & OPEN_LOCK) && !lock_fd(r->result)) {
-			TraceEvent(SevError, "UnableToLockFile").detail("filename", filename).GetLastError();
+			TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
 			throw io_error();
 		}
 
@@ -99,6 +100,11 @@ public:
 			return async_fsync_parent( filename );
 		} else
 			return Void();
+	}
+
+	ACTOR static Future<std::time_t> lastWriteTime( std::string filename ) {
+		EIO_STRUCT_STAT statdata = wait(stat_impl(filename));
+		return statdata.st_mtime;
 	}
 
 	virtual void addref() { ReferenceCounted<AsyncFileEIO>::addref(); }
@@ -139,15 +145,7 @@ public:
 	virtual Future<int64_t> size() {
 		++countFileLogicalReads;
 		++countLogicalReads;
-				
-		struct stat buf;
-		if (fstat( fd, &buf )) {
-			TraceEvent("AsyncFileEIOFStatError").detail("fd",fd).GetLastError();
-			return io_error();
-		}
-		return buf.st_size;
-		
-		//return size_impl(fd);
+		return size_impl(fd);
 	}
 	virtual std::string getFilename() {
 		return filename;
@@ -160,7 +158,7 @@ public:
 		if (folderFD<0)
 			throw io_error();
 		try {
-			Void _ = wait( async_fsync(folderFD) ); // not sure if fdatasync on the folder has the same effect
+			wait( async_fsync(folderFD) ); // not sure if fdatasync on the folder has the same effect
 		} catch (...) {
 			close(folderFD);
 			throw;
@@ -179,16 +177,16 @@ public:
 	}
 	ACTOR static Future<Void> waitAndAtomicRename( Future<Void> fsync, std::string part_filename, std::string final_filename ) {
 		// First wait for the data in the part file to be durable
-		Void _ = wait(fsync);
+		wait(fsync);
 
 		// rename() is atomic
 		if (rename( part_filename.c_str(), final_filename.c_str() )) {
-			TraceEvent("AsyncFileEIORenameError").detail("filename", final_filename).GetLastError();
+			TraceEvent("AsyncFileEIORenameError").detail("Filename", final_filename).GetLastError();
 			throw io_error();
 		}
 
 		// fsync the parent directory to make it durable as well
-		Void _ = wait( async_fsync_parent(final_filename) );
+		wait( async_fsync_parent(final_filename) );
 
 		return Void();
 	}
@@ -254,7 +252,7 @@ private:
 	static void error( const char* context, int fd, eio_req* r, Reference<ErrorInfo> const& err = Reference<ErrorInfo>() ) {
 		Error e = io_error();
 		errno = r->errorno;
-		TraceEvent(context).detail("fd", fd).detail("Result", r->result).GetLastError().error(e);
+		TraceEvent(context).error(e).detail("Fd", fd).detail("Result", r->result).GetLastError();
 		if (err) err->set(e);
 		else throw e;
 	}
@@ -262,9 +260,9 @@ private:
 	ACTOR static void close_impl( int fd ) {
 		state Promise<Void> p;
 		state eio_req* r = eio_close(fd, 0, eio_callback, &p);
-		Void _ = wait( p.getFuture() );
+		wait( p.getFuture() );
 		if (r->result) error( "CloseError", fd, r );
-		TraceEvent("AsyncFileClosed").detail("fd", fd).suppressFor(1.0);
+		TraceEvent("AsyncFileClosed").suppressFor(1.0).detail("Fd", fd);
 	}
 
 	ACTOR static Future<int> read_impl( int fd, void* data, int length, int64_t offset ) {
@@ -272,7 +270,7 @@ private:
 		state Promise<Void> p;
 		//fprintf(stderr, "eio_read (fd=%d length=%d offset=%lld)\n", fd, length, offset);
 		state eio_req* r = eio_read(fd, data, length, offset, 0, eio_callback, &p);
-		try { Void _ = wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
 		try {
 			state int result = r->result;
 			//printf("eio read: %d/%d\n", r->result, length);
@@ -280,12 +278,12 @@ private:
 				error("ReadError", fd, r);
 				throw internal_error();
 			} else {
-				Void _ = wait( delay(0, taskID) );
+				wait( delay(0, taskID) );
 				return result;
 			}
 		} catch( Error &_e ) {
 			state Error e = _e;
-			Void _ = wait( delay(0, taskID) );
+			wait( delay(0, taskID) );
 			throw e;
 		}
 	}
@@ -294,9 +292,9 @@ private:
 		state int taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_write(fd, (void*)data.begin(), data.size(), offset, 0, eio_callback, &p);
-		try { Void _ = wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
 		if (r->result != data.size()) error("WriteError", fd, r, err);
-		Void _ = wait( delay(0, taskID) );
+		wait( delay(0, taskID) );
 		return Void();
 	}
 
@@ -304,9 +302,9 @@ private:
 		state int taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_ftruncate(fd, size, 0, eio_callback, &p);
-		try { Void _ = wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
 		if (r->result) error("TruncateError", fd, r, err);
-		Void _ = wait( delay(0, taskID) );
+		wait( delay(0, taskID) );
 		return Void();
 	}
 
@@ -336,17 +334,17 @@ private:
 		state Promise<Void> p;
 		state eio_req* r = start_fsync( fd, p, sync_metadata );
 		
-		try { Void _ = wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
 		try {
 			// Report any errors from prior write() or truncate() calls
 			err->report();
 
 			if (r->result) error("SyncError", fd, r);
-			Void _ = wait( delay(0, taskID) );
+			wait( delay(0, taskID) );
 			return Void();
 		} catch( Error &_e ) {
 			state Error e = _e;
-			Void _ = wait( delay(0, taskID) );
+			wait( delay(0, taskID) );
 			throw e;
 		}
 	}
@@ -355,14 +353,26 @@ private:
 		state int taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_fstat( fd, 0, eio_callback, &p );
-		try { Void _ = wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
-		if (r->result) error("StatError", fd, r);
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		if (r->result) error("FStatError", fd, r);
 		EIO_STRUCT_STAT *statdata = (EIO_STRUCT_STAT *)r->ptr2;
-		if (!statdata) error("StatBufferError", fd, r);
+		if (!statdata) error("FStatBufferError", fd, r);
 		state int64_t size = statdata->st_size;
-		free(statdata);
-		Void _ = wait( delay(0, taskID) );
+		wait( delay(0, taskID) );
 		return size;
+	}
+
+	ACTOR static Future<EIO_STRUCT_STAT> stat_impl( std::string filename ) {
+		state int taskID = g_network->getCurrentTask();
+		state Promise<Void> p;
+		state EIO_STRUCT_STAT statdata;
+		state eio_req* r = eio_stat( filename.c_str(), 0, eio_callback, &p );
+		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		if (r->result) error("StatError", 0, r);
+		if (!r->ptr2) error("StatBufferError", 0, r);
+		statdata = *EIO_STAT_BUF(r);
+		wait( delay (0, taskID) );
+		return statdata;
 	}
 
 	ACTOR template <class R> static Future<R> dispatch_impl( std::function<R()> func) {
@@ -390,9 +400,9 @@ private:
 			p.send(Void());
 			return 0;
 		}, &data);
-		try { Void _ = wait( data.done.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
+		try { wait( data.done.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
 
-		Void _ = wait( delay(0, taskID) );
+		wait( delay(0, taskID) );
 		if (data.result.isError()) throw data.result.getError();
 		return data.result.get();
 	}
@@ -401,7 +411,7 @@ private:
 
 	ACTOR static void poll_eio() {
 		while (eio_poll() == -1)
-			Void _ = wait( yield() );
+			wait( yield() );
 		want_poll = 0;
 	}
 
@@ -430,5 +440,6 @@ private:
 volatile int32_t AsyncFileEIO::want_poll = 0;
 #endif
 
+#include "flow/unactorcompiler.h"
 #endif 
 #endif

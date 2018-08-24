@@ -32,14 +32,7 @@ import traceback
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 import fdb
-
-assert not fdb.is_api_version_selected()
-try:
-    fdb.get_api_version()
-except RuntimeError as e:
-    assert str(e) == 'API version is not set'
 fdb.api_version(int(sys.argv[2]))
-assert int(sys.argv[2]) == fdb.get_api_version()
 
 from fdb import six
 from fdb.impl import strinc
@@ -98,7 +91,7 @@ class Stack:
                     else:
                         raw[i] = (raw[i][0], val)
                 except fdb.FDBError as e:
-                    # print('ERROR: %s' % repr(e))
+                    # print('ERROR: %r' % e)
                     raw[i] = (raw[i][0], fdb.tuple.pack((b'ERROR', str(e.code).encode('ascii'))))
 
         if count is None:
@@ -528,19 +521,6 @@ class Tester:
                     Tester.wait_empty(self.db, prefix)
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
-                    assert fdb.is_api_version_selected()
-                    api_version = fdb.get_api_version()
-                    try:
-                        fdb.api_version(api_version + 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    try:
-                        fdb.api_version(api_version - 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    fdb.api_version(api_version)
                     try:
                         db.options.set_location_cache_size(100001)
 
@@ -563,7 +543,7 @@ class Tester:
                 else:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:
-                # print('ERROR: %s' % repr(e))
+                # print('ERROR: %r' % e)
                 inst.stack.push(idx, fdb.tuple.pack((b"ERROR", str(e.code).encode('ascii'))))
 
             # print("        to %s" % self.stack)

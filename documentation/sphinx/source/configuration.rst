@@ -71,7 +71,7 @@ You can change coordinators when the following conditions are met:
 
 * a majority of the current coordinators are available;
 * all of the new coordinators are available; and
-* client and server cluster files are writable.
+* client and server cluster files and their parent directories are writable.
 
 ``fdbcli`` supports a ``coordinators`` command to specify the new list of coordinators::
 
@@ -533,4 +533,4 @@ The recommended minimum number of ``class=transaction`` (log server) processes i
 
 .. warning:: The conflict-resolution algorithm used by FoundationDB is conservative: it guarantees that no conflicting transactions will be committed, but it may fail to commit some transactions that theoretically could have been. The effects of this conservatism may increase as you increase the number of resolvers. It is therefore important to employ the recommended techniques for :ref:`minimizing conflicts <developer-guide-transaction-conflicts>` when increasing the number of resolvers.
 
-You can contact us on the `community forums <https://forums.foundationdb.org>`_ if you are interested in more details or if you are benchmarking or performance-tuning on large clusters. Also see our `performance benchmarks </performance>`_ for a baseline of how a well-configured cluster should perform.
+You can contact us on the `community forums <https://forums.foundationdb.org>`_ if you are interested in more details or if you are benchmarking or performance-tuning on large clusters. Also see our :doc:`performance benchmarks <performance>` for a baseline of how a well-configured cluster should perform.

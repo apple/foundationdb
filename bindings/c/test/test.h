@@ -27,7 +27,7 @@
 #include <pthread.h>
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 520
+#define FDB_API_VERSION 600
 #endif
 
 #include <foundationdb/fdb_c.h>

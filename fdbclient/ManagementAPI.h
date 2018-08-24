@@ -34,6 +34,8 @@ standard API and some knowledge of the contents of the system key space.
 #include "NativeAPI.h"
 #include "Status.h"
 #include "ReadYourWrites.h"
+#include "DatabaseConfiguration.h"
+#include "MonitorLeader.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
@@ -107,6 +109,9 @@ ConfigureAutoResult parseConfig( StatusObject const& status );
 Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf );  // Accepts a vector of configuration tokens
 Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::map<std::string, std::string> const& m );  // Accepts a full configuration in key/value format (from buildConfiguration)
 
+Future<DatabaseConfiguration> getDatabaseConfiguration( Database const& cx );
+Future<Void> waitForFullReplication( Database const& cx );
+
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
 	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) = 0;
@@ -156,6 +161,8 @@ Future<Void> checkDatabaseLock( Transaction* const& tr, UID const& id );
 Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 
 Future<int> setDDMode( Database const& cx, int const& mode );
+
+Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
 
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );

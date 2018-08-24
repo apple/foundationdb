@@ -27,7 +27,7 @@ struct RelocateShard {
 	KeyRange keys;
 	int priority;
 
-	RelocateShard() {}
+	RelocateShard() : priority(0) {}
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
@@ -175,7 +175,8 @@ private:
 	void insert(Team team, KeyRange const& range);
 };
 
-struct ShardInfo {
+// DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
+struct DDShardInfo {
 	Key key;
 	vector<UID> primarySrc;
 	vector<UID> remoteSrc;
@@ -183,7 +184,7 @@ struct ShardInfo {
 	vector<UID> remoteDest;
 	bool hasDest;
 
-	explicit ShardInfo(Key key) : key(key), hasDest(false) {}
+	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
@@ -191,7 +192,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<vector<UID>> primaryTeams;
 	std::set<vector<UID>> remoteTeams;
-	vector<ShardInfo> shards;
+	vector<DDShardInfo> shards;
 };
 
 Future<Void> dataDistribution(
@@ -202,12 +203,14 @@ Future<Void> dataDistribution(
 	Version const& recoveryCommitVersion,
 	std::vector<Optional<Key>> const& primaryDcId,
 	std::vector<Optional<Key>> const& remoteDcIds,
-	double* const& lastLimited);
+	double* const& lastLimited,
+	Future<Void> const& remoteRecovered);
 
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
 	PromiseStream<RelocateShard> const& output,
+	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
@@ -216,16 +219,18 @@ Future<Void> dataDistributionTracker(
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,
-	PromiseStream<RelocateShard> const& input,
+	PromiseStream<RelocateShard> const& output,
+	FutureStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
+	Reference<AsyncVar<bool>> const& processingUnhealthy,
 	vector<TeamCollectionInterface> const& teamCollection,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	MasterInterface const& mi,
 	int const& teamSize,
-	int const& durableStorageQuorum,
-	double* const& lastLimited );
+	double* const& lastLimited,
+	Version const& recoveryVersion);
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

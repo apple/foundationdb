@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/IndexedSet.h"
 #include "Ratekeeper.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -26,6 +25,7 @@
 #include "fdbrpc/Smoother.h"
 #include "ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
 	unlimited,  // TODO: rename to workload?
@@ -84,14 +84,13 @@ struct StorageQueueInfo {
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
-	double readReplyRate;
 	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), readReplyRate(0.0), limitReason(limitReason_t::unlimited)
+		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited)
 	{
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackStorageServerQueueInfo
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
 };
@@ -107,7 +106,7 @@ struct TLogQueueInfo {
 	TLogQueueInfo(UID id) : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
 		lastReply.instanceID = -1;
 	}
 };
@@ -147,7 +146,6 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 				myQueueInfo->value.valid = true;
 				myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
 				myQueueInfo->value.lastReply = reply.get();
-				myQueueInfo->value.readReplyRate = reply.get().readReplyRate;
 				if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
 					myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
 					myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
@@ -169,7 +167,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 				myQueueInfo->value.valid = false;
 			}
 
-			Void _ = wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
+			wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
 		}
 	} catch (...) {
 		// including cancellation
@@ -210,7 +208,7 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 				myQueueInfo->value.valid = false;
 			}
 
-			Void _ = wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
+			wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
 		}
 	} catch (...) {
 		// including cancellation
@@ -221,7 +219,7 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 
 ACTOR Future<Void> splitError( Future<Void> in, Promise<Void> errOut ) {
 	try {
-		Void _ = wait( in );
+		wait( in );
 		return Void();
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && !errOut.isSet())
@@ -238,7 +236,7 @@ ACTOR Future<Void> trackEachStorageServer(
 	state Promise<Void> err;
 	loop choose {
 		when (state std::pair< UID, Optional<StorageServerInterface> > change = waitNext(serverChanges) ) {
-			Void _ = wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
+			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
 				auto& a = actors[ change.first ];
 				a = Future<Void>();
@@ -246,7 +244,7 @@ ACTOR Future<Void> trackEachStorageServer(
 			} else
 				actors.erase( change.first );
 		}
-		when (Void _ = wait(err.getFuture())) {}
+		when (wait(err.getFuture())) {}
 	}
 }
 
@@ -263,7 +261,6 @@ void updateRate( Ratekeeper* self ) {
 	limitReason_t limitReason = limitReason_t::unlimited;
 
 	int sscount = 0;
-	double readReplyRateSum=0.0;
 
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
@@ -278,8 +275,6 @@ void updateRate( Ratekeeper* self ) {
 		++sscount;
 
 		ss.limitReason = limitReason_t::unlimited;
-
-		readReplyRateSum += ss.readReplyRate;
 
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
@@ -317,7 +312,7 @@ void updateRate( Ratekeeper* self ) {
 				.detail("ActualTPS", actualTPS)
 				.detail("InputRate", inputRate)
 				.detail("VerySmoothDurableBytesRate", ss.verySmoothDurableBytes.smoothRate())
-				.detail("b", b);
+				.detail("B", b);
 		}*/
 
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
@@ -428,7 +423,7 @@ void updateRate( Ratekeeper* self ) {
 		if( tl.lastReply.bytesInput - tl.lastReply.bytesDurable > tl.lastReply.storageBytes.free - minFreeSpace / 2 ) {
 			if(now() - self->lastWarning > 5.0) {
 				self->lastWarning = now();
-				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("reasonId", tl.id);
+				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("ReasonId", tl.id);
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
@@ -499,7 +494,6 @@ void updateRate( Ratekeeper* self ) {
 			.detail("StorageServers", sscount)
 			.detail("Proxies", self->proxy_transactionCountAndTime.size())
 			.detail("TLogs", tlcount)
-			.detail("ReadReplyRate", readReplyRateSum)
 			.detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
 			.detail("WorstStorageServerQueue", worstStorageQueueStorageServer)
@@ -537,14 +531,14 @@ ACTOR Future<Void> rateKeeper(
 	TraceEvent("RkStorageServerQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER).detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER).detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
 
-	tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
 	loop{
 		choose {
-			when (Void _ = wait( track )) { break; }
-			when (Void _ = wait( timeout )) {
+			when (wait( track )) { break; }
+			when (wait( timeout )) {
 				updateRate( &self );
 				double tooOld = now() - 1.0;
 				for(auto p=self.proxy_transactionCountAndTime.begin(); p!=self.proxy_transactionCountAndTime.end(); ) {
@@ -570,10 +564,10 @@ ACTOR Future<Void> rateKeeper(
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 				req.reply.send( reply );
 			}
-			when (Void _ = wait(err.getFuture())) {}
-			when (Void _ = wait(dbInfo->onChange())) {
-				if( tlogInterfs != dbInfo->get().logSystemConfig.allPresentLogs() ) {
-					tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+			when (wait(err.getFuture())) {}
+			when (wait(dbInfo->onChange())) {
+				if( tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs() ) {
+					tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 					tlogTrackers = std::vector<Future<Void>>();
 					for( int i = 0; i < tlogInterfs.size(); i++ )
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );

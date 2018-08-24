@@ -6,15 +6,10 @@ fdb-go
 This package requires:
 
 - Go 1.1+ with CGO enabled
-- FoundationDB C API 2.0.x, 3.0.x, or 4.x.y (part of the [FoundationDB clients package](https://apple.github.io/foundationdb/downloads.html#c))
+- [Mono](http://www.mono-project.com/) (macOS or Linux) or [Visual Studio](https://www.visualstudio.com/) (Windows)  (build-time only)
+- FoundationDB C API 2.0.x, 3.0.x, or 4.x.y (part of the [FoundationDB client packages](https://apple.github.io/foundationdb/downloads.html#c))
 
-Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-520.
-
-To build this package, in the top level of this repository run:
-
-    make fdb_go
-
-This will create binary packages for the appropriate platform within the "build" subdirectory of this folder.
+Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-600.
 
 To install this package, you can run the "fdb-go-install.sh" script:
 
@@ -23,6 +18,13 @@ To install this package, you can run the "fdb-go-install.sh" script:
 The "install" command of this script does not depend on the presence of the repo in general and will download the repository into
 your local go path. Running "localinstall" instead of "install" will use the local copy here (with a symlink) instead
 of downloading from the remote repository.
+
+You can also build this package, in the top level of this repository run:
+
+    make fdb_go
+
+This will create binary packages for the appropriate platform within the "build" subdirectory of this folder.
+
 
 Documentation
 -------------

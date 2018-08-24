@@ -35,6 +35,7 @@
 #include "Locality.h"
 #include "QueueModel.h"
 #include "MultiInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
 
@@ -116,7 +117,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 ACTOR template <class Request>
 Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce, bool triedAllOptions) {
 	if(backoff > 0.0) {
-		Void _ = wait(delay(backoff) || requestUnneeded);
+		wait(delay(backoff) || requestUnneeded);
 	}
 
 	if(requestUnneeded.isReady()) {
@@ -301,8 +302,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			for(int i=0; i<ok.size(); i++)
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual( alternatives->get(i, channel).getEndpoint(), FailureStatus(false) );
 			choose {
-				when ( Void _ = wait( quorum( ok, 1 ) ) ) {}
-				when ( Void _ = wait( ::delayJittered( delay ) ) ) {
+				when ( wait( quorum( ok, 1 ) ) ) {}
+				when ( wait( ::delayJittered( delay ) ) ) {
 					throw all_alternatives_failed(); 
 				}
 			}
@@ -385,7 +386,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						firstRequestEndpoint = Optional<uint64_t>();
 						break;
 					}
-					when(Void _ = wait(secondDelay)) {
+					when(wait(secondDelay)) {
 						secondDelay = Never();
 						if(model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
@@ -420,5 +421,7 @@ inline Future< REPLY_TYPE(Request) > loadBalance(
 {
 	return loadBalance( Reference<MultiInterface<Interface>>(alternatives), channel, request, taskID, atMostOnce, model );
 }
+
+#include "flow/unactorcompiler.h"
 
 #endif

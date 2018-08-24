@@ -29,14 +29,14 @@ public:
 		while (self->recoveryQueueDataSize < bytes) {
 			if (self->recoveryLoc == self->logSystem->getEnd()) {
 				// Recovery will be complete once the current recoveryQueue is consumed, so we no longer need self->logSystem
-				TraceEvent("PeekNextEnd").detail("queue", self->recoveryQueue.size()).detail("bytes", bytes).detail("loc", self->recoveryLoc).detail("end", self->logSystem->getEnd()); 
+				TraceEvent("PeekNextEnd").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
 				self->logSystem.clear();
 				break;
 			}
 
 			if(!self->cursor->hasMessage()) {
-				Void _ = wait( self->cursor->getMore() );
-				TraceEvent("PeekNextGetMore").detail("queue", self->recoveryQueue.size()).detail("bytes", bytes).detail("loc", self->recoveryLoc).detail("end", self->logSystem->getEnd()); 
+				wait( self->cursor->getMore() );
+				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;
 				}
@@ -51,7 +51,7 @@ public:
 			self->cursor->nextMessage();
 			if(!self->cursor->hasMessage()) self->recoveryLoc = self->cursor->version().version;
 
-			//TraceEvent("PeekNextResults").detail("from", self->recoveryLoc).detail("queue", self->recoveryQueue.size()).detail("bytes", bytes).detail("has", self->cursor->hasMessage()).detail("end", self->logSystem->getEnd()); 
+			//TraceEvent("PeekNextResults").detail("From", self->recoveryLoc).detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Has", self->cursor->hasMessage()).detail("End", self->logSystem->getEnd()); 
 		}
 		if(self->recoveryQueue.size() > 1) {
 			self->recoveryQueue[0] = concatenate(self->recoveryQueue.begin(), self->recoveryQueue.end());
@@ -63,7 +63,7 @@ public:
 
 		ASSERT(self->recoveryQueue[0].size() == self->recoveryQueueDataSize);
 
-		//TraceEvent("PeekNextReturn").detail("bytes", bytes).detail("queueSize", self->recoveryQueue.size());
+		//TraceEvent("PeekNextReturn").detail("Bytes", bytes).detail("QueueSize", self->recoveryQueue.size());
 		bytes = std::min(bytes, self->recoveryQueue[0].size());
 		Standalone<StringRef> result( self->recoveryQueue[0].substr(0,bytes), self->recoveryQueue[0].arena() );
 		self->recoveryQueue[0].contents() = self->recoveryQueue[0].substr(bytes);

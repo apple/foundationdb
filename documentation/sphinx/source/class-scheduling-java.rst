@@ -30,7 +30,7 @@ Before using the API, we need to specify the API version. This allows programs t
   private static final Database db;
 
   static {
-    fdb = FDB.selectAPIVersion(510);
+    fdb = FDB.selectAPIVersion(600);
     db = fdb.open();
   }
 
@@ -66,7 +66,7 @@ If this is all working, it looks like we are ready to start building a real appl
     private static final Database db;
 
     static {
-      fdb = FDB.selectAPIVersion(510);
+      fdb = FDB.selectAPIVersion(600);
       db = fdb.open();
     }
 
@@ -436,7 +436,7 @@ Here's the code for the scheduling tutorial:
     private static final Database db;
 
     static {
-      fdb = FDB.selectAPIVersion(510);
+      fdb = FDB.selectAPIVersion(600);
       db = fdb.open();
     }
 

@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload
@@ -59,25 +59,25 @@ struct CommitBugWorkload : TestWorkload
 			loop {
 				try {
 					tr.set(key, val1);
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 					break;
 				}
 				catch(Error &e) {
 					TraceEvent("CommitBugSetVal1Error").error(e);
 					TEST(e.code() == error_code_commit_unknown_result); //Commit unknown result
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 
 			loop {
 				try {
 					tr.set(key, val2);
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 					break;
 				}
 				catch(Error &e) {
 					TraceEvent("CommitBugSetVal2Error").error(e);
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 
@@ -94,19 +94,19 @@ struct CommitBugWorkload : TestWorkload
 				}
 				catch(Error &e) {
 					TraceEvent("CommitBugGetValError").error(e);
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 
 			loop {
 				try {
 					tr.clear(key);
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 					break;
 				}
 				catch(Error &e) {
 					TraceEvent("CommitBugClearValError").error(e);
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -134,7 +134,7 @@ struct CommitBugWorkload : TestWorkload
 
 					TraceEvent("CommitBug2SetKey").detail("Num", i+1);
 					tr.set(key, StringRef(format("%d", i+1)));
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 					TraceEvent("CommitBug2SetCompleted").detail("Num", i+1);
 					break;
 				}
@@ -147,11 +147,11 @@ struct CommitBugWorkload : TestWorkload
 								TraceEvent("CommitBug2SetKey").detail("Num", i+1);
 								tr.set(key, StringRef(format("%d", i+1)));
 								TraceEvent("CommitBug2SetCompleted").detail("Num", i+1);
-								Void _ = wait(tr.commit());
+								wait(tr.commit());
 								break;
 							}
 							catch(Error &err) {
-								Void _ = wait(tr.onError(err));
+								wait(tr.onError(err));
 							}
 						}
 
@@ -160,8 +160,8 @@ struct CommitBugWorkload : TestWorkload
 					else {
 						TEST(true); //Commit conflict
 
-						TraceEvent("CommitBug2Error").detail("AttemptedNum", i+1).error(e);
-						Void _ = wait(tr.onError(e));
+						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i+1);
+						wait(tr.onError(e));
 					}
 				}
 			}

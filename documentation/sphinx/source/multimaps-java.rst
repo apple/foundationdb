@@ -41,7 +41,7 @@ Because we need to store multiple values per index, we'll store them within keys
 
     ByteBuffer b = ByteBuffer.allocate(8);
     b.order(ByteOrder.LITTLE_ENDIAN);
-    b.putLong(1l);  
+    b.putLong(1l);
     tr.mutate(MutationType.ADD, key, b.array());
 
 By using a read-free atomic addition, FoundationDB guarantees that the addition operation will not conflict. As a result, values can be frequently added by multiple clients.
@@ -72,46 +72,46 @@ Here’s a simple implementation of multimaps with multisets as described:
         private static final Database db;
         private static final Subspace multi;
         private static final int N = 100;
-        
+
         static {
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             multi = new Subspace(Tuple.from("M"));
         }
-        
+
         private static void addHelp(TransactionContext tcx, final byte[] key, final long amount){
             tcx.run(tr -> {
                 ByteBuffer b = ByteBuffer.allocate(8);
                 b.order(ByteOrder.LITTLE_ENDIAN);
                 b.putLong(amount);
-                
+
                 tr.mutate(MutationType.ADD, key, b.array());
-                
+
                 return null;
             });
         }
-        
+
         private static long getLong(byte[] val){
             ByteBuffer b = ByteBuffer.allocate(8);
             b.order(ByteOrder.LITTLE_ENDIAN);
             b.put(val);
             return b.getLong(0);
         }
-        
-        public static void add(TransactionContext tcx, final String index, 
+
+        public static void add(TransactionContext tcx, final String index,
                                 final Object value){
             tcx.run(tr -> {
                 addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(),1l);
                 return null;
             });
         }
-        
+
         public static void subtract(TransactionContext tcx, final String index,
                                     final Object value){
             tcx.run(tr -> {
                 Future<byte[]> v = tr.get(multi.subspace(
                                         Tuple.from(index,value)).getKey());
-                
+
                 if(v.get() != null &&  getLong(v.get()) > 1l){
                     addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(), -1l);
                 } else {
@@ -120,7 +120,7 @@ Here’s a simple implementation of multimaps with multisets as described:
                 return null;
             });
         }
-        
+
         public static ArrayList<Object> get(TransactionContext tcx, final String index){
             return tcx.run(tr -> {
                 ArrayList<Object> vals = new ArrayList<Object>();
@@ -131,20 +131,20 @@ Here’s a simple implementation of multimaps with multisets as described:
                 return vals;
             });
         }
-        
-        public static HashMap<Object,Long> getCounts(TransactionContext tcx, 
+
+        public static HashMap<Object,Long> getCounts(TransactionContext tcx,
                                                     final String index){
             return tcx.run(tr -> {
                 HashMap<Object,Long> vals = new HashMap<Object,Long>();
                 for(KeyValue kv : tr.getRange(multi.subspace(
                                         Tuple.from(index)).range())){
-                    vals.put(multi.unpack(kv.getKey()).get(1), 
+                    vals.put(multi.unpack(kv.getKey()).get(1),
                             getLong(kv.getValue()));
                 }
                 return vals;
             });
         }
-        
+
         public static boolean isElement(TransactionContext tcx, final String index,
                                     final Object value){
             return tcx.run(tr -> {

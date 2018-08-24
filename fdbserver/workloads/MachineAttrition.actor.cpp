@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
 	static std::set<int> s;
@@ -123,7 +123,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		ASSERT( g_network->isSimulated() );
 
 		if( self->killDc ) {
-			Void _ = wait( delay( delayBeforeKill ) );
+			wait( delay( delayBeforeKill ) );
 
 			// decide on a machine to kill
 			ASSERT( self->machines.size() );
@@ -144,12 +144,12 @@ struct MachineAttritionWorkload : TestWorkload {
 			g_simulator.killDataCenter( target, kt );
 		} else {
 			while ( killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
-				TraceEvent("WorkerKillBegin").detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size());
+				TraceEvent("WorkerKillBegin").detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size());
 				TEST(true);  // Killing a machine
 
-				Void _ = wait( delay( delayBeforeKill ) );
+				wait( delay( delayBeforeKill ) );
 				TraceEvent("WorkerKillAfterDelay");
 
 				if(self->waitForVersion) {
@@ -161,7 +161,7 @@ struct MachineAttritionWorkload : TestWorkload {
 							Version _ = wait(tr.getReadVersion());
 							break;
 						} catch( Error &e ) {
-							Void _ = wait( tr.onError(e) );
+							wait( tr.onError(e) );
 						}
 					}
 				}
@@ -170,10 +170,10 @@ struct MachineAttritionWorkload : TestWorkload {
 				LocalityData targetMachine = self->machines.back();
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detailext("zoneId", targetMachine.zoneId())
-					.detail("Reboot", self->reboot).detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size()).detail("Replace", self->replacement);
+					.detailext("ZoneId", targetMachine.zoneId())
+					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);
 
 				if (self->reboot) {
 					if( g_random->random01() > 0.5 ) {
@@ -197,7 +197,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				if(!self->replacement)
 					self->machines.pop_back();
 
-				Void _ = wait( delay( meanDelay - delayBeforeKill ) );
+				wait( delay( meanDelay - delayBeforeKill ) );
 				delayBeforeKill = g_random->random01() * meanDelay;
 				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}

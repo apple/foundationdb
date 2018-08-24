@@ -88,10 +88,18 @@ volatile int32_t FastAllocator<Size>::pageCount;
 thread_local bool memSample_entered = false;
 #endif
 
+#ifdef ALLOC_INSTRUMENTATION_STDOUT
+thread_local bool inRecordAllocation = false;
+#endif
+
 void recordAllocation( void *ptr, size_t size ) {
 #ifdef ALLOC_INSTRUMENTATION_STDOUT
+	if( inRecordAllocation )
+		return;
+	inRecordAllocation = true;
 	std::string trace = platform::get_backtrace();
-	printf("Alloc\t%p\t%d\t%s\n", ptr, size, platform::get_backtrace().c_str());
+	printf("Alloc\t%p\t%d\t%s\n", ptr, size, trace.c_str());
+	inRecordAllocation = false;
 #endif
 #ifdef ALLOC_INSTRUMENTATION
 	if( memSample_entered )
@@ -143,7 +151,10 @@ void recordAllocation( void *ptr, size_t size ) {
 
 void recordDeallocation( void *ptr ) {
 #ifdef ALLOC_INSTRUMENTATION_STDOUT
+	if( inRecordAllocation )
+		return;
 	printf("Dealloc\t%p\n", ptr);
+	inRecordAllocation = false;
 #endif
 #ifdef ALLOC_INSTRUMENTATION
 	if( memSample_entered ) // could this lead to deallocations not being recorded?
@@ -408,6 +419,22 @@ void releaseAllThreadMagazines() {
 	FastAllocator<1024>::releaseThreadMagazines();
 	FastAllocator<2048>::releaseThreadMagazines();
 	FastAllocator<4096>::releaseThreadMagazines();
+}
+
+int64_t getTotalUnusedAllocatedMemory() {
+	int64_t unusedMemory = 0;
+
+	unusedMemory += FastAllocator<16>::getMemoryUnused();
+	unusedMemory += FastAllocator<32>::getMemoryUnused();
+	unusedMemory += FastAllocator<64>::getMemoryUnused();
+	unusedMemory += FastAllocator<128>::getMemoryUnused();
+	unusedMemory += FastAllocator<256>::getMemoryUnused();
+	unusedMemory += FastAllocator<512>::getMemoryUnused();
+	unusedMemory += FastAllocator<1024>::getMemoryUnused();
+	unusedMemory += FastAllocator<2048>::getMemoryUnused();
+	unusedMemory += FastAllocator<4096>::getMemoryUnused();
+
+	return unusedMemory;
 }
 
 template class FastAllocator<16>;

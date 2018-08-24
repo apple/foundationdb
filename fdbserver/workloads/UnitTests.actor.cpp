@@ -85,7 +85,7 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_timer = timer();
 
 			try {
-				Void _ = wait(test->func());
+				wait(test->func());
 			}
 			catch (Error& e) {
 				++self->testsFailed;
@@ -100,9 +100,9 @@ struct UnitTestWorkload : TestWorkload {
 
 			auto test = *t;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
+				.error(result, true)
 				.detail("Name", test->name)
 				.detail("File", test->file).detail("Line", test->line)
-				.error(result, true)
 				.detail("WallTime", wallTime)
 				.detail("FlowTime", simTime);
 		}
@@ -114,6 +114,6 @@ struct UnitTestWorkload : TestWorkload {
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
 TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
-	Void _ = wait(delay(60));
+	wait(delay(60));
 	return Void();
 }

@@ -42,6 +42,7 @@ packaging/msi/FDBInstaller.wix*
 .ccache
 .deps/
 .objs/
+.cmds/
 bindings/c/fdb_c.symbols
 bindings/go/build
 bindings/go/godoc
@@ -66,10 +67,12 @@ trace.*.xml
 .project
 .pydevproject
 .vscode
+.vs/
 FoundationDB.xcodeproj
 foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
+compile_commands.json
 
 # Temporary and user configuration files
 *~

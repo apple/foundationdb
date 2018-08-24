@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct FileSystemWorkload : TestWorkload {
 	int actorCount, writeActorCount, fileCount, pathMinChars, pathCharRange, serverCount, userIDCount;
@@ -132,10 +132,10 @@ struct FileSystemWorkload : TestWorkload {
 
 				for(int n=begin; n<end; n++)
 					self->initializeFile( &tr, self, n );
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -156,7 +156,7 @@ struct FileSystemWorkload : TestWorkload {
 						cx, self, startingNode + order[i], std::min(startingNode+order[i]+batchCount, nodesToSetUp * (self->clientId+1)) ) );
 				i++;
 			}
-			Void _ = wait( waitForAll(fs) );
+			wait( waitForAll(fs) );
 		}
 		TraceEvent("FileSetupOK").detail("ClientIdx", self->clientId).detail("ClientCount", self->clientCount)
 			.detail("StartingFile", startingNode).detail("FilesToSetUp", nodesToSetUp);
@@ -169,7 +169,7 @@ struct FileSystemWorkload : TestWorkload {
 			operation = new ServerDeletionCountQuery();
 		else
 			operation = new RecentModificationQuery();
-		Void _ = wait( timeout( self->operationClient( cx, self, operation, 0.01 ), 1.0, Void() ) );
+		wait( timeout( self->operationClient( cx, self, operation, 0.01 ), 1.0, Void() ) );
 		self->queries.clear();
 		self->writes.clear();
 
@@ -183,9 +183,9 @@ struct FileSystemWorkload : TestWorkload {
 				self->operationClient( cx, self, operation, self->actorCount / self->transactionsPerSecond ),
 				self->testDuration, Void() ) );
 		}
-		Void _ = wait( waitForAll( self->clients ) );
+		wait( waitForAll( self->clients ) );
 
-		Void _ = wait( delay( 0.01 ) );  // Make sure the deletion happens after actor cancellation
+		wait( delay( 0.01 ) );  // Make sure the deletion happens after actor cancellation
 		delete operation;
 		return Void();
 	}
@@ -202,7 +202,7 @@ struct FileSystemWorkload : TestWorkload {
 		state double clientBegin = now();
 		state double lastTime = now();
 		loop {
-			Void _ = wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 			state double tstart = now();
 			state Transaction tr(cx);
 			loop {
@@ -211,7 +211,7 @@ struct FileSystemWorkload : TestWorkload {
 					if( ver.present() )
 						break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 			if( self->shouldRecord( clientBegin ) ) {
@@ -259,10 +259,10 @@ struct FileSystemWorkload : TestWorkload {
 						tr.set( keyStr + "/size", format( "%d", size ) );
 					}
 					tr.set( keyStr + "/lastupdated", doubleToTestKey( time ) );
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 			if( self->shouldRecord( clientBegin ) ) {
@@ -310,7 +310,7 @@ struct FileSystemWorkload : TestWorkload {
 			begin = begin + transfered;
 		}
 		if( self->loggingQueries ) {
-			TraceEvent("DeletionQueryResults").detail("serverID", serverID)
+			TraceEvent("DeletionQueryResults").detail("ServerID", serverID)
 				.detail("PathBase", base).detail("DeletedFiles", deletedFiles);
 		}
 		return Optional<Version>(Version(0));

@@ -93,38 +93,52 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 	return ret;
 }
 
-std::string format( const char* form, ... ) {
+int vsformat( std::string &outputString, const char* form, va_list args) {
 	char buf[200];
-	va_list args;
 
-	va_start(args, form);
-	int size = vsnprintf(buf, sizeof(buf), form, args);
-	va_end(args);
+	va_list args2;
+	va_copy(args2, args);
+	int size = vsnprintf(buf, sizeof(buf), form, args2);
+	va_end(args2);
 
 	if(size >= 0 && size < sizeof(buf)) {
-		return std::string(buf, size);
+		outputString = std::string(buf, size);
+		return size;
 	}
 
 	#ifdef _WIN32
 	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary size
-	va_start(args, form);
-	size = _vscprintf(form, args);
-	va_end(args);
+	va_copy(args2, args);
+	size = _vscprintf(form, args2);
+	va_end(args2);
 	#endif
 
-	if (size < 0) throw internal_error();
+	if (size < 0) {
+		return -1;
+	}
 
 	TEST(true); //large format result
 
-	std::string s;
-	s.resize(size + 1);
-	va_start(args, form);
-	size = vsnprintf(&s[0], s.size(), form, args);
-	va_end(args);
-	if (size < 0 || size >= s.size()) throw internal_error();
+	outputString.resize(size + 1);
+	size = vsnprintf(&outputString[0], outputString.size(), form, args);
+	if (size < 0 || size >= outputString.size()) {
+		return -1;
+	}
 
-	s.resize(size);
-	return s;
+	outputString.resize(size);
+	return size;
+}
+
+std::string format( const char* form, ... ) {
+	va_list args;
+	va_start(args, form);
+
+	std::string str;
+	int result = vsformat(str, form, args);
+	va_end(args);
+
+	ASSERT(result >= 0);
+	return str;
 }
 
 Standalone<StringRef> strinc(StringRef const& str) {
@@ -158,12 +172,12 @@ StringRef strinc(StringRef const& str, Arena& arena) {
 }
 
 StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena) {
-	int16_t size = str.size();
-	uint8_t* s = new (arena) uint8_t[size + 12];
+	int32_t size = str.size();
+	uint8_t* s = new (arena) uint8_t[size + 14];
 	memcpy(s, str.begin(), size);
 	memset(&s[size], 0, 10);
-	memcpy(&s[size+10], &size, 2);
-	return StringRef(s,size + 12);
+	memcpy(&s[size+10], &size, 4);
+	return StringRef(s,size + 14);
 }
 
 Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {

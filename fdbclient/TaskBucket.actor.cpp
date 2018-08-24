@@ -41,7 +41,7 @@ struct UnblockFutureTaskFunc : TaskFuncBase {
 
 		bool is_set = wait(future->isSet(tr));
 		if (is_set) {
-			Void _ = wait(future->performAllActions(tr, taskBucket));
+			wait(future->performAllActions(tr, taskBucket));
 		}
 
 		return Void();
@@ -229,17 +229,17 @@ public:
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", "missing");
 			return false;
 		}
 
 		if (task->params.find(Task::reservedTaskParamValidValue) == task->params.end()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", "missing");
 			return false;
 		}
 
@@ -248,20 +248,20 @@ public:
 		Optional<Value> keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
 
 		if (!keyValue.present()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("keyValue", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+				.detail("KeyValue", "missing");
 			return false;
 		}
 
 		if (keyValue.get().compare(StringRef(task->params[Task::reservedTaskParamValidValue]))) {
-			TraceEvent("TB_taskVerify_abortedTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("keyValue", printable(keyValue.get()));
+			TraceEvent("TB_TaskVerifyAbortedTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+				.detail("KeyValue", printable(keyValue.get()));
 			return false;
 		}
 
@@ -277,7 +277,7 @@ public:
 				return verified;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -294,10 +294,10 @@ public:
 			validTask = _validTask;
 		}
 		if (!validTask) {
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 		}
 		else {
-			Void _ = wait(taskFunc->finish(tr, taskBucket, futureBucket, task));
+			wait(taskFunc->finish(tr, taskBucket, futureBucket, task));
 		}
 
 		return Void();
@@ -322,10 +322,10 @@ public:
 			state FlowLock::Releaser releaser;
 
 			// Wait until we are half way to the timeout version of this task
-			Void _ = wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 
 			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
-			Void _ = wait(task->extendMutex.take());
+			wait(task->extendMutex.take());
 			releaser = FlowLock::Releaser(task->extendMutex, 1);
 
 			loop {
@@ -335,12 +335,12 @@ public:
 
 					// Attempt to extend the task's timeout
 					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, false));
-					Void _ = wait(tr->commit());
+					wait(tr->commit());
 					task->timeoutVersion = newTimeout;
 					versionNow = tr->getCommittedVersion();
 					break;
 				} catch(Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 		}
@@ -368,40 +368,40 @@ public:
 							if (!validTask) {
 								bool isFinished = wait(taskBucket->isFinished(tr, task));
 								if (!isFinished) {
-									Void _ = wait(taskBucket->finish(tr, task));
+									wait(taskBucket->finish(tr, task));
 								}
-								Void _ = wait(tr->commit());
+								wait(tr->commit());
 								return true;
 							}
 							break;
 						}
 						catch (Error &e) {
-							Void _ = wait(tr->onError(e));
+							wait(tr->onError(e));
 						}
 					}
 				}
 
-				Void _ = wait(taskFunc->execute(cx, taskBucket, futureBucket, task) || extendTimeoutRepeatedly(cx, taskBucket, task));
+				wait(taskFunc->execute(cx, taskBucket, futureBucket, task) || extendTimeoutRepeatedly(cx, taskBucket, task));
 
-				if (BUGGIFY) Void _ = wait(delay(10.0));
-				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				if (BUGGIFY) wait(delay(10.0));
+				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);
 				}));
 			}
 		} catch(Error &e) {
 			TraceEvent(SevWarn, "TB_ExecuteFailure")
+				.error(e)
 				.detail("TaskUID", task->key.printable())
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-				.detail("Priority", task->getPriority())
-				.error(e);
+				.detail("Priority", task->getPriority());
 			try {
-				Void _ = wait(taskFunc->handleError(cx, task, e));
+				wait(taskFunc->handleError(cx, task, e));
 			} catch(Error &e) {
 				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
+					.error(e) // output handleError() error instead of original task error
 					.detail("TaskUID", task->key.printable())
 					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-					.detail("Priority", task->getPriority())
-					.error(e);  // output handleError() error instead of original task error
+					.detail("Priority", task->getPriority());
 			}
 		}
 
@@ -429,7 +429,7 @@ public:
 				getTasks.clear();
 				for(int i = 0, imax = std::min<unsigned int>(getBatchSize, availableSlots.size()); i < imax; ++i)
 					getTasks.push_back(taskBucket->getOne(cx));
-				Void _ = wait(waitForAllReady(getTasks));
+				wait(waitForAllReady(getTasks));
 
 				bool done = false;
 				for(int i = 0; i < getTasks.size(); ++i) {
@@ -460,7 +460,7 @@ public:
 			Future<Void> w = ready(waitForAny(tasks));
 			if(!availableSlots.empty())
 				w = w || delay(*pollDelay * (0.9 + g_random->random01() / 5));   // Jittered by 20 %, so +/- 10%
-			Void _ = wait(w);
+			wait(w);
 
 			// Check all of the task slots, any that are finished should be replaced with Never() and their slots added back to availableSlots
 			for(int i = 0; i < tasks.size(); ++i) {
@@ -480,11 +480,11 @@ public:
 				Optional<Value> pausedVal = wait(tr->get(taskBucket->pauseKey));
 				paused->set(pausedVal.present());
 				state Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
-				Void _ = wait(tr->commit());
-				Void _ = wait(watchPausedFuture);
+				wait(tr->commit());
+				wait(watchPausedFuture);
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -495,10 +495,10 @@ public:
 
 		loop {
 			while(paused->get()) {
-				Void _ = wait(paused->onChange() || watchPausedFuture);
+				wait(paused->onChange() || watchPausedFuture);
 			}
 
-			Void _ = wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() || watchPausedFuture);
+			wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() || watchPausedFuture);
 		}
 	}
 
@@ -597,11 +597,11 @@ public:
 				Optional<Value> val = wait(tr->get(taskBucket->active.key()));
 				startingValue = val;
 
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
@@ -612,7 +612,7 @@ public:
 				try {
 					taskBucket->setOptions(tr);
 
-					Void _ = wait(delay(CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_DELAY));
+					wait(delay(CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_DELAY));
 					bool isActiveKey = wait(getActiveKey(tr, taskBucket, startingValue));
 					if (isActiveKey) {
 						TEST(true);	// checkActive return true
@@ -620,7 +620,7 @@ public:
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr->onError(e) );
+					wait( tr->onError(e) );
 				}
 			}
 		}
@@ -704,14 +704,14 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("TaskBucket").detail("debugPrintRange", "Print DB Range").detail("key", printable(subspace.key())).detail("count", values.size()).detail("msg", printable(msg));
+		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", printable(subspace.key())).detail("Count", values.size()).detail("Msg", printable(msg));
 		/*
 		printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
 			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), printable(s.value).c_str());
-			TraceEvent("TaskBucket").detail("debugPrintRange", printable(msg))
-				.detail("key", printable(s.key))
-				.detail("value", printable(s.value));
+			TraceEvent("TaskBucket").detail("DebugPrintRange", printable(msg))
+				.detail("Key", printable(s.key))
+				.detail("Value", printable(s.value));
 		}*/
 
 		return Void();
@@ -721,7 +721,7 @@ public:
 		taskBucket->setOptions(tr);
 
 		// First make sure it's safe to keep running
-		Void _ = wait(taskBucket->keepRunning(tr, task));
+		wait(taskBucket->keepRunning(tr, task));
 
 
 		// This is where the task definition currently exists
@@ -835,9 +835,9 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTr
 	Optional<Value> validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
-		TraceEvent(SevError, "TB_addTask_invalidKey")
-			.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-			.detail("validationKey", printable(validationKey));
+		TraceEvent(SevError, "TB_AddTaskInvalidKey")
+			.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			.detail("ValidationKey", printable(validationKey));
 		throw invalid_option_value();
 	}
 
@@ -980,7 +980,7 @@ public:
 
 		tr->clear(taskFuture->blocks.pack(StringRef()));
 
-		Void _ = wait(_join(tr, taskBucket, taskFuture, vectorFuture));
+		wait(_join(tr, taskBucket, taskFuture, vectorFuture));
 
 		return Void();
 	}
@@ -997,7 +997,7 @@ public:
 			onSetFutures.push_back( vectorFuture[i]->onSet(tr, taskBucket, task) );
 		}
 
-		Void _ = wait( waitForAll(onSetFutures) );
+		wait( waitForAll(onSetFutures) );
 
 		return Void();
 	}
@@ -1019,7 +1019,7 @@ public:
 
 		if (is_set) {
 			TEST(true);	// is_set == true
-			Void _ = wait(performAction(tr, taskBucket, taskFuture, task));
+			wait(performAction(tr, taskBucket, taskFuture, task));
 		}
 		else {
 			TEST(true);	// is_set == false
@@ -1037,7 +1037,7 @@ public:
 
 		tr->clear(taskFuture->blocks.range());
 
-		Void _ = wait(performAllActions(tr, taskBucket, taskFuture));
+		wait(performAllActions(tr, taskBucket, taskFuture));
 
 		return Void();
 	}
@@ -1048,7 +1048,7 @@ public:
 		if (task && TaskFuncBase::isValidTask(task)) {
 			Reference<TaskFuncBase> taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc.getPtr()) {
-				Void _ = wait(taskFunc->finish(tr, taskBucket, taskFuture->futureBucket, task));
+				wait(taskFunc->finish(tr, taskBucket, taskFuture->futureBucket, task));
 			}
 		}
 
@@ -1082,7 +1082,7 @@ public:
 			actions.push_back(performAction(tr, taskBucket, taskFuture, task));
 		}
 
-		Void _ = wait(waitForAll(actions));
+		wait(waitForAll(actions));
 
 		return Void();
 	}
@@ -1092,7 +1092,7 @@ public:
 
 		task->params[Task::reservedTaskParamKeyAddTask] = task->params[Task::reservedTaskParamKeyType];
 		task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("AddTask");
-		Void _ = wait(onSet(tr, taskBucket, taskFuture, task));
+		wait(onSet(tr, taskBucket, taskFuture, task));
 
 		return Void();
 	}
@@ -1103,16 +1103,16 @@ public:
 		Optional<Value> validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
-			TraceEvent(SevError, "TB_onSetAddTask_invalidKey")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("validationKey", printable(validationKey));
+			TraceEvent(SevError, "TB_OnSetAddTaskInvalidKey")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ValidationKey", printable(validationKey));
 			throw invalid_option_value();
 		}
 
 		task->params[Task::reservedTaskParamValidKey] = validationKey;
 		task->params[Task::reservedTaskParamValidValue] = validationValue.get();
 
-		Void _ = wait(onSetAddTask(tr, taskBucket, taskFuture, task));
+		wait(onSetAddTask(tr, taskBucket, taskFuture, task));
 
 		return Void();
 	}
@@ -1132,7 +1132,7 @@ public:
 		std::vector<Reference<TaskFuture>> vectorFuture;
 		state Reference<TaskFuture> future = taskFuture->futureBucket->future(tr);
 		vectorFuture.push_back(future);
-		Void _ = wait(join(tr, taskBucket, taskFuture, vectorFuture));
+		wait(join(tr, taskBucket, taskFuture, vectorFuture));
 		return future;
 	}
 };

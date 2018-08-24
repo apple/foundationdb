@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-
 #include "fdbrpc/IAsyncFile.h"
 #include "AsyncFile.actor.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static const double ROLL_TIME = 5.0;
 
@@ -60,13 +59,13 @@ struct IOLog {
 		void dumpMetrics(std::string name){
 			double elapsed = now() - startTime;
 			TraceEvent("ProcessLog")
-				.detail("name", name)
-				.detail("hz", count / elapsed)
-				.detail("latency_ms", 1e3 * sumSq / elapsed / 2.0)
-				.detail("avg_latency_ms", 1e3 * sum / count)
-				.detail("max_latency_ms", 1e3 * max)
-				.detail("startTime", startTime)
-				.detail("elapsed", elapsed);
+				.detail("Name", name)
+				.detail("Hz", count / elapsed)
+				.detail("Latency", sumSq / elapsed / 2.0)
+				.detail("AvgLatency", sum / count)
+				.detail("MaxLatency", max)
+				.detail("StartTime", startTime)
+				.detail("Elapsed", elapsed);
 		}
 	};
 
@@ -204,7 +203,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		for(int i = 0; i < self->numParallelReads; i++)
 			self->readBuffers.push_back(self->allocateBuffer(self->readSize));
 
-		Void _ = wait(self->openFile(self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize, self->fileSize!=0));
+		wait(self->openFile(self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize, self->fileSize!=0));
 
 		int64_t fileSize = wait(self->fileHandle->file->size());
 		self->fileSize = fileSize;
@@ -225,13 +224,13 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		state StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		Void _ = wait(timeout(self->runReadTest(self), self->testDuration, Void()));
+		wait(timeout(self->runReadTest(self), self->testDuration, Void()));
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		//Try to let the IO operations finish so we can clean up after them
-		Void _ = wait(timeout(waitForAll(self->readFutures), 10, Void()));
+		wait(timeout(waitForAll(self->readFutures), 10, Void()));
 
 		return Void();
 	}
@@ -242,7 +241,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		state double lastTime = now();
 		loop {
 			if (fixedRate)
-				Void _ = wait( poisson( &lastTime, 1.0 / fixedRate ) );
+				wait( poisson( &lastTime, 1.0 / fixedRate ) );
 
 			//state Future<Void> d = delay( 1/25. * (.75 + 0.5*g_random->random01()) );
 			int64_t offset;
@@ -272,7 +271,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 			if (self->ioLog)
 				self->ioLog->logIOCompletion(writeFlag, begin, now());
 			self->bytesRead += self->readSize;
-			//Void _ = wait(d);
+			//wait(d);
 		}
 	}
 
@@ -285,7 +284,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 
 			for(int i=0; i<self->numParallelReads; i++)
 				readers.push_back( readLoop(self, i, self->fixedRate / self->numParallelReads) );
-			Void _ = wait(waitForAll(readers));
+			wait(waitForAll(readers));
 
 			delete self->ioLog;
 			return Void();
@@ -325,12 +324,12 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 				);
 			}
 
-			Void _ = wait(waitForAll(self->readFutures));
+			wait(waitForAll(self->readFutures));
 			self->bytesRead += self->readSize * self->numParallelReads;
 
 			self->readFutures.clear();
 
-			Void _ = wait( delay(0) );
+			wait( delay(0) );
 		}
 	}
 

@@ -20,11 +20,11 @@
 
 #include "FDBLibTLSPolicy.h"
 #include "FDBLibTLSSession.h"
+#include "Trace.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
-#include <openssl/objects.h>
-#include <openssl/obj_mac.h>
+#include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
@@ -34,271 +34,95 @@
 #include <string>
 #include <vector>
 
+#include <string.h>
+#include <limits.h>
 
-FDBLibTLSPolicy::FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin, ITLSLogFunc logf):
-	plugin(plugin), logf(logf), tls_cfg(NULL), session_created(false), cert_data_set(false),
-	key_data_set(false), verify_peers_set(false), verify_cert(true), verify_time(true) {
+FDBLibTLSPolicy::FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin):
+	plugin(plugin), tls_cfg(NULL), roots(NULL), session_created(false), ca_data_set(false),
+	cert_data_set(false), key_data_set(false), verify_peers_set(false) {
 
 	if ((tls_cfg = tls_config_new()) == NULL) {
-		logf("FDBLibTLSConfigError", NULL, true, NULL);
+		TraceEvent(SevError, "FDBLibTLSConfigError");
 		throw std::runtime_error("FDBLibTLSConfigError");
 	}
 
 	// Require client certificates for authentication.
 	tls_config_verify_client(tls_cfg);
-
-	// Name verification is always manually handled (if requested via configuration).
-	tls_config_insecure_noverifyname(tls_cfg);
 }
 
 FDBLibTLSPolicy::~FDBLibTLSPolicy() {
+	sk_X509_pop_free(roots, X509_free);
 	tls_config_free(tls_cfg);
 }
 
-ITLSSession* FDBLibTLSPolicy::create_session(bool is_client, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) {
+ITLSSession* FDBLibTLSPolicy::create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) {
+	if (is_client) {
+		// If verify peers has been set then there is no point specifying a
+		// servername, since this will be ignored - the servername should be
+		// matched by the verify criteria instead.
+		if (verify_peers_set && servername != NULL) {
+			TraceEvent(SevError, "FDBLibTLSVerifyPeersWithServerName");
+			return NULL;
+		}
+
+		// If verify peers has not been set, then require a server name to
+		// avoid an accidental lack of name validation.
+		if (!verify_peers_set && servername == NULL) {
+			TraceEvent(SevError, "FDBLibTLSNoServerName");
+			return NULL;
+		}
+	}
+
 	session_created = true;
 	try {
-		return new FDBLibTLSSession(Reference<FDBLibTLSPolicy>::addRef(this), is_client, send_func, send_ctx, recv_func, recv_ctx, uid);
+		return new FDBLibTLSSession(Reference<FDBLibTLSPolicy>::addRef(this), is_client, servername, send_func, send_ctx, recv_func, recv_ctx, uid);
 	} catch ( ... ) {
 		return NULL;
 	}
 }
 
-static int hexValue(char c) {
-	static char const digits[] = "0123456789ABCDEF";
+static int password_cb(char *buf, int size, int rwflag, void *u) {
+	const char *password = (const char *)u;
+	int plen;
 
-	if (c >= 'a' && c <= 'f')
-		c -= ('a' - 'A');
+	if (size < 0)
+		return 0;
+	if (u == NULL)
+		return 0;
 
-	int value = std::find(digits, digits + 16, c) - digits;
-	if (value >= 16) {
-		throw std::runtime_error("hexValue");
-	}
-	return value;
+	plen = strlen(password);
+	if (plen > size)
+		return 0;
+
+	// Note: buf does not need to be NUL-terminated since
+	// we return an explicit length.
+	strncpy(buf, password, size);
+
+	return plen;
 }
 
-// Does not handle "raw" form (e.g. #28C4D1), only escaped text
-static std::string de4514(std::string const& input, int start, int& out_end) {
-	std::string output;
-
-	if(input[start] == '#' || input[start] == ' ') {
-		out_end = start;
-		return output;
-	}
-
-	int space_count = 0;
-
-	for(int p = start; p < input.size();) {
-		switch(input[p]) {
-		case '\\': // Handle escaped sequence
-
-			// Backslash escaping nothing!
-			if(p == input.size() - 1) {
-				out_end = p;
-				goto FIN;
-			}
-
-			switch(input[p+1]) {
-			case ' ':
-			case '"':
-			case '#':
-			case '+':
-			case ',':
-			case ';':
-			case '<':
-			case '=':
-			case '>':
-			case '\\':
-				output += input[p+1];
-				p += 2;
-				space_count = 0;
-				continue;
-
-			default:
-				// Backslash escaping pair of hex digits requires two characters
-				if(p == input.size() - 2) {
-					out_end = p;
-					goto FIN;
-				}
-
-				try {
-					output += hexValue(input[p+1]) * 16 + hexValue(input[p+2]);
-					p += 3;
-					space_count = 0;
-					continue;
-				} catch( ... ) {
-					out_end = p;
-					goto FIN;
-				}
-			}
-
-		case '"':
-		case '+':
-		case ',':
-		case ';':
-		case '<':
-		case '>':
-		case 0:
-			// All of these must have been escaped
-			out_end = p;
-			goto FIN;
-
-		default:
-			// Character is what it is
-			output += input[p];
-			if(input[p] == ' ')
-				space_count++;
-			else
-				space_count = 0;
-			p++;
-		}
-	}
-
-	out_end = input.size();
-
- FIN:
-	out_end -= space_count;
-	output.resize(output.size() - space_count);
-
-	return output;
-}
-
-static std::pair<std::string, std::string> splitPair(std::string const& input, char c) {
-	int p = input.find_first_of(c);
-	if(p == input.npos) {
-		throw std::runtime_error("splitPair");
-	}
-	return std::make_pair(input.substr(0, p), input.substr(p+1, input.size()));
-}
-
-static int abbrevToNID(std::string const& sn) {
-	int nid = NID_undef;
-
-	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU")
-		nid = OBJ_sn2nid(sn.c_str());
-	if (nid == NID_undef)
-		throw std::runtime_error("abbrevToNID");
-
-	return nid;
-}
-
-void FDBLibTLSPolicy::parse_verify(std::string input) {
-	int s = 0;
-
-	while (s < input.size()) {
-		int eq = input.find('=', s);
-
-		if (eq == input.npos)
-			throw std::runtime_error("parse_verify");
-
-		std::string term = input.substr(s, eq - s);
-
-		if (term.find("Check.") == 0) {
-			if (eq + 2 > input.size())
-				throw std::runtime_error("parse_verify");
-			if (eq + 2 != input.size() && input[eq + 2] != ',')
-				throw std::runtime_error("parse_verify");
-
-			bool* flag;
-
-			if (term == "Check.Valid")
-				flag = &verify_cert;
-			else if (term == "Check.Unexpired")
-				flag = &verify_time;
-			else
-				throw std::runtime_error("parse_verify");
-
-			if (input[eq + 1] == '0')
-				*flag = false;
-			else if (input[eq + 1] == '1')
-				*flag = true;
-			else
-				throw std::runtime_error("parse_verify");
-
-			s = eq + 3;
-		} else {
-			std::map<int, std::string>* criteria = &subject_criteria;
-
-			if (term.find('.') != term.npos) {
-				auto scoped = splitPair(term, '.');
-
-				if (scoped.first == "S" || scoped.first == "Subject")
-					criteria = &subject_criteria;
-				else if (scoped.first == "I" || scoped.first == "Issuer")
-					criteria = &issuer_criteria;
-				else
-					throw std::runtime_error("parse_verify");
-
-				term = scoped.second;
-			}
-
-			int remain;
-			auto unesc = de4514(input, eq + 1, remain);
-
-			if (remain == eq + 1)
-				throw std::runtime_error("parse_verify");
-
-			criteria->insert(std::make_pair(abbrevToNID(term), unesc));
-
-			if (remain != input.size() && input[remain] != ',')
-				throw std::runtime_error("parse_verify");
-
-			s = remain + 1;
-		}
-	}
-}
-
-void FDBLibTLSPolicy::reset_verify() {
-        verify_cert = true;
-        verify_time = true;
-	subject_criteria = {};
-	issuer_criteria = {};
-}
-
-int password_cb(char *buf, int size, int rwflag, void *u) {
-	// A no-op password callback is provided simply to stop libcrypto
-	// from trying to use its own password reading functionality.
-	return 0;
-}
-
-bool FDBLibTLSPolicy::set_cert_data(const uint8_t* cert_data, int cert_len) {
+struct stack_st_X509* FDBLibTLSPolicy::parse_cert_pem(const uint8_t* cert_pem, size_t cert_pem_len) {
 	struct stack_st_X509 *certs = NULL;
-	unsigned long errnum;
 	X509 *cert = NULL;
 	BIO *bio = NULL;
-	long data_len;
-	char *data;
+	int errnum;
 	bool rc = false;
 
-	// The cert data contains one or more PEM encoded certificates - the
-	// first certificate is for this host, with any additional certificates
-	// being the full certificate chain. As such, the last certificate
-	// is the trusted root certificate. If only one certificate is provided
-	// then it is required to be a self-signed certificate, which is also
-	// treated as the trusted root.
-
-	if (cert_data_set) {
-		logf("FDBLibTLSCertAlreadySet", NULL, true, NULL);
+	if (cert_pem_len > INT_MAX)
+		goto err;
+	if ((bio = BIO_new_mem_buf((void *)cert_pem, cert_pem_len)) == NULL) {
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory");
 		goto err;
 	}
-	if (session_created) {
-		logf("FDBLibTLSPolicyAlreadyActive", NULL, true, NULL);
-		goto err;
-	}
-
 	if ((certs = sk_X509_new_null()) == NULL) {
-		logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
-		goto err;
-	}
-	if ((bio = BIO_new_mem_buf((void *)cert_data, cert_len)) == NULL) {
-		logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory");
 		goto err;
 	}
 
 	ERR_clear_error();
 	while ((cert = PEM_read_bio_X509(bio, NULL, password_cb, NULL)) != NULL) {
 		if (!sk_X509_push(certs, cert)) {
-			logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
 			goto err;
 		}
 	}
@@ -309,110 +133,186 @@ bool FDBLibTLSPolicy::set_cert_data(const uint8_t* cert_data, int cert_len) {
 		char errbuf[256];
 
 		ERR_error_string_n(errnum, errbuf, sizeof(errbuf));
-		logf("FDBLibTLSCertDataError", NULL, true, "LibcryptoErrorMessage", errbuf, NULL);
+		TraceEvent(SevError, "FDBLibTLSCertDataError").detail("LibcryptoErrorMessage", errbuf);
 		goto err;
 	}
 
 	if (sk_X509_num(certs) < 1) {
-		logf("FDBLibTLSNoCerts", NULL, true, NULL);
+		TraceEvent(SevError, "FDBLibTLSNoCerts");
 		goto err;
 	}
 
-	BIO_free_all(bio);
-	if ((bio = BIO_new(BIO_s_mem())) == NULL) {
-		logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
-		goto err;
-	}
-	if (!PEM_write_bio_X509(bio, sk_X509_value(certs, sk_X509_num(certs) - 1))) {
-		logf("FDBLibTLSCertWriteError", NULL, true, NULL);
-		goto err;
-	}
-	if ((data_len = BIO_get_mem_data(bio, &data)) <= 0) {
-		logf("FDBLibTLSCertError", NULL, true, NULL);
-		goto err;
-	}
+	BIO_free(bio);
 
-	if (tls_config_set_ca_mem(tls_cfg, (const uint8_t *)data, data_len) == -1) {
-		logf("FDBLibTLSSetCAError", NULL, true, "LibTLSErrorMessage", tls_config_error(tls_cfg), NULL);
-		goto err;
-	}
-
-	if (sk_X509_num(certs) > 1) {
-		BIO_free_all(bio);
-		if ((bio = BIO_new(BIO_s_mem())) == NULL) {
-			logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
-			goto err;
-		}
-		for (int i = 0; i < sk_X509_num(certs) - 1; i++) {
-			if (!PEM_write_bio_X509(bio, sk_X509_value(certs, i))) {
-				logf("FDBLibTLSCertWriteError", NULL, true, NULL);
-				goto err;
-			}
-		}
-		if ((data_len = BIO_get_mem_data(bio, &data)) <= 0) {
-			logf("FDBLibTLSCertError", NULL, true, NULL);
-			goto err;
-		}
-	}
-
-	if (tls_config_set_cert_mem(tls_cfg, (const uint8_t *)data, data_len) == -1) {
-		logf("FDBLibTLSSetCertError", NULL, true, "LibTLSErrorMessage", tls_config_error(tls_cfg), NULL);
-		goto err;
-	}
-
-	rc = true;
+	return certs;
 
  err:
 	sk_X509_pop_free(certs, X509_free);
 	X509_free(cert);
-	BIO_free_all(bio);
+	BIO_free(bio);
 
-	return rc;
+	return NULL;
 }
 
-bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len) {
-	if (key_data_set) {
-		logf("FDBLibTLSKeyAlreadySet", NULL, true, NULL);
+bool FDBLibTLSPolicy::set_ca_data(const uint8_t* ca_data, int ca_len) {
+	if (ca_data_set) {
+		TraceEvent(SevError, "FDBLibTLSCAAlreadySet");
 		return false;
 	}
 	if (session_created) {
-		logf("FDBLibTLSPolicyAlreadyActive", NULL, true, NULL);
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
 		return false;
 	}
 
-	if (tls_config_set_key_mem(tls_cfg, key_data, key_len) == -1) {
-		logf("FDBLibTLSKeyError", NULL, true, "LibTLSErrorMessage", tls_config_error(tls_cfg), NULL);
+	if (ca_len < 0)
+		return false;
+	sk_X509_pop_free(roots, X509_free);
+	if ((roots = parse_cert_pem(ca_data, ca_len)) == NULL)
+		return false;
+
+	if (tls_config_set_ca_mem(tls_cfg, ca_data, ca_len) == -1) {
+		TraceEvent(SevError, "FDBLibTLSCAError").detail("LibTLSErrorMessage", tls_config_error(tls_cfg));
 		return false;
 	}
 
-	key_data_set = true;
+	ca_data_set = true;
 
 	return true;
 }
 
-bool FDBLibTLSPolicy::set_verify_peers(const uint8_t* verify_peers, int verify_peers_len) {
-	if (verify_peers_set) {
-		logf("FDBLibTLSVerifyPeersAlreadySet", NULL, true, NULL);
+bool FDBLibTLSPolicy::set_cert_data(const uint8_t* cert_data, int cert_len) {
+	if (cert_data_set) {
+		TraceEvent(SevError, "FDBLibTLSCertAlreadySet");
 		return false;
 	}
 	if (session_created) {
-		logf("FDBLibTLSPolicyAlreadyActive", NULL, true, NULL);
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
 		return false;
 	}
 
-	try {
-		parse_verify(std::string((const char*)verify_peers, verify_peers_len));
-	} catch ( const std::runtime_error& e ) {
-		reset_verify();
-		logf("FDBLibTLSVerifyPeersParseError", NULL, true, "Config", verify_peers, NULL);
+	if (tls_config_set_cert_mem(tls_cfg, cert_data, cert_len) == -1) {
+		TraceEvent(SevError, "FDBLibTLSCertError").detail("LibTLSErrorMessage", tls_config_error(tls_cfg));
 		return false;
 	}
 
-	if (!verify_cert)
-		tls_config_insecure_noverifycert(tls_cfg);
+	cert_data_set = true;
 
-	if (!verify_time)
-		tls_config_insecure_noverifytime(tls_cfg);
+	return true;
+}
+
+bool FDBLibTLSPolicy::set_key_data(const uint8_t* key_data, int key_len, const char* password) {
+	EVP_PKEY *key = NULL;
+	BIO *bio = NULL;
+	bool rc = false;
+
+	if (key_data_set) {
+		TraceEvent(SevError, "FDBLibTLSKeyAlreadySet");
+		goto err;
+	}
+	if (session_created) {
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		goto err;
+	}
+
+	if (password != NULL) {
+		char *data;
+		long len;
+
+		if ((bio = BIO_new_mem_buf((void *)key_data, key_len)) == NULL) {
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			goto err;
+		}
+		ERR_clear_error();
+		if ((key = PEM_read_bio_PrivateKey(bio, NULL, password_cb, (void *)password)) == NULL) {
+			int errnum = ERR_peek_error();
+			char errbuf[256];
+
+			if ((ERR_GET_LIB(errnum) == ERR_LIB_PEM && ERR_GET_REASON(errnum) == PEM_R_BAD_DECRYPT) ||
+				(ERR_GET_LIB(errnum) == ERR_LIB_EVP && ERR_GET_REASON(errnum) == EVP_R_BAD_DECRYPT)) {
+				TraceEvent(SevError, "FDBLibTLSIncorrectPassword");
+			} else {
+				ERR_error_string_n(errnum, errbuf, sizeof(errbuf));
+				TraceEvent(SevError, "FDBLibTLSPrivateKeyError").detail("LibcryptoErrorMessage", errbuf);
+			}
+			goto err;
+		}
+		BIO_free(bio);
+		if ((bio = BIO_new(BIO_s_mem())) == NULL) {
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			goto err;
+		}
+		if (!PEM_write_bio_PrivateKey(bio, key, NULL, NULL, 0, NULL, NULL)) {
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			goto err;
+		}
+		if ((len = BIO_get_mem_data(bio, &data)) <= 0) {
+			TraceEvent(SevError, "FDBLibTLSOutOfMemory");
+			goto err;
+		}
+		if (tls_config_set_key_mem(tls_cfg, (const uint8_t *)data, len) == -1) {
+			TraceEvent(SevError, "FDBLibTLSKeyError").detail("LibTLSErrorMessage", tls_config_error(tls_cfg));
+			goto err;
+		}
+	} else {
+		if (tls_config_set_key_mem(tls_cfg, key_data, key_len) == -1) {
+			TraceEvent(SevError, "FDBLibTLSKeyError").detail("LibTLSErrorMessage", tls_config_error(tls_cfg));
+			goto err;
+		}
+	}
+
+	key_data_set = true;
+	rc = true;
+
+ err:
+	BIO_free(bio);
+	EVP_PKEY_free(key);
+	return rc;
+}
+
+bool FDBLibTLSPolicy::set_verify_peers(int count, const uint8_t* verify_peers[], int verify_peers_len[]) {
+	if (verify_peers_set) {
+		TraceEvent(SevError, "FDBLibTLSVerifyPeersAlreadySet");
+		return false;
+	}
+	if (session_created) {
+		TraceEvent(SevError, "FDBLibTLSPolicyAlreadyActive");
+		return false;
+	}
+
+	if (count < 1) {
+		TraceEvent(SevError, "FDBLibTLSNoVerifyPeers");
+		return false;
+	}
+
+	for (int i = 0; i < count; i++) {
+		try {
+			std::string verifyString((const char*)verify_peers[i], verify_peers_len[i]);
+			int start = 0;
+			while(start < verifyString.size()) {
+				int split = verifyString.find('|', start);
+				if(split == std::string::npos) {
+					break;
+				}
+				if(split == start || verifyString[split-1] != '\\') {
+					Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start,split-start)));
+					verify_rules.push_back(verify);
+					start = split+1;
+				}
+			}
+			Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start)));
+			verify_rules.push_back(verify);
+		} catch ( const std::runtime_error& e ) {
+			verify_rules.clear();
+			std::string verifyString((const char*)verify_peers[i], verify_peers_len[i]);
+			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);
+			return false;
+		}
+	}
+
+	// All verification is manually handled (as requested via configuration).
+	tls_config_insecure_noverifycert(tls_cfg);
+	tls_config_insecure_noverifyname(tls_cfg);
+	tls_config_insecure_noverifytime(tls_cfg);
 
 	verify_peers_set = true;
 

@@ -236,6 +236,7 @@ void runTests(struct ResultSet *rs) {
 	runTest(&clearRangeGetRange, tr, rs, "C: get range cached values with clear ranges throughput");
 	runTest(&interleavedSetsGets, tr, rs, "C: interleaved sets and gets on a single key throughput");
 
+	fdb_transaction_destroy(tr);
 	fdb_database_destroy(db);
 	fdb_stop_network();
 }
@@ -243,7 +244,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	checkError(fdb_select_api_version(520), "select API version", rs);
+	checkError(fdb_select_api_version(600), "select API version", rs);
 	printf("Running RYW Benchmark test at client version: %s\n", fdb_get_client_version());
 
 	keys = generateKeys(numKeys, keySize);

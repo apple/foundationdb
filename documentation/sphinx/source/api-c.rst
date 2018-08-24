@@ -118,7 +118,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the :macro:`FDB_API_VERSION` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 510
+  #define FDB_API_VERSION 600
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -249,7 +249,7 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 .. function:: fdb_error_t fdb_future_block_until_ready(FDBFuture* future)
 
    Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error -- you must call :func:`fdb_future_get_error()` to determine that. :func:`fdb_future_block_until_ready()` will return an error only in exceptional conditions (e.g. out of memory or other operating system resources).
-   
+
    .. warning:: Never call this function from a callback passed to :func:`fdb_future_set_callback()`. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
 
 .. function:: fdb_bool_t fdb_future_is_ready(FDBFuture* future)
@@ -324,19 +324,19 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
       Set to the length of the value (in bytes).
 
    |future-memory-mine|
-   
+
 .. function:: fdb_error_t fdb_future_get_string_array(FDBFuture* future, const char*** out_strings, int* out_count)
 
     Extracts an array of null-terminated C strings from an :type:`FDBFuture` into caller-provided variables. |future-warning|
-    
+
     |future-get-return1| |future-get-return2|.
-    
+
     :data:`*out_strings`
       Set to point to the first string in the array.
-      
+
     :data:`*out_count`
       Set to the number of strings in the array.
-    
+
     |future-memory-mine|
 
 .. function:: fdb_error_t fdb_future_get_keyvalue_array(FDBFuture* future, FDBKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more)
@@ -512,15 +512,15 @@ Applications must provide error handling and an appropriate retry loop around th
 .. function:: FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length)
 
     Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing :data:`key_name` and its associated value.
-    
+
     |future-return0| an array of strings. |future-return1| call :func:`fdb_future_get_string_array()` to extract the string array, |future-return2|
-  
+
     :data:`key_name`
         A pointer to the name of the key whose location is to be queried.
-        
+
     :data:`key_name_length`
         |length-of| :data:`key_name`.
-  
+
 .. |range-limited-by| replace:: If this limit was reached before the end of the specified range, then the :data:`*more` return of :func:`fdb_future_get_keyvalue_array()` will be set to a non-zero value.
 
 .. function:: FDBFuture* fdb_transaction_get_range(FDBTransaction* transaction, uint8_t const* begin_key_name, int begin_key_name_length, fdb_bool_t begin_or_equal, int begin_offset, uint8_t const* end_key_name, int end_key_name_length, fdb_bool_t end_or_equal, int end_offset, int limit, int target_bytes, FDBStreamingMode mode, int iteration, fdb_bool_t snapshot, fdb_bool_t reverse)
@@ -637,52 +637,52 @@ Applications must provide error handling and an appropriate retry loop around th
 .. function:: void fdb_transaction_atomic_op(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, uint8_t const* param, int param_length, FDBMutationType operationType)
 
     |sets-and-clears1| to perform the operation indicated by ``operationType`` with operand ``param`` to the value stored by the given key.
-    
+
     |atomic-ops-blurb1|
-    
+
     |atomic-ops-blurb2|
-    
+
     |atomic-ops-blurb3|
-    
+
     .. warning :: |atomic-ops-warning|
-    
+
     |sets-and-clears2|
-    
+
     :data:`key_name`
         A pointer to the name of the key whose value is to be mutated.
-        
+
     :data:`key_name_length`
         |length-of| :data:`key_name`.
-        
+
     :data:`param`
         A pointer to the parameter with which the atomic operation will mutate the value associated with :data:`key_name`.
-        
+
     :data:`param_length`
         |length-of| :data:`param`.
-        
+
     :data:`operation_type`
         One of the :type:`FDBMutationType` values indicating which operation should be performed.
-        
+
 .. type:: FDBMutationType
 
     An enumeration of available opcodes to be passed to :func:`fdb_transaction_atomic_op()`
-    
+
     :data:`FDB_MUTATION_TYPE_ADD`
-    
+
     |atomic-add1|
-    
+
     |atomic-add2|
-    
+
     :data:`FDB_MUTATION_TYPE_AND`
-    
+
     |atomic-and|
-    
+
     :data:`FDB_MUTATION_TYPE_OR`
-    
+
     |atomic-or|
-    
+
     :data:`FDB_MUTATION_TYPE_XOR`
-    
+
     |atomic-xor|
 
     :data:`FDB_MUTATION_TYPE_MAX`
@@ -694,13 +694,13 @@ Applications must provide error handling and an appropriate retry loop around th
     :data:`FDB_MUTATION_TYPE_BYTE_MAX`
 
     |atomic-byte-max|
-    
+
     :data:`FDB_MUTATION_TYPE_MIN`
 
     |atomic-min1|
 
     |atomic-max-min|
-    
+
     :data:`FDB_MUTATION_TYPE_BYTE_MIN`
 
     |atomic-byte-min|
@@ -726,7 +726,7 @@ Applications must provide error handling and an appropriate retry loop around th
     |atomic-versionstamps-2|
 
     .. warning :: |atomic-versionstamps-tuple-warning-value|
-      
+
 .. function:: FDBFuture* fdb_transaction_commit(FDBTransaction* transaction)
 
    Attempts to commit the sets and clears previously applied to the database snapshot represented by :data:`transaction` to the actual database. The commit may or may not succeed -- in particular, if a conflicting transaction previously committed, then the commit must fail in order to preserve transactional isolation. If the commit does succeed, the transaction is durably committed to the database and all subsequently started transactions will observe its effects.
@@ -799,11 +799,11 @@ Applications must provide error handling and an appropriate retry loop around th
 .. function:: void fdb_transaction_cancel(FDBTransaction* transaction)
 
    |transaction-cancel-blurb|
-   
+
    .. warning :: |transaction-reset-cancel-warning|
-   
+
    .. warning :: |transaction-commit-cancel-warning|
-   
+
 .. _conflictRanges:
 
 .. function:: fdb_error_t fdb_transaction_add_conflict_range(FDBTransaction* transaction, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, FDBConflictRangeType type)

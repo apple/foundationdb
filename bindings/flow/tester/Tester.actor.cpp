@@ -327,8 +327,8 @@ struct EmptyStackFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		//Void _ = wait(printFlowTesterStack(&(data->stack)));
-		//Void _ = wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+		//wait(printFlowTesterStack(&(data->stack)));
+		//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 		data->stack.clear();
 		return Void();
 	}
@@ -340,7 +340,7 @@ struct SwapFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackSwap(&(data->stack)));
+		wait(stackSwap(&(data->stack)));
 		return Void();
 	}
 };
@@ -365,7 +365,7 @@ struct SubFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackSub(&(data->stack)));
+		wait(stackSub(&(data->stack)));
 		return Void();
 	}
 };
@@ -376,7 +376,7 @@ struct ConcatFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackConcat(&(data->stack)));
+		wait(stackConcat(&(data->stack)));
 		return Void();
 	}
 };
@@ -399,11 +399,11 @@ struct LogStackFunc : InstructionFunc {
 					tr->set(pk, pv.substr(0, std::min(pv.size(), 40000)));
 				}
 
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 				return Void();
 			}
 			catch(Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -422,11 +422,11 @@ struct LogStackFunc : InstructionFunc {
 			ASSERT(it.size() == 1);
 			entries[data->stack.data.size()] = it.front();
 			if(entries.size() == 100) {
-				Void _ = wait(logStack(data, entries, prefix));
+				wait(logStack(data, entries, prefix));
 				entries.clear();
 			}
 
-			Void _ = wait(logStack(data, entries, prefix));
+			wait(logStack(data, entries, prefix));
 		}
 
 		return Void();
@@ -440,7 +440,7 @@ REGISTER_INSTRUCTION_FUNC(LogStackFunc);
 //
 ACTOR Future<Standalone<StringRef>> waitForVoid(Future<Void> f) {
 	try{
-		Void _ = wait(f);
+		wait(f);
 		Tuple t;
 		t.append(LiteralStringRef("RESULT_NOT_PRESENT"));
 		return t.pack();
@@ -605,7 +605,7 @@ struct SetFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -765,7 +765,7 @@ struct ClearFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -902,7 +902,7 @@ struct ClearRangeFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -933,7 +933,7 @@ struct ClearRangeStartWithFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -1346,7 +1346,7 @@ struct WaitEmptyFunc : InstructionFunc {
 				break;
 			}
 			catch(Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
@@ -1493,7 +1493,7 @@ struct AtomicOPFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -1572,7 +1572,7 @@ ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, String
 			return Void();
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -1605,8 +1605,8 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(), printable(StringRef(data->instructions[idx].value)).c_str(),
 				// isDatabase, isSnapshot, data->stack.data.size());
 
-			//Void _ = wait(printFlowTesterStack(&(data->stack)));
-			//Void _ = wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+			//wait(printFlowTesterStack(&(data->stack)));
+			//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 
 			state Reference<InstructionData> instruction = Reference<InstructionData>(new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
 			if (isDatabase) {
@@ -1618,14 +1618,10 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			}
 
 			// Flow directory operations don't support snapshot reads
-			if (isDirectory && isSnapshot) {
-				Version readVersion = wait(instruction->tr->getReadVersion());
-				instruction->tr = Reference<Transaction>(new Transaction(data->db));
-				instruction->tr->setVersion(readVersion);
-			}
+			ASSERT(!isDirectory || !isSnapshot);
 
 			data->stack.index = idx;
-			Void _ = wait(InstructionFunc::call(op.toString(), data, instruction));
+			wait(InstructionFunc::call(op.toString(), data, instruction));
 		}
 		catch (Error& e) {
 			if(LOG_ERRORS) {
@@ -1652,9 +1648,9 @@ ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Data
 	ASSERT(data);
 	try {
 		data->db = db;
-		Void _ = wait(getInstructions(data, prefix));
-		Void _ = wait(doInstructions(data));
-		Void _ = wait(waitForAll(data->subThreads));
+		wait(getInstructions(data, prefix));
+		wait(doInstructions(data));
+		wait(waitForAll(data->subThreads));
 	}
 	catch (Error& e) {
 		TraceEvent(SevError, "FlowTesterDataRunError").error(e);
@@ -1722,7 +1718,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		Reference<DatabaseContext> db = cluster->createDatabase();
 
 		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
-		Void _ = wait(runTest(data, db, prefix));
+		wait(runTest(data, db, prefix));
 
 		// Stopping the network returns from g_network->run() and allows
 		// the program to terminate
@@ -1743,7 +1739,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(510);
+		API *fdb = FDB::API::selectAPIVersion(600);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1754,9 +1750,9 @@ ACTOR void _test_versionstamp() {
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
-		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
-		Void _ = wait(tr->commit()); // should use retry loop
+		wait(tr->commit()); // should use retry loop
 
 		tr->reset();
 
@@ -1820,7 +1816,7 @@ int main( int argc, char** argv ) {
 	}
 	catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 }

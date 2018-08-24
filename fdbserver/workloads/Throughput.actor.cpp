@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -26,6 +25,7 @@
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/Smoother.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ITransactor : ReferenceCounted<ITransactor> {
 	struct Stats {
@@ -99,11 +99,11 @@ struct RWTransactor : ITransactor {
 				state vector<Future<Optional<Value>>> reads;
 				for(int i=0; i<self->reads; i++)
 					reads.push_back( getLatency( tr.get( keys[i] ), &rrLatency ) );
-				Void _ = wait( waitForAll(reads) );
+				wait( waitForAll(reads) );
 				for(int i=0; i<self->writes; i++)
 					tr.set( keys[i], values[i] );
 				state double t_beforeCommit = now();
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 
 				stats->transactions++;
 				stats->reads += self->reads;
@@ -113,7 +113,7 @@ struct RWTransactor : ITransactor {
 				stats->rowReadLatency += rrLatency / self->reads;
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 				stats->retries++;
 			}
 		}
@@ -255,7 +255,7 @@ struct MeasurePeriodically : IMeasurer {
 		state double elapsed = 0;
 		loop {
 			elapsed += self->period;
-			Void _ = wait( delayUntil(startT + elapsed) );
+			wait( delayUntil(startT + elapsed) );
 			self->nextPeriod(elapsed);
 		}
 	}
@@ -356,10 +356,10 @@ struct ThroughputWorkload : TestWorkload {
 	ACTOR static Future<Void> throughputActor( Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add ) {
 		state double before = now();
 		state ITransactor::Stats stats;
-		Void _ = wait( self->op->doTransaction(db, &stats) );
+		wait( self->op->doTransaction(db, &stats) );
 		state double after = now();
 
-		Void _ = wait( delay( 0.0 ) );
+		wait( delay( 0.0 ) );
 		stats.totalLatency = after-before;
 		self->measurer->addTransaction( &stats, after );
 		

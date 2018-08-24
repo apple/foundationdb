@@ -25,18 +25,24 @@ CLEAN_TARGETS += GENNAME()_clean
 
 GENNAME()_ALL_SOURCES := $(addprefix GENDIR/,GENSOURCES)
 
-GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
-GENNAME()_GENERATED_SOURCES := $(patsubst %.actor.h,%.actor.g.h,$(patsubst %.actor.cpp,%.actor.g.cpp,$(filter %.actor.h %.actor.cpp,$(GENNAME()_ALL_SOURCES))))
+GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
+GENNAME()_GENERATED_SOURCES := $(patsubst %.actor.h,%.actor.g.h,$(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter %.actor.h %.actor.cpp,$(GENNAME()_ALL_SOURCES))))
 GENERATED_SOURCES += $(GENNAME()_GENERATED_SOURCES)
 
 -include GENDIR/local.mk
+
+# We need to include the current directory for .g.actor.cpp files emitted into
+# .objs that use includes not based at the root of fdb.
+GENNAME()_CFLAGS := -I GENDIR -I ${OBJDIR}/GENDIR ${GENNAME()_CFLAGS}
 
 # If we have any static libs, we have to wrap them in the appropriate
 # compiler flag magic
 ifeq ($(GENNAME()_STATIC_LIBS),)
   GENNAME()_STATIC_LIBS_REAL :=
 else
-  GENNAME()_STATIC_LIBS_REAL := -Wl,-Bstatic $(GENNAME()_STATIC_LIBS) -Wl,-Bdynamic
+# MacOS doesn't recognize -Wl,-Bstatic, but is happy with -Bstatic
+# gcc will handle both, so we prefer the non -Wl version
+  GENNAME()_STATIC_LIBS_REAL := -Bstatic $(GENNAME()_STATIC_LIBS) -Bdynamic
 endif
 
 # If we have any -L directives in our LDFLAGS, we need to add those
@@ -45,22 +51,27 @@ VPATH += $(addprefix :,$(patsubst -L%,%,$(filter -L%,$(GENNAME()_LDFLAGS))))
 
 IGNORE := $(shell echo $(VPATH))
 
-GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(GENNAME()_BUILD_SOURCES:=.o))
+GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(filter-out $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))) $(filter $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))
 GENNAME()_DEPS := $(addprefix $(DEPSDIR)/,$(GENNAME()_BUILD_SOURCES:=.d))
 
 .PHONY: GENNAME()_clean GENNAME
 
 GENNAME: GENTARGET
 
+$(CMDDIR)/GENDIR/compile_commands.json: build/project_commands.py ${GENNAME()_ALL_SOURCES}
+	@mkdir -p $(basename $@)
+	@build/project_commands.py --cflags="$(CFLAGS) $(GENNAME()_CFLAGS)" --cxxflags="$(CXXFLAGS) $(GENNAME()_CXXFLAGS)" --sources="$(GENNAME()_ALL_SOURCES)" --out="$@"
+
 -include $(GENNAME()_DEPS)
 
-GENDIR/%.actor.g.cpp: GENDIR/%.actor.cpp $(ACTORCOMPILER)
+$(OBJDIR)/GENDIR/%.actor.g.cpp: GENDIR/%.actor.cpp $(ACTORCOMPILER)
 	@echo "Actorcompiling $<"
+	@mkdir -p $(OBJDIR)/$(<D)
 	@$(MONO) $(ACTORCOMPILER) $< $@ >/dev/null
 
 GENDIR/%.actor.g.h: GENDIR/%.actor.h $(ACTORCOMPILER)
 	@if [ -e $< ]; then echo "Actorcompiling $<" ; $(MONO) $(ACTORCOMPILER) $< $@ >/dev/null ; fi
-.PRECIOUS: GENDIR/%.actor.g.cpp GENDIR/%.actor.g.h
+.PRECIOUS: $(OBJDIR)/GENDIR/%.actor.g.cpp GENDIR/%.actor.g.h
 
 # The order-only dependency on the generated .h files is to force make
 # to actor compile all headers before attempting compilation of any .c
@@ -68,9 +79,21 @@ GENDIR/%.actor.g.h: GENDIR/%.actor.h $(ACTORCOMPILER)
 # generated headers before compilation.
 
 $(OBJDIR)/GENDIR/%.cpp.o: GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
-	@echo "Compiling      $<"
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
 ifeq ($(VERBOSE),1)
-	@echo "$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@"
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
+endif
+	@mkdir -p $(DEPSDIR)/$(<D) && \
+	mkdir -p $(OBJDIR)/$(<D) && \
+	$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
+	cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
+	sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
+	rm $(DEPSDIR)/$<.d.tmp
+
+$(OBJDIR)/GENDIR/%.cpp.o: $(OBJDIR)/GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
+ifeq ($(VERBOSE),1)
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
 endif
 	@mkdir -p $(DEPSDIR)/$(<D) && \
 	mkdir -p $(OBJDIR)/$(<D) && \
@@ -109,6 +132,6 @@ GENNAME()_clean:
 	@rm -rf $(DEPSDIR)/GENDIR
 	@rm -rf $(OBJDIR)/GENDIR
 
-GENTARGET: $(GENNAME()_OBJECTS) $(GENNAME()_LIBS) $(GENNAME()_STATIC_LIBS) $(ALL_MAKEFILES) build/link-wrapper.sh build/link-validate.sh
+GENTARGET: $(GENNAME()_OBJECTS) $(GENNAME()_LIBS) $(ALL_MAKEFILES) build/link-wrapper.sh build/link-validate.sh
 	@mkdir -p GENOUTDIR
 	@./build/link-wrapper.sh GENCONFIGTYPE GENNAME $@ $(TARGET_LIBC_VERSION)

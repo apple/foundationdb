@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
@@ -77,7 +77,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> _start( ConfigureDatabaseWorkload *self, Database cx ) {
 		if( self->clientId == 0 ) {
 			self->clients.push_back( timeout( self->singleDB( self, cx ), self->testDuration, Void() ) );
-			Void _ = wait( waitForAll( self->clients ) );
+			wait( waitForAll( self->clients ) );
 		}
 		return Void();
 	}
@@ -98,17 +98,17 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if( randomChoice == 0 ) {
 				double waitDuration = 3.0 * g_random->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
-				Void _ = wait( delay( waitDuration ) );
+				wait( delay( waitDuration ) );
 			}
 			else if( randomChoice == 1 ) {
 				tr = Transaction( cx );
 				loop {
 					try {
 						tr.clear( normalKeys );
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 				}
 			}
@@ -129,24 +129,27 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 								uint64_t nextVal = val.present() ? valueToUInt64( val.get() ) + 1 : 0;
 								tr.set( randomKey, format( "%016llx", nextVal ) );
 							}
-							Void _ = wait( tr.commit() );
+							wait( tr.commit() );
 							amtLoaded += 10;
 							break;
 						}
 						catch( Error& e ) {
-							Void _ = wait( tr.onError( e ) );
+							wait( tr.onError( e ) );
 							++self->retries;
 						}
 					}
-					Void _ = wait( delay( 0.1 ) );
+					wait( delay( 0.1 ) );
 				}
 
 				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);
 			}
 			else if( randomChoice == 3 ) {
-				//TraceEvent("ConfigureTestConfigureBegin").detail("newConfig", newConfig);
+				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int redundancy = g_random->randomInt( 0, sizeof(redundancies)/sizeof(redundancies[0]));
 				std::string config = redundancies[redundancy];
+				if(config == "triple" && g_simulator.physicalDatacenters > 4) {
+					config = "double";
+				}
 				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
 					config = "three_data_hall";
 				}
@@ -156,15 +159,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				ConfigurationResult::Type _ = wait( changeConfig( cx, config ) );
-				//TraceEvent("ConfigureTestConfigureEnd").detail("newConfig", newConfig);
+				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			}
 			else if( randomChoice == 4 ) {
-				//TraceEvent("ConfigureTestQuorumBegin").detail("newQuorum", s);
+				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
 				auto ch = autoQuorumChange();
 				if (g_random->randomInt(0,2))
 					ch = nameQuorumChange( format("NewName%d", g_random->randomInt(0,100)), ch );
 				CoordinatorsResult::Type _ = wait( changeQuorum( cx, ch ) );
-				//TraceEvent("ConfigureTestConfigureEnd").detail("newQuorum", s);
+				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			}
 			else if ( randomChoice == 5) {
 				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))] ) );

@@ -49,6 +49,7 @@ BlobStoreEndpoint::Stats BlobStoreEndpoint::Stats::operator-(const Stats &rhs) {
 BlobStoreEndpoint::Stats BlobStoreEndpoint::s_stats;
 
 BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
+	secure_connection = 1;
 	connect_tries = CLIENT_KNOBS->BLOBSTORE_CONNECT_TRIES;
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
 	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
@@ -56,6 +57,10 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
 	concurrent_requests = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS;
+	list_requests_per_second = CLIENT_KNOBS->BLOBSTORE_LIST_REQUESTS_PER_SECOND;
+	write_requests_per_second = CLIENT_KNOBS->BLOBSTORE_WRITE_REQUESTS_PER_SECOND;
+	read_requests_per_second = CLIENT_KNOBS->BLOBSTORE_READ_REQUESTS_PER_SECOND;
+	delete_requests_per_second = CLIENT_KNOBS->BLOBSTORE_DELETE_REQUESTS_PER_SECOND;
 	multipart_max_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MAX_PART_SIZE;
 	multipart_min_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE;
 	concurrent_uploads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_UPLOADS;
@@ -71,12 +76,17 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	#define TRY_PARAM(n, sn) if(name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) { n = value; return true; }
+	TRY_PARAM(secure_connection, sc)
 	TRY_PARAM(connect_tries, ct);
 	TRY_PARAM(connect_timeout, cto);
 	TRY_PARAM(max_connection_life, mcl);
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout, rto);
 	TRY_PARAM(requests_per_second, rps);
+	TRY_PARAM(list_requests_per_second, lrps);
+	TRY_PARAM(write_requests_per_second, wrps);
+	TRY_PARAM(read_requests_per_second, rrps);
+	TRY_PARAM(delete_requests_per_second, drps);
 	TRY_PARAM(concurrent_requests, cr);
 	TRY_PARAM(multipart_max_part_size, maxps);
 	TRY_PARAM(multipart_min_part_size, minps);
@@ -98,12 +108,17 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	static BlobKnobs defaults;
 	std::string r;
 	#define _CHECK_PARAM(n, sn) if(n != defaults. n) { r += format("%s%s=%d", r.empty() ? "" : "&", #sn, n); }
+	_CHECK_PARAM(secure_connection, sc);
 	_CHECK_PARAM(connect_tries, ct);
 	_CHECK_PARAM(connect_timeout, cto);
 	_CHECK_PARAM(max_connection_life, mcl);
 	_CHECK_PARAM(request_tries, rt);
 	_CHECK_PARAM(request_timeout, rto);
 	_CHECK_PARAM(requests_per_second, rps);
+	_CHECK_PARAM(list_requests_per_second, lrps);
+	_CHECK_PARAM(write_requests_per_second, wrps);
+	_CHECK_PARAM(read_requests_per_second, rrps);
+	_CHECK_PARAM(delete_requests_per_second, drps);
 	_CHECK_PARAM(concurrent_requests, cr);
 	_CHECK_PARAM(multipart_max_part_size, maxps);
 	_CHECK_PARAM(multipart_min_part_size, minps);
@@ -149,7 +164,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			StringRef value = t.eat("&");
 			char *valueEnd;
 			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
-			if(*valueEnd || ivalue == 0)
+			if(*valueEnd || (ivalue == 0 && value.toString() != "0"))
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
 			if(!knobs.set(name, ivalue))
 				throw format("%s is not a valid parameter name", name.toString().c_str());
@@ -167,7 +182,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
-		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url).suppressFor(60, true);
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").suppressFor(60).detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
 		throw backup_invalid_url();
 	}
 }
@@ -192,6 +207,8 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 }
 
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	wait(b->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
@@ -204,6 +221,8 @@ Future<bool> BlobStoreEndpoint::objectExists(std::string const &bucket, std::str
 }
 
 ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	wait(b->requestRateDelete->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
@@ -230,7 +249,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {
+				when(wait(done)) {
 					done = Never();
 				}
 
@@ -248,7 +267,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 
 			// This is just a precaution to avoid having too many outstanding delete actors waiting to run
 			while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
-				Void _ = wait(deleteFutures.front());
+				wait(deleteFutures.front());
 				deleteFutures.pop_front();
 			}
 		}
@@ -258,7 +277,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 	}
 
 	while(deleteFutures.size() > 0) {
-		Void _ = wait(deleteFutures.front());
+		wait(deleteFutures.front());
 		deleteFutures.pop_front();
 	}
 
@@ -270,9 +289,10 @@ Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
+	wait(b->requestRateWrite->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket;
 	HTTP::Headers headers;
-
 	Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
 	return Void();
 }
@@ -282,6 +302,8 @@ Future<Void> BlobStoreEndpoint::createBucket(std::string const &bucket) {
 }
 
 ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	wait(b->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
@@ -319,11 +341,11 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		if(json.type() == json_spirit::obj_type)
 			return json.get_obj();
 		else
-			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
+			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").suppressFor(60).detail("File", path);
 
 	} catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, errorEventType).detail("File", path).error(e).suppressFor(60, true);
+			TraceEvent(SevWarn, errorEventType).error(e).suppressFor(60).detail("File", path);
 	}
 
 	return Optional<json_spirit::mObject>();
@@ -338,7 +360,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 	for(auto &f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
 
-	Void _ = wait(waitForAll(reads));
+	wait(waitForAll(reads));
 
 	std::string key = b->key + "@" + b->host;
 
@@ -386,23 +408,23 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 
 		// If the connection expires in the future then return it
 		if(rconn.expirationTime > now()) {
-		TraceEvent("BlobStoreEndpointReusingConnected")
+		TraceEvent("BlobStoreEndpointReusingConnected").suppressFor(60)
 			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			.detail("ExpiresIn", rconn.expirationTime - now())
-			.suppressFor(60, true);
+			.detail("ExpiresIn", rconn.expirationTime - now());
 			return rconn;
 		}
 	}
+	std::string service = b->service;
+	if (service.empty())
+		service = b->knobs.secure_connection ? "https" : "http";
+	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
 
-	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, b->service.empty() ? "http" : b->service));
-
-	TraceEvent("BlobStoreEndpointNewConnection")
+	TraceEvent("BlobStoreEndpointNewConnection").suppressFor(60)
 		.detail("RemoteEndpoint", conn->getPeerAddress())
-		.detail("ExpiresIn", b->knobs.max_connection_life)
-		.suppressFor(60, true);
+		.detail("ExpiresIn", b->knobs.max_connection_life);
 
 	if(b->lookupSecret)
-		Void _ = wait(b->updateSecret());
+		wait(b->updateSecret());
 
 	return BlobStoreEndpoint::ReusableConnection({conn, now() + b->knobs.max_connection_life});
 }
@@ -426,7 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
-	Void _ = wait(bstore->concurrentRequests.take());
+	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
@@ -436,6 +458,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	loop {
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
+		state bool connectionEstablished = false;
 
 		try {
 			// Start connecting
@@ -457,13 +480,14 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Finish connecting, do request
 			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			connectionEstablished = true;
 
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
 			// when a new connection is established and setAuthHeaders() would need the updated secret.
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
-			Void _ = wait(bstore->requestRate->getAllowance(1));
+			wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
 			r->convertToJSONifXML();
 
@@ -496,6 +520,17 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		TraceEvent event(SevWarn, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
 
+		// Attach err to trace event if present, otherwise extract some stuff from the response
+		if(err.present()) {
+			event.error(err.get());
+		}
+		event.suppressFor(60);
+		if(!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
+		event.detail("ConnectionEstablished", connectionEstablished);
+
 		if(remoteAddress.present())
 			event.detail("RemoteEndpoint", remoteAddress.get());
 		else
@@ -503,8 +538,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		event.detail("Verb", verb)
 			 .detail("Resource", resource)
-			 .detail("ThisTry", thisTry)
-			 .suppressFor(60, true);
+			 .detail("ThisTry", thisTry);
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt limit.
 		if(!r || r->code != 429)
@@ -514,13 +548,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		double delay = nextRetryDelay;
 		// Double but limit the *next* nextRetryDelay.
 		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
-
-		// Attach err to trace event if present, otherwise extract some stuff from the response
-		if(err.present())
-			event.error(err.get());
-		else {
-			event.detail("ResponseCode", r->code);
-		}
 
 		if(retryable) {
 			// If r is valid then obey the Retry-After response header if present.
@@ -539,7 +566,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
-			Void _ = wait(::delay(delay));
+			wait(::delay(delay));
 		}
 		else {
 			// We can't retry, so throw something.
@@ -550,6 +577,21 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			if(r && r->code == 401)
 				throw http_auth_failed();
+
+			// Recognize and throw specific errors
+			if(err.present()) {
+				int code = err.get().code();
+
+				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed despite the fact that
+				// there was technically never a 'connection' to begin with.  It differentiates between an active connection
+				// timing out vs a connection timing out, though not between an active connection failing vs connection attempt failing.
+				// TODO:  Add more error types?
+				if(code == error_code_timed_out && !connectionEstablished)
+					throw connection_failed();
+
+				if(code == error_code_timed_out || code == error_code_connection_failed || code == error_code_lookup_failed)
+					throw err.get();
+			}
 
 			throw http_request_failed();
 		}
@@ -576,7 +618,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	state std::vector<Future<Void>> subLists;
 
 	while(more) {
-		Void _ = wait(bstore->concurrentLists.take());
+		wait(bstore->concurrentLists.take());
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
@@ -660,18 +702,18 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					lastFile = result.commonPrefixes.back();
 
 				if(lastFile.empty()) {
-					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").detail("Resource", fullResource).suppressFor(60, true);
+					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").suppressFor(60).detail("Resource", fullResource);
 					throw backup_error();
 				}
 			}
 		} catch(Error &e) {
 			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
+				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").error(e).suppressFor(60).detail("Resource", fullResource);
 			throw http_bad_response();
 		}
 	}
 
-	Void _ = wait(waitForAll(subLists));
+	wait(waitForAll(subLists));
 
 	return Void();
 }
@@ -694,7 +736,7 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {
+				when(wait(done)) {
 					done = Never();
 				}
 
@@ -784,6 +826,8 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 }
 
 ACTOR Future<std::string> readEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
+	wait(bstore->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 404}));
@@ -800,7 +844,8 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	Void _ = wait(bstore->concurrentUploads.take());
+	wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = std::string("/") + bucket + "/" + object;
@@ -825,7 +870,7 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std
 
 	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate an MD5 sum of it.
 	// TODO:  If this actor is used to send large files then combine the summing and packetization into a loop with a yield() every 20k or so.
-	Void _ = wait(yield());
+	wait(yield());
 
 	MD5_CTX sum;
 	::MD5_Init(&sum);
@@ -836,7 +881,7 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std
 	std::string contentMD5 = base64::encoder::from_string(sumBytes);
 	contentMD5.resize(contentMD5.size() - 1);
 
-	Void _ = wait(writeEntireFileFromBuffer_impl(bstore, bucket, object, &packets, content.size(), contentMD5));
+	wait(writeEntireFileFromBuffer_impl(bstore, bucket, object, &packets, content.size(), contentMD5));
 	return Void();
 }
 
@@ -851,6 +896,8 @@ Future<Void> BlobStoreEndpoint::writeEntireFileFromBuffer(std::string const &buc
 ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, void *data, int length, int64_t offset) {
 	if(length <= 0)
 		return 0;
+	wait(bstore->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
@@ -869,6 +916,8 @@ Future<int> BlobStoreEndpoint::readObject(std::string const &bucket, std::string
 }
 
 ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
+	wait(bstore->requestRateWrite->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, NULL, 0, {200}));
@@ -887,7 +936,8 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	Void _ = wait(bstore->concurrentUploads.take());
+	wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
@@ -916,6 +966,7 @@ Future<std::string> BlobStoreEndpoint::uploadPart(std::string const &bucket, std
 
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, BlobStoreEndpoint::MultiPartSetT parts) {
 	state UnsentPacketQueue part_list();  // NonCopyable state var so must be declared at top of actor
+	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
 	for(auto &p : parts)

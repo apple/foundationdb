@@ -20,13 +20,13 @@
 
 import os
 
-MAX_API_VERSION = 520
+MAX_API_VERSION = 600
 COMMON_TYPES = ['null', 'bytes', 'string', 'int', 'uuid', 'bool', 'float', 'double', 'tuple']
 ALL_TYPES = COMMON_TYPES + ['versionstamp']
 
 
 class Tester:
-    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES):
+    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES, directory_snapshot_ops_enabled=True):
         self.name = name
         self.cmd = cmd
         self.max_int_bits = max_int_bits
@@ -34,6 +34,7 @@ class Tester:
         self.max_api_version = max_api_version
         self.threads_enabled = threads_enabled
         self.types = types
+        self.directory_snapshot_ops_enabled = directory_snapshot_ops_enabled
 
     def supports_api_version(self, api_version):
         return api_version >= self.min_api_version and api_version <= self.max_api_version
@@ -62,5 +63,5 @@ testers = {
     'java': Tester('java', _java_cmd + 'StackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
     'java_async': Tester('java', _java_cmd + 'AsyncStackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
     'go': Tester('go', _absolute_path('go/build/bin/_stacktester'), 63, 200, MAX_API_VERSION),
-    'flow': Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION),
+    'flow': Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION, directory_snapshot_ops_enabled=False),
 }

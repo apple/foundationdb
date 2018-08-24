@@ -73,27 +73,26 @@ The following is a simple implementation of the basic pattern:
         private static final Random randno;
 
         static{
-            fdb = FDB.selectAPIVersion(510);
+            fdb = FDB.selectAPIVersion(600);
             db = fdb.open();
             queue = new Subspace(Tuple.from("Q"));
             randno = new Random();
         }
-          
+
         // Remove the top element from the queue.
         public static Object dequeue(TransactionContext tcx){
-            final KeyValue item = firstItem(tcx);
-            if(item == null){
-                return null;
-            }
-
             // Remove from the top of the queue.
-            tcx.run((Transaction tr) -> {
+            return tcx.run((Transaction tr) -> {
+                final KeyValue item = firstItem(tr);
+                if(item == null){
+                    return null;
+                }
+
                 tr.clear(item.getKey());
-                return null;
+                // Return the old value.
+                return Tuple.fromBytes(item.getValue()).get(0);
             });
-            
-            // Return the old value.
-            return Tuple.fromBytes(item.getValue()).get(0);
+
         }
 
         // Add an element to the queue.
@@ -101,9 +100,9 @@ The following is a simple implementation of the basic pattern:
             tcx.run((Transaction tr) -> {
                 byte[] rands = new byte[20];
                 randno.nextBytes(rands); // Create random seed to avoid conflicts.
-                tr.set(queue.subspace(Tuple.from(lastIndex(tr)+1, rands)).pack(), 
+                tr.set(queue.subspace(Tuple.from(lastIndex(tr)+1, rands)).pack(),
                         Tuple.from(value).pack());
-                                
+
                 return null;
             });
         }
@@ -114,7 +113,7 @@ The following is a simple implementation of the basic pattern:
                 for(KeyValue kv : tr.getRange(queue.range(), 1)){
                     return kv;
                 }
-                
+
                 return null; // Empty queue. Should never be reached.
             });
         }

@@ -34,6 +34,7 @@ struct ClusterInterface {
 	RequestStream< struct StatusRequest > databaseStatus;
 	RequestStream< ReplyPromise<Void> > ping;
 	RequestStream< struct GetClientWorkersRequest > getClientWorkers;
+	RequestStream< struct ForceRecoveryRequest > forceRecovery;
 
 	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
@@ -46,11 +47,12 @@ struct ClusterInterface {
 		databaseStatus.getEndpoint( TaskClusterController );
 		ping.getEndpoint( TaskClusterController );
 		getClientWorkers.getEndpoint( TaskClusterController );
+		forceRecovery.getEndpoint( TaskClusterController );
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & openDatabase & failureMonitoring & databaseStatus & ping & getClientWorkers;
+		ar & openDatabase & failureMonitoring & databaseStatus & ping & getClientWorkers & forceRecovery;
 	}
 };
 
@@ -186,13 +188,19 @@ struct StatusRequest {
 
 struct StatusReply {
 	StatusObject statusObj;
+	std::string statusStr;
 
 	StatusReply() {}
-	StatusReply( StatusObject statusObj ) : statusObj(statusObj) {}
+	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & statusObj;
+		ar & statusStr;
+		if( ar.isDeserializing ) {
+			json_spirit::mValue mv;
+			json_spirit::read_string( statusStr, mv );
+			statusObj = StatusObject(mv.get_obj());
+		}
 	}
 };
 
@@ -200,6 +208,17 @@ struct GetClientWorkersRequest {
 	ReplyPromise<vector<ClientWorkerInterface>> reply;
 
 	GetClientWorkersRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & reply;
+	}
+};
+
+struct ForceRecoveryRequest {
+	ReplyPromise<Void> reply;
+
+	ForceRecoveryRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

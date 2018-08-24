@@ -23,13 +23,22 @@
 #define FLOW_ACOMPILER_STATE 0
 #define FLOW_EMPTY_STR
 
-class Void {
-public:
-	template <class Ar>
-	void serialize(Ar&) {}
-};
+template<typename T> struct Future;
+struct Never;
+template<typename T> struct FutureStream;
 
-class Never {};
+// These are for intellisense to do proper type inferring, etc. They are no included at build time.
+#ifndef NO_INTELLISENSE
+#define ACTOR
+#define DESCR
+#define state
+#define UNCANCELLABLE
+#define choose if(1)
+#define when(x) for(x;;)
+template <class T> T wait( const Future<T>& );
+void wait(const Never&);
+template <class T> T waitNext( const FutureStream<T>& );
+#endif
 
 // These are for intellisense to do proper type inferring, etc. They are no
 // included at build time.
@@ -53,9 +62,6 @@ typename T::type waitNext(const T&);
 #define _uvar _
 #endif
 
-#define FLOW_LOOP while (true)
-#undef loop
-#define loop BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_LOOP, loop)
-#include "flow.h"
+#define loop while(true)
 
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
