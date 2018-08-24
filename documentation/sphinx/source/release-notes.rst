@@ -49,6 +49,7 @@ Fixes
 * Calling status too many times in a 5 second interval caused the cluster controller to pause for a few seconds. [6.0.7] `(PR #711) <https://github.com/apple/foundationdb/pull/711>`_
 * Configuring from usable_regions=2 to usable_regions=1 on a cluster with a large number of processes would prevent data distribution from completing. [6.0.8] `(PR #721) <https://github.com/apple/foundationdb/pull/721>`_
 * TLS certificate reloading could cause TLS connections to drop until process restart. [6.0.9] `(PR #717) <https://github.com/apple/foundationdb/pull/717>`_
+* Watches polled the server much more frequently than intended. [6.0.10] `(PR #728) <https://github.com/apple/foundationdb/pull/728>`_
 * Backup and DR didn't allow setting certain knobs. [6.0.10] `(Issue #715) <https://github.com/apple/foundationdb/issues/715>`_
 
 Status
