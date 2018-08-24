@@ -20,6 +20,6 @@
 
 #include "ThreadHelper.actor.h"
 
-ThreadCallback* ThreadCallback::addCallback(ThreadCallback *cb) {
+ThreadCallback* ThreadCallback::addCallback(ThreadCallback* cb) {
 	return (new ThreadMultiCallback())->addCallback(this)->addCallback(cb);
 }

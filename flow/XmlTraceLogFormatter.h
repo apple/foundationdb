@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #ifndef FLOW_XML_TRACE_LOG_FORMATTER_H
 #define FLOW_XML_TRACE_LOG_FORMATTER_H
 #pragma once
@@ -36,8 +35,8 @@ struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTra
 	const char* getHeader();
 	const char* getFooter();
 
-	void escape(std::stringstream &ss, std::string source);
-	std::string formatEvent(const TraceEventFields &fields);
+	void escape(std::stringstream& ss, std::string source);
+	std::string formatEvent(const TraceEventFields& fields);
 };
 
 #endif

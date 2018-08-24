@@ -20,9 +20,11 @@
 
 #ifndef POST_ACTOR_COMPILER
 
-template<typename T> struct Future;
+template <typename T>
+struct Future;
 struct Never;
-template<typename T> struct FutureStream;
+template <typename T>
+struct FutureStream;
 
 // These are for intellisense to do proper type inferring, etc. They are no included at build time.
 #ifndef NO_INTELLISENSE
@@ -30,15 +32,17 @@ template<typename T> struct FutureStream;
 #define DESCR
 #define state
 #define UNCANCELLABLE
-#define choose if(1)
-#define when(x) for(x;;)
-template <class T> T wait( const Future<T>& );
+#define choose if (1)
+#define when(x) for (x;;)
+template <class T>
+T wait(const Future<T>&);
 void wait(const Never&);
-template <class T> T waitNext( const FutureStream<T>& );
+template <class T>
+T waitNext(const FutureStream<T>&);
 #endif
 
 #endif
 
-#define loop while(true)
+#define loop while (true)
 
-#pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
+#pragma warning(disable : 4355) // 'this' : used in base member initializer list

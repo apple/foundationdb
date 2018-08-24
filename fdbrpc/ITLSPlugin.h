@@ -1,22 +1,22 @@
 /*
-* ITLSPlugin.h
-*
-* This source file is part of the FoundationDB open source project
-*
-* Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * ITLSPlugin.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #ifndef FDB_ITLSPLUGIN_H
 #define FDB_ITLSPLUGIN_H
@@ -51,11 +51,11 @@ struct ITLSSession {
 
 // Returns the number of bytes sent (possibly 0), or -1 on error
 // (including connection close)
-typedef int(*TLSSendCallbackFunc)(void* ctx, const uint8_t* buf, int len);
+typedef int (*TLSSendCallbackFunc)(void* ctx, const uint8_t* buf, int len);
 
 // Returns the number of bytes read (possibly 0), or -1 on error
 // (including connection close)
-typedef int(*TLSRecvCallbackFunc)(void* ctx, uint8_t* buf, int len);
+typedef int (*TLSRecvCallbackFunc)(void* ctx, uint8_t* buf, int len);
 
 struct ITLSPolicy {
 	virtual void addref() = 0;
@@ -119,7 +119,8 @@ struct ITLSPolicy {
 	// provide send_ctx/recv_ctx to the callbacks.
 	//
 	// uid will be used to identify this session within trace events
-	virtual ITLSSession* create_session(bool is_client, const char *servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) = 0;
+	virtual ITLSSession* create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func,
+	                                    void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) = 0;
 };
 
 struct ITLSPlugin {

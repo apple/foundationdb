@@ -30,58 +30,60 @@ struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
 
 	LocalityData locality;
-	RequestStream< struct CommitTransactionRequest > commit;
-	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
-															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
-	RequestStream< struct GetKeyServerLocationsRequest > getKeyServersLocations;
-	RequestStream< struct GetStorageServerRejoinInfoRequest > getStorageServerRejoinInfo;
+	RequestStream<struct CommitTransactionRequest> commit;
+	RequestStream<struct GetReadVersionRequest>
+	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
+	                              // committed (by a commit response) when this request was sent
+	                              //   (at some point between when this request is sent and when its response is
+	                              //   received, the latest version reported committed)
+	RequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
+	RequestStream<struct GetStorageServerRejoinInfoRequest> getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
-	RequestStream< struct TxnStateRequest >  txnState;
+	RequestStream<struct GetRawCommittedVersionRequest> getRawCommittedVersion;
+	RequestStream<struct TxnStateRequest> txnState;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
-	bool operator != (MasterProxyInterface const& r) const { return id() != r.id(); }
+	bool operator==(MasterProxyInterface const& r) const { return id() == r.id(); }
+	bool operator!=(MasterProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return commit.getEndpoint().address; }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & locality & commit & getConsistentReadVersion & getKeyServersLocations & waitFailure & getStorageServerRejoinInfo & getRawCommittedVersion & txnState;
+		ar& locality& commit& getConsistentReadVersion& getKeyServersLocations& waitFailure& getStorageServerRejoinInfo&
+		    getRawCommittedVersion& txnState;
 	}
 
 	void initEndpoints() {
 		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
 		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
 		commit.getEndpoint(TaskProxyCommitDispatcher);
-		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		// getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these
+		// requests, because clients cans bring down the cluster with too many of these messages.
 	}
 };
 
 struct CommitID {
-	Version version; 			// returns invalidVersion if transaction conflicts
+	Version version; // returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & txnBatchId;
+		ar& version& txnBatchId;
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId ) : version(version), txnBatchId(txnBatchId) {}
+	CommitID(Version version, uint16_t txnBatchId) : version(version), txnBatchId(txnBatchId) {}
 };
 
 struct CommitTransactionRequest {
-	enum { 
-		FLAG_IS_LOCK_AWARE = 0x1,
-		FLAG_FIRST_IN_BATCH = 0x2
-	};
+	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
 
 	bool isLockAware() const { return flags & FLAG_IS_LOCK_AWARE; }
 	bool firstInBatch() const { return flags & FLAG_FIRST_IN_BATCH; }
-	
+
 	Arena arena;
 	CommitTransactionRef transaction;
 	ReplyPromise<CommitID> reply;
@@ -90,21 +92,20 @@ struct CommitTransactionRequest {
 
 	CommitTransactionRequest() : flags(0) {}
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		ar & transaction & reply & arena & flags & debugID;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar& transaction& reply& arena& flags& debugID;
 	}
 };
 
-static inline int getBytes( CommitTransactionRequest const& r ) { 
+static inline int getBytes(CommitTransactionRequest const& r) {
 	// SOMEDAY: Optimize
-	//return r.arena.getSize(); // NOT correct because arena can be shared!
+	// return r.arena.getSize(); // NOT correct because arena can be shared!
 	int total = sizeof(r);
-	for(auto m = r.transaction.mutations.begin(); m != r.transaction.mutations.end(); ++m)
-		total += m->expectedSize();
-	for(auto i = r.transaction.read_conflict_ranges.begin(); i != r.transaction.read_conflict_ranges.end(); ++i)
+	for (auto m = r.transaction.mutations.begin(); m != r.transaction.mutations.end(); ++m) total += m->expectedSize();
+	for (auto i = r.transaction.read_conflict_ranges.begin(); i != r.transaction.read_conflict_ranges.end(); ++i)
 		total += i->expectedSize();
-	for(auto i = r.transaction.write_conflict_ranges.begin(); i != r.transaction.write_conflict_ranges.end(); ++i)
+	for (auto i = r.transaction.write_conflict_ranges.begin(); i != r.transaction.write_conflict_ranges.end(); ++i)
 		total += i->expectedSize();
 	return total;
 }
@@ -115,17 +116,18 @@ struct GetReadVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & locked;
+		ar& version& locked;
 	}
 };
 
 struct GetReadVersionRequest {
-	enum { 
-		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
+	enum {
+		PRIORITY_SYSTEM_IMMEDIATE =
+		    15 << 24, // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,
 		PRIORITY_BATCH = 1 << 24
 	};
-	enum { 
+	enum {
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
@@ -135,15 +137,16 @@ struct GetReadVersionRequest {
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, Optional<UID> debugID = Optional<UID>() ) : transactionCount( transactionCount ), flags( flags ), debugID( debugID ) {}
-	
-	int priority() const { return flags & FLAG_PRIORITY_MASK; }
-	bool operator < (GetReadVersionRequest const& rhs) const { return priority() < rhs.priority(); }
+	GetReadVersionRequest() : transactionCount(1), flags(PRIORITY_DEFAULT) {}
+	GetReadVersionRequest(uint32_t transactionCount, uint32_t flags, Optional<UID> debugID = Optional<UID>())
+	  : transactionCount(transactionCount), flags(flags), debugID(debugID) {}
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		ar & transactionCount & flags & debugID & reply;
+	int priority() const { return flags & FLAG_PRIORITY_MASK; }
+	bool operator<(GetReadVersionRequest const& rhs) const { return priority() < rhs.priority(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar& transactionCount& flags& debugID& reply;
 	}
 };
 
@@ -153,7 +156,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & results & arena;
+		ar& results& arena;
 	}
 };
 
@@ -166,11 +169,13 @@ struct GetKeyServerLocationsRequest {
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
-	GetKeyServerLocationsRequest( KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse, Arena const& arena ) : begin( begin ), end( end ), limit( limit ), reverse( reverse ), arena( arena ) {}
-	
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		ar & begin & end & limit & reverse & reply & arena;
+	GetKeyServerLocationsRequest(KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse,
+	                             Arena const& arena)
+	  : begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar& begin& end& limit& reverse& reply& arena;
 	}
 };
 
@@ -181,8 +186,8 @@ struct GetRawCommittedVersionRequest {
 	explicit GetRawCommittedVersionRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ar & debugID & reply;
+	void serialize(Ar& ar) {
+		ar& debugID& reply;
 	}
 };
 
@@ -195,21 +200,21 @@ struct GetStorageServerRejoinInfoReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & tag & newTag & newLocality & history;
+		ar& version& tag& newTag& newLocality& history;
 	}
 };
 
 struct GetStorageServerRejoinInfoRequest {
 	UID id;
 	Optional<Value> dcId;
-	ReplyPromise< GetStorageServerRejoinInfoReply > reply;
+	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest( UID const& id, Optional<Value> const& dcId ) : id(id), dcId(dcId) {}
+	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId) : id(id), dcId(dcId) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ar & id & dcId & reply;
+	void serialize(Ar& ar) {
+		ar& id& dcId& reply;
 	}
 };
 
@@ -220,9 +225,9 @@ struct TxnStateRequest {
 	bool last;
 	ReplyPromise<Void> reply;
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		ar & data & sequence & last & reply & arena;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar& data& sequence& last& reply& arena;
 	}
 };
 

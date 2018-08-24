@@ -47,19 +47,19 @@ public:
 	virtual void init() = 0;
 };
 
-struct ThreadAction { 
-	virtual void operator()(IThreadPoolReceiver*) = 0;		// self-destructs
+struct ThreadAction {
+	virtual void operator()(IThreadPoolReceiver*) = 0; // self-destructs
 	virtual void cancel() = 0;
-	virtual double getTimeEstimate() = 0;                   // for simulation
+	virtual double getTimeEstimate() = 0; // for simulation
 };
 typedef ThreadAction* PThreadAction;
 
 class IThreadPool {
 public:
 	virtual ~IThreadPool() {}
-	virtual Future<Void> getError() = 0;  // asynchronously throws an error if there is an internal error
-	virtual void addThread( IThreadPoolReceiver* userData ) = 0;
-	virtual void post( PThreadAction action ) = 0;
+	virtual Future<Void> getError() = 0; // asynchronously throws an error if there is an internal error
+	virtual void addThread(IThreadPoolReceiver* userData) = 0;
+	virtual void post(PThreadAction action) = 0;
 	virtual Future<Void> stop() = 0;
 	virtual bool isCoro() const { return false; }
 	virtual void addref() = 0;
@@ -74,36 +74,36 @@ public:
 		o->action(*(ActionType*)this);
 		delete (ActionType*)this;
 	}
-	virtual void cancel() {
-		delete (ActionType*)this;
-	}
+	virtual void cancel() { delete (ActionType*)this; }
 };
 
 template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
-	~ThreadReturnPromise() { if (promise.isValid()) sendError( broken_promise() ); }
+	~ThreadReturnPromise() {
+		if (promise.isValid()) sendError(broken_promise());
+	}
 
-	Future<T> getFuture() {  // Call only on the originating thread!
+	Future<T> getFuture() { // Call only on the originating thread!
 		return promise.getFuture();
 	}
 
-	void send( T const& t ) {  // Can be called safely from another thread.  Call send or sendError at most once.
+	void send(T const& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
-		tagAndForward( &promise, t, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), g_network->getCurrentTask() | 1 );
+		tagAndForward(&promise, t, signal.getFuture());
+		g_network->onMainThread(std::move(signal), g_network->getCurrentTask() | 1);
 	}
-	void sendError( Error const& e ) {  // Can be called safely from another thread.  Call send or sendError at most once.
+	void sendError(Error const& e) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
-		tagAndForwardError( &promise, e, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), g_network->getCurrentTask() | 1 );
+		tagAndForwardError(&promise, e, signal.getFuture());
+		g_network->onMainThread(std::move(signal), g_network->getCurrentTask() | 1);
 	}
+
 private:
 	Promise<T> promise;
 };
 
-Reference<IThreadPool>	createGenericThreadPool();
-
+Reference<IThreadPool> createGenericThreadPool();
 
 #endif

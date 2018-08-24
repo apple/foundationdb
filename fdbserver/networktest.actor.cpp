@@ -19,65 +19,61 @@
  */
 
 #include "NetworkTest.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-UID WLTOKEN_NETWORKTEST( -1, 2 );
+UID WLTOKEN_NETWORKTEST(-1, 2);
 
-NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
-	: test( Endpoint(remote, WLTOKEN_NETWORKTEST) )
-{
-}
+NetworkTestInterface::NetworkTestInterface(NetworkAddress remote) : test(Endpoint(remote, WLTOKEN_NETWORKTEST)) {}
 
-NetworkTestInterface::NetworkTestInterface( INetwork* local )
-{
-	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskDefaultEndpoint );
+NetworkTestInterface::NetworkTestInterface(INetwork* local) {
+	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskDefaultEndpoint);
 }
 
 ACTOR Future<Void> networkTestServer() {
-	state NetworkTestInterface interf( g_network );
-	state Future<Void> logging = delay( 1.0 );
+	state NetworkTestInterface interf(g_network);
+	state Future<Void> logging = delay(1.0);
 	state double lastTime = now();
 	state int sent = 0;
 
 	loop {
 		choose {
-			when( NetworkTestRequest req = waitNext( interf.test.getFuture() ) ) {
-				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
+			when(NetworkTestRequest req = waitNext(interf.test.getFuture())) {
+				req.reply.send(NetworkTestReply(Value(std::string(req.replySize, '.'))));
 				sent++;
 			}
-			when( wait( logging ) ) {
+			when(wait(logging)) {
 				auto spd = sent / (now() - lastTime);
-				fprintf( stderr, "responses per second: %f (%f us)\n", spd, 1e6/spd );
+				fprintf(stderr, "responses per second: %f (%f us)\n", spd, 1e6 / spd);
 				lastTime = now();
 				sent = 0;
-				logging = delay( 1.0 );
+				logging = delay(1.0);
 			}
 		}
 	}
 }
 
-ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent ) {
+ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* sent) {
 	state double lastTime = now();
 
 	loop {
-		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[g_random->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
+		NetworkTestReply rep = wait(retryBrokenPromise(interfs[g_random->randomInt(0, interfs.size())].test,
+		                                               NetworkTestRequest(LiteralStringRef("."), 600000)));
 		(*sent)++;
 	}
 }
 
-ACTOR Future<Void> logger( int* sent ) {
+ACTOR Future<Void> logger(int* sent) {
 	state double lastTime = now();
 	loop {
-		wait( delay(1.0) );
+		wait(delay(1.0));
 		auto spd = *sent / (now() - lastTime);
-		fprintf( stderr, "messages per second: %f\n", spd);
+		fprintf(stderr, "messages per second: %f\n", spd);
 		lastTime = now();
 		*sent = 0;
 	}
 }
 
-static void networkTestnanosleep()
-{
+static void networkTestnanosleep() {
 	printf("nanosleep speed test\n");
 
 #ifdef __linux__
@@ -91,7 +87,7 @@ static void networkTestnanosleep()
 		nanosleep(&tv, NULL);
 		double after = timer_monotonic();
 
-		printf(" %0.3lf", (after - before)*1e6);
+		printf(" %0.3lf", (after - before) * 1e6);
 	}
 
 	printf("\nnanosleep(10) latency after 5ms spin:");
@@ -106,7 +102,7 @@ static void networkTestnanosleep()
 		nanosleep(&tv, NULL);
 		double after = timer_monotonic();
 
-		printf(" %0.3lf", (after - before)*1e6);
+		printf(" %0.3lf", (after - before) * 1e6);
 	}
 
 	printf("\nnanosleep(20000) latency:");
@@ -118,7 +114,7 @@ static void networkTestnanosleep()
 		nanosleep(&tv, NULL);
 		double after = timer_monotonic();
 
-		printf(" %0.3lf", (after - before)*1e6);
+		printf(" %0.3lf", (after - before) * 1e6);
 	}
 	printf("\n");
 
@@ -134,26 +130,24 @@ static void networkTestnanosleep()
 	return;
 }
 
-ACTOR Future<Void> networkTestClient( std:: string testServers ) {
+ACTOR Future<Void> networkTestClient(std::string testServers) {
 	if (testServers == "nanosleep") {
 		networkTestnanosleep();
-		//return Void();
+		// return Void();
 	}
-
 
 	state std::vector<NetworkTestInterface> interfs;
 	state std::vector<NetworkAddress> servers = NetworkAddress::parseList(testServers);
 	state int sent = 0;
 
-	for( int i = 0; i < servers.size(); i++ ) {
-		interfs.push_back( NetworkTestInterface( servers[i] ) );
+	for (int i = 0; i < servers.size(); i++) {
+		interfs.push_back(NetworkTestInterface(servers[i]));
 	}
 
 	state std::vector<Future<Void>> clients;
-	for( int i = 0; i < 30; i++ )
-		clients.push_back( testClient( interfs, &sent ) );
-	clients.push_back( logger( &sent ) );
+	for (int i = 0; i < 30; i++) clients.push_back(testClient(interfs, &sent));
+	clients.push_back(logger(&sent));
 
-	wait( waitForAll( clients ) );
+	wait(waitForAll(clients));
 	return Void();
 }

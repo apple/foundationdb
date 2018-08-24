@@ -27,7 +27,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace ph = std::placeholders;
 
@@ -39,10 +39,11 @@ struct ExceptionContract {
 
 	std::string func;
 	std::map<int, occurance_t> expected;
-	std::function<void (TraceEvent &)> augment;
+	std::function<void(TraceEvent&)> augment;
 
-	ExceptionContract(const char *func_, const std::function<void (TraceEvent &)> &augment_) : func(func_), augment(augment_) {}
-	ExceptionContract &operator=(const std::map<int, occurance_t> &e) {
+	ExceptionContract(const char* func_, const std::function<void(TraceEvent&)>& augment_)
+	  : func(func_), augment(augment_) {}
+	ExceptionContract& operator=(const std::map<int, occurance_t>& e) {
 		expected = e;
 		return *this;
 	}
@@ -51,34 +52,29 @@ struct ExceptionContract {
 	static occurance_t requiredIf(bool in) { return in ? Always : Never; }
 	static occurance_t possibleIf(bool in) { return in ? Possible : Never; }
 
-	void handleException(const Error &e) const {
+	void handleException(const Error& e) const {
 		// We should always ignore these.
-		if (e.code() == error_code_used_during_commit ||
-			e.code() == error_code_transaction_too_old ||
-			e.code() == error_code_future_version ||
-			e.code() == error_code_transaction_cancelled ||
-			e.code() == error_code_key_too_large ||
-			e.code() == error_code_value_too_large)
-		{
+		if (e.code() == error_code_used_during_commit || e.code() == error_code_transaction_too_old ||
+		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
+		    e.code() == error_code_key_too_large || e.code() == error_code_value_too_large) {
 			return;
 		}
 
 		auto i = expected.find(e.code());
-		if (i != expected.end() && i->second != Never)
-		{
+		if (i != expected.end() && i->second != Never) {
 			Severity s = (i->second == Possible) ? SevWarn : SevInfo;
 			TraceEvent evt(s, func.c_str());
-			evt.error(e).detail("Thrown", true)
-				.detail("Expected", i->second == Possible ? "possible" : "always").backtrace();
-			if (augment)
-				augment(evt);
+			evt.error(e)
+			    .detail("Thrown", true)
+			    .detail("Expected", i->second == Possible ? "possible" : "always")
+			    .backtrace();
+			if (augment) augment(evt);
 			return;
 		}
 
 		TraceEvent evt(SevError, func.c_str());
 		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
-		if (augment)
-			augment(evt);
+		if (augment) augment(evt);
 		throw e;
 	}
 
@@ -87,9 +83,11 @@ struct ExceptionContract {
 		for (auto i : expected) {
 			if (i.second == Always) {
 				TraceEvent evt(SevError, func.c_str());
-				evt.error(Error::fromUnvalidatedCode(i.first)).detail("Thrown", false).detail("Expected", "always").backtrace();
-				if (augment)
-					augment(evt);
+				evt.error(Error::fromUnvalidatedCode(i.first))
+				    .detail("Thrown", false)
+				    .detail("Expected", "always")
+				    .backtrace();
+				if (augment) augment(evt);
 			}
 		}
 	}
@@ -97,13 +95,15 @@ struct ExceptionContract {
 
 struct FuzzApiCorrectnessWorkload : TestWorkload {
 	static std::once_flag onceFlag;
-	static std::vector<std::function<Future<Void> (unsigned int const &, FuzzApiCorrectnessWorkload * const &, Reference<ITransaction> const &)>> testCases;
+	static std::vector<std::function<Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&,
+	                                              Reference<ITransaction> const&)>>
+	    testCases;
 
 	double testDuration;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
 	int minNode, nodes;
-	std::pair<int,int> valueSizeRange;
+	std::pair<int, int> valueSizeRange;
 	int maxClearSize;
 	double initialKeyDensity;
 	bool useSystemKeys;
@@ -114,146 +114,152 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	bool success;
 
-	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), operationId(0), success(true) {
+	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
 		std::call_once(onceFlag, [&]() { addTestCases(); });
 
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 60.0 );
-		numOps = getOption( options, LiteralStringRef("numOps"), 21 );
-		rarelyCommit = getOption( options, LiteralStringRef("rarelyCommit"), false );
-		maximumTotalData = getOption( options, LiteralStringRef("maximumTotalData"), 15e6);
-		minNode = getOption( options, LiteralStringRef("minNode"), 0);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
+		numOps = getOption(options, LiteralStringRef("numOps"), 21);
+		rarelyCommit = getOption(options, LiteralStringRef("rarelyCommit"), false);
+		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 15e6);
+		minNode = getOption(options, LiteralStringRef("minNode"), 0);
 		adjacentKeys = g_random->coinflip();
 		useSystemKeys = g_random->coinflip();
-		initialKeyDensity = g_random->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
+		initialKeyDensity = g_random->random01(); // This fraction of keys are present before the first transaction (and
+		                                          // after an unknown result)
 
-		if( adjacentKeys ) {
-			nodes = std::min<int64_t>( g_random->randomInt(1, 4 << g_random->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
-		}
-		else {
-			nodes = g_random->randomInt(1, 4 << g_random->randomInt(0,20));
+		if (adjacentKeys) {
+			nodes = std::min<int64_t>(g_random->randomInt(1, 4 << g_random->randomInt(0, 14)),
+			                          CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2);
+		} else {
+			nodes = g_random->randomInt(1, 4 << g_random->randomInt(0, 20));
 		}
 
 		int newNodes = std::min<int>(nodes, maximumTotalData / (getKeyForIndex(nodes).size() + valueSizeRange.second));
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
-		if(useSystemKeys && g_random->coinflip()) {
+		if (useSystemKeys && g_random->coinflip()) {
 			keyPrefix = "\xff\x01";
 		}
 
-		maxClearSize = 1<<g_random->randomInt(0, 20);
-		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
+		maxClearSize = 1 << g_random->randomInt(0, 20);
+		conflictRange = KeyRangeRef(LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00"));
 		TraceEvent("FuzzApiCorrectnessConfiguration")
-			.detail("Nodes", nodes)
-			.detail("InitialKeyDensity", initialKeyDensity)
-			.detail("AdjacentKeys", adjacentKeys)
-			.detail("ValueSizeMin", valueSizeRange.first)
-			.detail("ValueSizeRange", valueSizeRange.second)
-			.detail("MaxClearSize", maxClearSize)
-			.detail("UseSystemKeys", useSystemKeys);
+		    .detail("Nodes", nodes)
+		    .detail("InitialKeyDensity", initialKeyDensity)
+		    .detail("AdjacentKeys", adjacentKeys)
+		    .detail("ValueSizeMin", valueSizeRange.first)
+		    .detail("ValueSizeRange", valueSizeRange.second)
+		    .detail("MaxClearSize", maxClearSize)
+		    .detail("UseSystemKeys", useSystemKeys);
 
-		TraceEvent("RemapEventSeverity").detail("TargetEvent", "Net2_LargePacket").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
-		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity")
+		    .detail("TargetEvent", "Net2_LargePacket")
+		    .detail("OriginalSeverity", SevWarnAlways)
+		    .detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity")
+		    .detail("TargetEvent", "LargeTransaction")
+		    .detail("OriginalSeverity", SevWarnAlways)
+		    .detail("NewSeverity", SevInfo);
 	}
 
 	virtual std::string description() { return "FuzzApiCorrectness"; }
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 ) {
-			return loadAndRun( cx, this );
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) {
+			return loadAndRun(cx, this);
 		}
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return success;
-	}
+	virtual Future<bool> check(Database const& cx) { return success; }
 
-	Key getRandomKey() {
-		return getKeyForIndex( g_random->randomInt(0, nodes ) );
-	}
+	Key getRandomKey() { return getKeyForIndex(g_random->randomInt(0, nodes)); }
 
-	Key getKeyForIndex( int idx ) {
+	Key getKeyForIndex(int idx) {
 		idx += minNode;
-		if( adjacentKeys ) {
-			return Key( keyPrefix + std::string( idx, '\x00' ) );
+		if (adjacentKeys) {
+			return Key(keyPrefix + std::string(idx, '\x00'));
 		} else {
-			return Key( keyPrefix + format( "%010d", idx ) );
+			return Key(keyPrefix + format("%010d", idx));
 		}
 	}
 
 	Value getRandomValue() {
-		return Value( std::string( g_random->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
+		return Value(std::string(g_random->randomInt(valueSizeRange.first, valueSizeRange.second + 1), 'x'));
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		//m.push_back( transactions.getMetric() );
-		//m.push_back( retries.getMetric() );
+	virtual void getMetrics(vector<PerfMetric>& m) {
+		// m.push_back( transactions.getMetric() );
+		// m.push_back( retries.getMetric() );
 	}
 
-	ACTOR Future<Void> loadAndRun( Database db, FuzzApiCorrectnessWorkload* self ) {
+	ACTOR Future<Void> loadAndRun(Database db, FuzzApiCorrectnessWorkload* self) {
 		state double startTime = now();
-		state Reference<IDatabase> cx = wait( unsafeThreadFutureToFuture( ThreadSafeDatabase::createFromExistingDatabase(db) ) );
+		state Reference<IDatabase> cx =
+		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
 		try {
-		loop {
-			state int i = 0;
-			state int keysPerBatch = std::min<int64_t>(1000, 1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 / (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
-			for(; i < self->nodes; i+=keysPerBatch ) {
-				state Reference<ITransaction> tr = cx->createTransaction();
-				loop {
-					if( now() - startTime > self->testDuration )
-						return Void();
-					try {
-						if( i == 0 ) {
-							tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-							tr->addWriteConflictRange(allKeys); // To prevent a write only transaction whose commit was previously cancelled from being reordered after this transaction
-							tr->clear( normalKeys );
-						}
-						if( self->useSystemKeys )
-							tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+			loop {
+				state int i = 0;
+				state int keysPerBatch = std::min<int64_t>(
+				    1000, 1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
+				                  (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
+				for (; i < self->nodes; i += keysPerBatch) {
+					state Reference<ITransaction> tr = cx->createTransaction();
+					loop {
+						if (now() - startTime > self->testDuration) return Void();
+						try {
+							if (i == 0) {
+								tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+								tr->addWriteConflictRange(
+								    allKeys); // To prevent a write only transaction whose commit was previously
+								              // cancelled from being reordered after this transaction
+								tr->clear(normalKeys);
+							}
+							if (self->useSystemKeys) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-						int end = std::min(self->nodes, i+keysPerBatch );
-						tr->clear( KeyRangeRef( self->getKeyForIndex(i), self->getKeyForIndex(end) ) );
+							int end = std::min(self->nodes, i + keysPerBatch);
+							tr->clear(KeyRangeRef(self->getKeyForIndex(i), self->getKeyForIndex(end)));
 
-						for( int j = i; j < end; j++ ) {
-							if ( g_random->random01() < self->initialKeyDensity ) {
-								Key key = self->getKeyForIndex( j );
-								if( key.size() <= (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
-									Value value = self->getRandomValue();
-									value = value.substr(0,std::min<int>(value.size(),CLIENT_KNOBS->VALUE_SIZE_LIMIT));
-									tr->set( key, value );
+							for (int j = i; j < end; j++) {
+								if (g_random->random01() < self->initialKeyDensity) {
+									Key key = self->getKeyForIndex(j);
+									if (key.size() <= (key.startsWith(systemKeys.begin)
+									                       ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+									                       : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
+										Value value = self->getRandomValue();
+										value = value.substr(
+										    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
+										tr->set(key, value);
+									}
 								}
 							}
+							wait(unsafeThreadFutureToFuture(tr->commit()));
+							//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
+							break;
+						} catch (Error& e) {
+							wait(unsafeThreadFutureToFuture(tr->onError(e)));
 						}
-						wait( unsafeThreadFutureToFuture( tr->commit() ) );
-						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
-						break;
-					} catch( Error &e ) {
-						wait( unsafeThreadFutureToFuture( tr->onError( e ) ) );
 					}
 				}
-			}
 
-			loop {
-				try {
-					wait( self->randomTransaction( cx, self ) && delay( self->numOps * .001 ) );
-				} catch( Error &e ) {
-					if( e.code() != error_code_not_committed )
-						throw e;
-					break;
+				loop {
+					try {
+						wait(self->randomTransaction(cx, self) && delay(self->numOps * .001));
+					} catch (Error& e) {
+						if (e.code() != error_code_not_committed) throw e;
+						break;
+					}
+					if (now() - startTime > self->testDuration) return Void();
 				}
-				if( now() - startTime > self->testDuration )
-					return Void();
 			}
-		}
-		} catch (Error &e) {
+		} catch (Error& e) {
 			TraceEvent("FuzzLoadAndRunError").error(e).backtrace();
 			throw e;
 		}
 	}
 
-	ACTOR Future<Void> randomTransaction( Reference<IDatabase> cx, FuzzApiCorrectnessWorkload* self ) {
+	ACTOR Future<Void> randomTransaction(Reference<IDatabase> cx, FuzzApiCorrectnessWorkload* self) {
 		state Reference<ITransaction> tr = cx->createTransaction();
 		state bool readYourWritesDisabled = g_random->coinflip();
 		state bool readAheadDisabled = g_random->coinflip();
@@ -262,69 +268,64 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		loop {
 			state bool cancelled = false;
-			if( readYourWritesDisabled )
-				tr->setOption( FDBTransactionOptions::READ_YOUR_WRITES_DISABLE );
-			if( readAheadDisabled )
-				tr->setOption( FDBTransactionOptions::READ_AHEAD_DISABLE );
-			if( self->useSystemKeys ) {
-				tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+			if (readYourWritesDisabled) tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			if (readAheadDisabled) tr->setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
+			if (self->useSystemKeys) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			}
-			tr->addWriteConflictRange( self->conflictRange );
+			tr->addWriteConflictRange(self->conflictRange);
 
 			try {
-				state int numWaits = g_random->randomInt( 1, 5 );
+				state int numWaits = g_random->randomInt(1, 5);
 				state int i = 0;
 
 				// Code path here will create a bunch of ops, wait for ONE of them to complete,
 				// then add more ops, wait for another one, and so on.
-				for(; i < numWaits; i++ ) {
-					state int numOps = g_random->randomInt( 1, self->numOps );
+				for (; i < numWaits; i++) {
+					state int numOps = g_random->randomInt(1, self->numOps);
 					state int j = 0;
-					for(; j < numOps; j++ ) {
+					for (; j < numOps; j++) {
 						state int operationType = g_random->randomInt(0, testCases.size());
-						printf("%d: Selected Operation %d\n", self->operationId+1, operationType);
+						printf("%d: Selected Operation %d\n", self->operationId + 1, operationType);
 						try {
 							operations.push_back(testCases[operationType](++self->operationId, self, tr));
-						} catch( Error &e ) {
-							TraceEvent(SevWarn, "IgnoredOperation").error(e)
-								.detail("Operation", operationType).detail("Id", self->operationId);
+						} catch (Error& e) {
+							TraceEvent(SevWarn, "IgnoredOperation")
+							    .error(e)
+							    .detail("Operation", operationType)
+							    .detail("Id", self->operationId);
 						}
 					}
 
 					// Wait for a random op to complete.
-					if( waitLocation < operations.size() ) {
-						int waitOp = g_random->randomInt(waitLocation,operations.size());
-						wait( operations[waitOp] );
-						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
+					if (waitLocation < operations.size()) {
+						int waitOp = g_random->randomInt(waitLocation, operations.size());
+						wait(operations[waitOp]);
+						wait(delay(0.000001)); // to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
-				wait( waitForAll( operations ) );
+				wait(waitForAll(operations));
 				try {
-					wait( timeoutError( unsafeThreadFutureToFuture( tr->commit() ), 30) );
-				}
-				catch( Error &e ) {
-					if(e.code() == error_code_client_invalid_operation ||
-					   e.code() == error_code_transaction_too_large)
-					{
+					wait(timeoutError(unsafeThreadFutureToFuture(tr->commit()), 30));
+				} catch (Error& e) {
+					if (e.code() == error_code_client_invalid_operation ||
+					    e.code() == error_code_transaction_too_large) {
 						throw not_committed();
 					}
 				}
 				break;
-			} catch( Error &e ) {
+			} catch (Error& e) {
 				operations.clear();
 				waitLocation = 0;
 
-				if( e.code() == error_code_not_committed ||
-					e.code() == error_code_commit_unknown_result ||
-					cancelled )
-				{
+				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || cancelled) {
 					throw not_committed();
 				}
 				try {
-					wait( unsafeThreadFutureToFuture( tr->onError(e) ) );
-				} catch( Error &e ) {
-					if( e.code() == error_code_transaction_timed_out ) {
+					wait(unsafeThreadFutureToFuture(tr->onError(e)));
+				} catch (Error& e) {
+					if (e.code() == error_code_transaction_timed_out) {
 						throw not_committed();
 					}
 					throw e;
@@ -334,62 +335,62 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	template<typename Subclass, typename T>
+	template <typename Subclass, typename T>
 	struct BaseTest {
 		typedef T value_type;
 
-		ACTOR static Future<Void> runTest( unsigned int id, FuzzApiCorrectnessWorkload *wl, Reference<ITransaction> tr ) {
+		ACTOR static Future<Void> runTest(unsigned int id, FuzzApiCorrectnessWorkload* wl, Reference<ITransaction> tr) {
 			state Subclass self(id, wl);
 
 			try {
-				value_type result = wait( timeoutError( BaseTest::runTest2(tr, &self), 1000) );
+				value_type result = wait(timeoutError(BaseTest::runTest2(tr, &self), 1000));
 				self.contract.handleNotThrown();
 				return self.errorCheck(tr, result);
-			} catch (Error &e) {
+			} catch (Error& e) {
 				self.contract.handleException(e);
 			}
 			return Void();
 		}
 
-		ACTOR static Future<value_type> runTest2( Reference<ITransaction> tr, Subclass *self ) {
-			state Future<value_type> future = unsafeThreadFutureToFuture( self->createFuture(tr) );
+		ACTOR static Future<value_type> runTest2(Reference<ITransaction> tr, Subclass* self) {
+			state Future<value_type> future = unsafeThreadFutureToFuture(self->createFuture(tr));
 
 			// Create may have added some other things to do before
 			// we can get the result.
-			state std::vector<ThreadFuture<Void> >::iterator i;
+			state std::vector<ThreadFuture<Void>>::iterator i;
 			for (i = self->pre_steps.begin(); i != self->pre_steps.end(); ++i) {
-				wait(unsafeThreadFutureToFuture( *i ));
+				wait(unsafeThreadFutureToFuture(*i));
 			}
 
-			value_type result = wait( future );
+			value_type result = wait(future);
 			if (future.isError()) {
 				self->contract.handleException(future.getError());
 			} else {
-				ASSERT( future.isValid() );
+				ASSERT(future.isValid());
 			}
 
 			return result;
 		}
 
-		virtual ThreadFuture<value_type> createFuture( Reference<ITransaction> tr ) = 0;
+		virtual ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) = 0;
 		virtual Void errorCheck(Reference<ITransaction> tr, value_type result) { return Void(); }
-		virtual void augmentTrace(TraceEvent &e) const { e.detail("Id", id); }
+		virtual void augmentTrace(TraceEvent& e) const { e.detail("Id", id); }
 
 	protected:
 		unsigned int id;
-		FuzzApiCorrectnessWorkload *workload;
+		FuzzApiCorrectnessWorkload* workload;
 		ExceptionContract contract;
-		std::vector<ThreadFuture<Void> > pre_steps;
+		std::vector<ThreadFuture<Void>> pre_steps;
 
-		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload *wl, const char *func)
-			: id(id_), workload(wl), contract(func, std::bind(&Subclass::augmentTrace, static_cast<Subclass *>(this), ph::_1)) {}
+		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, const char* func)
+		  : id(id_), workload(wl),
+		    contract(func, std::bind(&Subclass::augmentTrace, static_cast<Subclass*>(this), ph::_1)) {}
 
 		static Key makeKey() {
 			double ksrv = g_random->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
-			if (ksrv < 0.25)
-				return Key();
+			if (ksrv < 0.25) return Key();
 
 			int64_t key_size;
 			if (ksrv < 0.5)
@@ -399,8 +400,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			std::string skey;
 			skey.reserve(key_size);
-			for (size_t j = 0; j < key_size; ++j)
-				skey.append(1, (char) g_random->randomInt(0, 256));
+			for (size_t j = 0; j < key_size; ++j) skey.append(1, (char)g_random->randomInt(0, 256));
 
 			return Key(skey);
 		}
@@ -409,19 +409,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			double vrv = g_random->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
-			if (vrv < 0.25)
-				return Value();
+			if (vrv < 0.25) return Value();
 
 			int64_t value_size;
 			if (vrv < 0.5)
-				value_size = g_random->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				value_size =
+				    g_random->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 			else
 				value_size = g_random->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1);
 
 			std::string svalue;
 			svalue.reserve(value_size);
-			for (size_t j = 0; j < value_size; ++j)
-				svalue.append(1, (char) g_random->randomInt(0, 256));
+			for (size_t j = 0; j < value_size; ++j) svalue.append(1, (char)g_random->randomInt(0, 256));
 
 			return Value(svalue);
 		}
@@ -434,7 +433,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				if (orv < 0.7)
 					offs = g_random->randomInt(INT_MIN, 0);
 				else
-					offs = g_random->randomInt(0, INT_MAX)+1;
+					offs = g_random->randomInt(0, INT_MAX) + 1;
 			}
 			return KeySelectorRef(makeKey(), g_random->coinflip(), offs);
 		}
@@ -446,11 +445,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				if (lrv < 0.4)
 					rowlimit = g_random->randomInt(INT_MIN, 0);
 				else
-					rowlimit = g_random->randomInt(0, INT_MAX)+1;
+					rowlimit = g_random->randomInt(0, INT_MAX) + 1;
 			}
 
-			if (g_random->coinflip())
-				return GetRangeLimits(rowlimit);
+			if (g_random->coinflip()) return GetRangeLimits(rowlimit);
 
 			lrv = g_random->random01();
 			int bytelimit = 0;
@@ -458,79 +456,68 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				if (lrv < 0.4)
 					bytelimit = g_random->randomInt(INT_MIN, 0);
 				else
-					bytelimit = g_random->randomInt(0, INT_MAX)+1;
+					bytelimit = g_random->randomInt(0, INT_MAX) + 1;
 			}
 
 			// Try again if both are 0.
-			if (!rowlimit && !bytelimit)
-				return makeRangeLimits();
+			if (!rowlimit && !bytelimit) return makeRangeLimits();
 
 			return GetRangeLimits(rowlimit, bytelimit);
 		}
 
-		static bool isOverlapping(const Key &begin, const Key &end, const KeyRangeRef &range) {
-			return ((range.begin >= begin && range.begin < end) ||
-					(range.end >= begin && range.end < end) ||
-					(begin >= range.begin && begin < range.end) ||
-					(end >= range.begin && end < range.end));
+		static bool isOverlapping(const Key& begin, const Key& end, const KeyRangeRef& range) {
+			return ((range.begin >= begin && range.begin < end) || (range.end >= begin && range.end < end) ||
+			        (begin >= range.begin && begin < range.end) || (end >= range.begin && end < range.end));
 		}
-		static bool isOverlapping(const Key &begin, const Key &end, const KeyRef &key) {
+		static bool isOverlapping(const Key& begin, const Key& end, const KeyRef& key) {
 			return (key >= begin && key < end);
 		}
 
-		static std::string slashToEnd(const KeyRef &key) {
-			return key.toString().replace(key.size()-1, 1, 1, '0');
-		}
+		static std::string slashToEnd(const KeyRef& key) { return key.toString().replace(key.size() - 1, 1, 1, '0'); }
 
-		static KeyRangeRef &getServerKeys() {
+		static KeyRangeRef& getServerKeys() {
 			static std::string serverKeysEnd = slashToEnd(serverKeysPrefix);
 			static KeyRangeRef serverKeys(serverKeysPrefix, StringRef(serverKeysEnd));
 			return serverKeys;
 		}
 
-		static KeyRangeRef &getGlobalKeys() {
+		static KeyRangeRef& getGlobalKeys() {
 			static std::string globalKeysPrefix2 = globalKeysPrefix.toString() + "/";
 			static std::string globalKeysEnd = slashToEnd(globalKeysPrefix2);
 			static KeyRangeRef globalKeys(globalKeysPrefix2, StringRef(globalKeysEnd));
 			return globalKeys;
 		}
 
-		static bool isProtectedKey(const Key &begin, const Key &end) {
-			if (end < begin)
-				return false;
+		static bool isProtectedKey(const Key& begin, const Key& end) {
+			if (end < begin) return false;
 
-			return (isOverlapping(begin, end, keyServersKeys) ||
-				isOverlapping(begin, end, serverListKeys) ||
-				isOverlapping(begin, end, processClassKeys) ||
-				isOverlapping(begin, end, configKeys) ||
-				isOverlapping(begin, end, workerListKeys) ||
-				isOverlapping(begin, end, backupLogKeys) ||
-				isOverlapping(begin, end, getServerKeys()) ||
-				isOverlapping(begin, end, getGlobalKeys()) ||
-				isOverlapping(begin, end, coordinatorsKey) ||
-				isOverlapping(begin, end, backupEnabledKey) ||
-				isOverlapping(begin, end, backupVersionKey) );
+			return (isOverlapping(begin, end, keyServersKeys) || isOverlapping(begin, end, serverListKeys) ||
+			        isOverlapping(begin, end, processClassKeys) || isOverlapping(begin, end, configKeys) ||
+			        isOverlapping(begin, end, workerListKeys) || isOverlapping(begin, end, backupLogKeys) ||
+			        isOverlapping(begin, end, getServerKeys()) || isOverlapping(begin, end, getGlobalKeys()) ||
+			        isOverlapping(begin, end, coordinatorsKey) || isOverlapping(begin, end, backupEnabledKey) ||
+			        isOverlapping(begin, end, backupVersionKey));
 		}
 
-		static bool isProtectedKey(const Key &k) {
+		static bool isProtectedKey(const Key& k) {
 			return (isOverlapping(keyServersKeys.begin, keyServersKeys.end, k) ||
-				isOverlapping(serverListKeys.begin, serverListKeys.end, k) ||
-				isOverlapping(processClassKeys.begin, processClassKeys.end, k) ||
-				isOverlapping(configKeys.begin, configKeys.end, k) ||
-				isOverlapping(workerListKeys.begin, workerListKeys.end, k) ||
-				isOverlapping(backupLogKeys.begin, backupLogKeys.end, k) ||
-				isOverlapping(getServerKeys().begin, getServerKeys().end, k) ||
-				isOverlapping(getGlobalKeys().begin, getGlobalKeys().end, k) ||
-				coordinatorsKey == k || backupEnabledKey == k || backupVersionKey == k);
+			        isOverlapping(serverListKeys.begin, serverListKeys.end, k) ||
+			        isOverlapping(processClassKeys.begin, processClassKeys.end, k) ||
+			        isOverlapping(configKeys.begin, configKeys.end, k) ||
+			        isOverlapping(workerListKeys.begin, workerListKeys.end, k) ||
+			        isOverlapping(backupLogKeys.begin, backupLogKeys.end, k) ||
+			        isOverlapping(getServerKeys().begin, getServerKeys().end, k) ||
+			        isOverlapping(getGlobalKeys().begin, getGlobalKeys().end, k) || coordinatorsKey == k ||
+			        backupEnabledKey == k || backupVersionKey == k);
 		}
 	};
 
-	template<typename Subclass>
+	template <typename Subclass>
 	struct BaseTestCallback : BaseTest<Subclass, Void> {
 		typedef typename BaseTest<Subclass, Void>::value_type value_type;
 
-		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload *wl, const char *func)
-			: BaseTest<Subclass, Void>(id, wl, func) {}
+		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload* wl, const char* func)
+		  : BaseTest<Subclass, Void>(id, wl, func) {}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
 			callback(tr);
@@ -543,25 +530,22 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		virtual void callback(Reference<ITransaction> tr) = 0;
-		virtual void callbackErrorCheck(Reference<ITransaction> tr) { }
+		virtual void callbackErrorCheck(Reference<ITransaction> tr) {}
 	};
 
 	struct TestSetVersion : public BaseTest<TestSetVersion, Version> {
 		typedef BaseTest<TestSetVersion, Version> base_type;
 		Version v;
 
-		TestSetVersion(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestSetVersion") {
+		TestSetVersion(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTest(id, workload, "TestSetVersion") {
 			if (g_random->coinflip())
 				v = g_random->randomInt64(INT64_MIN, 0);
 			else
 				v = g_random->randomInt64(0, INT64_MAX);
 
-			contract = {
-				std::make_pair( error_code_read_version_already_set, ExceptionContract::Possible ),
-				std::make_pair( error_code_version_invalid, ExceptionContract::requiredIf(v <= 0) )
-			};
-
-
+			contract = { std::make_pair(error_code_read_version_already_set, ExceptionContract::Possible),
+				         std::make_pair(error_code_version_invalid, ExceptionContract::requiredIf(v <= 0)) };
 		}
 
 		ThreadFuture<Version> createFuture(Reference<ITransaction> tr) {
@@ -575,7 +559,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return Void();
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Version", v);
 		}
@@ -585,20 +569,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestGet, Optional<Value>> base_type;
 		Key key;
 
-		TestGet(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGet") {
+		TestGet(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGet") {
 			key = makeKey();
-			contract = {
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf((key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible) };
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->get(key, g_random->coinflip());
-		}
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) { return tr->get(key, g_random->coinflip()); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -608,20 +590,21 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestGetKey, Key> base_type;
 		KeySelector keysel;
 
-		TestGetKey(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetKey") {
+		TestGetKey(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGetKey") {
 			keysel = makeKeySel();
-			contract = {
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf((keysel.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(
+				             error_code_key_outside_legal_range,
+				             ExceptionContract::requiredIf(
+				                 (keysel.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
 			return tr->getKey(keysel, g_random->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("KeySel", keysel.toString());
 		}
@@ -632,7 +615,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		KeySelector keysel1, keysel2;
 		int limit;
 
-		TestGetRange0(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetRange0") {
+		TestGetRange0(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGetRange0") {
 			keysel1 = makeKeySel();
 			keysel2 = makeKeySel();
 			limit = 0;
@@ -642,16 +625,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				if (lrv < 0.4)
 					limit = g_random->randomInt(INT_MIN, 0);
 				else
-					limit = g_random->randomInt(0, INT_MAX)+1;
+					limit = g_random->randomInt(0, INT_MAX) + 1;
 			}
 
 			contract = {
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   (keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                   (keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
@@ -659,7 +643,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return tr->getRange(keysel1, keysel2, limit, g_random->coinflip(), g_random->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString()).detail("Limit", limit);
 		}
@@ -670,17 +654,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		KeySelector keysel1, keysel2;
 		GetRangeLimits limits;
 
-		TestGetRange1(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetRange1") {
+		TestGetRange1(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGetRange1") {
 			keysel1 = makeKeySel();
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
 			contract = {
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_range_limits_invalid,
+				               ExceptionContract::possibleButRequiredIf(!limits.isReached() && !limits.isValid())),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   (keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                   (keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
@@ -688,7 +674,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return tr->getRange(keysel1, keysel2, limits, g_random->coinflip(), g_random->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString());
 			std::stringstream ss;
@@ -702,7 +688,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Key key1, key2;
 		int limit;
 
-		TestGetRange2(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetRange2") {
+		TestGetRange2(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGetRange2") {
 			key1 = makeKey();
 			key2 = makeKey();
 			limit = 0;
@@ -712,25 +698,24 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				if (lrv < 0.4)
 					limit = g_random->randomInt(INT_MIN, 0);
 				else
-					limit = g_random->randomInt(0, INT_MAX)+1;
+					limit = g_random->randomInt(0, INT_MAX) + 1;
 			}
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_range_limits_invalid,
+				                        ExceptionContract::possibleButRequiredIf(limit < 0)),
+				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(KeyRangeRef(key1, key2),
-					limit, g_random->coinflip(), g_random->coinflip());
+			return tr->getRange(KeyRangeRef(key1, key2), limit, g_random->coinflip(), g_random->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2)).detail("Limit", limit);
 		}
@@ -741,26 +726,26 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Key key1, key2;
 		GetRangeLimits limits;
 
-		TestGetRange3(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetRange3") {
+		TestGetRange3(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestGetRange3") {
 			key1 = makeKey();
 			key2 = makeKey();
 			limits = makeRangeLimits();
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(
+				                                                             !limits.isReached() && !limits.isValid())),
+				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
 			return tr->getRange(KeyRangeRef(key1, key2), limits, g_random->coinflip(), g_random->coinflip());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 			std::stringstream ss;
@@ -770,21 +755,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetAddressesForKey : public BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> {
-		typedef BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char *>>> base_type;
+		typedef BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> base_type;
 		Key key;
 
-		TestGetAddressesForKey(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGetAddressesForKey") {
+		TestGetAddressesForKey(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTest(id, workload, "TestGetAddressesForKey") {
 			key = makeKey();
-			contract = {
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible) };
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getAddressesForKey(key);
-		}
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) { return tr->getAddressesForKey(key); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -794,22 +776,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestAddReadConflictRange, Void> base_type;
 		Key key1, key2;
 
-		TestAddReadConflictRange(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestAddReadConflictRange") {
+		TestAddReadConflictRange(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestAddReadConflictRange") {
 			key1 = makeKey();
 			key2 = makeKey();
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->addReadConflictRange(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) { tr->addReadConflictRange(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -822,7 +802,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		uint8_t op;
 		int32_t pos;
 
-		TestAtomicOp(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestAtomicOp") {
+		TestAtomicOp(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestAtomicOp") {
 			key = makeKey();
 			while (isProtectedKey(key)) {
 				key = makeKey();
@@ -832,52 +813,54 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (arv < 0.25) {
 				int val = UINT8_MAX;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
-					if (i->first < val)
-						val = i->first;
+					if (i->first < val) val = i->first;
 				op = g_random->randomInt(0, val);
 			} else if (arv < 0.50) {
 				int val = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
-					if (i->first > val)
-						val = i->first;
-				op = g_random->randomInt(val+1, UINT8_MAX);
+					if (i->first > val) val = i->first;
+				op = g_random->randomInt(val + 1, UINT8_MAX);
 			} else {
 				int minval = UINT8_MAX, maxval = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i) {
-					if (i->first < minval)
-						minval = i->first;
-					if (i->first > maxval)
-						maxval = i->first;
+					if (i->first < minval) minval = i->first;
+					if (i->first > maxval) maxval = i->first;
 				}
-				op = g_random->randomInt(minval, maxval+1);
+				op = g_random->randomInt(minval, maxval + 1);
 			}
 
 			pos = -1;
-			if(op == MutationRef::SetVersionstampedKey && key.size() >= 4) {
+			if (op == MutationRef::SetVersionstampedKey && key.size() >= 4) {
 				pos = littleEndian32(*(int32_t*)&key.end()[-4]);
 			}
-			if(op == MutationRef::SetVersionstampedValue && value.size() >= 4) {
+			if (op == MutationRef::SetVersionstampedValue && value.size() >= 4) {
 				pos = littleEndian32(*(int32_t*)&value.end()[-4]);
 			}
 
 			contract = {
-				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
-				std::make_pair( error_code_value_too_large, ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) ),
-				std::make_pair( error_code_invalid_mutation_type, ExceptionContract::requiredIf(
-							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op)) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(
-							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 4)) ||
-							(op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4))) )
+				std::make_pair(error_code_key_too_large,
+				               ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin)
+				                                                               ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+				                                                               : CLIENT_KNOBS->KEY_SIZE_LIMIT))),
+				std::make_pair(error_code_value_too_large,
+				               ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)),
+				std::make_pair(
+				    error_code_invalid_mutation_type,
+				    ExceptionContract::requiredIf(!isValidMutationType(op) || !isAtomicOp((MutationRef::Type)op))),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				std::make_pair(
+				    error_code_client_invalid_operation,
+				    ExceptionContract::requiredIf(
+				        (op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 4)) ||
+				        (op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4))))
 			};
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->atomicOp(key, value, (FDBMutationTypes::Option) op);
-		}
+		void callback(Reference<ITransaction> tr) { tr->atomicOp(key, value, (FDBMutationTypes::Option)op); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key)).detail("Value", printable(value)).detail("Op", op).detail("Pos", pos);
 		}
@@ -888,25 +871,27 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Key key;
 		Value value;
 
-		TestSet(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestSet") {
+		TestSet(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTestCallback(id, workload, "TestSet") {
 			key = makeKey();
 			while (isProtectedKey(key)) {
 				key = makeKey();
 			}
 			value = makeValue();
-			contract = {
-				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
-				std::make_pair( error_code_value_too_large, ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) )
-			};
+			contract = { std::make_pair(
+				             error_code_key_too_large,
+				             ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin)
+				                                                             ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+				                                                             : CLIENT_KNOBS->KEY_SIZE_LIMIT))),
+				         std::make_pair(error_code_value_too_large,
+				                        ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->set(key, value);
-		}
+		void callback(Reference<ITransaction> tr) { tr->set(key, value); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key)).detail("Value", printable(value));
 		}
@@ -916,26 +901,24 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestClear0, Void> base_type;
 		Key key1, key2;
 
-		TestClear0(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestClear0") {
+		TestClear0(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestClear0") {
 			key1 = makeKey();
 			key2 = makeKey();
 			while (isProtectedKey(key1, key2)) {
 				key1 = makeKey();
 				key2 = makeKey();
 			}
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(key1, key2);
-		}
+		void callback(Reference<ITransaction> tr) { tr->clear(key1, key2); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -945,26 +928,24 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestClear1, Void> base_type;
 		Key key1, key2;
 
-		TestClear1(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestClear1") {
+		TestClear1(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestClear1") {
 			key1 = makeKey();
 			key2 = makeKey();
 			while (isProtectedKey(key1, key2)) {
 				key1 = makeKey();
 				key2 = makeKey();
 			}
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) { tr->clear(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -974,22 +955,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestClear2, Void> base_type;
 		Key key;
 
-		TestClear2(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestClear2") {
+		TestClear2(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestClear2") {
 			key = makeKey();
 			while (isProtectedKey(key)) {
 				key = makeKey();
 			}
-			contract = {
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end) ) )
-			};
+			contract = { std::make_pair(
+				error_code_key_outside_legal_range,
+				ExceptionContract::requiredIf(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->clear(key);
-		}
+		void callback(Reference<ITransaction> tr) { tr->clear(key); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -999,23 +978,25 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestWatch, Void> base_type;
 		Key key;
 
-		TestWatch(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestWatch") {
+		TestWatch(unsigned int id, FuzzApiCorrectnessWorkload* workload) : BaseTest(id, workload, "TestWatch") {
 			key = makeKey();
-			contract = {
-				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
-				std::make_pair( error_code_watches_disabled, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf( (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_timed_out, ExceptionContract::Possible ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
-			};
+			contract = { std::make_pair(
+				             error_code_key_too_large,
+				             ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin)
+				                                                             ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+				                                                             : CLIENT_KNOBS->KEY_SIZE_LIMIT))),
+				         std::make_pair(error_code_watches_disabled, ExceptionContract::Possible),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))),
+				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				         std::make_pair(error_code_timed_out, ExceptionContract::Possible),
+				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible) };
 		}
 
-		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->watch(key);
-		}
+		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) { return tr->watch(key); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key", printable(key));
 		}
@@ -1025,22 +1006,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestAddWriteConflictRange, Void> base_type;
 		Key key1, key2;
 
-		TestAddWriteConflictRange(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestAddWriteConflictRange") {
+		TestAddWriteConflictRange(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestAddWriteConflictRange") {
 			key1 = makeKey();
 			key2 = makeKey();
-			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) )
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf(
+				                            (key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                            (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))) };
 		}
 
-		void callback(Reference<ITransaction> tr) {
-			tr->addWriteConflictRange(KeyRangeRef(key1, key2));
-		}
+		void callback(Reference<ITransaction> tr) { tr->addWriteConflictRange(KeyRangeRef(key1, key2)); }
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
 		}
@@ -1051,57 +1030,62 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		int op;
 		Optional<Standalone<StringRef>> val;
 
-		TestSetOption(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestSetOption") {
+		TestSetOption(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestSetOption") {
 			double arv = g_random->random01();
 			if (arv < 0.25) {
 				int val = INT_MAX;
-				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i)
-					if (i->first < val)
-						val = i->first;
+				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
+				     ++i)
+					if (i->first < val) val = i->first;
 				op = g_random->randomInt(INT_MIN, val);
 			} else if (arv < 0.50) {
 				int val = INT_MIN;
-				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i)
-					if (i->first > val)
-						val = i->first;
-				op = g_random->randomInt(val+1, INT_MAX);
+				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
+				     ++i)
+					if (i->first > val) val = i->first;
+				op = g_random->randomInt(val + 1, INT_MAX);
 			} else {
 				int minval = INT_MAX, maxval = INT_MIN;
-				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i) {
-					if (i->first < minval)
-						minval = i->first;
-					if (i->first > maxval)
-						maxval = i->first;
+				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end();
+				     ++i) {
+					if (i->first < minval) minval = i->first;
+					if (i->first > maxval) maxval = i->first;
 				}
-				op = g_random->randomInt(minval, maxval+1);
+				op = g_random->randomInt(minval, maxval + 1);
 			}
-			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
+			if (op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS ||
+			    op == FDBTransactionOptions::READ_SYSTEM_KEYS) // do not test access system keys since the option is
+			                                                   // actually used by the workload
 				op = -1;
 
 			double orv = g_random->random01();
 			if (orv >= 0.25) {
-				int64_t value_size = g_random->randomInt64(0, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				int64_t value_size =
+				    g_random->randomInt64(0, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 
 				std::string svalue;
 				svalue.reserve(value_size);
-				for (size_t j = 0; j < value_size; ++j)
-					svalue.append(1, (char) g_random->randomInt(0, 256));
+				for (size_t j = 0; j < value_size; ++j) svalue.append(1, (char)g_random->randomInt(0, 256));
 
 				val = Standalone<StringRef>(StringRef(svalue));
 			}
 
-			contract = {
-				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE) ),
-				std::make_pair( error_code_read_version_already_set, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::INITIALIZE_NEW_DATABASE) )
-			};
+			contract = { std::make_pair(error_code_invalid_option_value, ExceptionContract::Possible),
+				         std::make_pair(error_code_client_invalid_operation,
+				                        ExceptionContract::possibleIf((FDBTransactionOptions::Option)op ==
+				                                                      FDBTransactionOptions::READ_YOUR_WRITES_DISABLE)),
+				         std::make_pair(
+				             error_code_read_version_already_set,
+				             ExceptionContract::possibleIf((FDBTransactionOptions::Option)op ==
+				                                           FDBTransactionOptions::INITIALIZE_NEW_DATABASE)) };
 		}
 
 		void callback(Reference<ITransaction> tr) {
-			tr->setOption((FDBTransactionOptions::Option) op, val.cast_to<StringRef>());
+			tr->setOption((FDBTransactionOptions::Option)op, val.cast_to<StringRef>());
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("Op", op).detail("Val", printable(val));
 		}
@@ -1111,14 +1095,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef BaseTest<TestOnError, Void> base_type;
 		int errorcode;
 
-		TestOnError(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestOnError") {
+		TestOnError(unsigned int id, FuzzApiCorrectnessWorkload* workload)
+		  : BaseTestCallback(id, workload, "TestOnError") {
 			errorcode = 0;
 			double erv = g_random->random01();
 			if (erv >= 0.2) {
 				if (erv < 0.6)
 					errorcode = g_random->randomInt(INT_MIN, 0);
 				else
-					errorcode = g_random->randomInt(0, INT_MAX)+1;
+					errorcode = g_random->randomInt(0, INT_MAX) + 1;
 			}
 		}
 
@@ -1126,11 +1111,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			tr->onError(Error::fromUnvalidatedCode(errorcode));
 			// This is necessary here, as onError will have reset this
 			// value, we will be looking at the wrong thing.
-			if( workload->useSystemKeys )
-				tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+			if (workload->useSystemKeys) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		}
 
-		void augmentTrace(TraceEvent &e) const {
+		void augmentTrace(TraceEvent& e) const {
 			base_type::augmentTrace(e);
 			e.detail("ErrorCode", errorcode);
 		}
@@ -1159,5 +1143,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 };
 
 std::once_flag FuzzApiCorrectnessWorkload::onceFlag;
-std::vector<std::function<Future<Void> (unsigned int const &, FuzzApiCorrectnessWorkload * const &, Reference<ITransaction> const &)>> FuzzApiCorrectnessWorkload::testCases;
+std::vector<std::function<Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&,
+                                       Reference<ITransaction> const&)>>
+    FuzzApiCorrectnessWorkload::testCases;
 WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory("FuzzApiCorrectness");

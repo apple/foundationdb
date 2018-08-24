@@ -31,21 +31,23 @@ class ThreadSafeDatabase;
 
 class ThreadSafeCluster : public ICluster, public ThreadSafeReferenceCounted<ThreadSafeCluster>, private NonCopyable {
 public:
-	static ThreadFuture<Reference<ICluster>> create( std::string connFilename, int apiVersion = -1 );
+	static ThreadFuture<Reference<ICluster>> create(std::string connFilename, int apiVersion = -1);
 	~ThreadSafeCluster();
-	ThreadFuture<Reference<IDatabase>> createDatabase( Standalone<StringRef> dbName );
+	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
 
-	void setOption( FDBClusterOptions::Option option, Optional<StringRef> value  = Optional<StringRef>() );
+	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	ThreadFuture<Void> onConnected();  // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
+	ThreadFuture<Void>
+	onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The
+	               // cluster file therefore is valid, but the database might be unavailable.
 
 	void addref() { ThreadSafeReferenceCounted<ThreadSafeCluster>::addref(); }
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeCluster>::delref(); }
 
 private:
-	ThreadSafeCluster( Cluster* cluster ) : cluster(cluster) { }
+	ThreadSafeCluster(Cluster* cluster) : cluster(cluster) {}
 	Cluster* cluster;
-	friend Reference<ICluster> constructThreadSafeCluster( Cluster* cluster );
+	friend Reference<ICluster> constructThreadSafeCluster(Cluster* cluster);
 };
 
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
@@ -55,7 +57,7 @@ public:
 
 	Reference<ITransaction> createTransaction();
 
-	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 	void addref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
@@ -64,55 +66,62 @@ private:
 	friend class ThreadSafeCluster;
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;
-public:  // Internal use only
-	ThreadSafeDatabase( DatabaseContext* db ) : db(db) {}
+
+public: // Internal use only
+	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
-	Database unsafeGetDatabase() const;  // This is thread unsafe (ONLY call from the network thread), but respects reference counting
+	Database unsafeGetDatabase()
+	    const; // This is thread unsafe (ONLY call from the network thread), but respects reference counting
 };
 
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction( ThreadSafeDatabase *cx );
+	explicit ThreadSafeTransaction(ThreadSafeDatabase* cx);
 	~ThreadSafeTransaction();
 
 	void cancel();
-	void setVersion( Version v );
+	void setVersion(Version v);
 	ThreadFuture<Version> getReadVersion();
 
-	ThreadFuture< Optional<Value> > get( const KeyRef& key, bool snapshot = false );
-	ThreadFuture< Key > getKey( const KeySelectorRef& key, bool snapshot = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot = false, bool reverse = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false );
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, int limit, bool snapshot = false, bool reverse = false ) {
-		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse );
+	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false);
+	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit,
+	                                                  bool snapshot = false, bool reverse = false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
+	                                                  GetRangeLimits limits, bool snapshot = false,
+	                                                  bool reverse = false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot = false,
+	                                                  bool reverse = false) {
+		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture< Standalone<RangeResultRef> > getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) {
-		return getRange( firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse );
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, GetRangeLimits limits,
+	                                                  bool snapshot = false, bool reverse = false) {
+		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
 
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key);
 
-	void addReadConflictRange( const KeyRangeRef& keys );
+	void addReadConflictRange(const KeyRangeRef& keys);
 	void makeSelfConflicting();
 
-	void atomicOp( const KeyRef& key, const ValueRef& value, uint32_t operationType );
-	void set( const KeyRef& key, const ValueRef& value );
-	void clear( const KeyRef& begin, const KeyRef& end);
-	void clear( const KeyRangeRef& range );
-	void clear( const KeyRef& key );
+	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType);
+	void set(const KeyRef& key, const ValueRef& value);
+	void clear(const KeyRef& begin, const KeyRef& end);
+	void clear(const KeyRangeRef& range);
+	void clear(const KeyRef& key);
 
-	ThreadFuture< Void > watch( const KeyRef& key );
+	ThreadFuture<Void> watch(const KeyRef& key);
 
-	void addWriteConflictRange( const KeyRangeRef& keys );
+	void addWriteConflictRange(const KeyRangeRef& keys);
 
 	ThreadFuture<Void> commit();
 	Version getCommittedVersion();
 	ThreadFuture<Standalone<StringRef>> getVersionstamp();
 
-	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 	ThreadFuture<Void> checkDeferredError();
-	ThreadFuture<Void> onError( Error const& e );
+	ThreadFuture<Void> onError(Error const& e);
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(NULL) {}
@@ -125,7 +134,7 @@ public:
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
 private:
-	ReadYourWritesTransaction *tr;
+	ReadYourWritesTransaction* tr;
 };
 
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
@@ -138,9 +147,9 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
+	ThreadFuture<Reference<ICluster>> createCluster(const char* clusterFilePath);
 
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter);
 
 	static IClientApi* api;
 
@@ -150,7 +159,7 @@ private:
 	int apiVersion;
 	const std::string clientVersion;
 	uint64_t transportId;
-	
+
 	Mutex lock;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 };

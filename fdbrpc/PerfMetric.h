@@ -29,9 +29,11 @@
 using std::vector;
 
 struct PerfMetric {
-	PerfMetric() : m_name(""), m_value(0), m_averaged(false), m_format_code( "%.3g" ) {}
-	PerfMetric( std::string name, double value, bool averaged ) : m_name(name), m_value(value), m_averaged(averaged), m_format_code( "%.3g" ) {}
-	PerfMetric( std::string name, double value, bool averaged, std::string format_code ) : m_name(name), m_value(value), m_averaged(averaged), m_format_code(format_code) {}
+	PerfMetric() : m_name(""), m_value(0), m_averaged(false), m_format_code("%.3g") {}
+	PerfMetric(std::string name, double value, bool averaged)
+	  : m_name(name), m_value(value), m_averaged(averaged), m_format_code("%.3g") {}
+	PerfMetric(std::string name, double value, bool averaged, std::string format_code)
+	  : m_name(name), m_value(value), m_averaged(averaged), m_format_code(format_code) {}
 
 	std::string name() const { return m_name; }
 	double value() const { return m_value; }
@@ -39,11 +41,13 @@ struct PerfMetric {
 	std::string format_code() const { return m_format_code; }
 	bool averaged() const { return m_averaged; }
 
-	PerfMetric withPrefix( const std::string& pre ) { return PerfMetric(pre+name(), value(), averaged(), format_code()); }
+	PerfMetric withPrefix(const std::string& pre) {
+		return PerfMetric(pre + name(), value(), averaged(), format_code());
+	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ar & m_name & m_format_code & m_value & m_averaged;
+	void serialize(Ar& ar) {
+		ar& m_name& m_format_code& m_value& m_averaged;
 	}
 
 private:
@@ -55,9 +59,9 @@ private:
 struct PerfIntCounter {
 	PerfIntCounter(std::string name) : name(name), value(0) {}
 	PerfIntCounter(std::string name, vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
-	void operator += (int64_t delta) { value += delta; }
-	void operator ++ () { value += 1; }
-	PerfMetric getMetric() { return PerfMetric( name, (double)value, false, "%.0lf" ); }
+	void operator+=(int64_t delta) { value += delta; }
+	void operator++() { value += 1; }
+	PerfMetric getMetric() { return PerfMetric(name, (double)value, false, "%.0lf"); }
 	int64_t getValue() { return value; }
 	void clear() { value = 0; }
 
@@ -69,9 +73,9 @@ private:
 struct PerfDoubleCounter {
 	PerfDoubleCounter(std::string name) : name(name), value(0) {}
 	PerfDoubleCounter(std::string name, vector<PerfDoubleCounter*>& v) : name(name), value(0) { v.push_back(this); }
-	void operator += (double delta) { value += delta; }
-	void operator ++ () { value += 1.0; }
-	PerfMetric getMetric() { return PerfMetric( name, value, false ); }
+	void operator+=(double delta) { value += delta; }
+	void operator++() { value += 1.0; }
+	PerfMetric getMetric() { return PerfMetric(name, value, false); }
 	double getValue() { return value; }
 	void clear() { value = 0.0; }
 
@@ -89,18 +93,12 @@ struct GlobalCounters {
 	PerfIntCounter conflictKeys;
 	PerfIntCounter conflictTransactions;
 
-	GlobalCounters() : 
-		conflictTime("Conflict detection time", doubles),
-		conflictBatches("Conflict batches", ints),
-		conflictKeys("Conflict keys", ints),
-		conflictTransactions("Conflict transactions", ints)
-	{
-	}
+	GlobalCounters()
+	  : conflictTime("Conflict detection time", doubles), conflictBatches("Conflict batches", ints),
+	    conflictKeys("Conflict keys", ints), conflictTransactions("Conflict transactions", ints) {}
 	void clear() {
-		for(int i=0; i<ints.size(); i++)
-			ints[i]->clear();
-		for(int i=0; i<doubles.size(); i++)
-			doubles[i]->clear();
+		for (int i = 0; i < ints.size(); i++) ints[i]->clear();
+		for (int i = 0; i < doubles.size(); i++) doubles[i]->clear();
 	}
 };
 

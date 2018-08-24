@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
@@ -36,121 +36,106 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
-	ConfigureDatabaseWorkload( WorkloadContext const& wcx )
-		: TestWorkload(wcx), retries("Retries")
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 200.0 );
+	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
 	}
 
 	virtual std::string description() { return "DestroyDatabaseWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup( cx, this );
-	}
+	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( this, cx );
-	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	virtual Future<Void> start(Database const& cx) { return _start(this, cx); }
+	virtual Future<bool> check(Database const& cx) { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( retries.getMetric() );
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) { m.push_back(retries.getMetric()); }
 
-	static inline uint64_t valueToUInt64( const StringRef& v ) {
+	static inline uint64_t valueToUInt64(const StringRef& v) {
 		long long unsigned int x = 0;
-		sscanf( v.toString().c_str(), "%llx", &x );
+		sscanf(v.toString().c_str(), "%llx", &x);
 		return x;
 	}
 
-	static inline Standalone<StringRef> getDatabaseName( ConfigureDatabaseWorkload *self, int dbIndex ) {
+	static inline Standalone<StringRef> getDatabaseName(ConfigureDatabaseWorkload* self, int dbIndex) {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
-	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "single" ) );
+	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
+		ConfigurationResult::Type _ = wait(changeConfig(cx, "single"));
 		return Void();
 	}
 
-	ACTOR Future<Void> _start( ConfigureDatabaseWorkload *self, Database cx ) {
-		if( self->clientId == 0 ) {
-			self->clients.push_back( timeout( self->singleDB( self, cx ), self->testDuration, Void() ) );
-			wait( waitForAll( self->clients ) );
+	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+		if (self->clientId == 0) {
+			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
+			wait(waitForAll(self->clients));
 		}
 		return Void();
 	}
 
 	static int randomRoleNumber() {
-		int i = g_random->randomInt(0,4);
+		int i = g_random->randomInt(0, 4);
 		return i ? i : -1;
 	}
 
-	ACTOR Future<Void> singleDB( ConfigureDatabaseWorkload *self, Database cx ) {
+	ACTOR Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
 		state Transaction tr;
 		state int i;
 		loop {
-			if(g_simulator.speedUpSimulation) {
+			if (g_simulator.speedUpSimulation) {
 				return Void();
 			}
 			state int randomChoice = g_random->randomInt(0, 6);
-			if( randomChoice == 0 ) {
+			if (randomChoice == 0) {
 				double waitDuration = 3.0 * g_random->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
-				wait( delay( waitDuration ) );
-			}
-			else if( randomChoice == 1 ) {
-				tr = Transaction( cx );
+				wait(delay(waitDuration));
+			} else if (randomChoice == 1) {
+				tr = Transaction(cx);
 				loop {
 					try {
-						tr.clear( normalKeys );
-						wait( tr.commit() );
+						tr.clear(normalKeys);
+						wait(tr.commit());
 						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
+					} catch (Error& e) {
+						wait(tr.onError(e));
 					}
 				}
-			}
-			else if( randomChoice == 2 ) {
+			} else if (randomChoice == 2) {
 				state double loadDuration = g_random->random01() * 10.0;
 				state double startTime = now();
 				state int amtLoaded = 0;
 
 				loop {
-					if( now() - startTime > loadDuration )
-						break;
+					if (now() - startTime > loadDuration) break;
 					loop {
-						tr = Transaction( cx );
+						tr = Transaction(cx);
 						try {
-							for( i = 0; i < 10; i++ ) {
-								state Key randomKey( "ConfigureTest" + g_random->randomUniqueID().toString() );
-								Optional<Value> val = wait( tr.get( randomKey ) );
-								uint64_t nextVal = val.present() ? valueToUInt64( val.get() ) + 1 : 0;
-								tr.set( randomKey, format( "%016llx", nextVal ) );
+							for (i = 0; i < 10; i++) {
+								state Key randomKey("ConfigureTest" + g_random->randomUniqueID().toString());
+								Optional<Value> val = wait(tr.get(randomKey));
+								uint64_t nextVal = val.present() ? valueToUInt64(val.get()) + 1 : 0;
+								tr.set(randomKey, format("%016llx", nextVal));
 							}
-							wait( tr.commit() );
+							wait(tr.commit());
 							amtLoaded += 10;
 							break;
-						}
-						catch( Error& e ) {
-							wait( tr.onError( e ) );
+						} catch (Error& e) {
+							wait(tr.onError(e));
 							++self->retries;
 						}
 					}
-					wait( delay( 0.1 ) );
+					wait(delay(0.1));
 				}
 
 				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);
-			}
-			else if( randomChoice == 3 ) {
+			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
-				int redundancy = g_random->randomInt( 0, sizeof(redundancies)/sizeof(redundancies[0]));
+				int redundancy = g_random->randomInt(0, sizeof(redundancies) / sizeof(redundancies[0]));
 				std::string config = redundancies[redundancy];
-				if(config == "triple" && g_simulator.physicalDatacenters > 4) {
+				if (config == "triple" && g_simulator.physicalDatacenters > 4) {
 					config = "double";
 				}
-				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
+				if (config == "triple" && g_simulator.physicalDatacenters == 3) {
 					config = "three_data_hall";
 				}
 
@@ -158,21 +143,19 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (g_random->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
-				ConfigurationResult::Type _ = wait( changeConfig( cx, config ) );
+				ConfigurationResult::Type _ = wait(changeConfig(cx, config));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
-			}
-			else if( randomChoice == 4 ) {
+			} else if (randomChoice == 4) {
 				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
 				auto ch = autoQuorumChange();
-				if (g_random->randomInt(0,2))
-					ch = nameQuorumChange( format("NewName%d", g_random->randomInt(0,100)), ch );
-				CoordinatorsResult::Type _ = wait( changeQuorum( cx, ch ) );
+				if (g_random->randomInt(0, 2))
+					ch = nameQuorumChange(format("NewName%d", g_random->randomInt(0, 100)), ch);
+				CoordinatorsResult::Type _ = wait(changeQuorum(cx, ch));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
-			}
-			else if ( randomChoice == 5) {
-				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))] ) );
-			}
-			else {
+			} else if (randomChoice == 5) {
+				ConfigurationResult::Type _ = wait(
+				    changeConfig(cx, storeTypes[g_random->randomInt(0, sizeof(storeTypes) / sizeof(storeTypes[0]))]));
+			} else {
 				ASSERT(false);
 			}
 		}

@@ -23,728 +23,764 @@
 #include "ActorFuzz.h"
 #ifndef WIN32
 
-ACTOR Future<int> actorFuzz0( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz0(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list928815;
 	list928815.push_back(1);
 	list928815.push_back(2);
 	list928815.push_back(3);
-	for( auto i : list928815 ) {
-		outputStream.send( 472952 );
+	for (auto i : list928815) {
+		outputStream.send(472952);
 		return 424221;
 	}
 	return 136262;
 }
 
-ACTOR Future<int> actorFuzz1( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz1(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	int input = waitNext( inputStream );
-	outputStream.send( input + 895041 );
+	int input = waitNext(inputStream);
+	outputStream.send(input + 895041);
 	return 406985;
 }
 
-ACTOR Future<int> actorFuzz2( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz2(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	return 981337;
 }
 
-ACTOR Future<int> actorFuzz3( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz3(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
-		outputStream.send( 169417 );
+		outputStream.send(169417);
 		try {
-			outputStream.send( 910046 );
+			outputStream.send(910046);
 			throw_operation_failed();
-			outputStream.send( 128775 );
+			outputStream.send(128775);
 			try {
-				outputStream.send( 288265 );
+				outputStream.send(288265);
 				state std::vector<int> list147355;
 				list147355.push_back(1);
 				list147355.push_back(2);
 				list147355.push_back(3);
-				for( auto i : list147355 ) {
-					outputStream.send( 884888 );
+				for (auto i : list147355) {
+					outputStream.send(884888);
 					try {
-						outputStream.send( 523929 );
+						outputStream.send(523929);
 						return 803295;
 					} catch (...) {
-						outputStream.send( 895092 );
+						outputStream.send(895092);
 						try {
-							outputStream.send( 103860 );
+							outputStream.send(103860);
 							return 189456;
 						} catch (...) {
-							outputStream.send( 636033 );
+							outputStream.send(636033);
 							continue;
 						}
 					}
 				}
-				outputStream.send( 827981 );
+				outputStream.send(827981);
 			} catch (...) {
-				outputStream.send( 530422 );
-				int input = waitNext( inputStream );
-				outputStream.send( input + 556758 );
-				outputStream.send( 289564 );
+				outputStream.send(530422);
+				int input = waitNext(inputStream);
+				outputStream.send(input + 556758);
+				outputStream.send(289564);
 			}
-			outputStream.send( 479534 );
+			outputStream.send(479534);
 		} catch (...) {
-			outputStream.send( 901015 );
-			state int i276213; for(i276213 = 0; i276213 < 5; i276213++) {
-				outputStream.send( 238065 );
+			outputStream.send(901015);
+			state int i276213;
+			for (i276213 = 0; i276213 < 5; i276213++) {
+				outputStream.send(238065);
 				continue;
 			}
-			outputStream.send( 216530 );
+			outputStream.send(216530);
 		}
-		outputStream.send( 721088 );
-		state int i183102; for(i183102 = 0; i183102 < 5; i183102++) {
-			outputStream.send( 154168 );
-			state int i424006; for(i424006 = 0; i424006 < 5; i424006++) {
-				outputStream.send( 509758 );
+		outputStream.send(721088);
+		state int i183102;
+		for (i183102 = 0; i183102 < 5; i183102++) {
+			outputStream.send(154168);
+			state int i424006;
+			for (i424006 = 0; i424006 < 5; i424006++) {
+				outputStream.send(509758);
 				break;
 			}
-			outputStream.send( 331070 );
+			outputStream.send(331070);
 		}
-		outputStream.send( 728291 );
+		outputStream.send(728291);
 	} catch (...) {
-		outputStream.send( 276663 );
+		outputStream.send(276663);
 		return 893442;
 	}
 	return 150168;
 }
 
-ACTOR Future<int> actorFuzz4( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz4(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	if ( (++ifstate&1) == 0 ) {
-		outputStream.send( 757514 );
-		int input = waitNext( inputStream );
-		outputStream.send( input + 991755 );
-		outputStream.send( 397194 );
+	if ((++ifstate & 1) == 0) {
+		outputStream.send(757514);
+		int input = waitNext(inputStream);
+		outputStream.send(input + 991755);
+		outputStream.send(397194);
 	}
 	return 924232;
 }
 
-ACTOR Future<int> actorFuzz5( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz5(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	state int i442791; for(i442791 = 0; i442791 < 5; i442791++) {
-		outputStream.send( 793665 );
-		state int i122946; for(i122946 = 0; i122946 < 5; i122946++) {
-			outputStream.send( 473530 );
-			state int i880568; for(i880568 = 0; i880568 < 5; i880568++) {
-				outputStream.send( 728257 );
+	state int i442791;
+	for (i442791 = 0; i442791 < 5; i442791++) {
+		outputStream.send(793665);
+		state int i122946;
+		for (i122946 = 0; i122946 < 5; i122946++) {
+			outputStream.send(473530);
+			state int i880568;
+			for (i880568 = 0; i880568 < 5; i880568++) {
+				outputStream.send(728257);
 				return 239736;
 			}
-			outputStream.send( 923761 );
+			outputStream.send(923761);
 		}
-		outputStream.send( 713797 );
+		outputStream.send(713797);
 		state std::vector<int> list811633;
 		list811633.push_back(1);
 		list811633.push_back(2);
 		list811633.push_back(3);
-		for( auto i : list811633 ) {
-			outputStream.send( 366087 );
-			int input = waitNext( inputStream );
-			outputStream.send( input + 538592 );
-			outputStream.send( 222552 );
+		for (auto i : list811633) {
+			outputStream.send(366087);
+			int input = waitNext(inputStream);
+			outputStream.send(input + 538592);
+			outputStream.send(222552);
 		}
-		outputStream.send( 974653 );
+		outputStream.send(974653);
 	}
 	return 738267;
 }
 
-ACTOR Future<int> actorFuzz6( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz6(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list672004;
 	list672004.push_back(1);
 	list672004.push_back(2);
 	list672004.push_back(3);
-	for( auto i : list672004 ) {
-		outputStream.send( 228205 );
-		state int i213703; for(i213703 = 0; i213703 < 5; i213703++) {
-			outputStream.send( 686961 );
-			wait( error ); // throw operation_failed()
-			outputStream.send( 453057 );
+	for (auto i : list672004) {
+		outputStream.send(228205);
+		state int i213703;
+		for (i213703 = 0; i213703 < 5; i213703++) {
+			outputStream.send(686961);
+			wait(error); // throw operation_failed()
+			outputStream.send(453057);
 		}
-		outputStream.send( 318329 );
+		outputStream.send(318329);
 	}
-	outputStream.send( 878109 );
-	if ( (++ifstate&1) == 0 ) {
-		outputStream.send( 947744 );
+	outputStream.send(878109);
+	if ((++ifstate & 1) == 0) {
+		outputStream.send(947744);
 		return 770841;
 	}
-	outputStream.send( 484904 );
+	outputStream.send(484904);
 	throw operation_failed();
 }
 
-ACTOR Future<int> actorFuzz7( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz7(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	state int i865202; for(i865202 = 0; i865202 < 5; i865202++) {
-		outputStream.send( 388211 );
+	state int i865202;
+	for (i865202 = 0; i865202 < 5; i865202++) {
+		outputStream.send(388211);
 		continue;
 	}
 	return 215808;
 }
 
-ACTOR Future<int> actorFuzz8( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz8(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list872196;
 	list872196.push_back(1);
 	list872196.push_back(2);
 	list872196.push_back(3);
-	for( auto i : list872196 ) {
-		outputStream.send( 906334 );
+	for (auto i : list872196) {
+		outputStream.send(906334);
 		continue;
 	}
 	return 190561;
 }
 
-ACTOR Future<int> actorFuzz9( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz9(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	if ( (++ifstate&1) == 0 ) {
-		outputStream.send( 862320 );
+	if ((++ifstate & 1) == 0) {
+		outputStream.send(862320);
 		try {
-			outputStream.send( 467528 );
-			int input = waitNext( inputStream );
-			outputStream.send( input + 454869 );
-			outputStream.send( 170527 );
+			outputStream.send(467528);
+			int input = waitNext(inputStream);
+			outputStream.send(input + 454869);
+			outputStream.send(170527);
 		} catch (...) {
-			outputStream.send( 599433 );
-			int input = waitNext( inputStream );
-			outputStream.send( input + 849051 );
-			outputStream.send( 399140 );
+			outputStream.send(599433);
+			int input = waitNext(inputStream);
+			outputStream.send(input + 849051);
+			outputStream.send(399140);
 		}
-		outputStream.send( 775108 );
+		outputStream.send(775108);
 	}
 	return 159221;
 }
 
-ACTOR Future<int> actorFuzz10( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz10(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	state int i624986; for(i624986 = 0; i624986 < 5; i624986++) {
-		outputStream.send( 713197 );
+	state int i624986;
+	for (i624986 = 0; i624986 < 5; i624986++) {
+		outputStream.send(713197);
 		break;
 	}
 	return 195782;
 }
 
-ACTOR Future<int> actorFuzz11( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz11(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list716397;
 	list716397.push_back(1);
 	list716397.push_back(2);
 	list716397.push_back(3);
-	for( auto i : list716397 ) {
-		outputStream.send( 715504 );
+	for (auto i : list716397) {
+		outputStream.send(715504);
 		state std::vector<int> list893053;
 		list893053.push_back(1);
 		list893053.push_back(2);
 		list893053.push_back(3);
-		for( auto i : list893053 ) {
-			outputStream.send( 404836 );
+		for (auto i : list893053) {
+			outputStream.send(404836);
 			break;
 		}
-		outputStream.send( 687853 );
+		outputStream.send(687853);
 	}
 	return 416948;
 }
 
-ACTOR Future<int> actorFuzz12( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz12(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	return 955805;
 }
 
-ACTOR Future<int> actorFuzz13( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz13(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	state int i543171; for(i543171 = 0; i543171 < 5; i543171++) {
-		outputStream.send( 619715 );
-		if ( (++ifstate&1) == 1 ) {
-			outputStream.send( 528509 );
+	state int i543171;
+	for (i543171 = 0; i543171 < 5; i543171++) {
+		outputStream.send(619715);
+		if ((++ifstate & 1) == 1) {
+			outputStream.send(528509);
 			try {
-				outputStream.send( 647852 );
+				outputStream.send(647852);
 				continue;
 			} catch (...) {
-				outputStream.send( 707540 );
+				outputStream.send(707540);
 				return 252364;
 			}
 		}
-		outputStream.send( 255314 );
+		outputStream.send(255314);
 	}
 	return 391920;
 }
 
-ACTOR Future<int> actorFuzz14( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz14(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	state int i341633; for(i341633 = 0; i341633 < 5; i341633++) {
-		outputStream.send( 422579 );
+	state int i341633;
+	for (i341633 = 0; i341633 < 5; i341633++) {
+		outputStream.send(422579);
 		try {
-			outputStream.send( 665867 );
+			outputStream.send(665867);
 			continue;
 		} catch (...) {
-			outputStream.send( 934161 );
+			outputStream.send(934161);
 			throw_operation_failed();
-			outputStream.send( 966369 );
+			outputStream.send(966369);
 		}
-		outputStream.send( 484274 );
+		outputStream.send(484274);
 		return 323308;
 	}
 	return 798692;
 }
 
-ACTOR Future<int> actorFuzz15( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz15(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	if ( (++ifstate&1) == 1 ) {
-		outputStream.send( 463317 );
-		int input = waitNext( inputStream );
-		outputStream.send( input + 862528 );
-		outputStream.send( 144528 );
+	if ((++ifstate & 1) == 1) {
+		outputStream.send(463317);
+		int input = waitNext(inputStream);
+		outputStream.send(input + 862528);
+		outputStream.send(144528);
 		throw operation_failed();
 	}
 	return 348329;
 }
 
-ACTOR Future<int> actorFuzz16( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz16(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list315206;
 	list315206.push_back(1);
 	list315206.push_back(2);
 	list315206.push_back(3);
-	for( auto i : list315206 ) {
-		outputStream.send( 488500 );
-		int input = waitNext( inputStream );
-		outputStream.send( input + 435335 );
-		outputStream.send( 838746 );
+	for (auto i : list315206) {
+		outputStream.send(488500);
+		int input = waitNext(inputStream);
+		outputStream.send(input + 435335);
+		outputStream.send(838746);
 	}
 	return 241009;
 }
 
-ACTOR Future<int> actorFuzz17( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz17(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	return 499302;
 }
 
-ACTOR Future<int> actorFuzz18( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz18(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	throw operation_failed();
 }
 
-ACTOR Future<int> actorFuzz19( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz19(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	int input = waitNext( inputStream );
-	outputStream.send( input + 216963 );
-	outputStream.send( 928990 );
+	int input = waitNext(inputStream);
+	outputStream.send(input + 216963);
+	outputStream.send(928990);
 	try {
-		outputStream.send( 833320 );
+		outputStream.send(833320);
 		return 981835;
 	} catch (...) {
-		outputStream.send( 163601 );
-		if ( (++ifstate&1) == 0 ) {
-			outputStream.send( 566353 );
-			int input = waitNext( inputStream );
-			outputStream.send( input + 898598 );
-			outputStream.send( 489283 );
+		outputStream.send(163601);
+		if ((++ifstate & 1) == 0) {
+			outputStream.send(566353);
+			int input = waitNext(inputStream);
+			outputStream.send(input + 898598);
+			outputStream.send(489283);
 		} else {
-			outputStream.send( 302679 );
+			outputStream.send(302679);
 			state std::vector<int> list598178;
 			list598178.push_back(1);
 			list598178.push_back(2);
 			list598178.push_back(3);
-			for( auto i : list598178 ) {
-				outputStream.send( 161921 );
+			for (auto i : list598178) {
+				outputStream.send(161921);
 				state std::vector<int> list144442;
 				list144442.push_back(1);
 				list144442.push_back(2);
 				list144442.push_back(3);
-				for( auto i : list144442 ) {
-					outputStream.send( 383319 );
-					if ( (++ifstate&1) == 0 ) {
-						outputStream.send( 510598 );
-						if ( (++ifstate&1) == 0 ) {
-							outputStream.send( 507597 );
-							if ( (++ifstate&1) == 0 ) {
-								outputStream.send( 165706 );
-								wait( error ); // throw operation_failed()
-								outputStream.send( 517934 );
+				for (auto i : list144442) {
+					outputStream.send(383319);
+					if ((++ifstate & 1) == 0) {
+						outputStream.send(510598);
+						if ((++ifstate & 1) == 0) {
+							outputStream.send(507597);
+							if ((++ifstate & 1) == 0) {
+								outputStream.send(165706);
+								wait(error); // throw operation_failed()
+								outputStream.send(517934);
 							} else {
-								outputStream.send( 310975 );
+								outputStream.send(310975);
 								continue;
 							}
-							outputStream.send( 276549 );
+							outputStream.send(276549);
 						} else {
-							outputStream.send( 760246 );
+							outputStream.send(760246);
 							return 285921;
 						}
-						outputStream.send( 998271 );
-						state int i844483; for(i844483 = 0; i844483 < 5; i844483++) {
-							outputStream.send( 116027 );
+						outputStream.send(998271);
+						state int i844483;
+						for (i844483 = 0; i844483 < 5; i844483++) {
+							outputStream.send(116027);
 							try {
-								outputStream.send( 924660 );
+								outputStream.send(924660);
 								return 318962;
 							} catch (...) {
-								outputStream.send( 344097 );
+								outputStream.send(344097);
 								return 650093;
 							}
 						}
-						outputStream.send( 911361 );
+						outputStream.send(911361);
 					} else {
-						outputStream.send( 132280 );
-						state int i765185; for(i765185 = 0; i765185 < 5; i765185++) {
-							outputStream.send( 304676 );
+						outputStream.send(132280);
+						state int i765185;
+						for (i765185 = 0; i765185 < 5; i765185++) {
+							outputStream.send(304676);
 							try {
-								outputStream.send( 213797 );
+								outputStream.send(213797);
 								continue;
 							} catch (...) {
-								outputStream.send( 103092 );
+								outputStream.send(103092);
 								break;
 							}
 						}
-						outputStream.send( 186853 );
+						outputStream.send(186853);
 						throw operation_failed();
 					}
-					outputStream.send( 111835 );
+					outputStream.send(111835);
 				}
-				outputStream.send( 556173 );
+				outputStream.send(556173);
 			}
-			outputStream.send( 946155 );
+			outputStream.send(946155);
 		}
-		outputStream.send( 933557 );
+		outputStream.send(933557);
 	}
 	return 291132;
 }
 
-ACTOR Future<int> actorFuzz20( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz20(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	return 668336;
 }
 
-ACTOR Future<int> actorFuzz21( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz21(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	int input = waitNext( inputStream );
-	outputStream.send( input + 103331 );
+	int input = waitNext(inputStream);
+	outputStream.send(input + 103331);
 	return 404486;
 }
 
-ACTOR Future<int> actorFuzz22( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz22(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
-		outputStream.send( 173342 );
-		if ( (++ifstate&1) == 1 ) {
-			outputStream.send( 133654 );
+		outputStream.send(173342);
+		if ((++ifstate & 1) == 1) {
+			outputStream.send(133654);
 			throw operation_failed();
 		}
-		outputStream.send( 390745 );
+		outputStream.send(390745);
 	} catch (...) {
-		outputStream.send( 317492 );
+		outputStream.send(317492);
 		try {
-			outputStream.send( 976956 );
-			if ( (++ifstate&1) == 1 ) {
-				outputStream.send( 488021 );
+			outputStream.send(976956);
+			if ((++ifstate & 1) == 1) {
+				outputStream.send(488021);
 				try {
-					outputStream.send( 379893 );
-					int input = waitNext( inputStream );
-					outputStream.send( input + 113044 );
-					outputStream.send( 514763 );
+					outputStream.send(379893);
+					int input = waitNext(inputStream);
+					outputStream.send(input + 113044);
+					outputStream.send(514763);
 				} catch (...) {
-					outputStream.send( 934231 );
+					outputStream.send(934231);
 					try {
-						outputStream.send( 897734 );
-						if ( (++ifstate&1) == 1 ) {
-							outputStream.send( 217526 );
-							if ( (++ifstate&1) == 0 ) {
-								outputStream.send( 483115 );
-								state int i174159; for(i174159 = 0; i174159 < 5; i174159++) {
-									outputStream.send( 153107 );
+						outputStream.send(897734);
+						if ((++ifstate & 1) == 1) {
+							outputStream.send(217526);
+							if ((++ifstate & 1) == 0) {
+								outputStream.send(483115);
+								state int i174159;
+								for (i174159 = 0; i174159 < 5; i174159++) {
+									outputStream.send(153107);
 									return 282773;
 								}
-								outputStream.send( 980876 );
+								outputStream.send(980876);
 							} else {
-								outputStream.send( 617607 );
+								outputStream.send(617607);
 								state std::vector<int> list256809;
 								list256809.push_back(1);
 								list256809.push_back(2);
 								list256809.push_back(3);
-								for( auto i : list256809 ) {
-									outputStream.send( 939809 );
+								for (auto i : list256809) {
+									outputStream.send(939809);
 									state std::vector<int> list645802;
 									list645802.push_back(1);
 									list645802.push_back(2);
 									list645802.push_back(3);
-									for( auto i : list645802 ) {
-										outputStream.send( 958333 );
+									for (auto i : list645802) {
+										outputStream.send(958333);
 										return 863292;
 									}
-									outputStream.send( 556033 );
+									outputStream.send(556033);
 								}
-								outputStream.send( 374285 );
+								outputStream.send(374285);
 							}
-							outputStream.send( 804200 );
+							outputStream.send(804200);
 						}
-						outputStream.send( 353758 );
+						outputStream.send(353758);
 					} catch (...) {
-						outputStream.send( 289122 );
-						if ( (++ifstate&1) == 1 ) {
-							outputStream.send( 807371 );
-							state int i990430; for(i990430 = 0; i990430 < 5; i990430++) {
-								outputStream.send( 415008 );
+						outputStream.send(289122);
+						if ((++ifstate & 1) == 1) {
+							outputStream.send(807371);
+							state int i990430;
+							for (i990430 = 0; i990430 < 5; i990430++) {
+								outputStream.send(415008);
 								try {
-									outputStream.send( 693494 );
+									outputStream.send(693494);
 									try {
-										outputStream.send( 281197 );
-										int input = waitNext( inputStream );
-										outputStream.send( input + 441269 );
-										outputStream.send( 508213 );
+										outputStream.send(281197);
+										int input = waitNext(inputStream);
+										outputStream.send(input + 441269);
+										outputStream.send(508213);
 									} catch (...) {
-										outputStream.send( 481511 );
+										outputStream.send(481511);
 										try {
-											outputStream.send( 902248 );
+											outputStream.send(902248);
 											continue;
 										} catch (...) {
-											outputStream.send( 801076 );
+											outputStream.send(801076);
 											state std::vector<int> list833389;
 											list833389.push_back(1);
 											list833389.push_back(2);
 											list833389.push_back(3);
-											for( auto i : list833389 ) {
-												outputStream.send( 828677 );
-												state int i413921; for(i413921 = 0; i413921 < 5; i413921++) {
-													outputStream.send( 972392 );
+											for (auto i : list833389) {
+												outputStream.send(828677);
+												state int i413921;
+												for (i413921 = 0; i413921 < 5; i413921++) {
+													outputStream.send(972392);
 													state std::vector<int> list209829;
 													list209829.push_back(1);
 													list209829.push_back(2);
 													list209829.push_back(3);
-													for( auto i : list209829 ) {
-														outputStream.send( 986318 );
+													for (auto i : list209829) {
+														outputStream.send(986318);
 														throw operation_failed();
 													}
-													outputStream.send( 756646 );
+													outputStream.send(756646);
 												}
-												outputStream.send( 685268 );
+												outputStream.send(685268);
 											}
-											outputStream.send( 570856 );
+											outputStream.send(570856);
 										}
-										outputStream.send( 193955 );
+										outputStream.send(193955);
 									}
-									outputStream.send( 432512 );
+									outputStream.send(432512);
 								} catch (...) {
-									outputStream.send( 373686 );
-									if ( (++ifstate&1) == 1 ) {
-										outputStream.send( 627374 );
-										int input = waitNext( inputStream );
-										outputStream.send( input + 597617 );
-										outputStream.send( 837374 );
+									outputStream.send(373686);
+									if ((++ifstate & 1) == 1) {
+										outputStream.send(627374);
+										int input = waitNext(inputStream);
+										outputStream.send(input + 597617);
+										outputStream.send(837374);
 									}
-									outputStream.send( 297526 );
+									outputStream.send(297526);
 								}
-								outputStream.send( 683444 );
+								outputStream.send(683444);
 							}
-							outputStream.send( 871558 );
+							outputStream.send(871558);
 							state std::vector<int> list684364;
 							list684364.push_back(1);
 							list684364.push_back(2);
 							list684364.push_back(3);
-							for( auto i : list684364 ) {
-								outputStream.send( 562891 );
+							for (auto i : list684364) {
+								outputStream.send(562891);
 								break;
 							}
-							outputStream.send( 568138 );
+							outputStream.send(568138);
 						}
-						outputStream.send( 510866 );
+						outputStream.send(510866);
 					}
-					outputStream.send( 760603 );
+					outputStream.send(760603);
 				}
-				outputStream.send( 396539 );
+				outputStream.send(396539);
 			}
-			outputStream.send( 294563 );
+			outputStream.send(294563);
 		} catch (...) {
-			outputStream.send( 341975 );
+			outputStream.send(341975);
 			throw_operation_failed();
-			outputStream.send( 533359 );
+			outputStream.send(533359);
 		}
-		outputStream.send( 313661 );
+		outputStream.send(313661);
 	}
 	return 330816;
 }
 
-ACTOR Future<int> actorFuzz23( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz23(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
-		outputStream.send( 803855 );
+		outputStream.send(803855);
 		try {
-			outputStream.send( 187873 );
+			outputStream.send(187873);
 			throw operation_failed();
 		} catch (...) {
-			outputStream.send( 107262 );
-			if ( (++ifstate&1) == 0 ) {
-				outputStream.send( 903833 );
+			outputStream.send(107262);
+			if ((++ifstate & 1) == 0) {
+				outputStream.send(903833);
 				return 122479;
 			}
-			outputStream.send( 129084 );
+			outputStream.send(129084);
 			throw operation_failed();
 		}
 	} catch (...) {
-		outputStream.send( 193646 );
-		int input = waitNext( inputStream );
-		outputStream.send( input + 123221 );
-		outputStream.send( 336636 );
+		outputStream.send(193646);
+		int input = waitNext(inputStream);
+		outputStream.send(input + 123221);
+		outputStream.send(336636);
 	}
 	return 823727;
 }
 
-ACTOR Future<int> actorFuzz24( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz24(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list353113;
 	list353113.push_back(1);
 	list353113.push_back(2);
 	list353113.push_back(3);
-	for( auto i : list353113 ) {
-		outputStream.send( 904160 );
+	for (auto i : list353113) {
+		outputStream.send(904160);
 		try {
-			outputStream.send( 630322 );
-			if ( (++ifstate&1) == 1 ) {
-				outputStream.send( 971556 );
+			outputStream.send(630322);
+			if ((++ifstate & 1) == 1) {
+				outputStream.send(971556);
 				throw_operation_failed();
-				outputStream.send( 693412 );
+				outputStream.send(693412);
 			}
-			outputStream.send( 102553 );
+			outputStream.send(102553);
 			continue;
 		} catch (...) {
-			outputStream.send( 284758 );
+			outputStream.send(284758);
 			state std::vector<int> list964534;
 			list964534.push_back(1);
 			list964534.push_back(2);
 			list964534.push_back(3);
-			for( auto i : list964534 ) {
-				outputStream.send( 597252 );
+			for (auto i : list964534) {
+				outputStream.send(597252);
 				return 236723;
 			}
-			outputStream.send( 482123 );
-			if ( (++ifstate&1) == 0 ) {
-				outputStream.send( 523339 );
-				int input = waitNext( inputStream );
-				outputStream.send( input + 223842 );
-				outputStream.send( 423422 );
+			outputStream.send(482123);
+			if ((++ifstate & 1) == 0) {
+				outputStream.send(523339);
+				int input = waitNext(inputStream);
+				outputStream.send(input + 223842);
+				outputStream.send(423422);
 			}
-			outputStream.send( 683377 );
+			outputStream.send(683377);
 		}
-		outputStream.send( 415173 );
+		outputStream.send(415173);
 	}
 	return 660359;
 }
 
-ACTOR Future<int> actorFuzz25( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz25(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
-		outputStream.send( 450503 );
-		int input = waitNext( inputStream );
-		outputStream.send( input + 146899 );
-		outputStream.send( 754498 );
+		outputStream.send(450503);
+		int input = waitNext(inputStream);
+		outputStream.send(input + 146899);
+		outputStream.send(754498);
 	} catch (...) {
-		outputStream.send( 898315 );
+		outputStream.send(898315);
 		return 869882;
 	}
 	return 861489;
 }
 
-ACTOR Future<int> actorFuzz26( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz26(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	return 355765;
 }
 
-ACTOR Future<int> actorFuzz27( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz27(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
-	int input = waitNext( inputStream );
-	outputStream.send( input + 862579 );
+	int input = waitNext(inputStream);
+	outputStream.send(input + 862579);
 	return 567151;
 }
 
-ACTOR Future<int> actorFuzz28( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz28(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
-		outputStream.send( 190685 );
+		outputStream.send(190685);
 		state std::vector<int> list488175;
 		list488175.push_back(1);
 		list488175.push_back(2);
 		list488175.push_back(3);
-		for( auto i : list488175 ) {
-			outputStream.send( 107570 );
+		for (auto i : list488175) {
+			outputStream.send(107570);
 			state std::vector<int> list925612;
 			list925612.push_back(1);
 			list925612.push_back(2);
 			list925612.push_back(3);
-			for( auto i : list925612 ) {
-				outputStream.send( 430892 );
+			for (auto i : list925612) {
+				outputStream.send(430892);
 				throw_operation_failed();
-				outputStream.send( 705871 );
+				outputStream.send(705871);
 			}
-			outputStream.send( 102606 );
+			outputStream.send(102606);
 		}
-		outputStream.send( 619003 );
+		outputStream.send(619003);
 	} catch (...) {
-		outputStream.send( 787855 );
+		outputStream.send(787855);
 		state std::vector<int> list959628;
 		list959628.push_back(1);
 		list959628.push_back(2);
 		list959628.push_back(3);
-		for( auto i : list959628 ) {
-			outputStream.send( 934043 );
-			state int i699601; for(i699601 = 0; i699601 < 5; i699601++) {
-				outputStream.send( 815071 );
+		for (auto i : list959628) {
+			outputStream.send(934043);
+			state int i699601;
+			for (i699601 = 0; i699601 < 5; i699601++) {
+				outputStream.send(815071);
 				continue;
 			}
-			outputStream.send( 868540 );
+			outputStream.send(868540);
 		}
-		outputStream.send( 978175 );
+		outputStream.send(978175);
 	}
 	return 887701;
 }
 
-ACTOR Future<int> actorFuzz29( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {
+ACTOR Future<int> actorFuzz29(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	state std::vector<int> list757591;
 	list757591.push_back(1);
 	list757591.push_back(2);
 	list757591.push_back(3);
-	for( auto i : list757591 ) {
-		outputStream.send( 121079 );
+	for (auto i : list757591) {
+		outputStream.send(121079);
 		throw operation_failed();
 	}
-	outputStream.send( 814445 );
-	state int i743927; for(i743927 = 0; i743927 < 5; i743927++) {
-		outputStream.send( 548422 );
+	outputStream.send(814445);
+	state int i743927;
+	for (i743927 = 0; i743927 < 5; i743927++) {
+		outputStream.send(548422);
 		return 324302;
 	}
 	return 853491;
 }
 
-std::pair<int,int> actorFuzzTests() {
+std::pair<int, int> actorFuzzTests() {
 	int testsOK = 0;
-	testsOK += testFuzzActor( &actorFuzz0, "actorFuzz0", (vector<int>(),472952,424221) );
-	testsOK += testFuzzActor( &actorFuzz1, "actorFuzz1", (vector<int>(),896041,406985) );
-	testsOK += testFuzzActor( &actorFuzz2, "actorFuzz2", (vector<int>(),981337) );
-	testsOK += testFuzzActor( &actorFuzz3, "actorFuzz3", (vector<int>(),169417,910046,901015,238065,238065,238065,238065,238065,216530,721088,154168,509758,331070,154168,509758,331070,154168,509758,331070,154168,509758,331070,154168,509758,331070,728291,150168) );
-	testsOK += testFuzzActor( &actorFuzz4, "actorFuzz4", (vector<int>(),924232) );
-	testsOK += testFuzzActor( &actorFuzz5, "actorFuzz5", (vector<int>(),793665,473530,728257,239736) );
-	testsOK += testFuzzActor( &actorFuzz6, "actorFuzz6", (vector<int>(),228205,686961,1000) );
-	testsOK += testFuzzActor( &actorFuzz7, "actorFuzz7", (vector<int>(),388211,388211,388211,388211,388211,215808) );
-	testsOK += testFuzzActor( &actorFuzz8, "actorFuzz8", (vector<int>(),906334,906334,906334,190561) );
-	testsOK += testFuzzActor( &actorFuzz9, "actorFuzz9", (vector<int>(),159221) );
-	testsOK += testFuzzActor( &actorFuzz10, "actorFuzz10", (vector<int>(),713197,195782) );
-	testsOK += testFuzzActor( &actorFuzz11, "actorFuzz11", (vector<int>(),715504,404836,687853,715504,404836,687853,715504,404836,687853,416948) );
-	testsOK += testFuzzActor( &actorFuzz12, "actorFuzz12", (vector<int>(),955805) );
-	testsOK += testFuzzActor( &actorFuzz13, "actorFuzz13", (vector<int>(),619715,528509,647852,619715,255314,619715,528509,647852,619715,255314,619715,528509,647852,391920) );
-	testsOK += testFuzzActor( &actorFuzz14, "actorFuzz14", (vector<int>(),422579,665867,422579,665867,422579,665867,422579,665867,422579,665867,798692) );
-	testsOK += testFuzzActor( &actorFuzz15, "actorFuzz15", (vector<int>(),463317,863528,144528,1000) );
-	testsOK += testFuzzActor( &actorFuzz16, "actorFuzz16", (vector<int>(),488500,436335,838746,488500,437335,838746,488500,438335,838746,241009) );
-	testsOK += testFuzzActor( &actorFuzz17, "actorFuzz17", (vector<int>(),499302) );
-	testsOK += testFuzzActor( &actorFuzz18, "actorFuzz18", (vector<int>(),1000) );
-	testsOK += testFuzzActor( &actorFuzz19, "actorFuzz19", (vector<int>(),217963,928990,833320,981835) );
-	testsOK += testFuzzActor( &actorFuzz20, "actorFuzz20", (vector<int>(),668336) );
-	testsOK += testFuzzActor( &actorFuzz21, "actorFuzz21", (vector<int>(),104331,404486) );
-	testsOK += testFuzzActor( &actorFuzz22, "actorFuzz22", (vector<int>(),173342,133654,317492,976956,294563,313661,330816) );
-	testsOK += testFuzzActor( &actorFuzz23, "actorFuzz23", (vector<int>(),803855,187873,107262,129084,193646,124221,336636,823727) );
-	testsOK += testFuzzActor( &actorFuzz24, "actorFuzz24", (vector<int>(),904160,630322,971556,284758,597252,236723) );
-	testsOK += testFuzzActor( &actorFuzz25, "actorFuzz25", (vector<int>(),450503,147899,754498,861489) );
-	testsOK += testFuzzActor( &actorFuzz26, "actorFuzz26", (vector<int>(),355765) );
-	testsOK += testFuzzActor( &actorFuzz27, "actorFuzz27", (vector<int>(),863579,567151) );
-	testsOK += testFuzzActor( &actorFuzz28, "actorFuzz28", (vector<int>(),190685,107570,430892,787855,934043,815071,815071,815071,815071,815071,868540,934043,815071,815071,815071,815071,815071,868540,934043,815071,815071,815071,815071,815071,868540,978175,887701) );
-	testsOK += testFuzzActor( &actorFuzz29, "actorFuzz29", (vector<int>(),121079,1000) );
+	testsOK += testFuzzActor(&actorFuzz0, "actorFuzz0", (vector<int>(), 472952, 424221));
+	testsOK += testFuzzActor(&actorFuzz1, "actorFuzz1", (vector<int>(), 896041, 406985));
+	testsOK += testFuzzActor(&actorFuzz2, "actorFuzz2", (vector<int>(), 981337));
+	testsOK += testFuzzActor(&actorFuzz3, "actorFuzz3",
+	                         (vector<int>(), 169417, 910046, 901015, 238065, 238065, 238065, 238065, 238065, 216530,
+	                          721088, 154168, 509758, 331070, 154168, 509758, 331070, 154168, 509758, 331070, 154168,
+	                          509758, 331070, 154168, 509758, 331070, 728291, 150168));
+	testsOK += testFuzzActor(&actorFuzz4, "actorFuzz4", (vector<int>(), 924232));
+	testsOK += testFuzzActor(&actorFuzz5, "actorFuzz5", (vector<int>(), 793665, 473530, 728257, 239736));
+	testsOK += testFuzzActor(&actorFuzz6, "actorFuzz6", (vector<int>(), 228205, 686961, 1000));
+	testsOK +=
+	    testFuzzActor(&actorFuzz7, "actorFuzz7", (vector<int>(), 388211, 388211, 388211, 388211, 388211, 215808));
+	testsOK += testFuzzActor(&actorFuzz8, "actorFuzz8", (vector<int>(), 906334, 906334, 906334, 190561));
+	testsOK += testFuzzActor(&actorFuzz9, "actorFuzz9", (vector<int>(), 159221));
+	testsOK += testFuzzActor(&actorFuzz10, "actorFuzz10", (vector<int>(), 713197, 195782));
+	testsOK +=
+	    testFuzzActor(&actorFuzz11, "actorFuzz11",
+	                  (vector<int>(), 715504, 404836, 687853, 715504, 404836, 687853, 715504, 404836, 687853, 416948));
+	testsOK += testFuzzActor(&actorFuzz12, "actorFuzz12", (vector<int>(), 955805));
+	testsOK += testFuzzActor(&actorFuzz13, "actorFuzz13",
+	                         (vector<int>(), 619715, 528509, 647852, 619715, 255314, 619715, 528509, 647852, 619715,
+	                          255314, 619715, 528509, 647852, 391920));
+	testsOK += testFuzzActor(
+	    &actorFuzz14, "actorFuzz14",
+	    (vector<int>(), 422579, 665867, 422579, 665867, 422579, 665867, 422579, 665867, 422579, 665867, 798692));
+	testsOK += testFuzzActor(&actorFuzz15, "actorFuzz15", (vector<int>(), 463317, 863528, 144528, 1000));
+	testsOK +=
+	    testFuzzActor(&actorFuzz16, "actorFuzz16",
+	                  (vector<int>(), 488500, 436335, 838746, 488500, 437335, 838746, 488500, 438335, 838746, 241009));
+	testsOK += testFuzzActor(&actorFuzz17, "actorFuzz17", (vector<int>(), 499302));
+	testsOK += testFuzzActor(&actorFuzz18, "actorFuzz18", (vector<int>(), 1000));
+	testsOK += testFuzzActor(&actorFuzz19, "actorFuzz19", (vector<int>(), 217963, 928990, 833320, 981835));
+	testsOK += testFuzzActor(&actorFuzz20, "actorFuzz20", (vector<int>(), 668336));
+	testsOK += testFuzzActor(&actorFuzz21, "actorFuzz21", (vector<int>(), 104331, 404486));
+	testsOK += testFuzzActor(&actorFuzz22, "actorFuzz22",
+	                         (vector<int>(), 173342, 133654, 317492, 976956, 294563, 313661, 330816));
+	testsOK += testFuzzActor(&actorFuzz23, "actorFuzz23",
+	                         (vector<int>(), 803855, 187873, 107262, 129084, 193646, 124221, 336636, 823727));
+	testsOK +=
+	    testFuzzActor(&actorFuzz24, "actorFuzz24", (vector<int>(), 904160, 630322, 971556, 284758, 597252, 236723));
+	testsOK += testFuzzActor(&actorFuzz25, "actorFuzz25", (vector<int>(), 450503, 147899, 754498, 861489));
+	testsOK += testFuzzActor(&actorFuzz26, "actorFuzz26", (vector<int>(), 355765));
+	testsOK += testFuzzActor(&actorFuzz27, "actorFuzz27", (vector<int>(), 863579, 567151));
+	testsOK += testFuzzActor(&actorFuzz28, "actorFuzz28",
+	                         (vector<int>(), 190685, 107570, 430892, 787855, 934043, 815071, 815071, 815071, 815071,
+	                          815071, 868540, 934043, 815071, 815071, 815071, 815071, 815071, 868540, 934043, 815071,
+	                          815071, 815071, 815071, 815071, 868540, 978175, 887701));
+	testsOK += testFuzzActor(&actorFuzz29, "actorFuzz29", (vector<int>(), 121079, 1000));
 	return std::make_pair(testsOK, 30);
 }
 

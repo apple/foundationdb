@@ -24,7 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;
@@ -34,31 +34,27 @@ struct LowLatencyWorkload : TestWorkload {
 	bool ok;
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), operations("Operations"), retries("Retries") , ok(true)
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 20.0 );
-		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
+	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
+		maxLatency = getOption(options, LiteralStringRef("maxLatency"), 20.0);
+		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
 	}
 
 	virtual std::string description() { return "LowLatency"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
+
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) return _start(cx, this);
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return _start( cx, this );
-		return Void();
-	}
-
-	ACTOR static Future<Void> _start( Database cx, LowLatencyWorkload* self ) {
+	ACTOR static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
 		state double testStart = now();
 		try {
 			loop {
-				wait( delay( self->checkDelay ) );
-				state Transaction tr( cx );
+				wait(delay(self->checkDelay));
+				state Transaction tr(cx);
 				state double operationStart = now();
 				++self->operations;
 				loop {
@@ -67,34 +63,33 @@ struct LowLatencyWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						Version _ = wait(tr.getReadVersion());
 						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
+					} catch (Error& e) {
+						wait(tr.onError(e));
 						++self->retries;
 					}
 				}
-				if(now() - operationStart > self->maxLatency) {
-					TraceEvent(SevError, "LatencyTooLarge").detail("MaxLatency", self->maxLatency).detail("ObservedLatency", now() - operationStart);
+				if (now() - operationStart > self->maxLatency) {
+					TraceEvent(SevError, "LatencyTooLarge")
+					    .detail("MaxLatency", self->maxLatency)
+					    .detail("ObservedLatency", now() - operationStart);
 					self->ok = false;
 				}
-				if( now() - testStart > self->testDuration )
-					break;
+				if (now() - testStart > self->testDuration) break;
 			}
 			return Void();
-		} catch( Error &e ) {
-			TraceEvent(SevError, "LowLatencyError").error(e,true);
+		} catch (Error& e) {
+			TraceEvent(SevError, "LowLatencyError").error(e, true);
 			throw;
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return ok;
-	}
+	virtual Future<bool> check(Database const& cx) { return ok; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics(vector<PerfMetric>& m) {
 		double duration = testDuration;
-		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
-		m.push_back( operations.getMetric() );
-		m.push_back( retries.getMetric() );
+		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.push_back(operations.getMetric());
+		m.push_back(retries.getMetric());
 	}
 };
 

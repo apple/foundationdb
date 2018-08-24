@@ -36,27 +36,27 @@
 double getTime() {
 	static struct timeval tv;
 	gettimeofday(&tv, NULL);
-	return tv.tv_usec/1000000.0 + tv.tv_sec;
+	return tv.tv_usec / 1000000.0 + tv.tv_sec;
 }
 
-void writeKey(uint8_t **dest, int key, int keySize) {
-	*dest = (uint8_t*)malloc((sizeof(uint8_t))*keySize);
+void writeKey(uint8_t** dest, int key, int keySize) {
+	*dest = (uint8_t*)malloc((sizeof(uint8_t)) * keySize);
 	sprintf((char*)*dest, "%0*d", keySize, key);
 }
 
-uint8_t **generateKeys(int numKeys, int keySize) {
-	uint8_t **keys = (uint8_t**)malloc(sizeof(uint8_t*)*(numKeys+1));
+uint8_t** generateKeys(int numKeys, int keySize) {
+	uint8_t** keys = (uint8_t**)malloc(sizeof(uint8_t*) * (numKeys + 1));
 
 	uint32_t i;
-	for(i = 0; i <= numKeys; ++i) {
+	for (i = 0; i <= numKeys; ++i) {
 		writeKey(keys + i, i, keySize);
 	}
 
 	return keys;
 }
-void freeKeys(uint8_t **keys, int numKeys) {
+void freeKeys(uint8_t** keys, int numKeys) {
 	uint32_t i;
-	for(i = 0; i < numKeys; i++) {
+	for (i = 0; i < numKeys; i++) {
 		free(keys[i]);
 	}
 	free(keys);
@@ -66,38 +66,39 @@ int cmpfunc(const void* a, const void* b) {
 	return (*(int*)a - *(int*)b);
 }
 
-int median(int *values, int length) {
+int median(int* values, int length) {
 	qsort(values, length, sizeof(int), cmpfunc);
-	return values[length/2];
+	return values[length / 2];
 }
 
 struct RunResult {
 	int res;
 	fdb_error_t e;
 };
-#define RES(x, y) (struct RunResult) { x, y }
+#define RES(x, y)                                                                                                      \
+	(struct RunResult) { x, y }
 
 struct Kpi {
-	const char *name;
+	const char* name;
 	int value;
-	const char *units;
+	const char* units;
 
-	struct Kpi *next;
+	struct Kpi* next;
 };
 
 struct Error {
-	char *message;
+	char* message;
 
-	struct Error *next;
+	struct Error* next;
 };
 
 struct ResultSet {
-	struct Kpi *kpis;
-	struct Error *errors;
+	struct Kpi* kpis;
+	struct Error* errors;
 };
 
 struct ResultSet* newResultSet() {
-	struct ResultSet *rs = malloc(sizeof(struct ResultSet));
+	struct ResultSet* rs = malloc(sizeof(struct ResultSet));
 
 	rs->kpis = NULL;
 	rs->errors = NULL;
@@ -105,8 +106,8 @@ struct ResultSet* newResultSet() {
 	return rs;
 }
 
-void addKpi(struct ResultSet *rs, const char *name, int value, const char *units) {
-	struct Kpi *k = malloc(sizeof(struct Kpi));
+void addKpi(struct ResultSet* rs, const char* name, int value, const char* units) {
+	struct Kpi* k = malloc(sizeof(struct Kpi));
 	k->name = name;
 	k->value = value;
 	k->units = units;
@@ -114,20 +115,20 @@ void addKpi(struct ResultSet *rs, const char *name, int value, const char *units
 	rs->kpis = k;
 }
 
-void addError(struct ResultSet *rs, const char *message) {
-	struct Error *e = malloc(sizeof(struct Error));
-	e->message = (char*)malloc(strlen(message)+1);
+void addError(struct ResultSet* rs, const char* message) {
+	struct Error* e = malloc(sizeof(struct Error));
+	e->message = (char*)malloc(strlen(message) + 1);
 	strcpy(e->message, message);
 	e->next = rs->errors;
 	rs->errors = e;
 }
 
-void writeResultSet(struct ResultSet *rs) {
+void writeResultSet(struct ResultSet* rs) {
 	uint64_t id = ((uint64_t)rand() << 32) + rand();
 	char name[100];
 	sprintf(name, "fdb-c_result-%llu.json", id);
-	FILE *fp = fopen(name, "w");
-	if(!fp) {
+	FILE* fp = fopen(name, "w");
+	if (!fp) {
 		fprintf(stderr, "Could not open results file %s\n", name);
 		exit(1);
 	}
@@ -135,10 +136,10 @@ void writeResultSet(struct ResultSet *rs) {
 	fprintf(fp, "{\n");
 	fprintf(fp, "\t\"kpis\": {\n");
 
-	struct Kpi *k = rs->kpis;
-	while(k != NULL) {
+	struct Kpi* k = rs->kpis;
+	while (k != NULL) {
 		fprintf(fp, "\t\t\"%s\": { \"units\": \"%s\", \"value\": %d }", k->name, k->units, k->value);
-		if(k->next != NULL) {
+		if (k->next != NULL) {
 			fprintf(fp, ",");
 		}
 		fprintf(fp, "\n");
@@ -148,10 +149,10 @@ void writeResultSet(struct ResultSet *rs) {
 	fprintf(fp, "\t},\n");
 	fprintf(fp, "\t\"errors\": [\n");
 
-	struct Error *e = rs->errors;
-	while(e != NULL) {
+	struct Error* e = rs->errors;
+	while (e != NULL) {
 		fprintf(fp, "\t\t\"%s\"", e->message);
-		if(e->next != NULL) {
+		if (e->next != NULL) {
 			fprintf(fp, ",");
 		}
 		fprintf(fp, "\n");
@@ -164,17 +165,17 @@ void writeResultSet(struct ResultSet *rs) {
 	fclose(fp);
 }
 
-void freeResultSet(struct ResultSet *rs) {
-	struct Kpi *k = rs->kpis;
-	while(k != NULL) {
-		struct Kpi *next = k->next;
+void freeResultSet(struct ResultSet* rs) {
+	struct Kpi* k = rs->kpis;
+	while (k != NULL) {
+		struct Kpi* next = k->next;
 		free(k);
 		k = next;
 	}
 
-	struct Error *e = rs->errors;
-	while(e != NULL) {
-		struct Error *next = e->next;
+	struct Error* e = rs->errors;
+	while (e != NULL) {
+		struct Error* next = e->next;
 		free(e->message);
 		free(e);
 		e = next;
@@ -183,12 +184,12 @@ void freeResultSet(struct ResultSet *rs) {
 	free(rs);
 }
 
-fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-	if(err) {
-		char *msg = (char*)malloc(strlen(context) + 100);
+fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+	if (err) {
+		char* msg = (char*)malloc(strlen(context) + 100);
 		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
 		fprintf(stderr, "%s\n", msg);
-		if(rs != NULL) {
+		if (rs != NULL) {
 			addError(rs, msg);
 		}
 
@@ -198,9 +199,9 @@ fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet *rs)
 	return err;
 }
 
-void checkError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-	if(getError(err, context, rs)) {
-		if(rs != NULL) {
+void checkError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+	if (getError(err, context, rs)) {
+		if (rs != NULL) {
 			writeResultSet(rs);
 			freeResultSet(rs);
 		}
@@ -208,11 +209,11 @@ void checkError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	}
 }
 
-fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-	char *msg = (char*)malloc(strlen(context) + 100);
+fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+	char* msg = (char*)malloc(strlen(context) + 100);
 	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
 	fprintf(stderr, "%s\n", msg);
-	if(rs != NULL) {
+	if (rs != NULL) {
 		addError(rs, msg);
 	}
 
@@ -220,8 +221,8 @@ fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs)
 	return err;
 }
 
-fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
+fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+	if (err && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
 		return logError(err, context, rs);
 	}
 	return err;
@@ -232,14 +233,14 @@ void* runNetwork() {
 	return NULL;
 }
 
-FDBDatabase* openDatabase(struct ResultSet *rs, pthread_t *netThread) {
+FDBDatabase* openDatabase(struct ResultSet* rs, pthread_t* netThread) {
 	checkError(fdb_setup_network(), "setup network", rs);
 	pthread_create(netThread, NULL, &runNetwork, NULL);
 
-	FDBFuture *f = fdb_create_cluster(NULL);
+	FDBFuture* f = fdb_create_cluster(NULL);
 	checkError(fdb_future_block_until_ready(f), "block for cluster", rs);
 
-	FDBCluster *cluster;
+	FDBCluster* cluster;
 	checkError(fdb_future_get_cluster(f, &cluster), "get cluster", rs);
 
 	fdb_future_destroy(f);
@@ -247,7 +248,7 @@ FDBDatabase* openDatabase(struct ResultSet *rs, pthread_t *netThread) {
 	f = fdb_cluster_create_database(cluster, (uint8_t*)"DB", 2);
 	checkError(fdb_future_block_until_ready(f), "block for database", rs);
 
-	FDBDatabase *db;
+	FDBDatabase* db;
 	checkError(fdb_future_get_database(f, &db), "get database", rs);
 
 	fdb_future_destroy(f);

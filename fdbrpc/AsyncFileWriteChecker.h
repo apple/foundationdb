@@ -30,22 +30,28 @@ public:
 	void delref() { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
-	Future<int> read( void* data, int length, int64_t offset ) {
-		return map(m_f->read(data, length, offset), [=](int r) { updateChecksumHistory(false, offset, length, (uint8_t *)data); return r; });
+	Future<int> read(void* data, int length, int64_t offset) {
+		return map(m_f->read(data, length, offset), [=](int r) {
+			updateChecksumHistory(false, offset, length, (uint8_t*)data);
+			return r;
+		});
 	}
-	Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
-		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) { updateChecksumHistory(false, offset, *length, (uint8_t *)data); return r; });
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) {
+		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) {
+			updateChecksumHistory(false, offset, *length, (uint8_t*)data);
+			return r;
+		});
 	}
 
-	Future<Void> write( void const* data, int length, int64_t offset ) {
-		updateChecksumHistory(true, offset, length, (uint8_t *)data);
+	Future<Void> write(void const* data, int length, int64_t offset) {
+		updateChecksumHistory(true, offset, length, (uint8_t*)data);
 		return m_f->write(data, length, offset);
 	}
 
-	Future<Void> truncate( int64_t size )  {
+	Future<Void> truncate(int64_t size) {
 		return map(m_f->truncate(size), [=](Void r) {
 			// Truncate the page checksum history if it is in use
-			if( (size / checksumHistoryPageSize) < checksumHistory.size() ) {
+			if ((size / checksumHistoryPageSize) < checksumHistory.size()) {
 				int oldCapacity = checksumHistory.capacity();
 				checksumHistory.resize(size / checksumHistoryPageSize);
 				checksumHistoryBudget -= (checksumHistory.capacity() - oldCapacity);
@@ -58,21 +64,19 @@ public:
 	Future<Void> flush() { return m_f->flush(); }
 	Future<int64_t> size() { return m_f->size(); }
 	std::string getFilename() { return m_f->getFilename(); }
-	void releaseZeroCopy( void* data, int length, int64_t offset )  { return m_f->releaseZeroCopy(data, length, offset); }
+	void releaseZeroCopy(void* data, int length, int64_t offset) { return m_f->releaseZeroCopy(data, length, offset); }
 	int64_t debugFD() { return m_f->debugFD(); }
 
 	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
 		static int _ = checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
 
-		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some implementations.
+		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some
+		// implementations.
 		checksumHistoryBudget -= checksumHistory.capacity();
 	}
 
-
-	virtual ~AsyncFileWriteChecker() {
-		checksumHistoryBudget += checksumHistory.capacity();
-	}
+	virtual ~AsyncFileWriteChecker() { checksumHistoryBudget += checksumHistory.capacity(); }
 
 private:
 	Reference<IAsyncFile> m_f;
@@ -89,24 +93,25 @@ private:
 	static int checksumHistoryPageSize;
 
 	// Update or check checksum(s) in history for any full pages covered by this operation
-	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t *buf) {
+	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t* buf) {
 		// Check or set each full block in the the range
-		int page = offset / checksumHistoryPageSize;            // First page number
-		int slack = offset % checksumHistoryPageSize;           // Bytes after most recent page boundary
-		uint8_t *start = buf;                                   // Position in buffer to start checking from
+		int page = offset / checksumHistoryPageSize; // First page number
+		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
+		uint8_t* start = buf; // Position in buffer to start checking from
 		// If offset is not page-aligned, move to next page and adjust start
-		if(slack != 0) {
+		if (slack != 0) {
 			++page;
 			start += (checksumHistoryPageSize - slack);
 		}
 		int pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
 
 		// Make sure history is large enough or limit pageEnd
-		if(checksumHistory.size() < pageEnd) {
-			if(checksumHistoryBudget > 0) {
+		if (checksumHistory.size() < pageEnd) {
+			if (checksumHistoryBudget > 0) {
 				// Resize history and update budget based on capacity change
 				auto initialCapacity = checksumHistory.capacity();
-				checksumHistory.resize(checksumHistory.size() + std::min<int>(checksumHistoryBudget, pageEnd - checksumHistory.size()));
+				checksumHistory.resize(checksumHistory.size() +
+				                       std::min<int>(checksumHistoryBudget, pageEnd - checksumHistory.size()));
 				checksumHistoryBudget -= (checksumHistory.capacity() - initialCapacity);
 			}
 
@@ -115,31 +120,31 @@ private:
 			pageEnd = checksumHistory.size();
 		}
 
-		while(page < pageEnd) {
+		while (page < pageEnd) {
 			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
-			WriteInfo &history = checksumHistory[page];
-			//printf("%d %d %u %u\n", write, page, checksum, history.checksum);
+			WriteInfo& history = checksumHistory[page];
+			// printf("%d %d %u %u\n", write, page, checksum, history.checksum);
 
 #if VALGRIND
-			// It's possible we'll read or write a page where not all of the data is defined, but the checksum of the page is still valid
+			// It's possible we'll read or write a page where not all of the data is defined, but the checksum of the
+			// page is still valid
 			VALGRIND_MAKE_MEM_DEFINED_IF_ADDRESSABLE(&checksum, sizeof(uint32_t));
 #endif
 
 			// For writes, just update the stored sum
-			if(write) {
+			if (write) {
 				history.timestamp = (uint32_t)now();
 				history.checksum = checksum;
-			}
-			else {
-				if(history.checksum != 0 && history.checksum != checksum) {
+			} else {
+				if (history.checksum != 0 && history.checksum != checksum) {
 					// For reads, verify the stored sum if it is not 0.  If it fails, clear it.
-					TraceEvent (SevError, "AsyncFileLostWriteDetected")
-						.error(checksum_failed())
-						.detail("Filename", m_f->getFilename())
-						.detail("PageNumber", page)
-						.detail("ChecksumOfPage", checksum)
-						.detail("ChecksumHistory", history.checksum)
-						.detail("LastWriteTime", history.timestamp);
+					TraceEvent(SevError, "AsyncFileLostWriteDetected")
+					    .error(checksum_failed())
+					    .detail("Filename", m_f->getFilename())
+					    .detail("PageNumber", page)
+					    .detail("ChecksumOfPage", checksum)
+					    .detail("ChecksumHistory", history.checksum)
+					    .detail("LastWriteTime", history.timestamp);
 					history.checksum = 0;
 				}
 			}

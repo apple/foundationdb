@@ -57,7 +57,9 @@ struct ICounter {
 struct CounterCollection {
 	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
 	std::vector<struct ICounter*> counters, counters_to_remove;
-	~CounterCollection() { for (auto c : counters_to_remove) c->remove(); }
+	~CounterCollection() {
+		for (auto c : counters_to_remove) c->remove();
+	}
 	std::string name;
 	std::string id;
 };
@@ -68,8 +70,8 @@ public:
 
 	Counter(std::string const& name, CounterCollection& collection);
 
-	void operator += (Value delta);
-	void operator ++ () { *this += 1; }
+	void operator+=(Value delta);
+	void operator++() { *this += 1; }
 	void clear();
 	void resetInterval();
 
@@ -77,8 +79,9 @@ public:
 
 	Value getIntervalDelta() const { return interval_delta; }
 	Value getValue() const { return interval_start_value + interval_delta; }
-	double getRate() const;				// dValue / dt
-	double getRoughness() const;			// value deltas come in "clumps" of this many ( 1 = periodic, 2 = poisson, 10 = periodic clumps of 10 (nearly) simultaneous delta )
+	double getRate() const; // dValue / dt
+	double getRoughness() const; // value deltas come in "clumps" of this many ( 1 = periodic, 2 = poisson, 10 =
+	                             // periodic clumps of 10 (nearly) simultaneous delta )
 	bool hasRate() const { return true; }
 	bool hasRoughness() const { return true; }
 
@@ -91,7 +94,10 @@ private:
 
 template <class F>
 struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>> {
-	SpecialCounter(CounterCollection& collection, std::string const& name, F && f) : name(name), f(f) { collection.counters.push_back(this); collection.counters_to_remove.push_back(this); }
+	SpecialCounter(CounterCollection& collection, std::string const& name, F&& f) : name(name), f(f) {
+		collection.counters.push_back(this);
+		collection.counters_to_remove.push_back(this);
+	}
 	virtual void remove() { delete this; }
 
 	virtual std::string const& getName() const { return name; }
@@ -108,8 +114,11 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>> {
 	F f;
 };
 template <class F>
-static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
+static void specialCounter(CounterCollection& collection, std::string const& name, F&& f) {
+	new SpecialCounter<F>(collection, name, std::move(f));
+}
 
-Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
+Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval,
+                           CounterCollection* const& counters, std::string const& trackLatestName = std::string());
 
 #endif

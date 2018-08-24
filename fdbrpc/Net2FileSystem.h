@@ -27,21 +27,22 @@
 class Net2FileSystem : public IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
+	virtual Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode);
 
-	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a
+	// power failure.
+	virtual Future<Void> deleteFile(std::string filename, bool mustBeDurable);
 
 	// Returns the time of the last modification of the file.
-	virtual Future< std::time_t > lastWriteTime( std::string filename );
+	virtual Future<std::time_t> lastWriteTime(std::string filename);
 
-	//void init();
+	// void init();
 
-	Net2FileSystem(double ioTimeout=0.0, std::string fileSystemPath = "");
+	Net2FileSystem(double ioTimeout = 0.0, std::string fileSystemPath = "");
 
 	virtual ~Net2FileSystem() {}
 
-	static void newFileSystem(double ioTimeout=0.0, std::string fileSystemPath = "");
+	static void newFileSystem(double ioTimeout = 0.0, std::string fileSystemPath = "");
 
 #ifdef __linux__
 	dev_t fileSystemDeviceId;

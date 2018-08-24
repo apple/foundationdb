@@ -23,104 +23,93 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RYWDisableWorkload : TestWorkload {
 	int nodes, keyBytes;
 	double testDuration;
 	vector<Future<Void>> clients;
 
-	RYWDisableWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx)
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		nodes = getOption( options, LiteralStringRef("nodes"), 100 );
-		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
+	RYWDisableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
+		nodes = getOption(options, LiteralStringRef("nodes"), 100);
+		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
 	}
 
 	virtual std::string description() { return "RYWDisable"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
+
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) return _start(cx, this);
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return _start( cx, this );
-		return Void();
-	}
-
-	ACTOR static Future<Void> _start( Database cx, RYWDisableWorkload* self ) {
+	ACTOR static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
 		state double testStart = now();
-		
+
 		loop {
-			state ReadYourWritesTransaction tr( cx );
+			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					//do some operations
-					state int opType = g_random->randomInt(0,4);
+					// do some operations
+					state int opType = g_random->randomInt(0, 4);
 					state bool shouldError = true;
 
-					if( opType == 0 ) {
+					if (opType == 0) {
 						//TraceEvent("RYWSetting");
-						tr.set( self->keyForIndex(g_random->randomInt(0, self->nodes)), StringRef());
-					} else if( opType == 1 ) {
+						tr.set(self->keyForIndex(g_random->randomInt(0, self->nodes)), StringRef());
+					} else if (opType == 1) {
 						//TraceEvent("RYWGetNoWait");
-						Future<Optional<Value>> _ = tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes)));
-					} else if( opType == 2 ) {
+						Future<Optional<Value>> _ = tr.get(self->keyForIndex(g_random->randomInt(0, self->nodes)));
+					} else if (opType == 2) {
 						//TraceEvent("RYWGetAndWait");
-						Optional<Value> _ = wait( tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes))) );
+						Optional<Value> _ = wait(tr.get(self->keyForIndex(g_random->randomInt(0, self->nodes))));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;
 					}
 
-					//set ryw disable, check that it fails
+					// set ryw disable, check that it fails
 					try {
-						tr.setOption( FDBTransactionOptions::READ_YOUR_WRITES_DISABLE );
-						if( shouldError )
-							ASSERT(false);
-					} catch( Error &e ) {
-						if( !shouldError )
-							ASSERT(false);
+						tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+						if (shouldError) ASSERT(false);
+					} catch (Error& e) {
+						if (!shouldError) ASSERT(false);
 						ASSERT(e.code() == error_code_client_invalid_operation);
 					}
 
-					wait( delay(0.1) );
-					
-					if( now() - testStart > self->testDuration )
-						return Void();
+					wait(delay(0.1));
 
-					if( g_random->random01() < 0.5 )
-						break;
+					if (now() - testStart > self->testDuration) return Void();
+
+					if (g_random->random01() < 0.5) break;
 
 					tr.reset();
-				} catch( Error &e ) {
-					wait( tr.onError(e) );
+				} catch (Error& e) {
+					wait(tr.onError(e));
 				}
 			}
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
-		for( int i = 0; i < clients.size(); i++ )
-			if( clients[i].isError() )
-				ok = false;
+		for (int i = 0; i < clients.size(); i++)
+			if (clients[i].isError()) ok = false;
 		clients.clear();
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	Key keyForIndex( uint64_t index ) {
-		Key result = makeString( keyBytes );
-		uint8_t* data = mutateString( result );
+	Key keyForIndex(uint64_t index) {
+		Key result = makeString(keyBytes);
+		uint8_t* data = mutateString(result);
 		memset(data, '.', keyBytes);
 
 		double d = double(index) / nodes;
-		emplaceIndex( data, 0, *(int64_t*)&d );
+		emplaceIndex(data, 0, *(int64_t*)&d);
 
 		return result;
 	}

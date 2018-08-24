@@ -22,11 +22,12 @@
 
 #include "flow/flow.h"
 
-//Checks that a given block of data is the same as what has been written by a call to debugFileSet
-extern void debugFileCheck(std::string context, std::string file, const void *data, int64_t offset, int length);
+// Checks that a given block of data is the same as what has been written by a call to debugFileSet
+extern void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length);
 
-//Updates the in-memory copy of tracked data at a given offset
-extern void debugFileSet(std::string context, std::string file, const void *data, int64_t offset, int length);
+// Updates the in-memory copy of tracked data at a given offset
+extern void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length);
 
-//Updates the in-memory copy of tracked data to account for truncates (this simply invalidates any data after truncate point)
+// Updates the in-memory copy of tracked data to account for truncates (this simply invalidates any data after truncate
+// point)
 extern void debugFileTruncate(std::string context, std::string file, int64_t offset);

@@ -33,13 +33,13 @@ struct FDBOptionInfo {
 	bool hasParameter;
 	bool hidden;
 
-	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden) 
-		: name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden) { }
+	FDBOptionInfo(std::string name, std::string comment, std::string parameterComment, bool hasParameter, bool hidden)
+	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden) {}
 
-	FDBOptionInfo() { }
+	FDBOptionInfo() {}
 };
 
-template<class T>
+template <class T>
 class FDBOptionInfoMap {
 private:
 	std::map<typename T::Option, FDBOptionInfo> optionInfo;
@@ -48,11 +48,12 @@ public:
 	typename std::map<typename T::Option, FDBOptionInfo>::iterator begin() { return optionInfo.begin(); }
 	typename std::map<typename T::Option, FDBOptionInfo>::iterator end() { return optionInfo.end(); }
 
-	FDBOptionInfo& operator[] (const typename T::Option& key) { return optionInfo[key]; }
+	FDBOptionInfo& operator[](const typename T::Option& key) { return optionInfo[key]; }
 
 	FDBOptionInfoMap() { T::init(); }
 };
 
-#define ADD_OPTION_INFO( type, var, name, comment, parameterComment, hasParameter, hidden ) type::optionInfo[var] = FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden);
+#define ADD_OPTION_INFO(type, var, name, comment, parameterComment, hasParameter, hidden)                              \
+	type::optionInfo[var] = FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden);
 
 #endif

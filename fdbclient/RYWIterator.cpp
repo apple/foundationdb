@@ -22,42 +22,57 @@
 #include "KeyRangeMap.h"
 #include "flow/UnitTest.h"
 
-const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = { 
-		// UNMODIFIED_RANGE
-		RYWIterator::UNKNOWN_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::KV,
-		// CLEARED_RANGE
-		RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE, 
-		// INDEPENDENT_WRITE
-		RYWIterator::KV, RYWIterator::KV, RYWIterator::KV,
-		// DEPENDENT_WRITE
-		RYWIterator::UNKNOWN_RANGE, RYWIterator::KV, RYWIterator::KV };
+const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
+	// UNMODIFIED_RANGE
+	RYWIterator::UNKNOWN_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::KV,
+	// CLEARED_RANGE
+	RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE, RYWIterator::EMPTY_RANGE,
+	// INDEPENDENT_WRITE
+	RYWIterator::KV, RYWIterator::KV, RYWIterator::KV,
+	// DEPENDENT_WRITE
+	RYWIterator::UNKNOWN_RANGE, RYWIterator::KV, RYWIterator::KV
+};
 
 RYWIterator::SEGMENT_TYPE RYWIterator::type() {
-	if (is_unreadable())
-		throw accessed_unreadable();
+	if (is_unreadable()) throw accessed_unreadable();
 
-	return typeMap[ writes.type()*3 + cache.type() ];
+	return typeMap[writes.type() * 3 + cache.type()];
 }
 
-bool RYWIterator::is_kv() { return type() == KV; }
-bool RYWIterator::is_unknown_range() { return type() == UNKNOWN_RANGE; }
-bool RYWIterator::is_empty_range() { return type() == EMPTY_RANGE; }
-bool RYWIterator::is_dependent() { return writes.type() == WriteMap::iterator::DEPENDENT_WRITE; }
-bool RYWIterator::is_unreadable() { return writes.is_unreadable(); }
+bool RYWIterator::is_kv() {
+	return type() == KV;
+}
+bool RYWIterator::is_unknown_range() {
+	return type() == UNKNOWN_RANGE;
+}
+bool RYWIterator::is_empty_range() {
+	return type() == EMPTY_RANGE;
+}
+bool RYWIterator::is_dependent() {
+	return writes.type() == WriteMap::iterator::DEPENDENT_WRITE;
+}
+bool RYWIterator::is_unreadable() {
+	return writes.is_unreadable();
+}
 
-ExtStringRef RYWIterator::beginKey() { return begin_key_cmp <= 0 ? writes.beginKey() : cache.beginKey(); }
-ExtStringRef RYWIterator::endKey() { return end_key_cmp <= 0 ? cache.endKey() : writes.endKey(); }
+ExtStringRef RYWIterator::beginKey() {
+	return begin_key_cmp <= 0 ? writes.beginKey() : cache.beginKey();
+}
+ExtStringRef RYWIterator::endKey() {
+	return end_key_cmp <= 0 ? cache.endKey() : writes.endKey();
+}
 
-KeyValueRef const& RYWIterator::kv( Arena& arena ) {
-	if(is_unreadable())
-		throw accessed_unreadable();
-	
+KeyValueRef const& RYWIterator::kv(Arena& arena) {
+	if (is_unreadable()) throw accessed_unreadable();
+
 	if (writes.is_unmodified_range())
-		return cache.kv( arena );
+		return cache.kv(arena);
 	else if (writes.is_independent() || cache.is_empty_range())
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), Optional<ValueRef>(), arena ).value.get() );
+		return temp = KeyValueRef(writes.beginKey().assertRef(),
+		                          WriteMap::coalesceUnder(writes.op(), Optional<ValueRef>(), arena).value.get());
 	else
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), cache.kv(arena).value, arena ).value.get() );
+		return temp = KeyValueRef(writes.beginKey().assertRef(),
+		                          WriteMap::coalesceUnder(writes.op(), cache.kv(arena).value, arena).value.get());
 }
 
 RYWIterator& RYWIterator::operator++() {
@@ -76,24 +91,27 @@ RYWIterator& RYWIterator::operator--() {
 	return *this;
 }
 
-bool RYWIterator::operator == ( const RYWIterator& r ) const { return cache == r.cache && writes == r.writes; }
+bool RYWIterator::operator==(const RYWIterator& r) const {
+	return cache == r.cache && writes == r.writes;
+}
 
-void RYWIterator::skip( KeyRef key ) {     // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())
+void RYWIterator::skip(
+    KeyRef key) { // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())
 	cache.skip(key);
 	writes.skip(key);
 	updateCmp();
 }
-	
-void RYWIterator::skipContiguous( KeyRef key ) {
+
+void RYWIterator::skipContiguous(KeyRef key) {
 	if (is_kv() && writes.is_unmodified_range()) {
-		cache.skipContiguous( std::min(ExtStringRef(key), writes.endKey()) );
+		cache.skipContiguous(std::min(ExtStringRef(key), writes.endKey()));
 		updateCmp();
 	}
 }
-	
-void RYWIterator::skipContiguousBack( KeyRef key ) {
+
+void RYWIterator::skipContiguousBack(KeyRef key) {
 	if (is_kv() && writes.is_unmodified_range()) {
-		cache.skipContiguousBack( std::max(ExtStringRef(key), writes.beginKey().keyAfter() ) );
+		cache.skipContiguousBack(std::max(ExtStringRef(key), writes.beginKey().keyAfter()));
 		updateCmp();
 	}
 }
@@ -103,9 +121,14 @@ WriteMap::iterator& RYWIterator::extractWriteMapIterator() {
 }
 
 void RYWIterator::dbg() {
-	fprintf(stderr, "cache: %d begin: '%s' end: '%s'\n", cache.type(), printable(cache.beginKey().toStandaloneStringRef()).c_str(), printable(cache.endKey().toStandaloneStringRef()).c_str());
-	fprintf(stderr, "writes: %d begin: '%s' end: '%s'\n", writes.type(), printable(writes.beginKey().toStandaloneStringRef()).c_str(), printable(writes.endKey().toStandaloneStringRef()).c_str());
-	//fprintf(stderr, "summary - offset: %d cleared: %d size: %d\n", writes.offset, writes.entry().following_keys_cleared, writes.entry().stack.size());
+	fprintf(stderr, "cache: %d begin: '%s' end: '%s'\n", cache.type(),
+	        printable(cache.beginKey().toStandaloneStringRef()).c_str(),
+	        printable(cache.endKey().toStandaloneStringRef()).c_str());
+	fprintf(stderr, "writes: %d begin: '%s' end: '%s'\n", writes.type(),
+	        printable(writes.beginKey().toStandaloneStringRef()).c_str(),
+	        printable(writes.endKey().toStandaloneStringRef()).c_str());
+	// fprintf(stderr, "summary - offset: %d cleared: %d size: %d\n", writes.offset,
+	// writes.entry().following_keys_cleared, writes.entry().stack.size());
 }
 
 void RYWIterator::updateCmp() {
@@ -117,59 +140,58 @@ void testESR() {
 	printf("testESR\n");
 
 	int chars[] = { 0, 1, 127, 128, 255 };
-	int nchars = sizeof(chars)/sizeof(chars[0]);
+	int nchars = sizeof(chars) / sizeof(chars[0]);
 
 	std::vector<std::string> bases;
-	bases.push_back( std::string() );
-	for(int i=0; i<nchars; i++) {
-		bases.push_back( std::string(1,chars[i]) );
-		for(int j=0; j<nchars; j++) {
-			bases.push_back( std::string(1,chars[i]) + std::string(1,chars[j]) );
-			for(int k=0; k<nchars; k++)
-				bases.push_back( std::string(1,chars[i]) + std::string(1,chars[j]) + std::string(1, chars[k]) );
+	bases.push_back(std::string());
+	for (int i = 0; i < nchars; i++) {
+		bases.push_back(std::string(1, chars[i]));
+		for (int j = 0; j < nchars; j++) {
+			bases.push_back(std::string(1, chars[i]) + std::string(1, chars[j]));
+			for (int k = 0; k < nchars; k++)
+				bases.push_back(std::string(1, chars[i]) + std::string(1, chars[j]) + std::string(1, chars[k]));
 		}
 	}
 
 	printf("1\n");
-	std::vector< ExtStringRef > srs;
-	std::vector< Standalone<StringRef> > ssrs;
-	for(int e=0; e<3; e++)
-		for(auto b=bases.begin(); b!=bases.end(); ++b) {
-			srs.push_back( ExtStringRef( *b, e ) );
-			ssrs.push_back( StringRef( *b + std::string(e,0) ) );
+	std::vector<ExtStringRef> srs;
+	std::vector<Standalone<StringRef>> ssrs;
+	for (int e = 0; e < 3; e++)
+		for (auto b = bases.begin(); b != bases.end(); ++b) {
+			srs.push_back(ExtStringRef(*b, e));
+			ssrs.push_back(StringRef(*b + std::string(e, 0)));
 		}
-	ASSERT( srs.size() == ssrs.size() );
+	ASSERT(srs.size() == ssrs.size());
 	printf("2\n");
-	for(int i=0; i<srs.size(); i++)
-		for(int j=0; j<srs.size(); j++)
-		{
+	for (int i = 0; i < srs.size(); i++)
+		for (int j = 0; j < srs.size(); j++) {
 			bool c = ssrs[i] != ssrs[j];
 			bool c2 = srs[i] != srs[j];
-			if ( c != c2 ) {
+			if (c != c2) {
 				printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
 				return;
 			}
-			
+
 			/*
 			int c = ssrs[i] < ssrs[j] ? -1 : ssrs[i] == ssrs[j] ? 0 : 1;
 			int c2 = srs[i].cmp(srs[j]);
 			if ( c != (0<c2)-(c2<0) ) {
-				printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
-				return;
+			    printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
+			    return;
 			}*/
 
 			/*
 			bool c = ssrs[i].startsWith( ssrs[j] );
 			int c2 = srs[i].startsWith( srs[j] );
 			if ( c != c2 ) {
-				printf("Error: '%s' + %d cmp '%s' + %d = %d\n", printable(srs[i].base).c_str(), srs[i].extra_zero_bytes, printable(srs[j].base).c_str(), srs[j].extra_zero_bytes, c2);
-				return;
+			    printf("Error: '%s' + %d cmp '%s' + %d = %d\n", printable(srs[i].base).c_str(), srs[i].extra_zero_bytes,
+			printable(srs[j].base).c_str(), srs[j].extra_zero_bytes, c2); return;
 			}
 			bool c = equalsKeyAfter( ssrs[j], ssrs[i] );
 			int c2 = srs[i].isKeyAfter( srs[j] );
 			if ( c != c2 ) {
-				printf("Error: '%s' + %d cmp '%s' + %d = %d\n", printable(srs[i].base).c_str(), srs[i].extra_zero_bytes, printable(srs[j].base).c_str(), srs[j].extra_zero_bytes, c2);
-				return;
+			    printf("Error: '%s' + %d cmp '%s' + %d = %d\n", printable(srs[i].base).c_str(), srs[i].extra_zero_bytes,
+			printable(srs[j].base).c_str(), srs[j].extra_zero_bytes, c2); return;
 			}
 			*/
 		}
@@ -195,20 +217,24 @@ void testSnapshotCache() {
 	keys2.push_back_deep(keys2.arena(), KeyValueRef(LiteralStringRef("l"), LiteralStringRef("loo")));
 	cache.insert(KeyRangeRef(LiteralStringRef("j"), LiteralStringRef("m")), keys2);
 
-	writes.mutate( LiteralStringRef("c"), MutationRef::SetValue, LiteralStringRef("c--"), true);
+	writes.mutate(LiteralStringRef("c"), MutationRef::SetValue, LiteralStringRef("c--"), true);
 	writes.clear(KeyRangeRef(LiteralStringRef("c\x00"), LiteralStringRef("e")), true);
-	writes.mutate( LiteralStringRef("c\x00"), MutationRef::SetValue, LiteralStringRef("c00--"), true);
+	writes.mutate(LiteralStringRef("c\x00"), MutationRef::SetValue, LiteralStringRef("c00--"), true);
 	WriteMap::iterator it3(&writes);
-	writes.mutate( LiteralStringRef("d"), MutationRef::SetValue, LiteralStringRef("d--"), true);
-	writes.mutate( LiteralStringRef("e"), MutationRef::SetValue, LiteralStringRef("e++"), true);
-	writes.mutate( LiteralStringRef("i"), MutationRef::SetValue, LiteralStringRef("i--"), true);
+	writes.mutate(LiteralStringRef("d"), MutationRef::SetValue, LiteralStringRef("d--"), true);
+	writes.mutate(LiteralStringRef("e"), MutationRef::SetValue, LiteralStringRef("e++"), true);
+	writes.mutate(LiteralStringRef("i"), MutationRef::SetValue, LiteralStringRef("i--"), true);
 
 	KeyRange searchKeys = KeyRangeRef(LiteralStringRef("a"), LiteralStringRef("z"));
 
 	RYWIterator it(&cache, &writes);
 	it.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv(arena).value).c_str() : "");
+		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		        printable(it.endKey().toStandaloneStringRef()).c_str(),
+		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
+		        it.is_kv() ? printable(it.kv(arena).value).c_str() : "");
 		if (it.endKey() >= searchKeys.end) break;
 		++it;
 	}
@@ -216,7 +242,11 @@ void testSnapshotCache() {
 
 	it.skip(searchKeys.end);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv(arena).value).c_str() : "" );
+		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		        printable(it.endKey().toStandaloneStringRef()).c_str(),
+		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
+		        it.is_kv() ? printable(it.kv(arena).value).c_str() : "");
 		if (it.beginKey() <= searchKeys.begin) break;
 		--it;
 	}
@@ -227,98 +257,104 @@ void testSnapshotCache() {
 
 	it.skip(searchKeys.begin);
 	while (true) {
-		if( it.is_kv() ) {
-			Standalone<VectorRef<KeyValueRef>> result;
-			KeyValueRef const& start = it.kv();
-			it.skipContiguous(searchKeys.end);
-			result.append( result.arena(), &start, &it.kv() - &start + 1 );
-			fprintf(stderr, "%s\n", printable(result).c_str());
-			
-		}
-		if (it.endKey() >= searchKeys.end) break;
-		++it;
+	    if( it.is_kv() ) {
+	        Standalone<VectorRef<KeyValueRef>> result;
+	        KeyValueRef const& start = it.kv();
+	        it.skipContiguous(searchKeys.end);
+	        result.append( result.arena(), &start, &it.kv() - &start + 1 );
+	        fprintf(stderr, "%s\n", printable(result).c_str());
+
+	    }
+	    if (it.endKey() >= searchKeys.end) break;
+	    ++it;
 	}
 	fprintf(stderr, "end\n");
-	
+
 
 	it.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv().value).c_str() : "");
-		if (it.endKey() >= searchKeys.end) break;
-		++it;
+	    fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+	printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(),
+	it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ?
+	printable(it.kv().value).c_str() : ""); if (it.endKey() >= searchKeys.end) break;
+	    ++it;
 	}
 	fprintf(stderr, "end\n");
 
 	it.skip(searchKeys.end);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv().value).c_str() : "" );
-		if (it.beginKey() <= searchKeys.begin) break;
-		--it;
+	    fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+	printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(),
+	it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ?
+	printable(it.kv().value).c_str() : "" ); if (it.beginKey() <= searchKeys.begin) break;
+	    --it;
 	}
 	fprintf(stderr, "end\n");
 
 	WriteMap::iterator it2(&writes);
 	it2.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it2.beginKey().toStandaloneStringRef()).c_str(), printable(it2.endKey().toStandaloneStringRef()).c_str(), it2.is_cleared_range() ? "cleared" : ( it2.is_unmodified_range() ? "unmodified" : "operation" ), it2.is_operation() ? printable(it2.op().top().value).c_str() : "");
-		if (it2.endKey() >= searchKeys.end) break;
-		++it2;
+	    fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+	printable(it2.beginKey().toStandaloneStringRef()).c_str(), printable(it2.endKey().toStandaloneStringRef()).c_str(),
+	it2.is_cleared_range() ? "cleared" : ( it2.is_unmodified_range() ? "unmodified" : "operation" ), it2.is_operation()
+	? printable(it2.op().top().value).c_str() : ""); if (it2.endKey() >= searchKeys.end) break;
+	    ++it2;
 	}
 	fprintf(stderr, "end\n");
 
-	
+
 	it3.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it3.beginKey().toStandaloneStringRef()).c_str(), printable(it3.endKey().toStandaloneStringRef()).c_str(), it3.is_cleared_range() ? "cleared" : ( it3.is_unmodified_range() ? "unmodified" : "operation" ), it3.is_operation() ? printable(it3.op().top().value).c_str() : "");
-		if (it3.endKey() >= searchKeys.end) break;
-		++it3;
+	    fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+	printable(it3.beginKey().toStandaloneStringRef()).c_str(), printable(it3.endKey().toStandaloneStringRef()).c_str(),
+	it3.is_cleared_range() ? "cleared" : ( it3.is_unmodified_range() ? "unmodified" : "operation" ), it3.is_operation()
+	? printable(it3.op().top().value).c_str() : ""); if (it3.endKey() >= searchKeys.end) break;
+	    ++it3;
 	}
 	fprintf(stderr, "end\n");
 	*/
 }
 
 /*
-ACTOR Standalone<RangeResultRef> getRange( Transaction* tr, KeySelector begin, KeySelector end, SnapshotCache* cache, WriteMap* writes, GetRangeLimits limits ) {
-	RYWIterator it(cache, writes);
-	RYWIterator itEnd(cache, writes);
-	resolveKeySelectorFromCache( begin, it );
-	resolveKeySelectorFromCache( end, itEnd );
+ACTOR Standalone<RangeResultRef> getRange( Transaction* tr, KeySelector begin, KeySelector end, SnapshotCache* cache,
+WriteMap* writes, GetRangeLimits limits ) { RYWIterator it(cache, writes); RYWIterator itEnd(cache, writes);
+    resolveKeySelectorFromCache( begin, it );
+    resolveKeySelectorFromCache( end, itEnd );
 
-	Standalone<VectorRef<KeyValueRef>> result;
+    Standalone<VectorRef<KeyValueRef>> result;
 
-	while ( !limits.isReached() ) {
-		if ( it == itEnd && !it.is_unknown_range() ) break;
+    while ( !limits.isReached() ) {
+        if ( it == itEnd && !it.is_unknown_range() ) break;
 
-		if (it.is_unknown_range()) {
-			RYWIterator ucEnd(it);
-			ucEnd.skipUncached(itEnd);
+        if (it.is_unknown_range()) {
+            RYWIterator ucEnd(it);
+            ucEnd.skipUncached(itEnd);
 
-			state KeySelector read_end = ucEnd==itEnd ? end : firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef());
-			Standalone<RangeResultRef> snapshot_read = wait( tr->getRange( begin, read_end, limits, false, false ) );
-			cache->insert( getKnownKeyRange( snapshot_read, begin, read_end ), snapshot_read );
+            state KeySelector read_end = ucEnd==itEnd ? end :
+firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef()); Standalone<RangeResultRef> snapshot_read = wait(
+tr->getRange( begin, read_end, limits, false, false ) ); cache->insert( getKnownKeyRange( snapshot_read, begin, read_end
+), snapshot_read );
 
-			// TODO: Is there a more efficient way to deal with invalidation?
-			it = itEnd = RYWIterator( cache, writes );
-			resolveKeySelectorFromCache( begin, it );
-			resolveKeySelectorFromCache( end, itEnd );
-		} else if (it.is_kv()) {
-			KeyValueRef const& start = it.kv();
-			it.skipContiguous( end.isFirstGreaterOrEqual() ? end.key : allKeys.end );
-			result.append( result.arena(), &start, &it.kv() - &start + 1 );
-			limits;
+            // TODO: Is there a more efficient way to deal with invalidation?
+            it = itEnd = RYWIterator( cache, writes );
+            resolveKeySelectorFromCache( begin, it );
+            resolveKeySelectorFromCache( end, itEnd );
+        } else if (it.is_kv()) {
+            KeyValueRef const& start = it.kv();
+            it.skipContiguous( end.isFirstGreaterOrEqual() ? end.key : allKeys.end );
+            result.append( result.arena(), &start, &it.kv() - &start + 1 );
+            limits;
 
-			++it;
-		} else
-			++it;
-	}
+            ++it;
+        } else
+            ++it;
+    }
 
-	ASSERT( end.isFirstGreaterOrEqual() );
-	result.resize( result.arena(), std::lower_bound( result.begin(), result.end(), end.key ) - result.begin() );
+    ASSERT( end.isFirstGreaterOrEqual() );
+    result.resize( result.arena(), std::lower_bound( result.begin(), result.end(), end.key ) - result.begin() );
 }*/
 
-
-
-static void printWriteMap(WriteMap *p) {
+static void printWriteMap(WriteMap* p) {
 	WriteMap::iterator it(p);
 	for (it.skip(allKeys.begin); it.beginKey() < allKeys.end; ++it) {
 		if (it.is_cleared_range()) {
@@ -337,15 +373,14 @@ static void printWriteMap(WriteMap *p) {
 		if (it.is_unreadable()) {
 			printf("UNREADABLE ");
 		}
-		printf(": \"%s\" -> \"%s\"\n",
-			printable(it.beginKey().toStandaloneStringRef()).c_str(),
-			printable(it.endKey().toStandaloneStringRef()).c_str());
+		printf(": \"%s\" -> \"%s\"\n", printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		       printable(it.endKey().toStandaloneStringRef()).c_str());
 	}
 	printf("\n");
 }
 
-static int getWriteMapCount(WriteMap *p) {
-//	printWriteMap(p);
+static int getWriteMapCount(WriteMap* p) {
+	//	printWriteMap(p);
 	int count = 0;
 	WriteMap::iterator it(p);
 	for (it.skip(allKeys.begin); it.beginKey() < allKeys.end; ++it) {
@@ -386,7 +421,8 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"), MutationRef::SetVersionstampedKey, LiteralStringRef("1"), true);
+	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"), MutationRef::SetVersionstampedKey,
+	              LiteralStringRef("1"), true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -459,7 +495,8 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp"), MutationRef::SetVersionstampedValue, LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"), true);
+	writes.mutate(LiteralStringRef("stamp"), MutationRef::SetVersionstampedValue,
+	              LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"), true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -559,8 +596,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			writes.addConflictRange(range);
 			conflictMap.insert(range, true);
 			TraceEvent("RWMT_AddConflictRange").detail("Range", printable(range));
-		}
-		else if(r == 1) {
+		} else if (r == 1) {
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.addUnmodifiedAndUnreadableRange(range);
 			setMap.erase(setMap.lower_bound(range.begin), setMap.lower_bound(range.end));
@@ -568,43 +604,42 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			clearMap.insert(range, false);
 			unreadableMap.insert(range, true);
 			TraceEvent("RWMT_AddUnmodifiedAndUnreadableRange").detail("Range", printable(range));
-		}
-		else if (r == 2) {
+		} else if (r == 2) {
 			bool addConflict = g_random->random01() < 0.5;
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.clear(range, addConflict);
 			setMap.erase(setMap.lower_bound(range.begin), setMap.lower_bound(range.end));
-			if (addConflict)
-				conflictMap.insert(range, true);
+			if (addConflict) conflictMap.insert(range, true);
 			clearMap.insert(range, true);
 			unreadableMap.insert(range, false);
 			TraceEvent("RWMT_Clear").detail("Range", printable(range)).detail("AddConflict", addConflict);
-		}
-		else if (r == 3) {
+		} else if (r == 3) {
 			bool addConflict = g_random->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedValue, value, addConflict);
 			setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedValue));
-			if (addConflict)
-				conflictMap.insert(key, true);
+			if (addConflict) conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
-			TraceEvent("RWMT_SetVersionstampedValue").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
-		}
-		else if (r == 4) {
+			TraceEvent("RWMT_SetVersionstampedValue")
+			    .detail("Key", printable(key))
+			    .detail("Value", value.size())
+			    .detail("AddConflict", addConflict);
+		} else if (r == 4) {
 			bool addConflict = g_random->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedKey, value, addConflict);
 			setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedKey));
-			if (addConflict)
-				conflictMap.insert(key, true);
+			if (addConflict) conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
-			TraceEvent("RWMT_SetVersionstampedKey").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
-		}
-		else if (r == 5) {
+			TraceEvent("RWMT_SetVersionstampedKey")
+			    .detail("Key", printable(key))
+			    .detail("Value", value.size())
+			    .detail("AddConflict", addConflict);
+		} else if (r == 5) {
 			bool addConflict = g_random->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
@@ -619,12 +654,13 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			else
 				stack.push(RYWMutation(value, MutationRef::And));
 
-			if (addConflict)
-				conflictMap.insert(key, true);
+			if (addConflict) conflictMap.insert(key, true);
 			clearMap.insert(key, false);
-			TraceEvent("RWMT_And").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
-		}
-		else {
+			TraceEvent("RWMT_And")
+			    .detail("Key", printable(key))
+			    .detail("Value", value.size())
+			    .detail("AddConflict", addConflict);
+		} else {
 			bool addConflict = g_random->random01() < 0.5;
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
@@ -633,10 +669,12 @@ TEST_CASE("fdbclient/WriteMap/random") {
 				setMap[key].push(RYWMutation(value, MutationRef::SetValue));
 			else
 				setMap[key] = OperationStack(RYWMutation(value, MutationRef::SetValue));
-			if (addConflict)
-				conflictMap.insert(key, true);
+			if (addConflict) conflictMap.insert(key, true);
 			clearMap.insert(key, false);
-			TraceEvent("RWMT_Set").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
+			TraceEvent("RWMT_Set")
+			    .detail("Key", printable(key))
+			    .detail("Value", value.size())
+			    .detail("AddConflict", addConflict);
 		}
 	}
 
@@ -649,22 +687,25 @@ TEST_CASE("fdbclient/WriteMap/random") {
 		if (it.is_operation()) {
 			ASSERT(setIter != setEnd);
 			TraceEvent("RWMT_CheckOperation")
-				.detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("WmSize", it.op().size())
-				.detail("WmValue", it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
-				.detail("WmType", (int)it.op().top().type)
-				.detail("SmKey", printable(setIter->first))
-				.detail("SmSize", setIter->second.size())
-				.detail("SmValue", setIter->second.top().value.present() ? std::to_string(setIter->second.top().value.get().size()) : "Not Found")
-				.detail("SmType", (int)setIter->second.top().type);
+			    .detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
+			    .detail("WmSize", it.op().size())
+			    .detail("WmValue",
+			            it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
+			    .detail("WmType", (int)it.op().top().type)
+			    .detail("SmKey", printable(setIter->first))
+			    .detail("SmSize", setIter->second.size())
+			    .detail("SmValue", setIter->second.top().value.present()
+			                           ? std::to_string(setIter->second.top().value.get().size())
+			                           : "Not Found")
+			    .detail("SmType", (int)setIter->second.top().type);
 			ASSERT(it.beginKey() == setIter->first && it.op() == setIter->second);
 			++setIter;
 		}
 	}
 
 	TraceEvent("RWMT_CheckOperationFinal")
-		.detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
-		.detail("SmIter", setIter == setEnd);
+	    .detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
+	    .detail("SmIter", setIter == setEnd);
 
 	ASSERT(it.beginKey() >= allKeys.end && setIter == setEnd);
 
@@ -673,14 +714,13 @@ TEST_CASE("fdbclient/WriteMap/random") {
 	auto conflictIter = conflictRanges.begin();
 	auto conflictEnd = conflictRanges.end();
 
-	while (it.beginKey() < allKeys.end && conflictIter != conflictEnd ) {
+	while (it.beginKey() < allKeys.end && conflictIter != conflictEnd) {
 		ASSERT(conflictIter.value() == it.is_conflict_range());
 		if (conflictIter.range().end < it.endKey()) {
 			++conflictIter;
 		} else if (conflictIter.range().end > it.endKey()) {
 			++it;
-		}
-		else {
+		} else {
 			++it;
 			++conflictIter;
 		}
@@ -695,11 +735,9 @@ TEST_CASE("fdbclient/WriteMap/random") {
 		ASSERT(clearIter.value() == it.is_cleared_range());
 		if (clearIter.range().end < it.endKey()) {
 			++clearIter;
-		}
-		else if (clearIter.range().end > it.endKey()) {
+		} else if (clearIter.range().end > it.endKey()) {
 			++it;
-		}
-		else {
+		} else {
 			++it;
 			++clearIter;
 		}
@@ -712,24 +750,23 @@ TEST_CASE("fdbclient/WriteMap/random") {
 
 	while (it.beginKey() < allKeys.end && unreadableIter != unreadableEnd) {
 		TraceEvent("RWMT_CheckUnreadable")
-			.detail("WriteMapRange", printable(KeyRangeRef(it.beginKey().toStandaloneStringRef(), it.endKey().toStandaloneStringRef())))
-			.detail("UnreadableMapRange", printable(unreadableIter.range()))
-			.detail("WriteMapValue", it.is_unreadable())
-			.detail("UnreadableMapValue", unreadableIter.value());
+		    .detail("WriteMapRange",
+		            printable(KeyRangeRef(it.beginKey().toStandaloneStringRef(), it.endKey().toStandaloneStringRef())))
+		    .detail("UnreadableMapRange", printable(unreadableIter.range()))
+		    .detail("WriteMapValue", it.is_unreadable())
+		    .detail("UnreadableMapValue", unreadableIter.value());
 		ASSERT(unreadableIter.value() == it.is_unreadable());
 		if (unreadableIter.range().end < it.endKey()) {
 			++unreadableIter;
-		}
-		else if (unreadableIter.range().end > it.endKey()) {
+		} else if (unreadableIter.range().end > it.endKey()) {
 			++it;
-		}
-		else {
+		} else {
 			++it;
 			++unreadableIter;
 		}
 	}
 
-//	printWriteMap(&writes);
+	//	printWriteMap(&writes);
 
 	return Void();
 }

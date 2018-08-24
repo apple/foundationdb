@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 const int keyBytes = 16;
 
@@ -38,110 +38,106 @@ struct QueuePushWorkload : TestWorkload {
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
 	QueuePushWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx),
-		commitLatencies( 2000 ), GRVLatencies( 2000 ), transactions("Transactions"), retries("Retries")
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		actorCount = getOption( options, LiteralStringRef("actorCount"), 50 );
+	  : TestWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), transactions("Transactions"), retries("Retries") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
 
-		valueBytes = getOption( options, LiteralStringRef("valueBytes"), 96 );
-		valueString = std::string( valueBytes, 'x' );
+		valueBytes = getOption(options, LiteralStringRef("valueBytes"), 96);
+		valueString = std::string(valueBytes, 'x');
 
-		forward = getOption( options, LiteralStringRef("forward"), true );
+		forward = getOption(options, LiteralStringRef("forward"), true);
 
 		endingKey = LiteralStringRef("9999999900000001");
 		startingKey = LiteralStringRef("0000000000000001");
 	}
 
 	virtual std::string description() { return "QueuePush"; }
-	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
+	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	virtual Future<bool> check(Database const& cx) { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics(vector<PerfMetric>& m) {
 		double duration = testDuration;
 		int writes = transactions.getValue();
-		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
-		m.push_back( PerfMetric( "Operations/sec", writes / duration, false ) );
-		m.push_back( transactions.getMetric() );
-		m.push_back( retries.getMetric() );
+		m.push_back(PerfMetric("Measured Duration", duration, true));
+		m.push_back(PerfMetric("Operations/sec", writes / duration, false));
+		m.push_back(transactions.getMetric());
+		m.push_back(retries.getMetric());
 
-		m.push_back( PerfMetric( "Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true ) );
+		m.push_back(PerfMetric("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true));
+		m.push_back(PerfMetric("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true));
+		m.push_back(PerfMetric("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.90), true));
+		m.push_back(PerfMetric("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(0.98), true));
 
-		m.push_back( PerfMetric( "Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true ) );
+		m.push_back(PerfMetric("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true));
+		m.push_back(PerfMetric("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true));
+		m.push_back(PerfMetric("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.90), true));
+		m.push_back(PerfMetric("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(0.98), true));
 
-		m.push_back( PerfMetric( "Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, false ) );
+		m.push_back(PerfMetric("Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, false));
 	}
 
-	static Key keyForIndex( int base, int offset ) { return StringRef( format( "%08x%08x", base, offset ) ); }
+	static Key keyForIndex(int base, int offset) { return StringRef(format("%08x%08x", base, offset)); }
 
-	static std::pair<int, int> valuesForKey( KeyRef value ) {
+	static std::pair<int, int> valuesForKey(KeyRef value) {
 		int base, offset;
 		ASSERT(value.size() == 16);
 
-		if( sscanf( value.substr(0,8).toString().c_str(), "%x", &base ) && sscanf( value.substr(8,8).toString().c_str(), "%x", &offset ) ) {
-			return std::make_pair( base, offset );
-		}
-		else
+		if (sscanf(value.substr(0, 8).toString().c_str(), "%x", &base) &&
+		    sscanf(value.substr(8, 8).toString().c_str(), "%x", &offset)) {
+			return std::make_pair(base, offset);
+		} else
 			// SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
 			throw client_invalid_operation();
 	}
 
-	ACTOR Future<Void> _start( Database cx, QueuePushWorkload *self ) {
-		for( int i = 0; i < self->actorCount; i++ ) {
-			self->clients.push_back( self->writeClient( cx, self ) );
+	ACTOR Future<Void> _start(Database cx, QueuePushWorkload* self) {
+		for (int i = 0; i < self->actorCount; i++) {
+			self->clients.push_back(self->writeClient(cx, self));
 		}
 
-		wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
+		wait(timeout(waitForAll(self->clients), self->testDuration, Void()));
 		self->clients.clear();
 		return Void();
 	}
 
-	ACTOR Future<Void> writeClient( Database cx, QueuePushWorkload *self ) {
+	ACTOR Future<Void> writeClient(Database cx, QueuePushWorkload* self) {
 		loop {
-			state Transaction tr( cx );
+			state Transaction tr(cx);
 			loop {
 				try {
 					state double start = now();
-					Version v = wait( tr.getReadVersion() );
-					self->GRVLatencies.addSample( now() - start );
+					Version v = wait(tr.getReadVersion());
+					self->GRVLatencies.addSample(now() - start);
 
 					// Get the last key in the database with a snapshot read
 					state Key lastKey;
 
-					if( self->forward ) {
-						Key _lastKey = wait( tr.getKey( lastLessThan( self->endingKey ), true ) );
+					if (self->forward) {
+						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), true));
 						lastKey = _lastKey;
-						if( lastKey == StringRef() )
-							lastKey = self->startingKey;
+						if (lastKey == StringRef()) lastKey = self->startingKey;
 					} else {
-						Key _lastKey = wait( tr.getKey( firstGreaterThan( self->startingKey ), true ) );
+						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), true));
 						lastKey = _lastKey;
-						if( !normalKeys.contains( lastKey ) )
-							lastKey = self->endingKey;
+						if (!normalKeys.contains(lastKey)) lastKey = self->endingKey;
 					}
-					
-					pair<int, int> unpacked = valuesForKey( lastKey );
 
-					if( self->forward )
-						tr.set( keyForIndex( unpacked.first + unpacked.second, g_random->randomInt(1, 1000) ), 
-								StringRef(self->valueString) );
+					pair<int, int> unpacked = valuesForKey(lastKey);
+
+					if (self->forward)
+						tr.set(keyForIndex(unpacked.first + unpacked.second, g_random->randomInt(1, 1000)),
+						       StringRef(self->valueString));
 					else
-						tr.set( keyForIndex( unpacked.first - unpacked.second, g_random->randomInt(1, 1000) ), 
-								StringRef(self->valueString) );
+						tr.set(keyForIndex(unpacked.first - unpacked.second, g_random->randomInt(1, 1000)),
+						       StringRef(self->valueString));
 
 					start = now();
-					wait( tr.commit() );
-					self->commitLatencies.addSample( now() - start );
+					wait(tr.commit());
+					self->commitLatencies.addSample(now() - start);
 					break;
-				} catch( Error& e ) {
-					wait( tr.onError( e ) );
+				} catch (Error& e) {
+					wait(tr.onError(e));
 					++self->retries;
 				}
 			}

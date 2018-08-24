@@ -20,10 +20,10 @@
 
 #include "ActorCollection.h"
 #include "IndexedSet.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pCount, double *lastChangeTime, double *idleTime, double *allTime, bool returnWhenEmptied )
-{
+ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor, int* pCount, double* lastChangeTime,
+                                   double* idleTime, double* allTime, bool returnWhenEmptied) {
 	state int64_t nextTag = 0;
 	state Map<int64_t, Future<Void>> tag_streamHelper;
 	state PromiseStream<int64_t> complete;
@@ -32,29 +32,28 @@ ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pC
 	if (!pCount) pCount = &count;
 
 	loop choose {
-		when (Future<Void> f = waitNext(addActor)) {
+		when(Future<Void> f = waitNext(addActor)) {
 			int64_t t = nextTag++;
-			tag_streamHelper[t] = streamHelper( complete, errors, tag(f, t) );
+			tag_streamHelper[t] = streamHelper(complete, errors, tag(f, t));
 			++*pCount;
-			if( *pCount == 1 && lastChangeTime && idleTime && allTime) {
+			if (*pCount == 1 && lastChangeTime && idleTime && allTime) {
 				double currentTime = now();
 				*idleTime += currentTime - *lastChangeTime;
 				*allTime += currentTime - *lastChangeTime;
 				*lastChangeTime = currentTime;
 			}
 		}
-		when (int64_t t = waitNext(complete.getFuture())) {
+		when(int64_t t = waitNext(complete.getFuture())) {
 			if (!--*pCount) {
-				if( lastChangeTime && idleTime && allTime) {
+				if (lastChangeTime && idleTime && allTime) {
 					double currentTime = now();
 					*allTime += currentTime - *lastChangeTime;
 					*lastChangeTime = currentTime;
 				}
-				if (returnWhenEmptied)
-					return Void();
+				if (returnWhenEmptied) return Void();
 			}
 			tag_streamHelper.erase(t);
 		}
-		when (Error e = waitNext(errors.getFuture())) { throw e; }
+		when(Error e = waitNext(errors.getFuture())) { throw e; }
 	}
 }

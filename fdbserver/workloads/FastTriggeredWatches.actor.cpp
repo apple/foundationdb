@@ -24,7 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
 	int nodes, keyBytes;
@@ -34,66 +34,63 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	Value defaultValue;
 
 	FastTriggeredWatchesWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), operations("Operations"), retries("Retries")
-	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		nodes = getOption( options, LiteralStringRef("nodes"), 100 );
-		defaultValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 ) ));
-		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
+	  : TestWorkload(wcx), operations("Operations"), retries("Retries") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
+		nodes = getOption(options, LiteralStringRef("nodes"), 100);
+		defaultValue = StringRef(format("%010d", g_random->randomInt(0, 1000)));
+		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
 	}
 
 	virtual std::string description() { return "Watches"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		if( clientId == 0 )
-			return _setup( cx, this );
+	virtual Future<Void> setup(Database const& cx) {
+		if (clientId == 0) return _setup(cx, this);
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup( Database cx, FastTriggeredWatchesWorkload* self ) {
+	ACTOR Future<Void> _setup(Database cx, FastTriggeredWatchesWorkload* self) {
 		state Transaction tr(cx);
 
 		loop {
 			try {
-				for(int i = 0; i < self->nodes; i+=2) tr.set(self->keyForIndex(i), self->defaultValue);
+				for (int i = 0; i < self->nodes; i += 2) tr.set(self->keyForIndex(i), self->defaultValue);
 
-				wait( tr.commit() );
+				wait(tr.commit());
 				break;
 			} catch (Error& e) {
-				wait( tr.onError(e) );
+				wait(tr.onError(e));
 			}
 		}
 
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return _start( cx, this );
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) return _start(cx, this);
 		return Void();
 	}
 
-	ACTOR Future<Version> setter( Database cx, Key key, Optional<Value> value ) {
-		state ReadYourWritesTransaction tr( cx );
-		wait( delay( g_random->random01() ) );
+	ACTOR Future<Version> setter(Database cx, Key key, Optional<Value> value) {
+		state ReadYourWritesTransaction tr(cx);
+		wait(delay(g_random->random01()));
 		loop {
 			try {
-				if( value.present() )
-					tr.set( key, value.get() );
+				if (value.present())
+					tr.set(key, value.get());
 				else
-					tr.clear( key );
+					tr.clear(key);
 				//TraceEvent("FTWSetBegin").detail("Key", printable(key)).detail("Value", printable(value));
-				wait( tr.commit() );
+				wait(tr.commit());
 				//TraceEvent("FTWSetEnd").detail("Key", printable(key)).detail("Value", printable(value)).detail("Ver", tr.getCommittedVersion());
 				return tr.getCommittedVersion();
-			} catch( Error &e ) {
+			} catch (Error& e) {
 				//TraceEvent("FTWSetError").error(e).detail("Key", printable(key)).detail("Value", printable(value));
-				wait( tr.onError(e) );
+				wait(tr.onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> _start( Database cx, FastTriggeredWatchesWorkload* self ) {
+	ACTOR static Future<Void> _start(Database cx, FastTriggeredWatchesWorkload* self) {
 		state double testStart = now();
 		state Version lastReadVersion = 0;
 		try {
@@ -101,74 +98,71 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				state double getDuration = 0;
 				state double watchEnd = 0;
 				state bool first = true;
-				state Key setKey = self->keyForIndex(g_random->randomInt(0,self->nodes));
+				state Key setKey = self->keyForIndex(g_random->randomInt(0, self->nodes));
 				state Optional<Value> setValue;
-				if( g_random->random01() > 0.5 )
-					setValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 )));
-				state Future<Version> setFuture = self->setter( cx, setKey, setValue );
-				wait( delay( g_random->random01() ) );
+				if (g_random->random01() > 0.5) setValue = StringRef(format("%010d", g_random->randomInt(0, 1000)));
+				state Future<Version> setFuture = self->setter(cx, setKey, setValue);
+				wait(delay(g_random->random01()));
 				loop {
-					state ReadYourWritesTransaction tr( cx );
+					state ReadYourWritesTransaction tr(cx);
 
 					try {
 
-						Optional<Value> val = wait( tr.get( setKey ) );
-						if(!first) {
+						Optional<Value> val = wait(tr.get(setKey));
+						if (!first) {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
 						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
-						if( val == setValue )
-							break;
-						ASSERT( first );
-						state Future<Void> watchFuture = tr.watch( setKey );
-						wait( tr.commit() );
+						if (val == setValue) break;
+						ASSERT(first);
+						state Future<Void> watchFuture = tr.watch(setKey);
+						wait(tr.commit());
 						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
-						wait( watchFuture );
+						wait(watchFuture);
 						watchEnd = now();
 						first = false;
-					} catch( Error &e ) {
+					} catch (Error& e) {
 						//TraceEvent("FTWWatchError").error(e).detail("Key", printable(setKey));
-						wait( tr.onError(e) );
+						wait(tr.onError(e));
 					}
 				}
-				Version ver = wait( setFuture );
+				Version ver = wait(setFuture);
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
-				ASSERT( lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT || lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND*(12+getDuration) );
+				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
+				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (12 + getDuration));
 
-				if( now() - testStart > self->testDuration )
-					break;
+				if (now() - testStart > self->testDuration) break;
 			}
 			return Void();
-		} catch( Error &e ) {
-			TraceEvent(SevError, "FastWatchError").error(e,true);
+		} catch (Error& e) {
+			TraceEvent(SevError, "FastWatchError").error(e, true);
 			throw;
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	virtual Future<bool> check(Database const& cx) {
 		bool ok = true;
-		for( int i = 0; i < clients.size(); i++ )
-			if( clients[i].isError() )
-				ok = false;
+		for (int i = 0; i < clients.size(); i++)
+			if (clients[i].isError()) ok = false;
 		clients.clear();
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics(vector<PerfMetric>& m) {
 		double duration = testDuration;
-		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
-		m.push_back( operations.getMetric() );
-		m.push_back( retries.getMetric() );
+		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.push_back(operations.getMetric());
+		m.push_back(retries.getMetric());
 	}
 
-	Key keyForIndex( uint64_t index ) {
-		Key result = makeString( keyBytes );
-		uint8_t* data = mutateString( result );
+	Key keyForIndex(uint64_t index) {
+		Key result = makeString(keyBytes);
+		uint8_t* data = mutateString(result);
 		memset(data, '.', keyBytes);
 
 		double d = double(index) / nodes;
-		emplaceIndex( data, 0, *(int64_t*)&d );
+		emplaceIndex(data, 0, *(int64_t*)&d);
 
 		return result;
 	}

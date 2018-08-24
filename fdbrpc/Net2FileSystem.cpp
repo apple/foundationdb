@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #include "Net2FileSystem.h"
 
 // Define boost::asio::io_service
@@ -40,54 +39,54 @@
 #include "AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
-Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
-{
+Future<Reference<class IAsyncFile>> Net2FileSystem::open(std::string filename, int64_t flags, int64_t mode) {
 #ifdef __linux__
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
 		if (fileDeviceId != this->fileSystemDeviceId) {
-			TraceEvent(SevError, "DeviceIdMismatched").detail("FileSystemDeviceId", this->fileSystemDeviceId).detail("FileDeviceId", fileDeviceId);
+			TraceEvent(SevError, "DeviceIdMismatched")
+			    .detail("FileSystemDeviceId", this->fileSystemDeviceId)
+			    .detail("FileDeviceId", fileDeviceId);
 			throw io_error();
 		}
 	}
 #endif
 
-	if ( (flags & IAsyncFile::OPEN_EXCLUSIVE) ) ASSERT( flags & IAsyncFile::OPEN_CREATE );
-	if (!(flags & IAsyncFile::OPEN_UNCACHED))
-		return AsyncFileCached::open(filename, flags, mode);
+	if ((flags & IAsyncFile::OPEN_EXCLUSIVE)) ASSERT(flags & IAsyncFile::OPEN_CREATE);
+	if (!(flags & IAsyncFile::OPEN_UNCACHED)) return AsyncFileCached::open(filename, flags, mode);
 
 	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
-	if ( (flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) )
+	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO))
 		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
 	else
 #endif
-	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
-	if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+		f = Net2AsyncFile::open(
+		    filename, flags, mode,
+		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
+	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 	return f;
 }
 
-// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-Future< Void > Net2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
-{
+// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
+// failure.
+Future<Void> Net2FileSystem::deleteFile(std::string filename, bool mustBeDurable) {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
-Future< std::time_t > Net2FileSystem::lastWriteTime( std::string filename ) {
-	return Net2AsyncFile::lastWriteTime( filename );
+Future<std::time_t> Net2FileSystem::lastWriteTime(std::string filename) {
+	return Net2AsyncFile::lastWriteTime(filename);
 }
 
-void Net2FileSystem::newFileSystem(double ioTimeout, std::string fileSystemPath)
-{
+void Net2FileSystem::newFileSystem(double ioTimeout, std::string fileSystemPath) {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
 }
 
-Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
-{
+Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath) {
 	Net2AsyncFile::init();
 #ifdef __linux__
-	AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
+	AsyncFileKAIO::init(Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout);
 
 	if (fileSystemPath.empty()) {
 		checkFileSystem = false;
@@ -99,11 +98,13 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 			if (fileSystemPath != "/") {
 				dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
 				if (this->fileSystemDeviceId == fileSystemParentDeviceId) {
-					criticalError(FDB_EXIT_ERROR, "FileSystemError", format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+					criticalError(FDB_EXIT_ERROR, "FileSystemError",
+					              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
 				}
 			}
 		} catch (Error& e) {
-			criticalError(FDB_EXIT_ERROR, "FileSystemError", format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
+			criticalError(FDB_EXIT_ERROR, "FileSystemError",
+			              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
 	}
 #endif

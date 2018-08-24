@@ -24,19 +24,21 @@
 
 #include "flow/ThreadHelper.actor.h"
 
-template<class T>
+template <class T>
 class AbortableSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, public ThreadCallback {
 public:
-	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal) : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(false) {
+	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal)
+	  : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(false) {
 		int userParam;
 
 		ThreadSingleAssignmentVar<T>::addref();
 		ThreadSingleAssignmentVar<T>::addref();
 
-		// abortSignal comes first, because otherwise future could immediately call fire/error and attempt to remove this callback from abortSignal prematurely
+		// abortSignal comes first, because otherwise future could immediately call fire/error and attempt to remove
+		// this callback from abortSignal prematurely
 		abortSignal.callOrSetAsCallback(this, userParam, 0);
 		future.callOrSetAsCallback(this, userParam, 0);
-	} 
+	}
 
 	virtual void cancel() {
 		cancelCallbacks();
@@ -50,23 +52,20 @@ public:
 
 	bool canFire(int notMadeActive) { return true; }
 
-	void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) {
 		lock.enter();
-		if(!hasBeenSet) {
+		if (!hasBeenSet) {
 			hasBeenSet = true;
 			lock.leave();
 
-			if(future.isReady() && !future.isError()) {
+			if (future.isReady() && !future.isError()) {
 				ThreadSingleAssignmentVar<T>::send(future.get());
-			}
-			else if(abortSignal.isReady()) {
+			} else if (abortSignal.isReady()) {
 				ThreadSingleAssignmentVar<T>::sendError(cluster_version_changed());
-			}
-			else {
+			} else {
 				ASSERT(false);
 			}
-		}
-		else {
+		} else {
 			lock.leave();
 		}
 
@@ -77,13 +76,12 @@ public:
 	void error(const Error& e, int& userParam) {
 		ASSERT(future.isError());
 		lock.enter();
-		if(!hasBeenSet) {
+		if (!hasBeenSet) {
 			hasBeenSet = true;
 			lock.leave();
 
 			ThreadSingleAssignmentVar<T>::sendError(future.getError());
-		}
-		else {
+		} else {
 			lock.leave();
 		}
 
@@ -102,39 +100,41 @@ private:
 	void cancelCallbacks() {
 		lock.enter();
 
-		if(!callbacksCleared) {
+		if (!callbacksCleared) {
 			callbacksCleared = true;
 			lock.leave();
 
-			future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback gets destroyed
+			future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this
+			                           // callback gets destroyed
 			future.getPtr()->cancel();
 
-			if(abortSignal.clearCallback(this)) {
+			if (abortSignal.clearCallback(this)) {
 				ThreadSingleAssignmentVar<T>::delref();
 			}
-		}
-		else {
+		} else {
 			lock.leave();
 		}
 	}
 };
 
-template<class T>
+template <class T>
 ThreadFuture<T> abortableFuture(ThreadFuture<T> f, ThreadFuture<Void> abortSignal) {
 	return ThreadFuture<T>(new AbortableSingleAssignmentVar<T>(f, abortSignal));
 }
 
-template<class T>
+template <class T>
 class DLThreadSingleAssignmentVar : public ThreadSingleAssignmentVar<T> {
 public:
-	DLThreadSingleAssignmentVar(Reference<FdbCApi> api, FdbCApi::FDBFuture *f, std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue) : api(api), f(f), extractValue(extractValue), futureRefCount(1) { 
+	DLThreadSingleAssignmentVar(Reference<FdbCApi> api, FdbCApi::FDBFuture* f,
+	                            std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue)
+	  : api(api), f(f), extractValue(extractValue), futureRefCount(1) {
 		ThreadSingleAssignmentVar<T>::addref();
 		api->futureSetCallback(f, &futureCallback, this);
 	}
 
 	~DLThreadSingleAssignmentVar() {
 		lock.assertNotEntered();
-		if(f) {
+		if (f) {
 			ASSERT_ABORT(futureRefCount == 1);
 			api->futureDestroy(f);
 		}
@@ -143,7 +143,7 @@ public:
 	bool addFutureRef() {
 		lock.enter();
 		bool destroyed = futureRefCount == 0;
-		if(!destroyed) {
+		if (!destroyed) {
 			++futureRefCount;
 		}
 		lock.leave();
@@ -153,15 +153,15 @@ public:
 
 	bool delFutureRef() {
 		lock.enter();
-		if(futureRefCount == 0) {
+		if (futureRefCount == 0) {
 			lock.leave();
 			return true;
 		}
-		
-		bool destroyNow = (--futureRefCount == 0); 
+
+		bool destroyNow = (--futureRefCount == 0);
 		lock.leave();
 
-		if(destroyNow) {
+		if (destroyNow) {
 			api->futureDestroy(f);
 			f = NULL;
 		}
@@ -170,7 +170,7 @@ public:
 	}
 
 	virtual void cancel() {
-		if(addFutureRef()) {
+		if (addFutureRef()) {
 			api->futureCancel(f);
 			delFutureRef();
 		}
@@ -185,11 +185,10 @@ public:
 
 	void apply() {
 		FdbCApi::fdb_error_t error = addFutureRef() ? api->futureGetError(f) : error_code_operation_cancelled;
-		if(error != 0) {
+		if (error != 0) {
 			delFutureRef();
 			ThreadSingleAssignmentVar<T>::sendError(Error(error));
-		}
-		else {
+		} else {
 			T val = extractValue(f, api.getPtr());
 			delFutureRef();
 			ThreadSingleAssignmentVar<T>::send(val);
@@ -198,35 +197,36 @@ public:
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	static void futureCallback(FdbCApi::FDBFuture *f, void *param) {
+	static void futureCallback(FdbCApi::FDBFuture* f, void* param) {
 		auto sav = (DLThreadSingleAssignmentVar<T>*)param;
 
-		if(MultiVersionApi::api->callbackOnMainThread) {
-			onMainThreadVoid([sav](){ sav->apply(); }, NULL);
-		}
-		else {
+		if (MultiVersionApi::api->callbackOnMainThread) {
+			onMainThreadVoid([sav]() { sav->apply(); }, NULL);
+		} else {
 			sav->apply();
 		}
 	}
 
 private:
 	const Reference<FdbCApi> api;
-	FdbCApi::FDBFuture *f;
-	const std::function<T(FdbCApi::FDBFuture *f, FdbCApi *api)> extractValue;
+	FdbCApi::FDBFuture* f;
+	const std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue;
 	ThreadSpinLock lock;
 
 	int futureRefCount;
 };
 
-template<class T>
-ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api, FdbCApi::FDBFuture *f, std::function<T(FdbCApi::FDBFuture *f, FdbCApi *api)> extractValue) {
+template <class T>
+ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api, FdbCApi::FDBFuture* f,
+                               std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue) {
 	return ThreadFuture<T>(new DLThreadSingleAssignmentVar<T>(api, f, extractValue));
 }
 
-template<class S, class T>
+template <class S, class T>
 class MapSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, ThreadCallback {
 public:
-	MapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<T>(ErrorOr<S>)> mapValue) : source(source), mapValue(mapValue) { 
+	MapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<T>(ErrorOr<S>)> mapValue)
+	  : source(source), mapValue(mapValue) {
 		ThreadSingleAssignmentVar<T>::addref();
 
 		int userParam;
@@ -234,11 +234,12 @@ public:
 	}
 
 	virtual void cancel() {
-		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback gets destroyed
+		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback
+		                           // gets destroyed
 		source.getPtr()->cancel();
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
-	
+
 	virtual void cleanupUnsafe() {
 		source.getPtr()->releaseMemory();
 		ThreadSingleAssignmentVar<T>::cleanupUnsafe();
@@ -246,7 +247,7 @@ public:
 
 	bool canFire(int notMadeActive) { return true; }
 
-	void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) {
 		sendResult(mapValue(source.get()));
 		ThreadSingleAssignmentVar<T>::delref();
 	}
@@ -261,24 +262,24 @@ private:
 	const std::function<ErrorOr<T>(ErrorOr<S>)> mapValue;
 
 	void sendResult(ErrorOr<T> result) {
-		if(result.isError()) {
+		if (result.isError()) {
 			ThreadSingleAssignmentVar<T>::sendError(result.getError());
-		}
-		else {
+		} else {
 			ThreadSingleAssignmentVar<T>::send(result.get());
 		}
 	}
 };
 
-template<class S, class T>
+template <class S, class T>
 ThreadFuture<T> mapThreadFuture(ThreadFuture<S> source, std::function<ErrorOr<T>(ErrorOr<S>)> mapValue) {
 	return ThreadFuture<T>(new MapSingleAssignmentVar<S, T>(source, mapValue));
 }
 
-template<class S, class T>
+template <class S, class T>
 class FlatMapSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, ThreadCallback {
 public:
-	FlatMapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue) : source(source), mapValue(mapValue), cancelled(false), released(false) { 
+	FlatMapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue)
+	  : source(source), mapValue(mapValue), cancelled(false), released(false) {
 		ThreadSingleAssignmentVar<T>::addref();
 
 		int userParam;
@@ -286,33 +287,32 @@ public:
 	}
 
 	virtual void cancel() {
-		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback gets destroyed
+		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback
+		                           // gets destroyed
 		source.getPtr()->cancel();
 
 		lock.enter();
 		cancelled = true;
-		if(mappedFuture.isValid()) {
+		if (mappedFuture.isValid()) {
 			lock.leave();
 			mappedFuture.getPtr()->addref();
 			mappedFuture.getPtr()->cancel();
-		}
-		else {
+		} else {
 			lock.leave();
 		}
 
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
-	
+
 	virtual void cleanupUnsafe() {
 		source.getPtr()->releaseMemory();
 
 		lock.enter();
 		released = true;
-		if(mappedFuture.isValid()) {
+		if (mappedFuture.isValid()) {
 			lock.leave();
 			mappedFuture.getPtr()->releaseMemory();
-		}
-		else {
+		} else {
 			lock.leave();
 		}
 
@@ -321,11 +321,10 @@ public:
 
 	bool canFire(int notMadeActive) { return true; }
 
-	void fire(const Void &unused, int& userParam) {
-		if(mappedFuture.isValid()) {
+	void fire(const Void& unused, int& userParam) {
+		if (mappedFuture.isValid()) {
 			sendResult(mappedFuture.get());
-		}
-		else {
+		} else {
 			setMappedFuture(mapValue(source.get()));
 		}
 
@@ -333,10 +332,9 @@ public:
 	}
 
 	void error(const Error& e, int& userParam) {
-		if(mappedFuture.isValid()) {
+		if (mappedFuture.isValid()) {
 			sendResult(mappedFuture.getError());
-		}
-		else {
+		} else {
 			setMappedFuture(mapValue(source.getError()));
 		}
 
@@ -353,21 +351,20 @@ private:
 	ThreadSpinLock lock;
 
 	void setMappedFuture(ErrorOr<ThreadFuture<T>> f) {
-		if(f.isError()) {
+		if (f.isError()) {
 			sendResult(f.getError());
-		}
-		else {
+		} else {
 			lock.enter();
 			mappedFuture = f.get();
 			bool doCancel = cancelled;
 			bool doRelease = released;
 			lock.leave();
 
-			if(doCancel) {
+			if (doCancel) {
 				mappedFuture.getPtr()->addref();
 				mappedFuture.getPtr()->cancel();
 			}
-			if(doRelease) {
+			if (doRelease) {
 				mappedFuture.getPtr()->releaseMemory();
 			}
 
@@ -378,17 +375,17 @@ private:
 	}
 
 	void sendResult(ErrorOr<T> result) {
-		if(result.isError()) {
+		if (result.isError()) {
 			ThreadSingleAssignmentVar<T>::sendError(result.getError());
-		}
-		else {
+		} else {
 			ThreadSingleAssignmentVar<T>::send(result.get());
 		}
 	}
 };
 
-template<class S, class T>
-ThreadFuture<T> flatMapThreadFuture(ThreadFuture<S> source, std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue) {
+template <class S, class T>
+ThreadFuture<T> flatMapThreadFuture(ThreadFuture<S> source,
+                                    std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue) {
 	return ThreadFuture<T>(new FlatMapSingleAssignmentVar<S, T>(source, mapValue));
 }
 

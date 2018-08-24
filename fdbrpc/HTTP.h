@@ -24,27 +24,32 @@
 #include "fdbclient/Knobs.h"
 
 namespace HTTP {
-	typedef std::map<std::string, std::string> Headers;
+typedef std::map<std::string, std::string> Headers;
 
-	std::string urlEncode(const std::string &s);
+std::string urlEncode(const std::string& s);
 
-	struct Response : ReferenceCounted<Response>{
-		Response() {}
-		Future<Void> read(Reference<IConnection> conn, bool header_only);
-		std::string toString();
-		float version;
-		int code;
-		Headers headers;
-		std::string content;
-		int64_t contentLen;
+struct Response : ReferenceCounted<Response> {
+	Response() {}
+	Future<Void> read(Reference<IConnection> conn, bool header_only);
+	std::string toString();
+	float version;
+	int code;
+	Headers headers;
+	std::string content;
+	int64_t contentLen;
 
-		bool verifyMD5(bool fail_if_header_missing, Optional<std::string> content_sum = Optional<std::string>());
-		void convertToJSONifXML();
-	};
+	bool verifyMD5(bool fail_if_header_missing, Optional<std::string> content_sum = Optional<std::string>());
+	void convertToJSONifXML();
+};
 
-	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
-	PacketBuffer * writeRequestHeader(std::string const &verb, std::string const &resource, HTTP::Headers const &headers, PacketBuffer *dest);
+// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
+PacketBuffer* writeRequestHeader(std::string const& verb, std::string const& resource, HTTP::Headers const& headers,
+                                 PacketBuffer* dest);
 
-	// Do an HTTP request to the blob store, parse the response.
-	Future<Reference<Response>> doRequest(Reference<IConnection> const &conn, std::string const &verb, std::string const &resource, HTTP::Headers const &headers, UnsentPacketQueue * const &pContent, int const &contentLen, Reference<IRateControl> const &sendRate, int64_t * const &pSent, Reference<IRateControl> const &recvRate);
-}
+// Do an HTTP request to the blob store, parse the response.
+Future<Reference<Response>> doRequest(Reference<IConnection> const& conn, std::string const& verb,
+                                      std::string const& resource, HTTP::Headers const& headers,
+                                      UnsentPacketQueue* const& pContent, int const& contentLen,
+                                      Reference<IRateControl> const& sendRate, int64_t* const& pSent,
+                                      Reference<IRateControl> const& recvRate);
+} // namespace HTTP
