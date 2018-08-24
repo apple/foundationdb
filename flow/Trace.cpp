@@ -22,10 +22,12 @@
 #include "flow/Trace.h"
 #include "flow/FileTraceLogWriter.h"
 #include "flow/XmlTraceLogFormatter.h"
+#include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
+#include <cctype>
 #include <time.h>
 
 #include "flow/IThreadPool.h"
@@ -40,6 +42,19 @@
 #undef max
 #undef min
 #endif
+
+Reference<ITraceLogFormatter> createLogFormatter() {
+	auto f = FLOW_KNOBS->TRACE_FORMAT;
+	std::transform(f.begin(), f.end(), f.begin(), ::tolower);
+	if (f == "json") {
+		return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+	} else if (f == "xml") {
+		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+	} else {
+		ASSERT(false);
+		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+	}
+}
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -280,7 +295,14 @@ public:
 		}
 	};
 
-	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
+	TraceLog()
+		: bufferLength(0)
+		, loggedLength(0)
+		, opened(false)
+		, preopenOverflowCount(0)
+		, barriers(new BarrierList)
+		, logTraceEventMetrics(false)
+		, formatter(createLogFormatter()) {}
 
 	bool isOpen() const { return opened; }
 
