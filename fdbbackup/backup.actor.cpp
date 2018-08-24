@@ -2630,8 +2630,8 @@ int main(int argc, char* argv[]) {
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
-				if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( k->first, k->second ) &&
-					!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( k->first, k->second )) 
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second )) 
 				{
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
