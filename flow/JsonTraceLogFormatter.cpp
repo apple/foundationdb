@@ -23,62 +23,55 @@
 
 #include <sstream>
 
-void JsonTraceLogFormatter::addref()
-{
-    ReferenceCounted<JsonTraceLogFormatter>::addref();
+void JsonTraceLogFormatter::addref() {
+	ReferenceCounted<JsonTraceLogFormatter>::addref();
 }
 
-void JsonTraceLogFormatter::delref()
-{
-    ReferenceCounted<JsonTraceLogFormatter>::delref();
+void JsonTraceLogFormatter::delref() {
+	ReferenceCounted<JsonTraceLogFormatter>::delref();
 }
 
-const char* JsonTraceLogFormatter::getExtension()
-{
-    return "json";
+const char* JsonTraceLogFormatter::getExtension() {
+	return "json";
 }
 
-const char* JsonTraceLogFormatter::getHeader()
-{
-    return "";
+const char* JsonTraceLogFormatter::getHeader() {
+	return "";
 }
 
-const char* JsonTraceLogFormatter::getFooter()
-{
-    return "";
+const char* JsonTraceLogFormatter::getFooter() {
+	return "";
 }
 
 namespace {
 
-void escapeString(std::stringstream& ss, const std::string source)
-{
-    for (auto c : source) {
-        if (c == '"') {
-            ss << "\"";
-        } else if (c == '\\') {
-            ss << "\\\\";
-        } else {
-            ss << c;
-        }
-    }
+void escapeString(std::stringstream& ss, const std::string source) {
+	for (auto c : source) {
+		if (c == '"') {
+			ss << "\"";
+		} else if (c == '\\') {
+			ss << "\\\\";
+		} else {
+			ss << c;
+		}
+	}
 }
 
-}
+} // namespace
 
-std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields)
-{
-    std::stringstream ss;
-    ss << "{  ";
-    for (auto iter = fields.begin(); iter != fields.end(); ++iter) {
-        if (iter != fields.begin()) {
-            ss << ", ";
-        }
-        ss << "\"";
-        escapeString(ss, iter->first);
-        ss << "\": \"";
-        escapeString(ss, iter->second);
-        ss << "\"";
-    }
-    ss << " }\r\n";
-    return ss.str();
+std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
+	std::stringstream ss;
+	ss << "{  ";
+	for (auto iter = fields.begin(); iter != fields.end(); ++iter) {
+		if (iter != fields.begin()) {
+			ss << ", ";
+		}
+		ss << "\"";
+		escapeString(ss, iter->first);
+		ss << "\": \"";
+		escapeString(ss, iter->second);
+		ss << "\"";
+	}
+	ss << " }\r\n";
+	return ss.str();
 }
