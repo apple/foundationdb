@@ -671,7 +671,7 @@ TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool
 		fields.addField(std::move(key), std::move(value));
 
 		if(fields.sizeBytes() > TRACE_EVENT_MAX_SIZE) {
-			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));
 			enabled = false;
 		}
 	}
@@ -806,7 +806,7 @@ TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCou
 				}
 			}
 			else {
-				TraceEvent(SevError, "SuppressionFromNonNetworkThread");
+				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Type", type);
 				detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
 			}
 		}

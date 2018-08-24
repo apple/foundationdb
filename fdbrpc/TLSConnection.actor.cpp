@@ -205,11 +205,11 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 
 void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	try {
-		TraceEvent("TLSConnectionSettingCertFile").suppressFor(1.0).detail("CertFilePath", cert_file);
+		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
 		policyInfo.cert_path = cert_file;
 		set_cert_data( readFileBytes( cert_file, CERT_FILE_MAX_SIZE ) );
 	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetCertFileError").suppressFor(1.0).detail("Filename", cert_file);
+		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file);
 		throw;
 	}
 }
@@ -231,6 +231,7 @@ void TLSOptions::set_ca_data(std::string const& ca_data) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingCAData").detail("CADataSize", ca_data.size());
+	policyInfo.ca_contents = Standalone<StringRef>(ca_data);
 	if (!policyVerifyPeersSet.get()->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
@@ -244,6 +245,7 @@ void TLSOptions::set_cert_data( std::string const& cert_data ) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingCertData").detail("CertDataSize", cert_data.size());
+	policyInfo.cert_contents = Standalone<StringRef>(cert_data);
 	if ( !policyVerifyPeersSet.get()->set_cert_data( (const uint8_t*)&cert_data[0], cert_data.size() ) )
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_cert_data((const uint8_t*)&cert_data[0], cert_data.size()))
@@ -273,6 +275,7 @@ void TLSOptions::set_key_data( std::string const& key_data ) {
 		init_plugin();
 	const char *passphrase = policyInfo.keyPassword.empty() ? NULL : policyInfo.keyPassword.c_str();
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
+	policyInfo.key_contents = Standalone<StringRef>(key_data);
 	if ( !policyVerifyPeersSet.get()->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), passphrase) )
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_key_data((const uint8_t*)&key_data[0], key_data.size(), passphrase))
@@ -310,7 +313,7 @@ void TLSOptions::register_network() {
 }
 
 ACTOR static Future<ErrorOr<Standalone<StringRef>>> readEntireFile( std::string filename ) {
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY, 0));
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 	state int64_t filesize = wait(file->size());
 	state Standalone<StringRef> buf = makeString(filesize);
 	int rc = wait(file->read(mutateString(buf), filesize, 0));
@@ -347,6 +350,7 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		}
 		Void _ = wait(delay(1.0));
 	}
+	state int mismatches = 0;
 	state AsyncVar<Standalone<StringRef>> ca_var;
 	state AsyncVar<Standalone<StringRef>> key_var;
 	state AsyncVar<Standalone<StringRef>> cert_var;
@@ -359,14 +363,30 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		state Future<Void> key_changed = key_var.onChange();
 		state Future<Void> cert_changed = cert_var.onChange();
 		Void _ = wait( ca_changed || key_changed || cert_changed );
-		if (ca_changed.isReady()) pci->ca_contents = ca_var.get();
-		if (key_changed.isReady()) pci->key_contents = key_var.get();
-		if (cert_changed.isReady()) pci->cert_contents = cert_var.get();
-		try {
-			Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
-			verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
-			verifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
-			verifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+		if (ca_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshCAChanged").detail("path", pci->ca_path).detail("length", ca_var.get().size());
+			pci->ca_contents = ca_var.get();
+		}
+		if (key_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshKeyChanged").detail("path", pci->key_path).detail("length", key_var.get().size());
+			pci->key_contents = key_var.get();
+		}
+		if (cert_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshCertChanged").detail("path", pci->cert_path).detail("length", cert_var.get().size());
+			pci->cert_contents = cert_var.get();
+		}
+		bool rc = true;
+		Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+		Reference<ITLSPolicy> noverifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+		loop {
+			// Don't actually loop.  We're just using loop/break as a `goto err`.
+			// This loop always ends with an unconditional break.
+			rc = verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+			if (!rc) break;
+			rc = verifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+			if (!rc) break;
+			rc = verifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			if (!rc) break;
 			{
 				std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[pci->verify_peers.size()]);
 				std::unique_ptr<int[]> verify_peers_len(new int[pci->verify_peers.size()]);
@@ -374,18 +394,27 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 					verify_peers_arr[i] = (const uint8_t *)&pci->verify_peers[i][0];
 					verify_peers_len[i] = pci->verify_peers[i].size();
 				}
-				verifypeers->set_verify_peers(pci->verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get());
+				rc = verifypeers->set_verify_peers(pci->verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get());
+				if (!rc) break;
 			}
-			Reference<ITLSPolicy> noverifypeers = Reference<ITLSPolicy>(plugin->create_policy());
-			noverifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
-			noverifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
-			noverifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			rc = noverifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+			if (!rc) break;
+			rc = noverifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+			if (!rc) break;
+			rc = noverifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			if (!rc) break;
+			break;
+		}
 
+		if (rc) {
+			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
 			realVerifyPeersPolicy->set(verifypeers);
 			realNoVerifyPeersPolicy->set(noverifypeers);
-		} catch (Error& e) {
+			mismatches = 0;
+		} else {
 			// Some files didn't match up, they should in the future, and we'll retry then.
-			TraceEvent(SevWarn, "TLSCertificateRefresh").error(e);
+			mismatches++;
+			TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").detail("mismatches", mismatches);
 		}
 	}
 }
@@ -437,12 +466,12 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 
 void TLSOptions::init_plugin() {
 
-	TraceEvent("TLSConnectionLoadingPlugin").suppressFor(1.0).detail("Plugin", tlsPluginName);
+	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
 
 	plugin = loadPlugin<ITLSPlugin>( tlsPluginName );
 
 	if ( !plugin ) {
-		TraceEvent(SevError, "TLSConnectionPluginInitError").suppressFor(1.0).detail("Plugin", tlsPluginName).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", tlsPluginName).GetLastError();
 		throw tls_error();
 	}
 

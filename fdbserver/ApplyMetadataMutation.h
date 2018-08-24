@@ -178,7 +178,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						}
 					}
 				}
-			} else if( m.param1 == databaseLockedKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
+			} else if( m.param1 == databaseLockedKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -332,6 +332,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			}
 			if (range.contains(databaseLockedKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(databaseLockedKey));
+			}
+			if (range.contains(mustContainSystemMutationsKey)) {
+				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
 			if(range.intersects(applyMutationsEndRange)) {
 				KeyRangeRef commonEndRange(range & applyMutationsEndRange);
