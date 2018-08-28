@@ -48,7 +48,7 @@ namespace {
 void escapeString(std::stringstream& ss, const std::string source) {
 	for (auto c : source) {
 		if (c == '"') {
-			ss << "\"";
+			ss << "\\\"";
 		} else if (c == '\\') {
 			ss << "\\\\";
 		} else {
