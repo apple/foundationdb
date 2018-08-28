@@ -505,7 +505,6 @@ public:
 	// Cursor provides a way to seek into a PrefixTree and iterate over its content
 	// Seek and move methods can return false can return false if they fail to achieve the desired effect
 	// but a cursor will remain 'valid' as long as the tree is not empty.
-	// TODO:  Is this how it should work?
 	//
 	// It coalesces prefix bytes into a contiguous buffer for each node along the traversal
 	// path to make iteration faster.

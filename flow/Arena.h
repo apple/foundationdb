@@ -479,7 +479,7 @@ public:
 			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used for suffix bytes
 			if(limit >= 9) {
 				int suffix = limit / 3;
-				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() + format("...[%d]", length);
+				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() + format(" [%d bytes]", length);
 			}
 			return substr(0, limit).toHexString() + format("...[%d]", length);
 		}
