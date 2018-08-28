@@ -183,3 +183,76 @@ target_link_libraries(fdbserver PRIVATE fdbclient)
 
 install(TARGETS fdbserver DESTINATION ${FDB_SBIN_DIR} COMPONENT server)
 
+################################################################################
+# Testing
+################################################################################
+
+set(ENABLE_BUGGIFY OFF CACHE BOOL "Enable buggify for tests")
+
+set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
+
+configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
+
+# This will add a test that can be run by ctest. This macro can be called
+# with the following arguments:
+#
+# - UNIT will run the test as a unit test (it won't bring up a whole simulated system)
+# - TEST_NAME followed the name of the test
+# - TIMEOUT followed by a timeout - reaching the timeout makes the test fail (default is
+#   3600 seconds). The timeout will be reached whenever it ran either too long in simulated
+#   time or in real time - whatever is smaller.
+# - TEST_FILES followed by typically one test file. The test runner will run
+#   all these tests in serialized order and within the same directory. This is
+#   useful for restart tests
+macro(add_fdb_test)
+  set(options UNIT)
+  set(oneValueArgs TEST_NAME TIMEOUT)
+  set(multiValueArgs TEST_FILES)
+  cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  set(this_test_timeout ${ADD_FDB_TEST_TIMEOUT})
+  if(NOT this_test_timeout)
+    set(this_test_timeout 3600)
+  endif()
+  set(test_type "simulation")
+  list(LENGTH ADD_FDB_TEST_TEST_FILES NUM_TEST_FILES)
+  if(ADD_FDB_TEST_UNIT)
+    set(test_type "test")
+  endif()
+  list(GET ADD_FDB_TEST_TEST_FILES 0 first_file)
+  get_filename_component(test_name ${first_file} NAME_WE)
+  if (NOT "${ADD_FDB_TEST_TEST_NAME}" STREQUAL "")
+    set(test_name ${ADD_FDB_TEST_TEST_NAME})
+  endif()
+  if(ADD_FDB_TEST_UNIT)
+    message(STATUS
+      "ADDING UNIT TEST ${test_name}")
+  else()
+    message(STATUS
+      "ADDING SIMULATOR TEST ${test_name}")
+  endif()
+  set(test_files "")
+  foreach(curr_test_file ${ADD_FDB_TEST_TEST_FILES})
+    set(test_files "${test_files} ${curr_test_file}")
+  endforeach()
+  set(BUGGIFY_OPTION "")
+  if (ENABLE_BUGGIFY)
+    set(BUGGIFY_OPTION "-B")
+  endif()
+  add_test(NAME ${test_name}
+    COMMAND python3 ${TestRunner}
+    -n ${test_name}
+    -b ${PROJECT_BINARY_DIR}
+    -t ${test_type}
+    --seed ${SEED}
+    ${BUGGIFY_OPTION}
+    ${ADD_FDB_TEST_TEST_FILES}
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+  set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout})
+endmacro()
+
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/AsyncFileCorrectness.txt UNIT)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/restarting/CycleTestRestart-1.txt
+                        ${PROJECT_SOURCE_DIR}/tests/restarting/CycleTestRestart-2.txt
+             TEST_NAME CycleTestRestart)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/BigInsert.txt)
+
