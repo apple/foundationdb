@@ -80,6 +80,10 @@ struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
 		return *this;
 	}
 
+	std::vector<AttribRecord> const& getKeyValueArray() {
+		return _keyvaluearray;
+	}
+
 	int	size() const {
 		return _keyvaluearray.size();
 	}
@@ -140,6 +144,15 @@ struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
 	int	getMemoryUsed() const {
 		return sizeof(_entryIndex) + sizeof(_dataMap) + _dataMap->getMemoryUsed();
 	}
+
+	Reference<KeyValueMap> const& getDataMap() {
+		return _dataMap;
+	}
+
+	int getEntryIndex() {
+		return _entryIndex._id;
+	}
+
 };
 
 // This class stores the information for string to integer map for keys and values

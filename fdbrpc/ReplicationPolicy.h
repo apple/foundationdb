@@ -43,6 +43,9 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 			LocalitySetRef &										fromServers,
 			std::vector<LocalityEntry> const&		alsoServers,
 			std::vector<LocalityEntry>	&				results ) = 0;
+		virtual void traceLocalityRecords(LocalitySetRef const& fromServers);
+		virtual void traceOneLocalityRecord(Reference<LocalityRecord> record,
+											LocalitySetRef const& fromServers);
 		virtual bool validate(
 			std::vector<LocalityEntry>	const&	solutionSet,
 			LocalitySetRef const&								fromServers ) const = 0;
@@ -124,6 +127,7 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 	{ return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
 	virtual int maxResults() const { return _count * _policy->maxResults(); }
 	virtual int depth() const  { return 1 + _policy->depth(); }
+	//virtual void traceLocalityRecords(LocalitySetRef const& fromServers); //MX: trace locality records info
 	virtual bool validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
 		LocalitySetRef const&				fromServers ) const;

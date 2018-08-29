@@ -22,4 +22,4 @@
 
 // Map of attribute hash to name
 const std::vector<LocalityEntry>		emptyEntryArray;
-int g_replicationdebug = 0;
+int g_replicationdebug = 4;

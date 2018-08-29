@@ -88,6 +88,8 @@ Future<Void> testerServerCore( TesterInterface const& interf, Reference<ClusterC
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-Future<Void> runTests( Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun, test_location_t const& whereToRun, int const& minTestersExpected, std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(), LocalityData const& locality = LocalityData() );
+Future<Void> runTests( Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun,
+		test_location_t const& whereToRun, int const& minTestersExpected,
+		std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(), LocalityData const& locality = LocalityData() );
 
 #endif

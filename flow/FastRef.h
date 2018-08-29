@@ -132,6 +132,11 @@ public:
 		return *this;
 	}
 
+	//Enable Reference used in std::set
+	bool operator < (const Reference &r) const {
+		return (P*) this->ptr < (P*) r.ptr;
+	}
+
 	void clear() {
 		P* oldPtr = ptr;
 		if (oldPtr) {
