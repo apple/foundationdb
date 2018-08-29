@@ -140,6 +140,19 @@ struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
 	int	getMemoryUsed() const {
 		return sizeof(_entryIndex) + sizeof(_dataMap) + _dataMap->getMemoryUsed();
 	}
+
+	std::string toString() {
+		std::string str = "KeyValueArraySize:" + _dataMap->_keyvaluearray.size();
+		for ( int i = 0; i < _dataMap->size(); ++i ) {
+			AttribRecord attribRecord = _dataMap->_keyvaluearray[i]; //first is key, second is value
+			str = str + " KeyValueArrayIndex:" + std::to_string(i)
+					+ " Key:" + std::to_string(attribRecord.first._id)
+					+ " Value:" + std::to_string(attribRecord.second._id);
+		}
+
+		return str;
+	}
+
 };
 
 // This class stores the information for string to integer map for keys and values

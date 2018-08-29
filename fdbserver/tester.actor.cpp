@@ -622,6 +622,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	TraceEvent("TestRunning").detail( "WorkloadTitle", printable(spec.title) )
 		.detail("TesterCount", testers.size()).detail("Phases", spec.phases)
 		.detail("TestTimeout", spec.timeout);
+
 	state vector< Future< WorkloadInterface > > workRequests;
 	state vector<vector<PerfMetric>> metricsResults;
 
@@ -659,7 +660,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 	if( spec.phases & TestWorkload::EXECUTION ) {
 		TraceEvent("TestStarting").detail("WorkloadTitle", printable(spec.title));
-		printf("running test...\n");
+		printf("running test (%s)...\n", printable(spec.title).c_str());
 		std::vector< Future<Void> > starts;
 		for(int i= 0; i < workloads.size(); i++)
 			starts.push_back( workloads[i].start.template getReply<Void>() );
@@ -675,7 +676,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		state std::vector< Future<bool> > checks;
 		TraceEvent("CheckingResults");
-		printf("checking tests...\n");
+		printf("checking test (%s)...\n", printable(spec.title).c_str());
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back( workloads[i].check.template getReply<bool>() );
 		wait( waitForAll( checks ) );
@@ -690,7 +691,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 	if( spec.phases & TestWorkload::METRICS ) {
 		state std::vector< Future<vector<PerfMetric>> > metricTasks;
-		printf("fetching metrics...\n");
+		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", printable(spec.title));
 		for(int i= 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReply<vector<PerfMetric>>() );
@@ -725,6 +726,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
+
 	return Void();
 }
 
@@ -764,6 +766,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
+
 		wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
 	}
 }
@@ -792,6 +795,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 
 	state bool ok = testResults.ok();
 
+	printf("Spec info: useDB:%d, dumpAfterTest:%d, runConsistencyCheck:%d\n", spec.useDB, spec.dumpAfterTest, spec.runConsistencyCheck);
 	if( spec.useDB ) {
 		if( spec.dumpAfterTest ) {
 			try {
@@ -1033,6 +1037,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
 
 	//Change the configuration (and/or create the database) if necessary
+	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
@@ -1042,6 +1047,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		}
 	}
 
+	printf("waitForQuiescenceBegin start\n");
 	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks").detail("DatabasePingDelay", databasePingDelay).detail("StartDelay", startDelay);
 		try {
@@ -1055,6 +1061,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
+	printf("TestsExpectedToPass, count:%d\n", tests.size());
 	for(; idx < tests.size(); idx++ ) {
 		bool ok = wait( runTest( cx, testers, tests[idx], dbInfo ) );
 		// do we handle a failure here?
@@ -1066,7 +1073,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
 			try {
-				wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
+				wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) ||
 					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
 			} catch( Error& e ) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);

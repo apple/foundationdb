@@ -160,10 +160,13 @@ public:
 
 	std::string describeZone() const { return describeValue(keyZoneId); }
 	std::string describeDataHall() const { return describeValue(keyDataHallId); }
+	std::string describeDcId() const { return describeValue(keyDcId); }
+	std::string describeMachineId() const { return describeValue(keyMachineId); }
+	std::string describeProcessId() const { return describeValue(keyProcessId); }
 
 	Optional<Standalone<StringRef>> processId() const { return get(keyProcessId); }
 	Optional<Standalone<StringRef>> zoneId() const { return get(keyZoneId); }
-	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); }
+	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); } //default is ""
 	Optional<Standalone<StringRef>> dcId() const { return get(keyDcId); }
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
