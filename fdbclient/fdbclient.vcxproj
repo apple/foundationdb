@@ -97,6 +97,7 @@
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
+    <ClCompile Include="Status.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />

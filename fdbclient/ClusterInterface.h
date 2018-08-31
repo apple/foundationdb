@@ -27,6 +27,7 @@
 #include "Status.h"
 #include "ClientDBInfo.h"
 #include "ClientWorkerInterface.h"
+#include "flow/JsonString.h"
 
 struct ClusterInterface {
 	RequestStream< struct OpenDatabaseRequest > openDatabase;
@@ -145,7 +146,7 @@ struct SystemFailureStatus {
 struct FailureMonitoringRequest {
 	// Sent by all participants to the cluster controller reply.clientRequestIntervalMS
 	//   ms after receiving the previous reply.
-	// Provides the controller the self-diagnosed status of the sender, and also 
+	// Provides the controller the self-diagnosed status of the sender, and also
 	//   requests the status of other systems.  Failure to timely send one of these implies
 	//   a failed status.
 	// If !senderStatus.present(), the sender wants to receive the latest failure information
@@ -192,6 +193,7 @@ struct StatusReply {
 
 	StatusReply() {}
 	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
+	explicit StatusReply(JsonString obj) : statusStr(obj.getJson()) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
