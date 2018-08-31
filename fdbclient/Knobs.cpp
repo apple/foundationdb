@@ -39,6 +39,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
+	init( FAILURE_EMERGENCY_DELAY,                60.0 );
+	init( FAILURE_MAX_GENERATIONS,                   4 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
