@@ -260,7 +260,7 @@ struct ServerStatus {
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality.zoneId() == r.locality.zoneId(); }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -305,11 +305,15 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	loop {
-		bool unhealthy = statusMap->count(server.id()) && statusMap->get(server.id()).isUnhealthy();
-		if(unhealthy && !status->isUnhealthy()) {
-			(*unhealthyServers)--;
-		}
-		if(!unhealthy && status->isUnhealthy()) {
+		if( statusMap->count(server.id()) ) {
+			bool unhealthy = statusMap->get(server.id()).isUnhealthy();
+			if(unhealthy && !status->isUnhealthy()) {
+				(*unhealthyServers)--;
+			}
+			if(!unhealthy && status->isUnhealthy()) {
+				(*unhealthyServers)++;
+			}
+		} else if(status->isUnhealthy()) {
 			(*unhealthyServers)++;
 		}
 
@@ -593,7 +597,7 @@ struct DDTeamCollection {
 		teamBuilder.cancel();
 	}
 
-	ACTOR Future<Void> logOnCompletion( Future<Void> signal, DDTeamCollection *self ) {
+	ACTOR static Future<Void> logOnCompletion( Future<Void> signal, DDTeamCollection *self ) {
 		Void _ = wait(signal);
 		Void _ = wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskDataDistribution));
 
@@ -606,7 +610,7 @@ struct DDTeamCollection {
 		return Void();
 	}
 
-	ACTOR Future<Void> checkBuildTeams( DDTeamCollection* self ) {
+	ACTOR static Future<Void> checkBuildTeams( DDTeamCollection* self ) {
 		state Promise<Void> restart;
 
 		Void _ = wait( self->checkTeamDelay );
@@ -640,7 +644,7 @@ struct DDTeamCollection {
 
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
-	ACTOR Future<Void> getTeam( DDTeamCollection* self, GetTeamRequest req ) {
+	ACTOR static Future<Void> getTeam( DDTeamCollection* self, GetTeamRequest req ) {
 		try {
 			Void _ = wait( self->checkBuildTeams( self ) );
 
@@ -1242,6 +1246,10 @@ struct DDTeamCollection {
 		}
 		server_info.erase( removedServer );
 
+		if(server_status.count(removedServer) && server_status.get(removedServer).isUnhealthy()) {
+			unhealthyServers--;
+		}
+		server_status.clear( removedServer );
 		// remove all teams that contain removedServer
 		// SOMEDAY: can we avoid walking through all teams, since we have an index of teams in which removedServer participated
 		for(int t=0; t<teams.size(); t++) {
