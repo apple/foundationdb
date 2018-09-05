@@ -1477,14 +1477,14 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 			Void _ = wait( delayJittered(.005, TaskTLogCommit) );
 		}
 
-		if(logData->stopped) {
-			return Void();
-		}
+		state Version ver = 0;
+		state std::vector<TagsAndMessage> messages;
+		loop {
+			if(logData->stopped) {
+				return Void();
+			}
 
-		Version ver = 0;
-		std::vector<TagsAndMessage> messages;
-		while (true) {
-			bool foundMessage = r->hasMessage();
+			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
@@ -1519,6 +1519,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
 					logData->version.set( ver );
+					Void _ = wait( yield(TaskTLogCommit) );
 				}
 				lastVer = ver;
 				ver = r->version().version;
@@ -1556,6 +1557,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 						self->prevVersion = logData->version.get();
 						logData->version.set( ver );
+						Void _ = wait( yield(TaskTLogCommit) );
 					}
 					break;
 				}

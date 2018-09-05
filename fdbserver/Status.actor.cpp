@@ -1274,17 +1274,24 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 
 	if(configuration.regions.size() == 0) {
 		return allMachines.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
-	} 
-	int extraTlogEligibleMachines = std::numeric_limits<int>::max();
+	}
+	int extraTlogEligibleMachines = configuration.usableRegions == 1 ? 0 : std::numeric_limits<int>::max();
 	for(auto& region : configuration.regions) {
-		extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
+		int eligible = dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
 		//FIXME: does not take into account fallback satellite policies
 		if(region.satelliteTLogReplicationFactor > 0) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {
 				totalSatelliteEligible += dcId_machine[sat.dcId].size();
 			}
-			extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
+			eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
+		}
+		if( configuration.usableRegions == 1 ) {
+			if( region.priority >= 0 ) {
+				extraTlogEligibleMachines = std::max( extraTlogEligibleMachines, eligible );
+			}
+		} else {
+			extraTlogEligibleMachines = std::min( extraTlogEligibleMachines, eligible );
 		}
 	}
 	return extraTlogEligibleMachines;
