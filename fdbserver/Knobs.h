@@ -247,6 +247,7 @@ public:
 	int MOVE_KEYS_KRM_LIMIT;
 	int MOVE_KEYS_KRM_LIMIT_BYTES; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
 	int MAX_SKIP_TAGS;
+	double MAX_ADDED_SOURCES_MULTIPLIER;
 
 	//FdbServer
 	double MIN_REBOOT_TIME;
