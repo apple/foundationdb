@@ -281,8 +281,37 @@ struct DiskStoreRequest {
 	}
 };
 
-void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, std::string> details = std::map<std::string, std::string>(), std::string origination = "Recruited");
-void endRole(UID id, std::string as, std::string reason, bool ok = true, Error e = Error());
+struct Role {
+	static const Role WORKER;
+	static const Role STORAGE_SERVER;
+	static const Role TRANSACTION_LOG;
+	static const Role SHARED_TRANSACTION_LOG;
+	static const Role MASTER_PROXY;
+	static const Role MASTER;
+	static const Role RESOLVER;
+	static const Role CLUSTER_CONTROLLER;
+	static const Role TESTER;
+	static const Role LOG_ROUTER;
+	static const Role NONE; 
+
+	std::string roleName;
+	std::string abbreviation;
+
+	bool operator==(const Role &r) const {
+		return roleName == r.roleName;
+	}
+	bool operator!=(const Role &r) const {
+		return !(*this == r);
+	}
+
+private:
+	Role(std::string roleName, std::string abbreviation) : roleName(roleName), abbreviation(abbreviation) {
+		ASSERT(abbreviation.size() == 2); // Having a fixed size makes log queries more straightforward
+	}
+};
+
+void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details = std::map<std::string, std::string>(), std::string origination = "Recruited");
+void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error e = Error());
 
 struct ServerDBInfo;
 
