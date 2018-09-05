@@ -1069,16 +1069,16 @@ static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, S
 	return statusObj;
 }
 
-ACTOR static Future<StatusObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int *minReplicasRemaining) {
+ACTOR static Future<StatusObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int *minReplicasRemaining) {
 	state StatusObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/MovingData"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
 
@@ -1291,7 +1291,7 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 }
 
 ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, 
-	std::string dbName, StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture) 
+	StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture) 
 {
 	state StatusObject statusObj;
 	state StatusObject operationsObj;
@@ -1342,7 +1342,7 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 
 	// Transactions
 	try {
-		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/RkUpdate") ) ), 1.0) );
+		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
 		double tpsLimit = parseDouble(md.getValue("TPSLimit"));
 		double transPerSec = parseDouble(md.getValue("ReleasedTPS"));
 		int ssCount = parseInt(md.getValue("StorageServers"));
@@ -1701,9 +1701,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
 {
-	// since we no longer offer multi-database support, all databases must be named DB
-	state std::string dbName = "DB";
-
 	// Check if master worker is present
 	state StatusArray messages;
 	state std::set<std::string> status_incomplete_reasons;
@@ -1814,8 +1811,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<StatusObject>> futures2;
-			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(dataStatusFetcher(mWorker, &minReplicasRemaining));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 

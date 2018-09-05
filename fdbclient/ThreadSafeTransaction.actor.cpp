@@ -65,17 +65,17 @@ Future<Reference<IDatabase>> threadSafeCreateDatabase( Database db ) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(db.getPtr()));
 }
 
-ACTOR Future<Reference<IDatabase>> threadSafeCreateDatabase( Cluster* cluster, Standalone<StringRef> name ) {
-	Database db = wait( cluster->createDatabase(name) );
+ACTOR Future<Reference<IDatabase>> threadSafeCreateDatabase( Cluster* cluster ) {
+	Database db = wait( cluster->createDatabase() );
 	Reference<IDatabase> threadSafeDb = wait(threadSafeCreateDatabase(db));
 	return threadSafeDb;
 }
 
-ThreadFuture<Reference<IDatabase>> ThreadSafeCluster::createDatabase( Standalone<StringRef> dbName ) {
+ThreadFuture<Reference<IDatabase>> ThreadSafeCluster::createDatabase() {
 	Cluster* cluster = this->cluster;
-	return onMainThread( [cluster, dbName](){
+	return onMainThread( [cluster](){
 		cluster->checkDeferredError();
-		return threadSafeCreateDatabase(cluster, dbName);
+		return threadSafeCreateDatabase(cluster);
 	} );
 }
 

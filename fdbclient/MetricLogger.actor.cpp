@@ -410,7 +410,7 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 
 	state Reference<Cluster> metricsCluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
-	state Future<Void> metrics = runMetrics(metricsCluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics(metricsCluster->createDatabase(), KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;

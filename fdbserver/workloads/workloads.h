@@ -54,13 +54,11 @@ private:
 
 struct TestWorkload : NonCopyable, WorkloadContext {
 	int phases;
-	Value dbName;
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
 	explicit TestWorkload(WorkloadContext const& wcx) 
 		: WorkloadContext(wcx)
 	{
-		dbName = getOption( options, LiteralStringRef("dbName"), StringRef() );
 		bool runSetup = getOption( options, LiteralStringRef("runSetup"), true );
 		phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if( runSetup )
@@ -199,7 +197,7 @@ public:
 
 Future<DistributedTestResults> runWorkload( 
 		Database const& cx, std::vector< TesterInterface > const& testers, 
-		StringRef const& database, TestSpec const& spec );
+		TestSpec const& spec );
 
 void logMetrics( vector<PerfMetric> metrics );
 

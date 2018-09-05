@@ -132,7 +132,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 
 	if (g_simulator.backupAgents == ISimulator::BackupToFile) {
 		Reference<Cluster> cluster = Cluster::createCluster(connFile, -1);
-		Database cx = cluster->createDatabase(LiteralStringRef("DB")).get();
+		Database cx = cluster->createDatabase().get();
 
 		state FileBackupAgent fileAgent;
 		state double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
@@ -160,11 +160,11 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 
 	if (g_simulator.drAgents == ISimulator::BackupToDB) {
 		Reference<Cluster> cluster = Cluster::createCluster(connFile, -1);
-		Database cx = cluster->createDatabase(LiteralStringRef("DB")).get();
+		Database cx = cluster->createDatabase().get();
 
 		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-		state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		state Database extraDB = extraCluster->createDatabase().get();
 
 		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
 

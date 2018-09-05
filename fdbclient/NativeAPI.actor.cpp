@@ -474,9 +474,9 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 DatabaseContext::DatabaseContext(
 	Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
-	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
-	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
-  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
+	Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, 
+	bool enableLocalityLoadBalance, bool lockAware )
+  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbId(dbId),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), transactionsCommitStarted(0),
 	transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), transactionsResourceConstrained(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
@@ -494,14 +494,11 @@ DatabaseContext::DatabaseContext(
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Standalone<StringRef> dbName,
-	Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo )
-{
+ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
 	try {
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
-			req.dbName = dbName;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
 			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
 
@@ -529,7 +526,6 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	} catch( Error& e ) {
 		TraceEvent(SevError, "MonitorClientInfoError")
 			.error(e)
-			.detail("DBName", printable(dbName))
 			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
 			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
 
@@ -537,20 +533,15 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	}
 }
 
-Future< Database > DatabaseContext::createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, Standalone<StringRef> dbName, LocalityData const& clientLocality ) {
-	if (dbName != LiteralStringRef("DB")) {
-		return invalid_database_name(); // we no longer offer multi-database support, so all databases *must* be named this
-	}
-	else {
-		Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
-		Future<Void> monitor = monitorClientInfo( clusterInterface, dbName, cluster ? cluster->getConnectionFile() : Reference<ClusterConnectionFile>(), info );
+Future< Database > DatabaseContext::createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, LocalityData const& clientLocality ) {
+	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	Future<Void> monitor = monitorClientInfo( clusterInterface, cluster ? cluster->getConnectionFile() : Reference<ClusterConnectionFile>(), info );
 
-		return std::move( Database( new DatabaseContext( info, cluster, monitor, dbName, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false ) ) );
-	}
+	return std::move( Database( new DatabaseContext( info, cluster, monitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false ) ) );
 }
 
 Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID, bool lockAware ) {
-	return Database( new DatabaseContext( info, Reference<Cluster>(), dependency, LiteralStringRef("DB"), LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware ) );
+	return Database( new DatabaseContext( info, Reference<Cluster>(), dependency, LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware ) );
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -741,8 +732,8 @@ Reference<Cluster> Cluster::createCluster(std::string connFileName, int apiVersi
 	return Reference<Cluster>(new Cluster( rccf, apiVersion));
 }
 
-Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName, LocalityData locality ) {
-	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, locality );
+Future<Database> Cluster::createDatabase( LocalityData locality ) {
+	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), locality );
 }
 
 Future<Void> Cluster::onConnected() {

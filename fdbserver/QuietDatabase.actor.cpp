@@ -43,20 +43,20 @@ ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Refer
 
 //Gets the WorkerInterface representing the Master server.
 ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GettingWorkers");
+	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
 		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( dbInfo ) );
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
+				TraceEvent("GetMasterWorker").detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
 				return workers[i].first;
 			}
 		}
 
 		TraceEvent(SevWarn, "GetMasterWorkerError")
-			.detail("Database", printable(cx->dbName)).detail("Error", "MasterWorkerNotFound")
+			.detail("Error", "MasterWorkerNotFound")
 			.detail("Master", dbInfo->get().master.id()).detail("MasterAddress", dbInfo->get().master.address())
 			.detail("WorkerCount", workers.size());
 
@@ -67,7 +67,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 //Gets the number of bytes in flight from the master
 ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker ) {
 	try {
-		TraceEvent("DataInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEvent("DataInFlight").detail("Stage", "ContactingMaster");
 		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
 		int64_t dataInFlight;
@@ -102,7 +102,7 @@ int64_t getQueueSize( TraceEventFields md ) {
 
 // This is not robust in the face of a TLog failure
 ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface masterWorker ) {
-	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingLogs");
+	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
 	state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(getWorkers(dbInfo));
 	std::map<NetworkAddress, WorkerInterface> workersMap;
@@ -123,8 +123,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 	}
 	wait( waitForAll( messages ) );
 
-	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName))
-		.detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
+	TraceEvent("MaxTLogQueueSize").detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
 	state int64_t maxQueueSize = 0;
 	state int i = 0;
@@ -169,7 +168,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 
 //Gets the maximum size of all the storage server queues
 ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface masterWorker ) {
-	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingStorageServers");
+	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
 	state Future<std::vector<std::pair<WorkerInterface, ProcessClass>>> workersFuture = getWorkers(dbInfo);
@@ -195,7 +194,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 
 	wait( waitForAll(messages) );
 
-	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
+	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
 	state int64_t maxQueueSize = 0;
 	state int i = 0;
@@ -222,12 +221,12 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 //Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of the queue
 ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface masterWorker, bool reportInFlight) {
 	try {
-		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEvent("DataDistributionQueueSize").detail("Stage", "ContactingMaster");
 
 		TraceEventFields movingDataMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData") ) ), 1.0 ) );
+			EventLogRequest( LiteralStringRef("MovingData") ) ), 1.0 ) );
 
-		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "GotString")/*.detail("Result", printable(movingDataMessage))*/.detail("TrackLatest", printable( StringRef( cx->dbName.toString() + "/MovingData") ) );
+		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
 		int64_t inQueue;
 		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
@@ -256,10 +255,10 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 //Checks that data distribution is active
 ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface masterWorker ) {
 	try {
-		TraceEvent("DataDistributionActive").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEvent("DataDistributionActive").detail("Stage", "ContactingMaster");
 
 		TraceEventFields activeMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/DDTrackerStarting") ) ), 1.0 ) );
+			EventLogRequest( LiteralStringRef("DDTrackerStarting") ) ), 1.0 ) );
 
 		return activeMessage.getValue("State") == "Active";
 	} catch( Error &e ) {
@@ -271,10 +270,10 @@ ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface maste
 //Checks to see if any storage servers are being recruited
 ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface masterWorker ) {
 	try {
-		TraceEvent("StorageServersRecruiting").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEvent("StorageServersRecruiting").detail("Stage", "ContactingMaster");
 
 		TraceEventFields recruitingMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/StorageServerRecruitment_" + dbInfo->get().master.id().toString()) ) ), 1.0 ) );
+			EventLogRequest( StringRef( "StorageServerRecruitment_" + dbInfo->get().master.id().toString()) ) ), 1.0 ) );
 
 		return recruitingMessage.getValue("State") == "Recruiting";
 	} catch( Error &e ) {

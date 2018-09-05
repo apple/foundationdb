@@ -117,7 +117,7 @@ struct OpenDatabaseRequest {
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 	Arena arena;
-	StringRef dbName, issues, traceLogGroup;
+	StringRef issues, traceLogGroup;
 	VectorRef<ClientVersionRef> supportedVersions;
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
@@ -125,7 +125,7 @@ struct OpenDatabaseRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		ar & dbName & issues & supportedVersions & traceLogGroup & knownClientInfoID & reply & arena;
+		ar & issues & supportedVersions & traceLogGroup & knownClientInfoID & reply & arena;
 	}
 };
 

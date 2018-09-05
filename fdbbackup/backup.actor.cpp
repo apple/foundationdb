@@ -2672,7 +2672,6 @@ int main(int argc, char* argv[]) {
 		Reference<Cluster> source_cluster;
 		Reference<ClusterConnectionFile> source_ccf;
 		Database source_db;
-		const KeyRef databaseKey = LiteralStringRef("DB");
 		FileBackupAgent ba;
 		Key tag;
 		Future<Optional<Void>> f;
@@ -2746,7 +2745,7 @@ int main(int argc, char* argv[]) {
 				.detail("MemoryLimit", memLimit)
 				.trackLatest("ProgramStart");
 
-			db = cluster->createDatabase(databaseKey, localities).get();
+			db = cluster->createDatabase(localities).get();
 			return true;
 		};
 
@@ -2769,7 +2768,7 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			}
 
-			source_db = source_cluster->createDatabase(databaseKey, localities).get();
+			source_db = source_cluster->createDatabase(localities).get();
 		}
 
 		switch (programExe)
