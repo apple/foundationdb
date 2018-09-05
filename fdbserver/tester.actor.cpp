@@ -494,7 +494,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		details["ClientId"] = format("%d", work.clientId);
 		details["ClientCount"] = format("%d", work.clientCount);
 		details["WorkloadTimeout"] = format("%d", work.timeout);
-		startRole(workIface.id(), UID(), "Tester", details);
+		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if( work.useDatabase ) {
 			Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
@@ -522,7 +522,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 
 		wait(test);
 		
-		endRole(workIface.id(), "Tester", "Complete");
+		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
@@ -532,7 +532,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete || e.code() == error_code_actor_cancelled;
-		endRole(workIface.id(), "Tester", "Error", ok, e);
+		endRole(Role::TESTER, workIface.id(), "Error", ok, e);
 
 		if (e.code() != error_code_test_specification_invalid && e.code() != error_code_timed_out) {
 			throw;  // fatal errors will kill the testerServer as well

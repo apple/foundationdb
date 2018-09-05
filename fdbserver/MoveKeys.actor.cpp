@@ -119,16 +119,62 @@ Future<Void> removeOldDestinations(Transaction *tr, UID oldDest, VectorRef<KeyRa
 	return waitForAll(actors);
 }
 
-ACTOR Future<vector<vector<Optional<UID>>>> findReadWriteDestinations(Standalone<RangeResultRef> shards, UID relocationIntervalId, Transaction* tr) {
+ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard, vector<StorageServerInterface> srcInterfs, vector<StorageServerInterface> destInterfs, Version version, int desiredHealthy, int maxServers) {
+	if(srcInterfs.size() >= maxServers) {
+		return vector<UID>();
+	}
+
+	state vector< Future<Optional<UID>> > srcChecks;
+	for(int s=0; s<srcInterfs.size(); s++) {
+		srcChecks.push_back( checkReadWrite( srcInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), srcInterfs[s].id(), 0 ) );
+	}
+
+	state vector< Future<Optional<UID>> > destChecks;
+	for(int s=0; s<destInterfs.size(); s++) {
+		destChecks.push_back( checkReadWrite( destInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), destInterfs[s].id(), version ) );
+	}
+
+	wait( waitForAll(srcChecks) && waitForAll(destChecks) );
+
+	int healthySrcs = 0;
+	for(auto it : srcChecks) {
+		if( it.get().present() ) {
+			healthySrcs++;
+		}
+	}
+
+	vector<UID> result;
+	int totalDesired = std::min<int>(desiredHealthy - healthySrcs, maxServers - srcInterfs.size());
+	for(int s = 0; s < destInterfs.size() && result.size() < totalDesired; s++) {
+		if(destChecks[s].get().present()) {
+			result.push_back(destChecks[s].get().get());
+		}
+	}
+
+	return result;
+}
+
+ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> shards, Transaction* tr, int desiredHealthy, int maxServers) {
 	vector<Future<Optional<Value>>> serverListEntries;
+	std::set<UID> fetching;
 	for(int i = 0; i < shards.size() - 1; ++i) {
 		vector<UID> src;
 		vector<UID> dest;
 
 		decodeKeyServersValue( shards[i].value, src, dest );
 
+		for(int s=0; s<src.size(); s++) {
+			if(!fetching.count(src[s])) {
+				fetching.insert(src[s]);
+				serverListEntries.push_back( tr->get( serverListKeyFor(src[s]) ) );
+			}
+		}
+
 		for(int s=0; s<dest.size(); s++) {
-			serverListEntries.push_back( tr->get( serverListKeyFor(dest[s]) ) );
+			if(!fetching.count(dest[s])) {
+				fetching.insert(dest[s]);
+				serverListEntries.push_back( tr->get( serverListKeyFor(dest[s]) ) );
+			}
 		}
 	}
 
@@ -141,29 +187,31 @@ ACTOR Future<vector<vector<Optional<UID>>>> findReadWriteDestinations(Standalone
 		ssiMap[ssi.id()] = ssi;
 	}
 
-	vector<Future<vector<Optional<UID>>>> allChecks;
+	vector<Future<vector<UID>>> allChecks;
 	for(int i = 0; i < shards.size() - 1; ++i) {
 		KeyRangeRef rangeIntersectKeys( shards[i].key, shards[i+1].key );
 		vector<UID> src;
 		vector<UID> dest;
-		vector<StorageServerInterface> storageServerInterfaces;
+		vector<StorageServerInterface> srcInterfs;
+		vector<StorageServerInterface> destInterfs;
 
 		decodeKeyServersValue( shards[i].value, src, dest );
 
-		for(int s=0; s<dest.size(); s++)
-			storageServerInterfaces.push_back( ssiMap[dest[s]] );
-
-		vector< Future<Optional<UID>> > checks;
-		for(int s=0; s<storageServerInterfaces.size(); s++) {
-			checks.push_back( checkReadWrite( storageServerInterfaces[s].getShardState.getReplyUnlessFailedFor(
-				GetShardStateRequest( rangeIntersectKeys, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), dest[s], tr->getReadVersion().get() ) );
+		for(int s=0; s<src.size(); s++) {
+			srcInterfs.push_back( ssiMap[src[s]] );
 		}
 
-		allChecks.push_back(getAll(checks));
+		for(int s=0; s<dest.size(); s++) {
+			if( std::find(src.begin(), src.end(), dest[s]) == dest.end() ) {
+				destInterfs.push_back( ssiMap[dest[s]] );
+			}
+		}
+
+		allChecks.push_back(addReadWriteDestinations(rangeIntersectKeys, srcInterfs, destInterfs, tr->getReadVersion().get(), desiredHealthy, maxServers));
 	}
 
-	vector<vector<Optional<UID>>> readWriteDestinations = wait(getAll(allChecks));
-	return readWriteDestinations;
+	vector<vector<UID>> result = wait(getAll(allChecks));
+	return result;
 }
 
 // Set keyServers[keys].dest = servers
@@ -239,7 +287,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					//	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					//Check that enough servers for each shard are in the correct state
-					vector<vector<Optional<UID>>> readWriteDestinations = wait(findReadWriteDestinations(old, relocationIntervalId, &tr));
+					vector<vector<UID>> addAsSource = wait(additionalSources(old, &tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER*servers.size()));
 
 					// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest servers from serverKeys
 					for(int i = 0; i < old.size() - 1; ++i) {
@@ -255,10 +303,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 							.detail("OldDest", describe(dest))
 							.detail("ReadVersion", tr.getReadVersion().get());*/
 
-						for(auto& uid : readWriteDestinations[i]) {
-							if(uid.present()) {
-								src.push_back(uid.get());
-							}
+						for(auto& uid : addAsSource[i]) {
+							src.push_back(uid);
 						}
 						uniquify(src);
 

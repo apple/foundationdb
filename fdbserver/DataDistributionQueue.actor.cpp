@@ -345,7 +345,7 @@ struct DDQueueData {
 
 	int activeRelocations;
 	int queuedRelocations;
-	int bytesWritten;
+	int64_t bytesWritten;
 	int teamSize;
 
 	std::map<UID, Busyness> busymap;

@@ -250,6 +250,22 @@ bool isCompleteConfiguration( std::map<std::string, std::string> const& options 
 			options.count( p+"storage_engine" ) == 1;
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
+			DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) res);
+			return config;
+		} catch( Error &e ) {
+			wait( tr.onError(e) );
+		}
+	}
+}
+
 ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m ) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
@@ -264,6 +280,19 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m))
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
+	} else {
+		state Future<DatabaseConfiguration> fConfig = getDatabaseConfiguration(cx);
+		wait( success(fConfig) || delay(1.0) );
+
+		if(fConfig.isReady()) {
+			DatabaseConfiguration config = fConfig.get();
+			for(auto kv : m) {
+				config.set(kv.first, kv.second);
+			}
+			if(!config.isValid()) {
+				return ConfigurationResult::INVALID_CONFIGURATION;
+			}
+		}
 	}
 
 	loop {
@@ -1172,23 +1201,6 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 	}
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
-			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>) res);
-			return config;
-		} catch( Error &e ) {
-			wait( tr.onError(e) );
-		}
-	}
-
-}
-
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {
@@ -1382,6 +1394,140 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 			}
 			when( wait(clusterInterface->onChange()) ) {}
 		}
+	}
+}
+
+json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
+	if (type == json_spirit::int_type)
+		return json_spirit::real_type;
+	return type;
+}
+
+void schemaCoverage( std::string const& spath, bool covered ) {
+	static std::set<std::string> coveredSchemaPaths;
+	if (coveredSchemaPaths.insert(spath).second) {
+		TraceEvent ev(SevInfo, "CodeCoverage");
+		ev.detail("File", "documentation/StatusSchema.json/" + spath).detail("Line", 0);
+		if (!covered)
+			ev.detail("Covered", 0);
+	}
+}
+
+bool schemaMatch( StatusObject const schema, StatusObject const result, std::string& errorStr, Severity sev, bool checkCoverage, std::string path, std::string schema_path ) {
+	// Returns true if everything in `result` is permitted by `schema`
+
+	// Really this should recurse on "values" rather than "objects"?
+
+	bool ok = true;
+
+	try {
+		for(auto& rkv : result) {
+			auto& key = rkv.first;
+			auto& rv = rkv.second;
+			std::string kpath = path + "." + key;
+			std::string spath = schema_path + "." + key;
+
+			if(checkCoverage) schemaCoverage(spath);
+
+			if (!schema.count(key)) {
+				errorStr += format("ERROR: Unknown key `%s'\n", kpath.c_str());
+				TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaPath", spath);
+				ok = false;
+				continue;
+			}
+			auto& sv = schema.at(key);
+
+			if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$enum")) {
+				auto& enum_values = sv.get_obj().at("$enum").get_array();
+
+				bool any_match = false;
+				for(auto& enum_item : enum_values)
+					if (enum_item == rv) {
+						any_match = true;
+						if(checkCoverage) schemaCoverage(spath + ".$enum." + enum_item.get_str());
+						break;
+					}
+				if (!any_match) {
+					errorStr += format("ERROR: Unknown value `%s' for key `%s'\n", json_spirit::write_string(rv).c_str(), kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaEnumItems", enum_values.size()).detail("Value", json_spirit::write_string(rv));
+					if(checkCoverage) schemaCoverage(spath + ".$enum." + json_spirit::write_string(rv));
+					ok = false;
+				}
+			} else if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$map")) {
+				if (rv.type() != json_spirit::obj_type) {
+					errorStr += format("ERROR: Expected an object as the value for key `%s'\n", kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+					ok = false;
+					continue;
+				}
+				if(sv.get_obj().at("$map").type() != json_spirit::obj_type) {
+					continue;
+				}
+				auto& schema_obj = sv.get_obj().at("$map").get_obj();
+				auto& value_obj = rv.get_obj();
+
+				if(checkCoverage) schemaCoverage(spath + ".$map");
+
+				for(auto& value_pair : value_obj) {
+					auto vpath = kpath + "[" + value_pair.first + "]";
+					auto upath = spath + ".$map";
+					if (value_pair.second.type() != json_spirit::obj_type) {
+						errorStr += format("ERROR: Expected an object for `%s'\n", vpath.c_str());
+						TraceEvent(sev, "SchemaMismatch").detail("Path", vpath).detail("ValueType", value_pair.second.type());
+						ok = false;
+						continue;
+					}
+					if (!schemaMatch(schema_obj, value_pair.second.get_obj(), errorStr, sev, checkCoverage, vpath, upath))
+						ok = false;
+				}
+			} else {
+				// The schema entry isn't an operator, so it asserts a type and (depending on the type) recursive schema definition
+				if (normJSONType(sv.type()) != normJSONType(rv.type())) {
+					errorStr += format("ERROR: Incorrect value type for key `%s'\n", kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+					ok = false;
+					continue;
+				}
+				if (rv.type() == json_spirit::array_type) {
+					auto& value_array = rv.get_array();
+					auto& schema_array = sv.get_array();
+					if (!schema_array.size()) {
+						// An empty schema array means that the value array is required to be empty
+						if (value_array.size()) {
+							errorStr += format("ERROR: Expected an empty array for key `%s'\n", kpath.c_str());
+							TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaSize", schema_array.size()).detail("ValueSize", value_array.size());
+							ok = false;
+							continue;
+						}
+					} else if (schema_array.size() == 1 && schema_array[0].type() == json_spirit::obj_type) {
+						// A one item schema array means that all items in the value must match the first item in the schema
+						auto& schema_obj = schema_array[0].get_obj();
+						int index = 0;
+						for(auto &value_item : value_array) {
+							if (value_item.type() != json_spirit::obj_type) {
+								errorStr += format("ERROR: Expected all array elements to be objects for key `%s'\n", kpath.c_str());
+								TraceEvent(sev, "SchemaMismatch").detail("Path", kpath + format("[%d]",index)).detail("ValueType", value_item.type());
+								ok = false;
+								continue;
+							}
+							if (!schemaMatch(schema_obj, value_item.get_obj(), errorStr, sev, checkCoverage, kpath + format("[%d]", index), spath + "[0]"))
+								ok = false;
+							index++;
+						}
+					} else
+						ASSERT(false);  // Schema doesn't make sense
+				} else if (rv.type() == json_spirit::obj_type) {
+					auto& schema_obj = sv.get_obj();
+					auto& value_obj = rv.get_obj();
+					if (!schemaMatch(schema_obj, value_obj, errorStr, sev, checkCoverage, kpath, spath))
+						ok = false;
+				}
+			}
+		}
+		return ok;
+	} catch (std::exception& e) {
+		TraceEvent(SevError, "SchemaMatchException").detail("What", e.what()).detail("Path", path).detail("SchemaPath", schema_path);
+		throw unknown_error();
 	}
 }
 

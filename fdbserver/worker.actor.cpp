@@ -71,10 +71,9 @@ Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID
 
 struct ErrorInfo {
 	Error error;
-	const char* context;
+	const Role &role;
 	UID id;
-	ErrorInfo() {}
-	ErrorInfo( Error e, const char* context, UID id ) : error(e), context(context), id(id) {}
+	ErrorInfo( Error e, const Role &role, UID id ) : error(e), role(role), id(id) {}
 	template <class Ar> void serialize(Ar&) { ASSERT(false); }
 };
 
@@ -97,15 +96,15 @@ Error checkIOTimeout(Error const &e) {
 }
 
 ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
-	const char* context, UID id,
+	Role role, UID id,
 	Future<Void> process )
 {
 	try {
 		wait(process);
-		errors.send( ErrorInfo(success(), context, id) );
+		errors.send( ErrorInfo(success(), role, id) );
 		return Void();
 	} catch (Error& e) {
-		errors.send( ErrorInfo(e, context, id) );
+		errors.send( ErrorInfo(e, role, id) );
 		return Void();
 	}
 }
@@ -144,7 +143,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			if(!ok)
 				err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
 
-			endRole(err.id, err.context, "Error", ok, err.error);
+			endRole(err.role, err.id, "Error", ok, err.error);
 
 			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
 		}
@@ -385,9 +384,13 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 	return StringRef(result);
 }
 
-void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, std::string> details, std::string origination) {
+void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details, std::string origination) {
+	if(role.includeInTraceRoles) {
+		addTraceRole(role.abbreviation);
+	}
+
 	TraceEvent ev("Role", roleId);
-	ev.detail("As", as)
+	ev.detail("As", role.roleName)
 		.detail("Transition", "Begin")
 		.detail("Origination", origination)
 		.detail("OnWorker", workerId);
@@ -397,26 +400,26 @@ void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, s
 	ev.trackLatest( (roleId.shortString() + ".Role" ).c_str() );
 
 	// Update roles map, log Roles metrics
-	g_roles.insert({as, roleId.shortString()});
+	g_roles.insert({role.roleName, roleId.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
-	if (g_network->isSimulated()) g_simulator.addRole(g_network->getLocalAddress(), as);
+	if (g_network->isSimulated()) g_simulator.addRole(g_network->getLocalAddress(), role.roleName);
 }
 
-void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
+void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 	{
 		TraceEvent ev("Role", id);
 		if(e.code() != invalid_error_code)
 			ev.error(e, true);
 		ev.detail("Transition", "End")
-			.detail("As", as)
+			.detail("As", role.roleName)
 			.detail("Reason", reason);
 
 		ev.trackLatest( (id.shortString() + ".Role").c_str() );
 	}
 
 	if(!ok) {
-		std::string type = as + "Failed";
+		std::string type = role.roleName + "Failed";
 
 		TraceEvent err(SevError, type.c_str(), id);
 		if(e.code() != invalid_error_code) {
@@ -428,10 +431,14 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 	latestEventCache.clear( id.shortString() );
 
 	// Update roles map, log Roles metrics
-	g_roles.erase({as, id.shortString()});
+	g_roles.erase({role.roleName, id.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
-	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), as);
+	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
+
+	if(role.includeInTraceRoles) {
+		removeTraceRole(role.abbreviation);
+	}
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
@@ -560,7 +567,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole( recruited.id(), interf.id(), "StorageServer", details, "Restored" );
+				startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored" );
 
 				DUMPTOKEN(recruited.getVersion);
 				DUMPTOKEN(recruited.getValue);
@@ -580,7 +587,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recoveries.push_back(recovery.getFuture());
 				f =  handleIOErrors( f, kv, s.storeID, kvClosed );
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
-				errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), f ) );
+				errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
@@ -590,7 +597,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole( s.storeID, interf.id(), "SharedTLog", details, "Restored" );
+				startRole( Role::SHARED_TRANSACTION_LOG, s.storeID, interf.id(), details, "Restored" );
 
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
@@ -602,7 +609,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				if(tlog.isReady()) {
 					tlog = oldLog.getFuture() || tl;
 				}
-				errorForwarders.add( forwardError( errors, "SharedTLog", s.storeID, tl ) );
+				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
 		}
 
@@ -610,7 +617,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
-		startRole( interf.id(), interf.id(), "Worker", details );
+		startRole( Role::WORKER, interf.id(), interf.id(), details );
 
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
@@ -667,7 +674,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.locality = locality;
 				recruited.initEndpoints();
 
-				startRole( recruited.id(), interf.id(), "MasterServer" );
+				startRole( Role::MASTER, recruited.id(), interf.id() );
 
 				DUMPTOKEN( recruited.waitFailure );
 				DUMPTOKEN( recruited.getRateInfo );
@@ -677,7 +684,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				//printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
-				errorForwarders.add( zombie(recruited, forwardError( errors, "MasterServer", recruited.id(), masterProcess )) );
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER, recruited.id(), masterProcess )) );
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
@@ -689,7 +696,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					details["StorageEngine"] = req.storeType.toString();
 
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
-					startRole( logId, interf.id(), "SharedTLog", details );
+					startRole( Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details );
 
 					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
@@ -700,7 +707,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>(), Promise<Void>() );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
-					errorForwarders.add( forwardError( errors, "SharedTLog", logId, tlog ) );
+					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tlog ) );
 				}
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
@@ -711,7 +718,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
-					startRole( recruited.id(), interf.id(), "StorageServer", details );
+					startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details );
 
 					DUMPTOKEN(recruited.getVersion);
 					DUMPTOKEN(recruited.getValue);
@@ -737,7 +744,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady( req.reqId, s );
 					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
-					errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), s ) );
+					errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), s ) );
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
@@ -748,7 +755,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				details["ForMaster"] = req.master.id().shortString();
-				startRole( recruited.id(), interf.id(), "MasterProxyServer", details );
+				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
 
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.getConsistentReadVersion);
@@ -759,7 +766,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				DUMPTOKEN(recruited.txnState);
 
 				//printf("Recruited as masterProxyServer\n");
-				errorForwarders.add( zombie(recruited, forwardError( errors, "MasterProxyServer", recruited.id(),
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
 						masterProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -769,14 +776,14 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
-				startRole( recruited.id(), interf.id(), "Resolver", details );
+				startRole( Role::RESOLVER, recruited.id(), interf.id(), details );
 
 				DUMPTOKEN(recruited.resolve);
 				DUMPTOKEN(recruited.metrics);
 				DUMPTOKEN(recruited.split);
 				DUMPTOKEN(recruited.waitFailure);
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, "Resolver", recruited.id(),
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::RESOLVER, recruited.id(),
 						resolver( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -785,7 +792,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
-				startRole( recruited.id(), interf.id(), "LogRouter", details );
+				startRole( Role::LOG_ROUTER, recruited.id(), interf.id(), details );
 
 				DUMPTOKEN( recruited.peekMessages );
 				DUMPTOKEN( recruited.popMessages );
@@ -794,13 +801,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, "logRouter", recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
-			when( DebugQueryRequest req = waitNext(interf.debugQuery.getFuture()) ) {
-				errorForwarders.add( forwardError( errors, "DebugQuery", UID(), debugQueryServer(req) ) );
-			}
+			when( DebugQueryRequest req = waitNext(interf.debugQuery.getFuture()) ) { }
 			when( CoordinationPingMessage m = waitNext( interf.coordinationPing.getFuture() ) ) {
 				TraceEvent("CoordinationPing", interf.id()).detail("CCID", m.clusterControllerId).detail("TimeStep", m.timeStep);
 			}
@@ -860,7 +865,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_delete;
 
-		endRole(interf.id(), "Worker", "WorkerError", ok, e);
+		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		tlog = Void();
 
@@ -1040,3 +1045,14 @@ ACTOR Future<Void> fdbd(
 		throw err;
 	}
 }
+
+const Role Role::WORKER("Worker", "WK", false);
+const Role Role::STORAGE_SERVER("StorageServer", "SS");
+const Role Role::TRANSACTION_LOG("TLog", "TL");
+const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
+const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::MASTER("MasterServer", "MS");
+const Role Role::RESOLVER("Resolver", "RV");
+const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
+const Role Role::TESTER("Tester", "TS");
+const Role Role::LOG_ROUTER("LogRouter", "LR");
