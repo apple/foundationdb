@@ -83,8 +83,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		Void _ = wait( r == ITLSSession::WANT_WRITE ? self->conn->onWritable() : self->conn->onReadable() );
 	}
 
-	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID())
-		.detail("Peer", self->getPeerAddress());
+	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
 
 	return Void();
 }
