@@ -262,6 +262,9 @@ void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
 
+void addTraceRole(std::string role);
+void removeTraceRole(std::string role);
+
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern trace_clock_t g_trace_clock;
 extern TraceBatch g_traceBatch;

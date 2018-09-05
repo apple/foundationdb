@@ -206,6 +206,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					Void _ = wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
+					Void _ = wait(yield(TaskTLogCommit));
 					//TraceEvent("LogRouterVersion").detail("Ver",ver);
 				}
 				lastVer = ver;
@@ -217,6 +218,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					if(ver > self->version.get()) {
 						Void _ = wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 						self->version.set( ver );
+						Void _ = wait(yield(TaskTLogCommit));
 					}
 					break;
 				}

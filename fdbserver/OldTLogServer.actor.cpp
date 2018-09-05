@@ -412,7 +412,7 @@ namespace oldTLog {
 				// These are initialized differently on init() or recovery
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
-			startRole(interf.id(), UID(), "TLog");
+			startRole(Role::TRANSACTION_LOG,interf.id(), UID());
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -437,7 +437,7 @@ namespace oldTLog {
 			TraceEvent("TLogBytesWhenRemoved", tli.id()).detail("SharedBytesInput", tLogData->bytesInput).detail("SharedBytesDurable", tLogData->bytesDurable).detail("LocalBytesInput", bytesInput.getValue()).detail("LocalBytesDurable", bytesDurable.getValue());
 
 			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
-			endRole(tli.id(), "TLog", "Error", true);
+			endRole(Role::TRANSACTION_LOG, tli.id(), "Error", true);
 
 			if(!tLogData->terminated) {
 				Key logIdKey = BinaryWriter::toValue(logId,Unversioned());
