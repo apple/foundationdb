@@ -292,10 +292,10 @@ struct Role {
 	static const Role CLUSTER_CONTROLLER;
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
-	static const Role NONE; 
 
 	std::string roleName;
 	std::string abbreviation;
+	bool includeInTraceRoles;
 
 	bool operator==(const Role &r) const {
 		return roleName == r.roleName;
@@ -305,7 +305,7 @@ struct Role {
 	}
 
 private:
-	Role(std::string roleName, std::string abbreviation) : roleName(roleName), abbreviation(abbreviation) {
+	Role(std::string roleName, std::string abbreviation, bool includeInTraceRoles=true) : roleName(roleName), abbreviation(abbreviation), includeInTraceRoles(includeInTraceRoles) {
 		ASSERT(abbreviation.size() == 2); // Having a fixed size makes log queries more straightforward
 	}
 };

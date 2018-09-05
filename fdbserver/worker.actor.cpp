@@ -385,7 +385,7 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 }
 
 void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details, std::string origination) {
-	if(role != Role::WORKER) {
+	if(role.includeInTraceRoles) {
 		addTraceRole(role.abbreviation);
 	}
 
@@ -436,7 +436,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
 
-	if(role != Role::WORKER) {
+	if(role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);
 	}
 }
@@ -1046,10 +1046,10 @@ ACTOR Future<Void> fdbd(
 	}
 }
 
-const Role Role::WORKER("Worker", "WK");
+const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
-const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL");
+const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");

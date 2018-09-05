@@ -483,13 +483,10 @@ public:
 		RoleInfo &r = mutateRoleInfo();
 
 		auto itr = r.roles.find(role);
-		ASSERT(itr != r.roles.end() || g_network->isSimulated() && g_network->getLocalAddress() == NetworkAddress());
+		ASSERT(itr != r.roles.end() || (g_network->isSimulated() && g_network->getLocalAddress() == NetworkAddress()));
 
-		if(itr != r.roles.end()) {
-			if(--(*itr).second == 0) {
-				r.roles.erase(itr);
-			}
-
+		if(itr != r.roles.end() && --(*itr).second == 0) {
+			r.roles.erase(itr);
 			r.refreshRolesString();
 		}
 	}
