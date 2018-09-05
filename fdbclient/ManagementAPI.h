@@ -46,6 +46,7 @@ public:
 		CONFLICTING_OPTIONS,
 		UNKNOWN_OPTION,
 		INCOMPLETE_CONFIGURATION,
+		INVALID_CONFIGURATION,
 		DATABASE_ALREADY_CREATED,
 		DATABASE_CREATED,
 		SUCCESS
@@ -168,6 +169,6 @@ Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile)
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
 
 void schemaCoverage( std::string const& spath, bool covered=true );
-bool schemaMatch( StatusObject const schema, StatusObject const result, Severity sev=SevError, bool printErrors=true, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+bool schemaMatch( StatusObject const schema, StatusObject const result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
 
 #endif

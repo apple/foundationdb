@@ -20,7 +20,7 @@
 
 #include "Schemas.h"
 
-const KeyRef statusSchema = LiteralStringRef(R"statusSchema(
+const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
       "layers":{
@@ -567,13 +567,13 @@ const KeyRef statusSchema = LiteralStringRef(R"statusSchema(
    }
 })statusSchema");
 
-const KeyRef configurationSchema = LiteralStringRef(R"configSchema(
+const KeyRef JSONSchemas::configurationSchema = LiteralStringRef(R"configSchema(
 {
     "create":{
     "$enum":[
         "new"
     ]},
-	"log_anti_quorum":0,
+    "log_anti_quorum":0,
     "log_replicas":2,
     "log_replication_policy":"(zoneid^3x1)",
     "redundancy_mode":{
@@ -586,24 +586,24 @@ const KeyRef configurationSchema = LiteralStringRef(R"configSchema(
         "three_data_hall"
     ]},
     "regions":[{
-    "datacenters":[{
-        "id":"mr",
-        "priority":1,
-        "satellite":1
-    }],
-    "satellite_redundancy_mode":{
-    "$enum":[
-        "one_satellite_single",
-        "one_satellite_double",
-        "one_satellite_triple",
-        "two_satellite_safe",
-        "two_satellite_fast"
-    ]},
-    "satellite_log_replicas":1,
-    "satellite_usable_dcs":1,
-    "satellite_anti_quorum":0,
-    "satellite_log_policy":"(zoneid^3x1)",
-    "satellite_logs":2
+        "datacenters":[{
+            "id":"mr",
+            "priority":1,
+            "satellite":1
+        }],
+        "satellite_redundancy_mode":{
+        "$enum":[
+            "one_satellite_single",
+            "one_satellite_double",
+            "one_satellite_triple",
+            "two_satellite_safe",
+            "two_satellite_fast"
+        ]},
+        "satellite_log_replicas":1,
+        "satellite_usable_dcs":1,
+        "satellite_anti_quorum":0,
+        "satellite_log_policy":"(zoneid^3x1)",
+        "satellite_logs":2
     }],
     "remote_redundancy_mode":{
     "$enum":[

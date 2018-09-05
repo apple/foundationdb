@@ -26,7 +26,9 @@
 #include "flow/flow.h"
 #include "FDBTypes.h"
 
-extern const KeyRef statusSchema;
-extern const KeyRef configurationSchema;
+struct JSONSchemas {
+	static const KeyRef statusSchema;
+	static const KeyRef configurationSchema;
+};
 
 #endif /* FDBCLIENT_SCHEMAS_H */

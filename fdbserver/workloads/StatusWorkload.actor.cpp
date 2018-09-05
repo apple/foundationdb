@@ -41,7 +41,7 @@ struct StatusWorkload : TestWorkload {
 	{
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		requestsPerSecond = getOption(options, LiteralStringRef("requestsPerSecond"), 0.5);
-		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), statusSchema);
+		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), JSONSchemas::statusSchema);
 		if (statusSchemaStr.size()) {
 			json_spirit::mValue schema;
 			json_spirit::read_string( statusSchemaStr.toString(), schema );
@@ -123,8 +123,8 @@ struct StatusWorkload : TestWorkload {
 				save(br, result);
 				self->totalSize += br.getLength();
 				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", now() - issued);//.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));
-
-				if (self->parsedSchema.present() && !schemaMatch(self->parsedSchema.get(), result, SevError, false, true) )
+				std::string errorStr;
+				if (self->parsedSchema.present() && !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true) )
 					TraceEvent(SevError, "StatusWorkloadValidationFailed").detail("JSON", json_spirit::write_string(json_spirit::mValue(result)));
 			}
 			catch (Error& e) {
@@ -149,7 +149,8 @@ TEST_CASE("fdbserver/status/schema/basic") {
 		json_spirit::mValue test;
 		json_spirit::read_string( t, test );
 		TraceEvent("SchemaMatch").detail("Schema", json_spirit::write_string(schema)).detail("Value", json_spirit::write_string(test)).detail("Expect", expect_ok);
-		ASSERT( expect_ok == schemaMatch(schema.get_obj(), test.get_obj(), expect_ok ? SevError : SevInfo, false, true) );
+		std::string errorStr;
+		ASSERT( expect_ok == schemaMatch(schema.get_obj(), test.get_obj(), errorStr, expect_ok ? SevError : SevInfo, true) );
 	};
 	check(true, "{}");
 	check(true, "{\"apple\":4}");
