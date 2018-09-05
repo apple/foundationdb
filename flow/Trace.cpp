@@ -148,6 +148,34 @@ private:
 	EventMetricHandle<TraceEventNameID> SevInfoNames;
 	EventMetricHandle<TraceEventNameID> SevDebugNames;
 
+	struct RoleInfo {
+		std::map<std::string, int> roles;
+		std::string rolesString;
+
+		void refreshRolesString() {
+			rolesString = "";
+			for(auto itr : roles) {
+				if(!rolesString.empty()) {
+					rolesString += ",";
+				}
+				rolesString += itr.first;
+			}
+		}
+	};
+
+	RoleInfo roleInfo;
+	std::map<NetworkAddress, RoleInfo> roleInfoMap;
+
+	RoleInfo& mutateRoleInfo() {
+		ASSERT(g_network);
+
+		if(g_network->isSimulated()) {
+			return roleInfoMap[g_network->getLocalAddress()];
+		}
+		
+		return roleInfo;
+	}
+
 public:
 	bool logTraceEventMetrics;
 
@@ -307,6 +335,11 @@ public:
 		}
 
 		fields.addField("LogGroup", logGroup);
+
+		RoleInfo const& r = mutateRoleInfo();
+		if(r.rolesString.size() > 0) {
+			fields.addField("Roles", r.rolesString);
+		}
 	}
 
 	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
@@ -436,6 +469,28 @@ public:
 		}
 	}
 
+	void addRole(std::string role) {
+		MutexHolder holder(mutex);
+
+		RoleInfo &r = mutateRoleInfo();
+		++r.roles[role];
+		r.refreshRolesString();
+	}
+
+	void removeRole(std::string role) {
+		MutexHolder holder(mutex);
+
+		RoleInfo &r = mutateRoleInfo();
+
+		auto itr = r.roles.find(role);
+		ASSERT(itr != r.roles.end() || (g_network->isSimulated() && g_network->getLocalAddress() == NetworkAddress()));
+
+		if(itr != r.roles.end() && --(*itr).second == 0) {
+			r.roles.erase(itr);
+			r.refreshRolesString();
+		}
+	}
+
 	~TraceLog() {
 		close();
 		if (writer) writer->addref(); // FIXME: We are not shutting down the writer thread at all, because the ThreadPool shutdown mechanism is blocking (necessarily waits for current work items to finish) and we might not be able to finish everything.
@@ -548,6 +603,14 @@ void closeTraceFile() {
 
 bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
+}
+
+void addTraceRole(std::string role) {
+	g_traceLog.addRole(role);
+}
+
+void removeTraceRole(std::string role) {
+	g_traceLog.removeRole(role);
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}

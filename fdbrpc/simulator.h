@@ -159,7 +159,7 @@ public:
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
-		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("Roles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
+		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
 	}
 
 	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
@@ -169,16 +169,16 @@ public:
 			if (rolesIt != addressIt->second.end()) {
 				if (rolesIt->second > 1) {
 					rolesIt->second --;
-					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
+					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
 				}
 				else {
 					addressIt->second.erase(rolesIt);
 					if (addressIt->second.size()) {
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
 					}
 					else {
 						roleAddresses.erase(addressIt);
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", 0).detail("Value", 0).detail("Result", "Removed Address");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", 0).detail("Value", 0).detail("Result", "Removed Address");
 					}
 				}
 			}
