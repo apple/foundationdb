@@ -14,9 +14,10 @@ class JsonString {
 	public:
 		JsonString();
 		JsonString( const JsonString& jsonString);
+		JsonString( JsonString&& jsonString) = default;
 		explicit JsonString( const JsonStringArray& jsonArray);
-		explicit JsonString( const char* value );
-		explicit JsonString( const std::string& value );
+		explicit JsonString( const char* value ); // Used to define values (used in an Array)
+		explicit JsonString( const std::string& value ); // Used to define values (used in an Array)
 
 		JsonString( const std::string& name, const char* value );
 		JsonString( const std::string& name, const std::string& value );
@@ -72,6 +73,7 @@ class JsonString {
 
 		std::string	getJson() const;
 		void	setJson(const std::string& jsonText);
+		JsonString&	swapJsonText(std::string& jsonText);
 
 		size_t	getLength() const;
 		size_t	getNameTotal() const;
@@ -122,6 +124,7 @@ class JsonStringArray : protected std::vector<JsonString>
 	public:
 		JsonStringArray();
 		JsonStringArray( const JsonStringArray& jsonStringArray);
+		JsonStringArray( JsonStringArray&& jsonStringArray) = default;
 		virtual ~JsonStringArray();
 };
 

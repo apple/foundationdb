@@ -13,6 +13,7 @@ JsonString::JsonString( const JsonString& jsonString) : _jsonText(jsonString._js
 JsonString::JsonString( const JsonStringArray& jsonArray) : _jsonText(), _keyNames() {
 	append(jsonArray);
 }
+
 JsonString::JsonString( const std::string& value ) : _jsonText(), _keyNames() {
 	append(value);
 }
@@ -95,8 +96,7 @@ JsonString& JsonString::appendImpl( const std::string& value, bool quote ) {
 }
 
 std::string	JsonString::stringify(const char* value) {
-	std::string	textValue(value);
-	return appendImpl(name, textValue, true);
+	return std::string(value);
 }
 std::string	JsonString::stringify(double value) {
 	return format("%g", value);
@@ -265,6 +265,11 @@ JsonString& JsonString::operator=( const JsonString& jsonString ) {
 void	JsonString::setJson(const std::string& jsonText) {
 	_keyNames.clear();
 	_jsonText = jsonText;
+}
+JsonString&	JsonString::swapJsonText(std::string& jsonText) {
+	_keyNames.clear();
+	_jsonText.swap(jsonText);
+	return *this;
 }
 
 JsonStringSetter& JsonString::operator[]( const std::string& name ) {
