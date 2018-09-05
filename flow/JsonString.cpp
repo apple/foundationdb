@@ -74,7 +74,6 @@ JsonString JsonString::makeMessage(const char *name, const char *description) {
 	return out;
 }
 
-// ahm Todo: Added assert for correctness when name hash already present to identify collisions
 void JsonString::hashName( const std::string& name) {
 	if (isPresent(name)) {
 		TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "JsonError").detail("KeyPresent", name).backtrace();
@@ -241,8 +240,9 @@ JsonString& JsonString::operator=( const JsonString& jsonString ) {
 	return copy(jsonString);
 }
 
-//ahm Remove the leading and ending {}
+//TODO: Populate key names member
 void	JsonString::setJson(const std::string& jsonText) {
+	_keyNames.clear();
 	_jsonText = jsonText;
 }
 

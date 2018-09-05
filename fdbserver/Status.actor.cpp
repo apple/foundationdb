@@ -1787,7 +1787,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonString message = JsonString::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
 			JsonStringArray unreachableProcs;
 			for (auto m : mergeUnreachable){
-				unreachableProcs.push_back(JsonString("address", m));	//ahm I'm pretty sure this is right
+				unreachableProcs.push_back(JsonString("address", m));
 			}
 			message["unreachable_processes"] = unreachableProcs;
 			messages.push_back(message);
@@ -1888,7 +1888,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			// Merge data_overlay into data
 			JsonString &clusterDataSection = workerStatuses[0];
-			clusterDataSection.append(data_overlay); //ahm This is a problem, if dupe keys
+			clusterDataSection.append(data_overlay);
 
 			// If data section not empty, add it to statusObj
 			if (!clusterDataSection.empty())
@@ -1896,7 +1896,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			// Insert database_locked section
 			if(!workerStatuses[3].empty()) {
-				statusObj.append(workerStatuses[3]); //ahm This is a problem, if dupe keys
+				statusObj.append(workerStatuses[3]);
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
@@ -1951,7 +1951,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
 			JsonStringArray reasons;
 			for (auto i : status_incomplete_reasons) {
-				reasons.push_back(JsonString("description", i));	//ahm pretty sure this is right
+				reasons.push_back(JsonString("description", i));
 			}
 			incomplete_message["reasons"] = reasons;
 			messages.push_back(incomplete_message);
