@@ -851,7 +851,7 @@ struct DDTeamCollection {
 
 			if(servers.size() >= self->configuration.storageTeamSize) {
 				bool foundTeam = false;
-				for( int j = 0; j < std::max( 1, (int)(servers.size() - self->configuration.storageTeamSize + 1) ) && !foundTeam; j++ ) {
+				for( int j = 0; j < servers.size() - self->configuration.storageTeamSize + 1 && !foundTeam; j++ ) {
 					auto& serverTeams = self->server_info[servers[j]->id]->teams;
 					for( int k = 0; k < serverTeams.size(); k++ ) {
 						auto &testTeam = serverTeams[k]->getServerIDs();
