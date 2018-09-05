@@ -129,7 +129,7 @@ function parseArgs() {
 
     if [[ -z "${FDBVER}" ]] ; then
         echo "No FoundationDB version specified!"
-        echo "Please provide a value to the --fdbver or set the FDBVER environment variable."
+        echo "Please supply a version by setting the --fdbver flag or the FDBVER environment variable."
         let status="${status} + 1"
     fi
 
