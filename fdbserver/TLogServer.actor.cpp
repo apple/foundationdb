@@ -423,7 +423,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
 	{
-		startRole(interf.id(), UID(), "TLog");
+		startRole(Role::TRANSACTION_LOG, interf.id(), UID());
 
 		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -446,7 +446,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	~LogData() {
-		endRole(logId, "TLog", "Error", true);
+		endRole(Role::TRANSACTION_LOG, logId, "Error", true);
 
 		if(!terminated.isReady()) {
 			tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
@@ -2029,7 +2029,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 	TraceEvent("SharedTlog", tlogId);
 	// FIXME: Pass the worker id instead of stubbing it
-	startRole(tlogId, UID(), "SharedTLog");
+	startRole(Role::SHARED_TRANSACTION_LOG, tlogId, UID());
 	try {
 		if(restoreFromDisk) {
 			wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
@@ -2062,7 +2062,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 	} catch (Error& e) {
 		self.terminated.send(Void());
 		TraceEvent("TLogError", tlogId).error(e, true);
-		endRole(tlogId, "SharedTLog", "Error", true);
+		endRole(Role::SHARED_TRANSACTION_LOG, tlogId, "Error", true);
 		if(recovered.canBeSet()) recovered.send(Void());
 
 		while(!tlogRequests.isEmpty()) {

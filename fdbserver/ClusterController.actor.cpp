@@ -2160,10 +2160,10 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	loop choose {
 		when( ErrorOr<Void> err = wait( error ) ) {
 			if (err.isError()) {
-				endRole(interf.id(), "ClusterController", "Stop Received Error", false, err.getError());
+				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
 			}
 			else {
-				endRole(interf.id(), "ClusterController", "Stop Received Signal", true);
+				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
 			}
 
 			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected cluster controller)
@@ -2235,7 +2235,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.
-			endRole(interf.id(), "ClusterController", "Leader Replaced", true);
+			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
 			TEST(true); // Lost Cluster Controller Role
 			return Void();
 		}
@@ -2262,13 +2262,13 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 			}
 
 			hasConnected = true;
-			startRole(cci.id(), UID(), "ClusterController");
+			startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 			inRole = true;
 
 			wait( clusterControllerCore( cci, leaderFail, coordinators ) );
 		} catch(Error& e) {
 			if (inRole)
-				endRole(cci.id(), "ClusterController", "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
+				endRole(Role::CLUSTER_CONTROLLER, cci.id(), "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
 			else
 				TraceEvent( e.code() == error_code_coordinators_changed ? SevInfo : SevError, "ClusterControllerCandidateError", cci.id()).error(e);
 			throw;
