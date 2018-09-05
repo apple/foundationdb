@@ -100,13 +100,8 @@ ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 	Future<Void> process )
 {
 	try {
-<<<<<<< HEAD
 		wait(process);
-		errors.send( ErrorInfo(success(), context, id) );
-=======
-		Void _ = wait(process);
 		errors.send( ErrorInfo(success(), role, id) );
->>>>>>> release-6.0
 		return Void();
 	} catch (Error& e) {
 		errors.send( ErrorInfo(e, role, id) );
