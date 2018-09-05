@@ -285,6 +285,7 @@ struct Peer : NonCopyable {
 		if ( !destination.isPublic() || outgoingConnectionIdle || destination > transport->localAddress ) {
 			// Keep the new connection
 			TraceEvent("IncomingConnection", conn->getDebugID())
+				.suppressFor(1.0)
 				.detail("FromAddr", conn->getPeerAddress())
 				.detail("CanonicalAddr", destination)
 				.detail("IsPublic", destination.isPublic());
@@ -294,6 +295,7 @@ struct Peer : NonCopyable {
 			connect = connectionKeeper( this, conn, reader );
 		} else {
 			TraceEvent("RedundantConnection", conn->getDebugID())
+				.suppressFor(1.0)
 				.detail("FromAddr", conn->getPeerAddress().toString())
 				.detail("CanonicalAddr", destination);
 
@@ -323,7 +325,7 @@ struct Peer : NonCopyable {
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 
 			choose {
-				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
+				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination); throw connection_failed(); }
 				when (wait( reply.getFuture() )) {}
 				when (wait( peer->incompatibleDataRead.onTrigger())) {}
 			}

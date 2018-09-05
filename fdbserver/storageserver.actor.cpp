@@ -409,6 +409,7 @@ public:
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
+		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 
 		Counters(StorageServer* self)
 			: cc("StorageServer", self->thisServerID.toString()),
@@ -430,7 +431,11 @@ public:
 			atomicMutations("AtomicMutations", cc),
 			updateBatches("UpdateBatches", cc),
 			updateVersions("UpdateVersions", cc),
-			loops("Loops", cc)
+			loops("Loops", cc),
+			fetchWaitingMS("FetchWaitingMS", cc),
+			fetchWaitingCount("FetchWaitingCount", cc),
+			fetchExecutingMS("FetchExecutingMS", cc),
+			fetchExecutingCount("FetchExecutingCount", cc)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
@@ -1815,6 +1820,10 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		wait( data->fetchKeysParallelismLock.take( TaskDefaultYield, fetchBlockBytes ) );
 		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock, fetchBlockBytes );
 
+		state double executeStart = now();
+		++data->counters.fetchWaitingCount;
+		data->counters.fetchWaitingMS += 1000*(executeStart - startt);
+
 		wait(delay(0));
 
 		shard->phase = AddingShard::Fetching;
@@ -2005,6 +2014,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		coalesceShards(data, keys);
 
 		validate(data);
+
+		++data->counters.fetchExecutingCount;
+		data->counters.fetchExecutingMS += 1000*(now() - executeStart);
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){

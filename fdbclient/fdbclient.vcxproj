@@ -65,6 +65,7 @@
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
+    <ClInclude Include="Schemas.h" />
     <ClInclude Include="SnapshotCache.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
@@ -97,6 +98,8 @@
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
+		<ClCompile Include="Status.cpp" />
+    <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
