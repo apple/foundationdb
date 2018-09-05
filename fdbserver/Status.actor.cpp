@@ -389,11 +389,12 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 	}
 
 	// Add the status json for each machine with tracked values
-	for (auto mapPair : machineJsonMap) {
+	for (auto& mapPair : machineJsonMap) {
 		auto& machineId = mapPair.first;
-		machineJsonMap[machineId]["excluded"] = notExcludedMap[machineId];
-		machineJsonMap[machineId]["contributing_workers"] = workerContribMap[machineId];
-		machineMap[machineId] = machineJsonMap[machineId];
+		auto& jsonItem = machineJsonMap[machineId];
+		jsonItem["excluded"] = notExcludedMap[machineId];
+		jsonItem["contributing_workers"] = workerContribMap[machineId];
+		machineMap[machineId] = jsonItem;
 	}
 
 	if(failed > 0)
@@ -1610,7 +1611,7 @@ static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issue
 			JsonString message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonStringArray addresses;
 			for(auto addr : i.second) {
-				addresses.push_back(addr);
+				addresses.push_back(JsonString(addr));
 			}
 
 			message["addresses"] = addresses;
@@ -1928,7 +1929,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonStringArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
-			incompatibleConnectionsArray.push_back(it.toString());
+			incompatibleConnectionsArray.push_back(JsonString(it.toString()));
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
@@ -2046,9 +2047,9 @@ TEST_CASE("status/json/jsonstring") {
 	std::cout << "Json (complex array): " << jsonObj.getJson() << std::endl;
 
 	jsonArray.clear();
-	jsonArray.push_back("nissan");
-	jsonArray.push_back("honda");
-	jsonArray.push_back("bmw");
+	jsonArray.push_back(JsonString("nissan"));
+	jsonArray.push_back(JsonString("honda"));
+	jsonArray.push_back(JsonString("bmw"));
 	jsonObj.clear();
 	jsonObj.append(jsonArray);
 	std::cout << "Array (simple array #1): " << jsonObj.getJson() << std::endl;

@@ -57,12 +57,6 @@ JsonString::JsonString( const std::string& name, const JsonStringArray& value ) 
 	append(name, value);
 }
 
-uint32_t JsonString::hash32( const std::string& name ) {
-	uint32_t a=0, b=0;
-	hashlittle2( (const void*) name.c_str(), name.length(), &a, &b );
-	return a;
-}
-
 bool	JsonString::isPresent(const std::string& name) const {
 	return (_keyNames.find(name) != _keyNames.end());
 }
@@ -100,36 +94,64 @@ JsonString& JsonString::appendImpl( const std::string& value, bool quote ) {
 	return *this;
 }
 
+std::string	JsonString::stringify(const char* value) {
+	std::string	textValue(value);
+	return appendImpl(name, textValue, true);
+}
+std::string	JsonString::stringify(double value) {
+	return format("%g", value);
+}
+std::string	JsonString::stringify(long int value) {
+	return format("%ld", value);
+}
+std::string	JsonString::stringify(long unsigned int value) {
+	return format("%lu", value);
+}
+std::string	JsonString::stringify(long long int value) {
+	return format("%lld", value);
+}
+std::string	JsonString::stringify(long long unsigned int value) {
+	return format("%llu", value);
+}
+std::string	JsonString::stringify(int value) {
+	return format("%d", value);
+}
+std::string	JsonString::stringify(unsigned value) {
+	return format("%u", value);
+}
+std::string	JsonString::stringify(bool value) {
+	return value ? "true" : "false";
+}
+
 JsonString& JsonString::append( const std::string& name, const std::string& value ) {
 	return appendImpl(name, value, true);
 }
 JsonString& JsonString::append( const std::string& name, const char* value ) {
-	std::string	textValue(value);
-	return appendImpl(name, textValue, true);
+	return appendImpl(name, stringify(value), true);
 }
 JsonString& JsonString::append( const std::string& name, double value ) {
-	return appendImpl(name, format("%g", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, long int value ) {
-	return appendImpl(name, format("%ld", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, long unsigned int value ) {
-	return appendImpl(name, format("%lu", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, long long int value ) {
-	return appendImpl(name, format("%lld", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, long long unsigned int value ) {
-	return appendImpl(name, format("%llu", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, int value ) {
-	return appendImpl(name, format("%d", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, unsigned value ) {
-	return appendImpl(name, format("%u", value), false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, bool value ) {
-	return appendImpl(name, value ? "true" : "false", false);
+	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, const JsonString& value ) {
 	hashName(name);
@@ -154,32 +176,31 @@ JsonString& JsonString::append( const std::string& value ) {
 	return appendImpl(value, true);
 }
 JsonString& JsonString::append( const char* value ) {
-	std::string	textValue(value);
-	return appendImpl(textValue, true);
+	return appendImpl(stringify(value), true);
 }
 JsonString& JsonString::append( double value ) {
-	return appendImpl(format("%g", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( long int value ) {
-	return appendImpl(format("%ld", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( long unsigned int value ) {
-	return appendImpl(format("%lu", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( long long int value ) {
-	return appendImpl(format("%lld", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( long long unsigned int value ) {
-	return appendImpl(format("%llu", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( int value ) {
-	return appendImpl(format("%d", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( unsigned value ) {
-	return appendImpl(format("%u", value), false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( bool value ) {
-	return appendImpl(value ? "true" : "false", false);
+	return appendImpl(stringify(value), false);
 }
 JsonString& JsonString::append( const JsonString& value ) {
 	// Only do something, if not empty
@@ -274,53 +295,4 @@ JsonStringArray::~JsonStringArray() {
 }
 
 JsonStringSetter::JsonStringSetter( JsonString& jsonString, const std::string& name ) : _jsonString(jsonString), _name(name) {
-}
-
-JsonStringSetter& JsonStringSetter::operator=( const std::string& value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( const char* value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( double value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( long int value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( long unsigned int value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( long long int value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( long long unsigned int value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( int value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( unsigned value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( bool value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( const JsonString& value ) {
-	_jsonString.append(_name, value);
-	return *this;
-}
-JsonStringSetter& JsonStringSetter::operator=( const JsonStringArray& value ) {
-	_jsonString.append(_name, value);
-	return *this;
 }

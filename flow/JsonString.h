@@ -14,9 +14,9 @@ class JsonString {
 	public:
 		JsonString();
 		JsonString( const JsonString& jsonString);
-		JsonString( const JsonStringArray& jsonArray);
-		JsonString( const char* value );
-		JsonString( const std::string& value );
+		explicit JsonString( const JsonStringArray& jsonArray);
+		explicit JsonString( const char* value );
+		explicit JsonString( const std::string& value );
 
 		JsonString( const std::string& name, const char* value );
 		JsonString( const std::string& name, const std::string& value );
@@ -81,13 +81,22 @@ class JsonString {
 
 		bool	isPresent(const std::string& name) const;
 
-		static uint32_t hash32( const std::string& name );
 		static JsonString makeMessage(const char *name, const char *description);
 
 	protected:
 		void hashName( const std::string& name);
 		JsonString& appendImpl( const std::string& name, const std::string& value, bool quote);
 		JsonString& appendImpl( const std::string& value, bool quote);
+
+		static std::string	stringify(const char* value);
+		static std::string	stringify(double value);
+		static std::string	stringify(long int value);
+		static std::string	stringify(long unsigned int value);
+		static std::string	stringify(long long int value);
+		static std::string	stringify(long long unsigned int value);
+		static std::string	stringify(int value);
+		static std::string	stringify(unsigned value);
+		static std::string	stringify(bool value);
 
 	protected:
 		std::string		_jsonText;
@@ -121,18 +130,11 @@ class JsonStringSetter {
 
 	JsonStringSetter( JsonString& jsonString, const std::string& name );
 
-	JsonStringSetter& operator=( const std::string& value );
-	JsonStringSetter& operator=( const char* value );
-	JsonStringSetter& operator=( double value );
-	JsonStringSetter& operator=( long int value );
-	JsonStringSetter& operator=( long unsigned int value );
-	JsonStringSetter& operator=( long long int value );
-	JsonStringSetter& operator=( long long unsigned int value );
-	JsonStringSetter& operator=( int value );
-	JsonStringSetter& operator=( unsigned value );
-	JsonStringSetter& operator=( bool value );
-	JsonStringSetter& operator=( const JsonString& value );
-	JsonStringSetter& operator=( const JsonStringArray& value );
+	template <class valClass>
+	JsonStringSetter& operator=( const valClass& value ) {
+		_jsonString.append(_name, value);
+		return *this;
+	}
 
 	protected:
 		JsonString&		_jsonString;
