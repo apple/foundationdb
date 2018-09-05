@@ -3,7 +3,7 @@
 #define JSONSTRING_H
 
 #include <string>
-#include <set>
+#include <unordered_set>
 #include <vector>
 
 class JsonString;
@@ -73,10 +73,12 @@ class JsonString {
 		std::string	getJson() const;
 		void	setJson(const std::string& jsonText);
 
+		size_t	getLength() const;
+		size_t	getNameTotal() const;
+
 		JsonString& clear();
 		bool	empty() const;
 
-		bool	isPresent(uint32_t nameHash) const;
 		bool	isPresent(const std::string& name) const;
 
 		static uint32_t hash32( const std::string& name );
@@ -84,10 +86,12 @@ class JsonString {
 
 	protected:
 		void hashName( const std::string& name);
+		JsonString& appendImpl( const std::string& name, const std::string& value, bool quote);
+		JsonString& appendImpl( const std::string& value, bool quote);
 
 	protected:
 		std::string		_jsonText;
-		std::set<uint32_t>	_keyNames;
+		std::unordered_set<std::string>	_keyNames;
 
 		// Uneditted text
 		const std::string&	getJsonText() const;

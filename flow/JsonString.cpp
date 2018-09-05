@@ -1,6 +1,8 @@
 #include "JsonString.h"
 #include "Hash3.h"
 #include <iostream>
+#include "Trace.h"
+#include "flow.h"
 
 std::string format( const char* form, ... );
 
@@ -61,11 +63,8 @@ uint32_t JsonString::hash32( const std::string& name ) {
 	return a;
 }
 
-bool	JsonString::isPresent(uint32_t nameHash) const {
-	return (_keyNames.find(nameHash) != _keyNames.end());
-}
 bool	JsonString::isPresent(const std::string& name) const {
-	return isPresent(hash32(name));
+	return (_keyNames.find(name) != _keyNames.end());
 }
 
 JsonString JsonString::makeMessage(const char *name, const char *description) {
@@ -75,14 +74,63 @@ JsonString JsonString::makeMessage(const char *name, const char *description) {
 	return out;
 }
 
+// ahm Todo: Added assert for correctness when name hash already present to identify collisions
 void JsonString::hashName( const std::string& name) {
-	_keyNames.insert(hash32(name));
+	if (isPresent(name)) {
+		TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "JsonError").detail("KeyPresent", name).backtrace();
+	}
+	_keyNames.insert(name);
+}
+
+JsonString& JsonString::appendImpl( const std::string& name, const std::string& value, bool quote ) {
+	hashName(name);
+	_jsonText += (_jsonText.empty() ? "\"" : ",\n  \"") + name + (quote ? "\": \"" : "\": ") + value;
+	if (quote)
+		_jsonText += "\"";
+	return *this;
+}
+JsonString& JsonString::appendImpl( const std::string& value, bool quote ) {
+	if (quote) {
+		_jsonText += (_jsonText.empty() ? "\"" : ", \"") + value + "\"";
+	}
+	else {
+		if (_jsonText.empty())
+			_jsonText += ", ";
+		_jsonText += value;
+	}
+	return *this;
 }
 
 JsonString& JsonString::append( const std::string& name, const std::string& value ) {
-	hashName(name);
-	_jsonText += (_jsonText.empty() ? "\"" : ",\n  \"") + name + "\": \"" + value + "\"";
-	return *this;
+	return appendImpl(name, value, true);
+}
+JsonString& JsonString::append( const std::string& name, const char* value ) {
+	std::string	textValue(value);
+	return appendImpl(name, textValue, true);
+}
+JsonString& JsonString::append( const std::string& name, double value ) {
+	return appendImpl(name, format("%g", value), false);
+}
+JsonString& JsonString::append( const std::string& name, long int value ) {
+	return appendImpl(name, format("%ld", value), false);
+}
+JsonString& JsonString::append( const std::string& name, long unsigned int value ) {
+	return appendImpl(name, format("%lu", value), false);
+}
+JsonString& JsonString::append( const std::string& name, long long int value ) {
+	return appendImpl(name, format("%lld", value), false);
+}
+JsonString& JsonString::append( const std::string& name, long long unsigned int value ) {
+	return appendImpl(name, format("%llu", value), false);
+}
+JsonString& JsonString::append( const std::string& name, int value ) {
+	return appendImpl(name, format("%d", value), false);
+}
+JsonString& JsonString::append( const std::string& name, unsigned value ) {
+	return appendImpl(name, format("%u", value), false);
+}
+JsonString& JsonString::append( const std::string& name, bool value ) {
+	return appendImpl(name, value ? "true" : "false", false);
 }
 JsonString& JsonString::append( const std::string& name, const JsonString& value ) {
 	hashName(name);
@@ -102,71 +150,37 @@ JsonString& JsonString::append( const std::string& name, const JsonStringArray& 
 	_jsonText += " ]";
 	return *this;
 }
-JsonString& JsonString::append( const std::string& name, const char* value ) {
-	std::string	textValue(value);
-	return append(name, textValue);
-}
-JsonString& JsonString::append( const std::string& name, double value ) {
-	return append(name, format("%g", value));
-}
-JsonString& JsonString::append( const std::string& name, long int value ) {
-	return append(name, format("%ld", value));
-}
-JsonString& JsonString::append( const std::string& name, long unsigned int value ) {
-	return append(name, format("%lu", value));
-}
-JsonString& JsonString::append( const std::string& name, long long int value ) {
-	return append(name, format("%lld", value));
-}
-JsonString& JsonString::append( const std::string& name, long long unsigned int value ) {
-	return append(name, format("%llu", value));
-}
-JsonString& JsonString::append( const std::string& name, int value ) {
-	return append(name, format("%d", value));
-}
-JsonString& JsonString::append( const std::string& name, unsigned value ) {
-	return append(name, format("%u", value));
-}
-JsonString& JsonString::append( const std::string& name, bool value ) {
-	hashName(name);
-	_jsonText += (_jsonText.empty() ? "\"" : ",\n  ") + name + (value ? "\": true" : "\": false");
-	return *this;
-}
 
 JsonString& JsonString::append( const std::string& value ) {
-	_jsonText += (_jsonText.empty() ? "\"" : ", \"") + value + "\"";
-	return *this;
+	return appendImpl(value, true);
 }
 JsonString& JsonString::append( const char* value ) {
 	std::string	textValue(value);
-	return append(textValue);
+	return appendImpl(textValue, true);
 }
 JsonString& JsonString::append( double value ) {
-	return append(format("%g", value));
+	return appendImpl(format("%g", value), false);
 }
 JsonString& JsonString::append( long int value ) {
-	return append(format("%ld", value));
+	return appendImpl(format("%ld", value), false);
 }
 JsonString& JsonString::append( long unsigned int value ) {
-	return append(format("%lu", value));
+	return appendImpl(format("%lu", value), false);
 }
 JsonString& JsonString::append( long long int value ) {
-	return append(format("%lld", value));
+	return appendImpl(format("%lld", value), false);
 }
 JsonString& JsonString::append( long long unsigned int value ) {
-	return append(format("%llu", value));
+	return appendImpl(format("%llu", value), false);
 }
 JsonString& JsonString::append( int value ) {
-	return append(format("%d", value));
+	return appendImpl(format("%d", value), false);
 }
 JsonString& JsonString::append( unsigned value ) {
-	return append(format("%u", value));
+	return appendImpl(format("%u", value), false);
 }
 JsonString& JsonString::append( bool value ) {
-	if (!_jsonText.empty())
-		_jsonText += ", ";
-	_jsonText += value ? "true" : "false";
-	return *this;
+	return appendImpl(value ? "true" : "false", false);
 }
 JsonString& JsonString::append( const JsonString& value ) {
 	// Only do something, if not empty
@@ -203,6 +217,13 @@ bool	JsonString::empty() const {
 
 const std::string&	JsonString::getJsonText() const {
 	return _jsonText;
+}
+
+size_t	JsonString::getLength() const {
+	return _jsonText.length() + ((!empty() && _keyNames.empty()) ? 0 : 2);
+}
+size_t	JsonString::getNameTotal() const {
+	return _keyNames.size();
 }
 
 std::string	JsonString::getJson() const {
@@ -302,95 +323,4 @@ JsonStringSetter& JsonStringSetter::operator=( const JsonString& value ) {
 JsonStringSetter& JsonStringSetter::operator=( const JsonStringArray& value ) {
 	_jsonString.append(_name, value);
 	return *this;
-}
-
-inline void _fdbassert(const char* expression, const char* file, int line) {
-	fprintf(stderr, "Assertion '%s' failed, file '%s' line '%d'.", expression, file, line);
-	abort();
-}
-
-#define fdbassert(EXPRESSION) ((EXPRESSION) ? (void)0 : _fdbassert(#EXPRESSION, __FILE__, __LINE__))
-
-int jsonUnitTests() {
-	int	status = 0;
-
-	JsonString	jsonString1;
-	jsonString1["_valid"] = false;
-	jsonString1["error"] = "configurationMissing";
-
-	JsonString	jsonString2("_valid", false);
-	jsonString2["error"] = "configurationMissing";
-
-	JsonString	jsonString3("error", "configurationMissing");
-	jsonString3["_valid"] = false;
-
-	JsonString	jsonString4("_valid", false);
-	jsonString4.append("error", "configurationMissing");
-
-	std::cout << "Json1: " << jsonString1.getJson() << std::endl;
-	std::cout << "Json2: " << jsonString2.getJson() << std::endl;
-	std::cout << "Json3: " << jsonString3.getJson() << std::endl;
-	std::cout << "Json4: " << jsonString4.getJson() << std::endl;
-
-	fdbassert(jsonString1 == jsonString2);
-	fdbassert(jsonString1 != jsonString3); // wrong order
-	fdbassert(jsonString1 == jsonString4);
-
-	JsonString	jsonObj, testObj;
-	JsonStringArray jsonArray;
-
-	jsonObj["alvin"] = "moore";
-	jsonObj["count"] = 3;
-	testObj["pi"] = 3.14159;
-	jsonObj["piobj"] = testObj;
-
-	testObj.clear();
-	testObj["val1"] = 7.9;
-	testObj["val2"] = 34;
-	jsonArray.push_back(testObj);
-
-	testObj.clear();
-	testObj["name1"] = "alvin";
-	testObj["name2"] = "evan";
-	testObj["name3"] = "ben";
-	jsonArray.push_back(testObj);
-	jsonObj.append("name_vals", jsonArray);
-
-	std::cout << "Json (complex): " << jsonObj.getJson() << std::endl;
-
-	jsonObj.clear();
-	jsonObj.append(jsonArray);
-	std::cout << "Json (complex array): " << jsonObj.getJson() << std::endl;
-
-	jsonArray.clear();
-	jsonArray.push_back("nissan");
-	jsonArray.push_back("honda");
-	jsonArray.push_back("bmw");
-	jsonObj.clear();
-	jsonObj.append(jsonArray);
-	std::cout << "Array (simple array #1): " << jsonObj.getJson() << std::endl;
-
-	testObj.clear();
-	testObj.append("nissan");
-	testObj.append("honda");
-	testObj.append("bmw");
-	jsonArray.clear();
-	jsonArray.push_back(testObj);
-	jsonObj.clear();
-	jsonObj.append(jsonArray);
-	std::cout << "Array (simple array #2): " << jsonObj.getJson() << std::endl;
-
-	jsonObj.clear();
-	jsonObj["name1"] = "alvin";
-	jsonObj["name2"] = "evan";
-	jsonObj["name3"] = "ben";
-	testObj.clear();
-	testObj["val1"] = 7.9;
-	testObj["val2"] = 34;
-	std::cout << "Merge (obj #1): " << jsonObj.getJson() << std::endl;
-	std::cout << "Merge (obj #2): " << testObj.getJson() << std::endl;
-	jsonObj.append(testObj);
-	std::cout << "Merged: " << jsonObj.getJson() << std::endl;
-
-	return status;
 }

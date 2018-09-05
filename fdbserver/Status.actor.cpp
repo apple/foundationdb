@@ -621,8 +621,6 @@ ACTOR static Future<JsonString> processStatusFetcher(
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
 
-			processMap[printable(workerItr->first.locality.processId())] = JsonString();
-
 			NetworkAddress address = workerItr->first.address();
 			const TraceEventFields& event = pMetrics[workerItr->first.address()];
 			statusObj["address"] = address.toString();
@@ -1072,7 +1070,6 @@ static JsonString configurationFetcher(Optional<DatabaseConfiguration> conf, Ser
 		if(conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
 			statusObj = configuration.toJSON().toJsonString();
-//ahm			statusObj.setJson(configuration.toJSON());
 
 			JsonStringArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
@@ -1464,6 +1461,8 @@ static JsonStringArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Async
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
 			JsonString statusObj;
 			JsonStringArray logsObj;
+			Optional<int32_t> sat_log_replication_factor, sat_log_write_anti_quorum, sat_log_fault_tolerance, log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor, remote_log_fault_tolerance;
+
 			int maxFaultTolerance = 0;
 
 			for(int i = 0; i < it.tLogs.size(); i++) {
@@ -1483,22 +1482,42 @@ static JsonStringArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Async
 				}
 				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
 				if(it.tLogs[i].isLocal && it.tLogs[i].locality == tagLocalitySatellite) {
-					statusObj["satellite_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
-					statusObj["satellite_log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
-					statusObj["satellite_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+					sat_log_replication_factor = it.tLogs[i].tLogReplicationFactor;
+					sat_log_write_anti_quorum = it.tLogs[i].tLogWriteAntiQuorum;
+					sat_log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 				else if(it.tLogs[i].isLocal) {
-					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
-					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
-					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+					log_replication_factor = it.tLogs[i].tLogReplicationFactor;
+					log_write_anti_quorum = it.tLogs[i].tLogWriteAntiQuorum;
+					log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 				else {
-					statusObj["remote_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
-					statusObj["remote_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
+					remote_log_replication_factor = it.tLogs[i].tLogReplicationFactor;
+					remote_log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
 				}
 			}
 			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
 			statusObj["logs"] = logsObj;
+
+			if (sat_log_replication_factor.present())
+				statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
+			if (sat_log_write_anti_quorum.present())
+				statusObj["satellite_log_write_anti_quorum"] = sat_log_write_anti_quorum.get();
+			if (sat_log_fault_tolerance.present())
+				statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
+
+			if (log_replication_factor.present())
+				statusObj["log_replication_factor"] = log_replication_factor.get();
+			if (log_write_anti_quorum.present())
+				statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
+			if (log_fault_tolerance.present())
+				statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
+
+			if (remote_log_replication_factor.present())
+				statusObj["remote_log_replication_factor"] = remote_log_replication_factor.get();
+			if (remote_log_fault_tolerance.present())
+				statusObj["remote_log_fault_tolerance"] = remote_log_fault_tolerance.get();
+
 			oldTlogsArray.push_back(statusObj);
 		}
 	}
@@ -1606,11 +1625,10 @@ static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issue
 	return issuesList;
 }
 
-// ahm What is this doing?
 ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
-	state JsonString result;
-//ahm	state JSONDoc json(result);
-	state JSONDoc json;
+	state StatusObject result;
+	state JSONDoc json(result);
+	state double tStart = now();
 
 	try {
 		state ReadYourWritesTransaction tr(cx);
@@ -1661,7 +1679,9 @@ ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messag
 	}
 
 	json.cleanOps();
-	return result;
+	JsonString statusObj = result.toJsonString();
+	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getLength()).detail("StatusNameTotal",statusObj.getNameTotal());
+	return statusObj;
 }
 
 ACTOR Future<JsonString> lockedStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
@@ -1720,6 +1740,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 {
 	// since we no longer offer multi-database support, all databases must be named DB
 	state std::string dbName = "DB";
+	state double tStart = now();
 
 	// Check if master worker is present
 	state JsonStringArray messages;
@@ -1868,7 +1889,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Merge data_overlay into data
 			JsonString &clusterDataSection = workerStatuses[0];
 			clusterDataSection.append(data_overlay); //ahm This is a problem, if dupe keys
-//ahm			clusterDataSection.insert(data_overlay.begin(), data_overlay.end());
 
 			// If data section not empty, add it to statusObj
 			if (!clusterDataSection.empty())
@@ -1877,7 +1897,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Insert database_locked section
 			if(!workerStatuses[3].empty()) {
 				statusObj.append(workerStatuses[3]); //ahm This is a problem, if dupe keys
-//ahm				statusObj.insert(workerStatuses[3].begin(), workerStatuses[3].end());
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
@@ -1945,11 +1964,118 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}
 
+		TraceEvent("ClusterGetStatus").detail("Duration", now()-tStart)
+.detail("StatusSize",statusObj.getLength()) .detail("StatusNameTotal",statusObj.getNameTotal());
+
 		return StatusReply(statusObj);
 	} catch( Error&e ) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
 	}
+}
+
+TEST_CASE("status/json/jsonstring") {
+	JsonString	jsonObj, testObj;
+	JsonStringArray jsonArray;
+
+	JsonString	jsonString1;
+	jsonString1["_valid"] = false;
+	jsonString1["error"] = "configurationMissing";
+
+	JsonString	jsonString2("_valid", false);
+	jsonString2["error"] = "configurationMissing";
+
+	JsonString	jsonString3("error", "configurationMissing");
+	jsonString3["_valid"] = false;
+
+	JsonString	jsonString4("_valid", false);
+	jsonString4.append("error", "configurationMissing");
+
+	std::cout << "Json: " << jsonString1.getJson() << std::endl;
+
+	// Validate equality
+	ASSERT(jsonString1 == jsonString2);
+	ASSERT(jsonString1 != jsonString3); // wrong order
+	ASSERT(jsonString1.equals(jsonString4));
+	ASSERT(jsonString4.equals(jsonString1));
+
+	// Check presence of top level keys
+	ASSERT(jsonString1.isPresent("_valid"));
+	ASSERT(jsonString1.isPresent("error"));
+	ASSERT(!jsonString1.isPresent("configurationMissing"));
+	ASSERT(jsonString1.getNameTotal() == 2);
+
+	// Check empty
+	ASSERT(!jsonString1.empty());
+	ASSERT(JsonString().empty());
+
+	// Check clear
+	jsonString1.clear();
+	ASSERT(jsonString1.empty());
+
+	// Set object
+	jsonObj.clear();
+	testObj.clear();
+	jsonObj["first"] = "last";
+	jsonObj["count"] = 3;
+	testObj["pi"] = 3.14159;
+	jsonObj["piobj"] = testObj;
+
+	// Check presence of top level keys
+	ASSERT(jsonObj.isPresent("count"));
+	ASSERT(testObj.isPresent("pi"));
+	ASSERT(!jsonObj.isPresent("pi"));
+	ASSERT(jsonObj.getNameTotal() == 3);
+
+	testObj.clear();
+	testObj["val1"] = 7.9;
+	testObj["val2"] = 34;
+	jsonArray.push_back(testObj);
+
+	testObj.clear();
+	testObj["name1"] = "robert";
+	testObj["name2"] = "john";
+	testObj["name3"] = "eric";
+	jsonArray.push_back(testObj);
+	jsonObj.append("name_vals", jsonArray);
+
+	std::cout << "Json (complex): " << jsonObj.getJson() << std::endl;
+
+	jsonObj.clear();
+	jsonObj.append(jsonArray);
+	std::cout << "Json (complex array): " << jsonObj.getJson() << std::endl;
+
+	jsonArray.clear();
+	jsonArray.push_back("nissan");
+	jsonArray.push_back("honda");
+	jsonArray.push_back("bmw");
+	jsonObj.clear();
+	jsonObj.append(jsonArray);
+	std::cout << "Array (simple array #1): " << jsonObj.getJson() << std::endl;
+
+	jsonObj.clear();
+	testObj.clear();
+	jsonArray.clear();
+	testObj.append("nissan");
+	testObj.append("honda");
+	testObj.append("bmw");
+	jsonArray.push_back(testObj);
+	jsonObj.append(jsonArray);
+	std::cout << "Array (simple array #2): " << jsonObj.getJson() << std::endl;
+
+	jsonObj.clear();
+	testObj.clear();
+	jsonObj["name1"] = "robert";
+	jsonObj["name2"] = "john";
+	jsonObj["name3"] = "eric";
+	testObj["val1"] = 7.9;
+	testObj["val2"] = 34;
+	std::cout << "Merge (obj #1): " << jsonObj.getJson() << std::endl;
+	std::cout << "Merge (obj #2): " << testObj.getJson() << std::endl;
+	jsonObj.append(testObj);
+	std::cout << "Merged: " << jsonObj.getJson() << std::endl;
+
+	return Void();
 }
 
 TEST_CASE("status/json/merging") {
