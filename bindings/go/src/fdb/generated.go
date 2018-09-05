@@ -42,6 +42,20 @@ func int64ToBytes(i int64) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// Deprecated
+//
+// Parameter: IP:PORT
+func (o NetworkOptions) SetLocalAddress(param string) error {
+	return o.setOpt(10, []byte(param))
+}
+
+// Deprecated
+//
+// Parameter: path to cluster file
+func (o NetworkOptions) SetClusterFile(param string) error {
+	return o.setOpt(20, []byte(param))
+}
+
 // Enables trace output to a file in a directory of the clients choosing
 //
 // Parameter: path to output directory (or NULL for current working directory)
@@ -85,7 +99,7 @@ func (o NetworkOptions) SetKnob(param string) error {
 	return o.setOpt(40, []byte(param))
 }
 
-// Set the TLS plugin to load. This option, if used, must be set before any other TLS options
+// Deprecated
 //
 // Parameter: file path or linker-resolved name
 func (o NetworkOptions) SetTLSPlugin(param string) error {
@@ -280,6 +294,11 @@ func (o TransactionOptions) SetReadYourWritesDisable() error {
 	return o.setOpt(51, nil)
 }
 
+// Deprecated
+func (o TransactionOptions) SetReadAheadDisable() error {
+	return o.setOpt(52, nil)
+}
+
 // Not yet implemented.
 func (o TransactionOptions) SetDurabilityDatacenter() error {
 	return o.setOpt(110, nil)
@@ -288,6 +307,11 @@ func (o TransactionOptions) SetDurabilityDatacenter() error {
 // Not yet implemented.
 func (o TransactionOptions) SetDurabilityRisky() error {
 	return o.setOpt(120, nil)
+}
+
+// Deprecated
+func (o TransactionOptions) SetDurabilityDevNullIsWebScale() error {
+	return o.setOpt(130, nil)
 }
 
 // Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one. Use is discouraged outside of low-level tools
@@ -431,57 +455,72 @@ const (
 	StreamingModeSerial StreamingMode = 5
 )
 
-// Add performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The integers to be added must be stored in a little-endian representation.  They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to ``param`` and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
+// Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The integers to be added must be stored in a little-endian representation.  They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to ``param`` and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
 func (t Transaction) Add(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 2)
 }
 
-// BitAnd performs a bitwise ``and`` operation.  If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Deprecated
+func (t Transaction) And(key KeyConvertible, param []byte) {
+	t.atomicOp(key.FDBKey(), param, 6)
+}
+
+// Performs a bitwise ``and`` operation.  If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 func (t Transaction) BitAnd(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 6)
 }
 
-// BitOr performs a bitwise ``or`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Deprecated
+func (t Transaction) Or(key KeyConvertible, param []byte) {
+	t.atomicOp(key.FDBKey(), param, 7)
+}
+
+// Performs a bitwise ``or`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 func (t Transaction) BitOr(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 7)
 }
 
-// BitXor performs a bitwise ``xor`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+// Deprecated
+func (t Transaction) Xor(key KeyConvertible, param []byte) {
+	t.atomicOp(key.FDBKey(), param, 8)
+}
+
+// Performs a bitwise ``xor`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 func (t Transaction) BitXor(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 8)
 }
 
-// AppendIfFits appends ``param`` to the end of the existing value already in the database at the given key (or creates the key and sets the value to ``param`` if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.
+// Appends ``param`` to the end of the existing value already in the database at the given key (or creates the key and sets the value to ``param`` if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.
 func (t Transaction) AppendIfFits(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 9)
 }
 
-// Max performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database.
+// Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database.
 func (t Transaction) Max(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 12)
 }
 
-// Min performs a little-endian comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The smaller of the two values is then stored in the database.
+// Performs a little-endian comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The smaller of the two values is then stored in the database.
 func (t Transaction) Min(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 13)
 }
 
-// SetVersionstampedKey transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
+// Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
 func (t Transaction) SetVersionstampedKey(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 14)
 }
 
-// SetVersionstampedValue transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
+// Transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
 func (t Transaction) SetVersionstampedValue(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 15)
 }
 
-// ByteMin performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the smaller of the two values is then stored in the database.
+// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the smaller of the two values is then stored in the database.
 func (t Transaction) ByteMin(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 16)
 }
 
-// ByteMax performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database.
+// Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database.
 func (t Transaction) ByteMax(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 17)
 }

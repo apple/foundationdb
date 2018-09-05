@@ -53,7 +53,7 @@ description is not currently required but encouraged.
             description="Set internal tuning or debugging knobs"/>
     <Option name="TLS_plugin" code="41"
             paramType="String" paramDescription="file path or linker-resolved name"
-            description="Set the TLS plugin to load. This option, if used, must be set before any other TLS options" />
+            description="Deprecated" />
     <Option name="TLS_cert_bytes" code="42"
             paramType="Bytes" paramDescription="certificates"
             description="Set the certificate chain" />
