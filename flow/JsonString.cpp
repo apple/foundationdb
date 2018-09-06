@@ -8,7 +8,7 @@ std::string format( const char* form, ... );
 
 JsonString::JsonString() : hasKey(false) {
 }
-JsonString::JsonString( const JsonString& jsonString) : _jsonText(jsonString._jsonText), hasKey(false) {
+JsonString::JsonString( const JsonString& jsonString) : _jsonText(jsonString._jsonText), hasKey(jsonString.hasKey) {
 }
 JsonString::JsonString( const JsonStringArray& jsonArray) : hasKey(false) {
 	append(jsonArray);
