@@ -1751,8 +1751,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
 {
-	// since we no longer offer multi-database support, all databases must be named DB
-	state std::string dbName = "DB";
 	state double tStart = timer();
 
 	// Check if master worker is present
