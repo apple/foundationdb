@@ -231,7 +231,7 @@ const std::string& JsonString::getJsonText() const {
 }
 
 size_t JsonString::getLength() const {
-	return _jsonText.length() + ((!empty() && !hasKey) ? 0 : 2);
+	return _jsonText.length() + ((!empty() && !hasKey) ? 0 : 4);
 }
 
 std::string JsonString::getJson() const {
@@ -256,17 +256,6 @@ void JsonString::setJson(const std::string& jsonText) {
 JsonString&	JsonString::swapJsonText(std::string& jsonText) {
 	_jsonText.swap(jsonText);
 	return *this;
-}
-
-JsonStringSetter& JsonString::operator[]( const std::string& name ) {
-	JsonStringSetter* stringSetter = new JsonStringSetter(*this, name);
-	return *stringSetter;
-}
-
-JsonStringSetter& JsonString::operator[]( const char* name ) {
-	std::string	textName(name);
-	JsonStringSetter* stringSetter = new JsonStringSetter(*this, textName);
-	return *stringSetter;
 }
 
 int JsonString::compare( const JsonString& jsonString ) const {

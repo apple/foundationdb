@@ -58,8 +58,8 @@ class JsonString {
 		JsonString& append( bool value );
 		JsonString& append( const JsonString& value );
 
-		JsonStringSetter& operator[]( const std::string& name );
-		JsonStringSetter& operator[]( const char* name );
+		JsonStringSetter operator[]( const std::string& name );
+		JsonStringSetter operator[]( const char* name );
 
 		int compare( const JsonString& jsonString ) const;
 		bool equals( const JsonString& jsonString ) const;
@@ -136,5 +136,13 @@ class JsonStringSetter {
 		JsonString& _jsonString;
 		std::string _name;
 };
+
+inline JsonStringSetter JsonString::operator[]( const std::string& name ) {
+	return JsonStringSetter(*this, name);
+}
+
+inline JsonStringSetter JsonString::operator[]( const char* name ) {
+	return JsonStringSetter(*this, name);
+}
 
 #endif
