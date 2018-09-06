@@ -539,7 +539,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		DUMPTOKEN(recruited.masterProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
-		DUMPTOKEN(recruited.debugQuery);
 		DUMPTOKEN(recruited.debugPing);
 		DUMPTOKEN(recruited.coordinationPing);
 		DUMPTOKEN(recruited.waitFailure);
@@ -805,7 +804,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
-			when( DebugQueryRequest req = waitNext(interf.debugQuery.getFuture()) ) { }
 			when( CoordinationPingMessage m = waitNext( interf.coordinationPing.getFuture() ) ) {
 				TraceEvent("CoordinationPing", interf.id()).detail("CCID", m.clusterControllerId).detail("TimeStep", m.timeStep);
 			}
