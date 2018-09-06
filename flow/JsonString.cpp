@@ -6,60 +6,56 @@
 
 std::string format( const char* form, ... );
 
-JsonString::JsonString() : _jsonText(), _keyNames() {
+JsonString::JsonString() : hasKey(false) {
 }
-JsonString::JsonString( const JsonString& jsonString) : _jsonText(jsonString._jsonText), _keyNames(jsonString._keyNames) {
+JsonString::JsonString( const JsonString& jsonString) : _jsonText(jsonString._jsonText), hasKey(jsonString.hasKey) {
 }
-JsonString::JsonString( const JsonStringArray& jsonArray) : _jsonText(), _keyNames() {
+JsonString::JsonString( const JsonStringArray& jsonArray) : hasKey(false) {
 	append(jsonArray);
 }
 
-JsonString::JsonString( const std::string& value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& value ) : hasKey(false) {
 	append(value);
 }
-JsonString::JsonString( const char* value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const char* value ) : hasKey(false) {
 	append(value);
 }
 
-JsonString::JsonString( const std::string& name, const std::string& value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, const std::string& value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, const char* value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, const char* value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, double value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, double value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, long int value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, long int value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, long unsigned int value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, long unsigned int value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, long long int value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, long long int value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, long long unsigned int value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, long long unsigned int value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, int value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, int value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, unsigned value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, unsigned value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, bool value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, bool value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, const JsonString& value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, const JsonString& value ) : hasKey(false) {
 	append(name, value);
 }
-JsonString::JsonString( const std::string& name, const JsonStringArray& value ) : _jsonText(), _keyNames() {
+JsonString::JsonString( const std::string& name, const JsonStringArray& value ) : hasKey(false) {
 	append(name, value);
-}
-
-bool	JsonString::isPresent(const std::string& name) const {
-	return (_keyNames.find(name) != _keyNames.end());
 }
 
 JsonString JsonString::makeMessage(const char *name, const char *description) {
@@ -69,15 +65,8 @@ JsonString JsonString::makeMessage(const char *name, const char *description) {
 	return out;
 }
 
-void JsonString::hashName( const std::string& name) {
-	if (isPresent(name)) {
-		TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "JsonError").detail("KeyPresent", name).backtrace();
-	}
-	_keyNames.insert(name);
-}
-
 JsonString& JsonString::appendImpl( const std::string& name, const std::string& value, bool quote ) {
-	hashName(name);
+	hasKey = true;
 	_jsonText += (_jsonText.empty() ? "\"" : ",\n  \"") + name + (quote ? "\": \"" : "\": ") + value;
 	if (quote)
 		_jsonText += "\"";
@@ -154,12 +143,12 @@ JsonString& JsonString::append( const std::string& name, bool value ) {
 	return appendImpl(name, stringify(value), false);
 }
 JsonString& JsonString::append( const std::string& name, const JsonString& value ) {
-	hashName(name);
+	hasKey = true;
 	_jsonText += (_jsonText.empty() ? "\"" : ",\n  \"") + name + "\": { " + value._jsonText + " }";
 	return *this;
 }
 JsonString& JsonString::append( const std::string& name, const JsonStringArray& values ) {
-	hashName(name);
+	hasKey = true;
 	_jsonText += (_jsonText.empty() ? "\"" : ",\n  \"") + name + "\": [ ";
 	size_t counter = 0;
 	for (auto const& value : values) {
@@ -208,7 +197,9 @@ JsonString& JsonString::append( const JsonString& value ) {
 		if (!_jsonText.empty())
 			_jsonText += ",\n  ";
 		_jsonText += value._jsonText;
-		_keyNames.insert(value._keyNames.begin(), value._keyNames.end());
+		if(value.hasKey) {
+			hasKey = true;
+		}
 	}
 	return *this;
 }
@@ -226,34 +217,31 @@ JsonString& JsonString::append( const JsonStringArray& values ) {
 }
 
 JsonString& JsonString::clear() {
-	_keyNames.clear();
 	_jsonText.clear();
+	hasKey = false;
 	return *this;
 }
 
-bool	JsonString::empty() const {
+bool JsonString::empty() const {
 	return _jsonText.empty();
 }
 
-const std::string&	JsonString::getJsonText() const {
+const std::string& JsonString::getJsonText() const {
 	return _jsonText;
 }
 
-size_t	JsonString::getLength() const {
-	return _jsonText.length() + ((!empty() && _keyNames.empty()) ? 0 : 2);
-}
-size_t	JsonString::getNameTotal() const {
-	return _keyNames.size();
+size_t JsonString::getLength() const {
+	return _jsonText.length() + ((!empty() && !hasKey) ? 0 : 2);
 }
 
-std::string	JsonString::getJson() const {
+std::string JsonString::getJson() const {
 	// If not empty with no names (only values), don't add brackets because prob in an array
-	return (!empty() && _keyNames.empty()) ? _jsonText : ("{ " + _jsonText + " }");
+	return (!empty() && !hasKey) ? _jsonText : ("{ " + _jsonText + " }");
 }
 
 JsonString& JsonString::copy( const JsonString& jsonString ) {
 	_jsonText = jsonString._jsonText;
-	_keyNames = jsonString._keyNames;
+	hasKey = jsonString.hasKey;
 	return *this;
 }
 
@@ -262,12 +250,10 @@ JsonString& JsonString::operator=( const JsonString& jsonString ) {
 }
 
 //TODO: Populate key names member
-void	JsonString::setJson(const std::string& jsonText) {
-	_keyNames.clear();
+void JsonString::setJson(const std::string& jsonText) {
 	_jsonText = jsonText;
 }
 JsonString&	JsonString::swapJsonText(std::string& jsonText) {
-	_keyNames.clear();
 	_jsonText.swap(jsonText);
 	return *this;
 }

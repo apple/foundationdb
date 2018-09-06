@@ -3,7 +3,6 @@
 #define JSONSTRING_H
 
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 class JsonString;
@@ -59,7 +58,6 @@ class JsonString {
 		JsonString& append( bool value );
 		JsonString& append( const JsonString& value );
 
-
 		JsonStringSetter& operator[]( const std::string& name );
 		JsonStringSetter& operator[]( const char* name );
 
@@ -71,41 +69,36 @@ class JsonString {
 		JsonString& copy( const JsonString& jsonString );
 		JsonString& operator=( const JsonString& jsonString );
 
-		std::string	getJson() const;
-		void	setJson(const std::string& jsonText);
-		JsonString&	swapJsonText(std::string& jsonText);
+		std::string getJson() const;
+		void setJson(const std::string& jsonText);
+		JsonString& swapJsonText(std::string& jsonText);
 
-		size_t	getLength() const;
-		size_t	getNameTotal() const;
+		size_t getLength() const;
 
 		JsonString& clear();
-		bool	empty() const;
-
-		bool	isPresent(const std::string& name) const;
-
+		bool empty() const;
 		static JsonString makeMessage(const char *name, const char *description);
 
 	protected:
-		void hashName( const std::string& name);
 		JsonString& appendImpl( const std::string& name, const std::string& value, bool quote);
 		JsonString& appendImpl( const std::string& value, bool quote);
 
-		static std::string	stringify(const char* value);
-		static std::string	stringify(double value);
-		static std::string	stringify(long int value);
-		static std::string	stringify(long unsigned int value);
-		static std::string	stringify(long long int value);
-		static std::string	stringify(long long unsigned int value);
-		static std::string	stringify(int value);
-		static std::string	stringify(unsigned value);
-		static std::string	stringify(bool value);
+		static std::string stringify(const char* value);
+		static std::string stringify(double value);
+		static std::string stringify(long int value);
+		static std::string stringify(long unsigned int value);
+		static std::string stringify(long long int value);
+		static std::string stringify(long long unsigned int value);
+		static std::string stringify(int value);
+		static std::string stringify(unsigned value);
+		static std::string stringify(bool value);
 
 	protected:
-		std::string		_jsonText;
-		std::unordered_set<std::string>	_keyNames;
+		std::string _jsonText;
+		bool hasKey;
 
 		// Uneditted text
-		const std::string&	getJsonText() const;
+		const std::string& getJsonText() const;
 };
 
 // Make protected because no virtual destructor
@@ -140,8 +133,8 @@ class JsonStringSetter {
 	}
 
 	protected:
-		JsonString&		_jsonString;
-		std::string		_name;
+		JsonString& _jsonString;
+		std::string _name;
 };
 
 #endif
