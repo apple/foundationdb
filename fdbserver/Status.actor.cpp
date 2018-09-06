@@ -310,7 +310,7 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 			std::string machineId = event.getValue("MachineID");
 
 			// If this machine ID does not already exist in the machineMap, add it
-			if (!machineMap.isPresent(machineId)) {
+			if (machineJsonMap.count(machineId) == 0) {
 				statusObj["machine_id"] = machineId;
 
 				if (dcIds.count(it->first)){
@@ -587,14 +587,12 @@ ACTOR static Future<JsonString> processStatusFetcher(
 
 	state std::vector<std::pair<TLogInterface, TraceEventFields>>::iterator log;
 	state Version maxTLogVersion = 0;
-	state Version tLogVersion = 0;
 
 	// Get largest TLog version
 	for(log = tLogs.begin(); log != tLogs.end(); ++log) {
+		Version tLogVersion = 0;
 		JsonString const& roleStatus = roles.addRole( "log", log->first, log->second, &tLogVersion );
-		if (roleStatus.isPresent("data_version")) {
-			maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
-		}
+		maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
 		wait(yield());
 	}
 
@@ -880,8 +878,9 @@ ACTOR static Future<JsonString> recoveryStateStatusFetcher(std::pair<WorkerInter
 	}
 
 	// If recovery status name is not know, status is incomplete
-	if (!message.isPresent("name"))
+	if (message.empty()) {
 		incomplete_reasons->insert("Recovery Status unavailable.");
+	}
 
 	return message;
 }
@@ -951,10 +950,13 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 	}
 }
 
-ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, const char* prefix, const char* description, JsonString *probeObj, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, const char* prefix, const char* description, JsonString *probeObj, JsonStringArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable = nullptr) {
 	choose {
 		when(ErrorOr<double> result = wait(errorOr(probe))) {
 			if(result.isError()) {
+				if(isAvailable != nullptr) {
+					*isAvailable = false;
+				}
 				incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
 			}
 			else {
@@ -962,6 +964,9 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 			}
 		}
 		when(wait(delay(timeoutSeconds))) {
+			if(isAvailable != nullptr) {
+				*isAvailable = false;
+			}
 			messages->push_back(JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(), format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
 	}
@@ -969,7 +974,7 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 	return Void();
 }
 
-ACTOR static Future<JsonString> latencyProbeFetcher(Database cx, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<JsonString> latencyProbeFetcher(Database cx, JsonStringArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable) {
 	state Transaction trImmediate(cx);
 	state Transaction trDefault(cx);
 	state Transaction trBatch(cx);
@@ -988,11 +993,11 @@ ACTOR static Future<JsonString> latencyProbeFetcher(Database cx, JsonStringArray
 		int timeoutSeconds = 5;
 
 		std::vector<Future<Void>> probes;
-		probes.push_back(doProbe(immediateGrvProbe, timeoutSeconds, "immediate_priority_transaction_start", "start immediate priority transaction", &statusObj, messages, incomplete_reasons));
+		probes.push_back(doProbe(immediateGrvProbe, timeoutSeconds, "immediate_priority_transaction_start", "start immediate priority transaction", &statusObj, messages, incomplete_reasons, isAvailable));
 		probes.push_back(doProbe(defaultGrvProbe, timeoutSeconds, "transaction_start", "start default priority transaction", &statusObj, messages, incomplete_reasons));
 		probes.push_back(doProbe(batchGrvProbe, timeoutSeconds, "batch_priority_transaction_start", "start batch priority transaction", &statusObj, messages, incomplete_reasons));
-		probes.push_back(doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons));
-		probes.push_back(doProbe(commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons));
+		probes.push_back(doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons, isAvailable));
+		probes.push_back(doProbe(commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons, isAvailable));
 
 		wait(waitForAll(probes));
 	}
@@ -1688,7 +1693,7 @@ ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messag
 
 	json.cleanOps();
 	JsonString statusObj = result.toJsonString();
-	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getLength()).detail("StatusNameTotal",statusObj.getNameTotal());
+	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getLength());
 	return statusObj;
 }
 
@@ -1746,7 +1751,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
 {
-	state double tStart = now();
+	state double tStart = timer();
 
 	// Check if master worker is present
 	state JsonStringArray messages;
@@ -1828,7 +1833,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<bool> fullReplication;
 
-		if(!(recoveryStateStatus.isPresent("name") && statusCode == RecoveryStatus::configuration_missing)) {
+		if(statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>,Optional<bool>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
 			configuration = loadResults.first;
 			fullReplication = loadResults.second;
@@ -1842,9 +1847,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (configuration.present()){
 			// Do the latency probe by itself to avoid interference from other status activities
-			JsonString latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons));
+			state bool isAvailable = true;
+			JsonString latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
 
-			statusObj["database_available"] = latencyProbeResults.isPresent("immediate_priority_transaction_start_seconds") && latencyProbeResults.isPresent("read_seconds") && latencyProbeResults.isPresent("commit_seconds");
+			statusObj["database_available"] = isAvailable;
 			if (!latencyProbeResults.empty()) {
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
@@ -1970,8 +1976,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}
 
-		TraceEvent("ClusterGetStatus").detail("Duration", now()-tStart)
-.detail("StatusSize",statusObj.getLength()) .detail("StatusNameTotal",statusObj.getNameTotal());
+		TraceEvent("ClusterGetStatus").detail("Duration", timer()-tStart).detail("StatusSize",statusObj.getLength());
 
 		return StatusReply(statusObj);
 	} catch( Error&e ) {
@@ -2005,12 +2010,6 @@ TEST_CASE("status/json/jsonstring") {
 	ASSERT(jsonString1.equals(jsonString4));
 	ASSERT(jsonString4.equals(jsonString1));
 
-	// Check presence of top level keys
-	ASSERT(jsonString1.isPresent("_valid"));
-	ASSERT(jsonString1.isPresent("error"));
-	ASSERT(!jsonString1.isPresent("configurationMissing"));
-	ASSERT(jsonString1.getNameTotal() == 2);
-
 	// Check empty
 	ASSERT(!jsonString1.empty());
 	ASSERT(JsonString().empty());
@@ -2026,12 +2025,6 @@ TEST_CASE("status/json/jsonstring") {
 	jsonObj["count"] = 3;
 	testObj["pi"] = 3.14159;
 	jsonObj["piobj"] = testObj;
-
-	// Check presence of top level keys
-	ASSERT(jsonObj.isPresent("count"));
-	ASSERT(testObj.isPresent("pi"));
-	ASSERT(!jsonObj.isPresent("pi"));
-	ASSERT(jsonObj.getNameTotal() == 3);
 
 	testObj.clear();
 	testObj["val1"] = 7.9;
