@@ -19,24 +19,17 @@ bool shouldEscape(char c) {
 }
 
 void escape( const std::string& in, std::string& out ) {
-	bool needsEscaping = false;
-	for (int i = 0; i<in.size(); i++) {
+	int beginCopy = 0;
+	for (int i = 0; i < in.size(); i++) {
 		if (shouldEscape(in[i])) {
-			needsEscaping = true;
-			break;
-		}
-	}
-
-	if(!needsEscaping) {
-		out += in;
-		return;
-	}
-
-	for (int i = 0; i<in.size(); i++) {
-		if (shouldEscape(in[i])) {
+			out.append(in, beginCopy, i - beginCopy);
+			beginCopy = i + 1;
 			out += '\\';
+			out += in[i];
 		}
-		out += in[i];
+	}
+	if(beginCopy < in.size()) {
+		out.append(in, beginCopy, in.size() - beginCopy);
 	}
 }
 
@@ -124,7 +117,7 @@ JsonString& JsonString::appendImpl( const std::string& name, const std::string& 
 	return *this;
 }
 JsonString& JsonString::appendImpl( const std::string& value, bool quote ) {
-	_jsonText.reserve(_jsonText.size() + (quote ? (2*value.size() + 3) : value.size()));
+	_jsonText.reserve(_jsonText.size() + (quote ? (2*value.size() + 3) : (value.size() + 1)));
 	if(!_jsonText.empty()) {
 		_jsonText += ',';
 	}
