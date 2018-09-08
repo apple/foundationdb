@@ -27,7 +27,6 @@
 #include "Status.h"
 #include "ClientDBInfo.h"
 #include "ClientWorkerInterface.h"
-#include "JsonString.h"
 
 struct ClusterInterface {
 	RequestStream< struct OpenDatabaseRequest > openDatabase;
@@ -193,7 +192,7 @@ struct StatusReply {
 
 	StatusReply() {}
 	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
-	explicit StatusReply(JsonString obj) : statusStr(obj.getJson()) {}
+	explicit StatusReply(std::string &&text) : statusStr(text) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

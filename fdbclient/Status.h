@@ -23,6 +23,11 @@
 
 #include "../fdbrpc/JSONDoc.h"
 
+// Reads the entire string s as a JSON value
+// Throws if no value can be parsed or if s contains data after the first JSON value
+// Trailing whitespace in s is allowed
+json_spirit::mValue readJSONStrictly(const std::string s);
+
 struct StatusObject : json_spirit::mObject {
 	typedef json_spirit::mObject Map;
 	typedef json_spirit::mArray Array;

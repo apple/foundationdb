@@ -9,141 +9,190 @@
 #include "fdbrpc/JSONDoc.h"
 
 class JsonString;
-class JsonStringArray;
-class JsonStringSetter;
+template <typename T> class JsonStringSetter;
 
+// Class for building JSON string values.  
+// Default value is 'empty' which is different from JSON null
 class JsonString {
-	public:
-		JsonString();
-		JsonString( const JsonString& jsonString);
-		JsonString( JsonString&& jsonString) = default;
-		explicit JsonString( const JsonStringArray& jsonArray);
-		explicit JsonString( const char* value ); // Used to define values (used in an Array)
-		explicit JsonString( const std::string& value ); // Used to define values (used in an Array)
-		explicit JsonString( const json_spirit::mObject& value );
+public:
+	enum EType { EMPTY, NULLVALUE, SCALAR, OBJECT, ARRAY, FINAL, DESTROYED };
+	JsonString(EType type = EType::EMPTY) : type(type)
+	{
+		if(type == EType::NULLVALUE) {
+			write("null");
+		}
+		else if(type == EType::ARRAY) {
+			write("[");
+		}
+		else if(type == EType::OBJECT) {
+			write("{");
+		}
+	}
 
-		JsonString( const std::string& name, const char* value );
-		JsonString( const std::string& name, const std::string& value );
-		JsonString( const std::string& name, double value );
-		JsonString( const std::string& name, long int value );
-		JsonString( const std::string& name, long unsigned int value );
-		JsonString( const std::string& name, long long int value );
-		JsonString( const std::string& name, long long unsigned int value );
-		JsonString( const std::string& name, int value );
-		JsonString( const std::string& name, unsigned value );
-		JsonString( const std::string& name, bool value );
-		JsonString( const std::string& name, const JsonString& value );
-		JsonString( const std::string& name, const JsonStringArray& value );
+	int empty() const {
+		return type == EType::EMPTY || (jsonText.size() == 1 && (type == EType::ARRAY || type == EType::OBJECT));
+	}
+	
+	void clear() {
+		type = EMPTY;
+		jsonText.clear();
+	}
 
-		JsonString& append( const std::string& name, const char* value );
-		JsonString& append( const std::string& name, const std::string& value );
-		JsonString& append( const std::string& name, double value );
-		JsonString& append( const std::string& name, long int value );
-		JsonString& append( const std::string& name, long unsigned int value );
-		JsonString& append( const std::string& name, long long int value );
-		JsonString& append( const std::string& name, long long unsigned int value );
-		JsonString& append( const std::string& name, int value );
-		JsonString& append( const std::string& name, unsigned value );
-		JsonString& append( const std::string& name, bool value );
-		JsonString& append( const std::string& name, const JsonString& value );
-		JsonString& append( const std::string& name, const JsonStringArray& value );
+	// Finish the JSON value - close array or object if still open and set final state in either case
+	// Scalar and null types stay as they are
+	void finalize() {
+		ASSERT(type != EType::DESTROYED);
+		if(type != EType::FINAL) {
+			if(type == EType::ARRAY) {
+				write("]");
+				type = EType::FINAL;
+			}
+			else if(type == EType::OBJECT) {
+				write("}");
+				type = EType::FINAL;
+			}
+		}
+	}
 
-		JsonString& append( const std::string& value );
-		JsonString& append( const char* value );
-		JsonString& append( const JsonStringArray& value );
+	int getFinalLength() {
+		finalize();
+		return jsonText.size();
+	}
 
-		JsonString& append( double value );
-		JsonString& append( long int value );
-		JsonString& append( long unsigned int value );
-		JsonString& append( long long int value );
-		JsonString& append( long long unsigned int value );
-		JsonString& append( int value );
-		JsonString& append( unsigned value );
-		JsonString& append( bool value );
-		JsonString& append( const JsonString& value );
+	std::string getJson() {
+		finalize();
+		return jsonText;
+	}
 
-		JsonStringSetter operator[]( const std::string& name );
-		JsonStringSetter operator[]( const char* name );
+	// Can add value to an array or turn an empty into a scalar
+	template<typename VT> inline JsonString & append(VT &&val) {
+		if(type == EType::ARRAY) {
+			if(jsonText.size() != 1)
+				write(",");
+		}
+		else {
+			ASSERT(type == EType::EMPTY);
+			type = EType::SCALAR;
+		}
 
-		int compare( const JsonString& jsonString ) const;
-		bool equals( const JsonString& jsonString ) const;
-		bool operator==( const JsonString& jsonString ) const { return equals(jsonString); }
-		bool operator!=( const JsonString& jsonString ) const { return !equals(jsonString); }
-
-		JsonString& copy( const JsonString& jsonString );
-		JsonString& operator=( const JsonString& jsonString );
-
-		std::string getJson() const;
-		size_t getLength() const;
-
-		JsonString& clear();
-		bool empty() const;
-		static JsonString makeMessage(const char *name, const char *description);
-
-	protected:
-		JsonString& appendImpl( const std::string& name, const std::string& value, bool quote);
-		JsonString& appendImpl( const std::string& value, bool quote);
-
-		static std::string stringify(const char* value);
-		static std::string stringify(double value);
-		static std::string stringify(long int value);
-		static std::string stringify(long unsigned int value);
-		static std::string stringify(long long int value);
-		static std::string stringify(long long unsigned int value);
-		static std::string stringify(int value);
-		static std::string stringify(unsigned value);
-		static std::string stringify(bool value);
-
-	protected:
-		std::string _jsonText;
-		bool hasKey;
-
-		// Uneditted text
-		const std::string& getJsonText() const;
-};
-
-// Make protected because no virtual destructor
-class JsonStringArray : protected std::vector<JsonString>
-{
-	typedef JsonString T;
-	typedef std::vector<JsonString> vector;
-	public:
-		using vector::push_back;
-		using vector::operator[];
-		using vector::begin;
-		using vector::end;
-		using vector::size;
-		using vector::empty;
-		using vector::clear;
-	public:
-		JsonStringArray();
-		JsonStringArray( const JsonStringArray& jsonStringArray);
-		JsonStringArray( JsonStringArray&& jsonStringArray) = default;
-		virtual ~JsonStringArray();
-};
-
-class JsonStringSetter {
-	public:
-
-	JsonStringSetter( JsonString& jsonString, const std::string& name );
-
-	template <class valClass>
-	JsonStringSetter& operator=( const valClass& value ) {
-		_jsonString.append(_name, value);
+		writeValue(val);
 		return *this;
 	}
 
-	protected:
-		JsonString& _jsonString;
-		std::string _name;
+	template<typename KT, typename VT> inline JsonString & append(KT &&name, VT &&val) {
+		if(type == EType::EMPTY) {
+			type = EType::OBJECT;
+			write("{");
+		}
+		else {
+			ASSERT(type == EType::OBJECT);
+			if(jsonText.size() != 1)
+				write(",");
+		}
+
+		write("\"");
+		write(name);
+		write("\":");
+		// The easy alternative to this is using format() which also creates a temporary string, so let's 
+		// let json_spirit handle stringification of native types for now.
+		writeValue(val);
+		return *this;
+	}
+
+	template<typename T> inline JsonStringSetter<T> operator[](T &&name);
+
+	static JsonString makeMessage(const char *name, const char *description);
+
+protected:
+	EType type;
+	std::string jsonText;
+
+	template<typename T> inline void write(T &&s) {
+		jsonText.append(std::forward<T>(s));
+	}
+
+	template<typename T> inline void writeValue(T &&val) {
+		write(json_spirit::write_string(json_spirit::mValue(val)));
+	}
 };
 
-inline JsonStringSetter JsonString::operator[]( const std::string& name ) {
-	return JsonStringSetter(*this, name);
+// A JsonString is already a proper JSON string (or empty)
+template<> inline void JsonString::writeValue(const JsonString &val) {
+	// Convert empty to null because in this context we must write something.
+	if(val.type == EType::EMPTY) {
+		write("null");
+	}
+	else {
+		write(const_cast<JsonString &>(val).getJson());
+	}
 }
 
-inline JsonStringSetter JsonString::operator[]( const char* name ) {
-	return JsonStringSetter(*this, name);
+template<> inline void JsonString::writeValue(JsonString &val) {
+	writeValue<const JsonString &>(val);
+}
+
+// "Deep" append of mObject based on type of this
+// Add kv pairs individually for empty or object, add as a closed object for array
+template<> inline JsonString & JsonString::append(const json_spirit::mObject &obj) {
+	if(type == EType::EMPTY || type == EType::OBJECT) {
+		for(auto &kv : obj) {
+			append(kv.first, kv.second);
+		}
+	}
+	else {
+		ASSERT(type == EType::ARRAY);
+		append(json_spirit::mValue(obj));
+	}
+	return *this;
+}
+
+// Starts as an Array type and adds push_back interface to appear array-like for writing
+class JsonStringArray : protected JsonString {
+public:
+	JsonStringArray() : JsonString(EType::ARRAY) {}
+
+	template<typename VT> void push_back(VT &&o) {
+		append(std::forward<VT>(o));
+		++count;
+	}
+
+	// Clear but maintain Array-ness
+	void clear() {
+		clear();
+		type = EType::ARRAY;
+	}
+
+	int size() const {
+		return count;
+	}
+
+protected:
+	int count;
+};
+
+// A JsonString is already a proper JSON string (or empty)
+template<> inline void JsonString::writeValue(JsonStringArray &val) {
+	writeValue((JsonString &)val);
+}
+
+// Template is the key name, accepted as an r-value to avoid copying if it's a string
+template<typename KT>
+class JsonStringSetter {
+public:
+	JsonStringSetter( JsonString& dest, KT &&name) : dest(dest), name(std::forward<KT>(name)) {}
+
+	template <class VT> inline JsonStringSetter& operator=(VT &&value) {
+		dest.append(name, std::forward<VT>(value));
+		return *this;
+	}
+
+protected:
+	JsonString& dest;
+	KT name;
+};
+
+template<typename T> inline JsonStringSetter<T> JsonString::operator[](T &&name) {
+	return JsonStringSetter<T>(*this, std::forward<T>(name));
 }
 
 #endif

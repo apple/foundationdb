@@ -32,6 +32,23 @@
 #include "flow/UnitTest.h"
 #include "QuietDatabase.h"
 #include "RecoveryState.h"
+#include "fdbclient/JsonString.h"
+
+json_spirit::mValue readJSONStrictly(const std::string s) {
+	json_spirit::mValue val;
+	std::string::const_iterator i = s.begin();
+	if(!json_spirit::read_range(i, s.end(), val))
+		throw json_malformed();
+
+	// Allow trailing whitespace
+	while(i != s.end()) {
+		if(!isspace(*i))
+			throw json_eof_expected();
+		++i;
+	}
+
+	return val;
+}
 
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
@@ -233,7 +250,7 @@ static JsonString getLocalityInfo(const LocalityData& locality) {
 			localityObj[it->first.toString()] = it->second.get().toString();
 		}
 		else {
-			localityObj[it->first.toString()] = JsonString();
+			localityObj[it->first.toString()] = JsonString(JsonString::NULLVALUE);
 		}
 	}
 
@@ -1075,7 +1092,7 @@ static JsonString configurationFetcher(Optional<DatabaseConfiguration> conf, Ser
 	try {
 		if(conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
-			statusObj = JsonString( configuration.toJSON() );
+			statusObj.append(configuration.toJSON());
 
 			JsonStringArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
@@ -1623,7 +1640,7 @@ static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issue
 			JsonString message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonStringArray addresses;
 			for(auto addr : i.second) {
-				addresses.push_back(JsonString(addr));
+				addresses.push_back(addr);
 			}
 
 			message["addresses"] = addresses;
@@ -1692,8 +1709,9 @@ ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messag
 	}
 
 	json.cleanOps();
-	JsonString statusObj = JsonString( result );
-	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getLength());
+	JsonString statusObj;
+	statusObj.append(result);
+	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getFinalLength());
 	return statusObj;
 }
 
@@ -1800,7 +1818,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonString message = JsonString::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
 			JsonStringArray unreachableProcs;
 			for (auto m : mergeUnreachable){
-				unreachableProcs.push_back(JsonString("address", m));
+				unreachableProcs.push_back(JsonString().append("address", m));
 			}
 			message["unreachable_processes"] = unreachableProcs;
 			messages.push_back(message);
@@ -1931,9 +1949,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
-			JsonString	jsonString("_valid", false);
-			jsonString.append("_error", "configurationMissing");
-			statusObj["layers"] = jsonString;
+			JsonString layers;
+			layers.append("_valid", false);
+			layers.append("_error", "configurationMissing");
+			statusObj["layers"] = layers;
 		}
 
 		JsonString processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
@@ -1942,7 +1961,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonStringArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
-			incompatibleConnectionsArray.push_back(JsonString(it.toString()));
+			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
@@ -1965,7 +1984,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
 			JsonStringArray reasons;
 			for (auto i : status_incomplete_reasons) {
-				reasons.push_back(JsonString("description", i));
+				reasons.push_back(JsonString().append("description", i));
 			}
 			incomplete_message["reasons"] = reasons;
 			messages.push_back(incomplete_message);
@@ -1978,9 +1997,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}
 
-		TraceEvent("ClusterGetStatus").detail("Duration", timer()-tStart).detail("StatusSize",statusObj.getLength());
+		TraceEvent("ClusterGetStatus").detail("Duration", timer()-tStart).detail("StatusSize",statusObj.getFinalLength());
 
-		return StatusReply(statusObj);
+		return StatusReply(statusObj.getJson());
 	} catch( Error&e ) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
@@ -1988,37 +2007,39 @@ ACTOR Future<StatusReply> clusterGetStatus(
 }
 
 TEST_CASE("status/json/jsonstring") {
-	JsonString	jsonObj, testObj;
+	JsonString jsonObj, testObj;
 	JsonStringArray jsonArray;
 
-	JsonString	jsonString1;
+	JsonString jsonString1;
 	jsonString1["_valid"] = false;
 	jsonString1["error"] = "configurationMissing";
 
-	JsonString	jsonString2("_valid", false);
+	JsonString jsonString2;
+	jsonString2.append("_valid", false);
 	jsonString2["error"] = "configurationMissing";
 
-	JsonString	jsonString3("error", "configurationMissing");
+	JsonString jsonString3;
+	jsonString3.append("error", "configurationMissing");
 	jsonString3["_valid"] = false;
 
-	JsonString	jsonString4("_valid", false);
+	JsonString jsonString4;
+	jsonString4.append("_valid", false);
 	jsonString4.append("error", "configurationMissing");
 
 	std::cout << "Json: " << jsonString1.getJson() << std::endl;
 
 	// Validate equality
-	ASSERT(jsonString1 == jsonString2);
-	ASSERT(jsonString1 != jsonString3); // wrong order
-	ASSERT(jsonString1.equals(jsonString4));
-	ASSERT(jsonString4.equals(jsonString1));
+	ASSERT(jsonString1.getJson() == jsonString2.getJson());
+	ASSERT(jsonString1.getJson() != jsonString3.getJson()); // wrong order
+	ASSERT(jsonString1.getJson() == jsonString4.getJson());
 
 	// Check empty
-	ASSERT(!jsonString1.empty());
-	ASSERT(JsonString().empty());
+	ASSERT(!jsonString1.getJson().empty());
+	ASSERT(JsonString().getJson().empty());
 
 	// Check clear
 	jsonString1.clear();
-	ASSERT(jsonString1.empty());
+	ASSERT(jsonString1.getJson().empty());
 
 	// Set object
 	jsonObj.clear();
@@ -2047,9 +2068,9 @@ TEST_CASE("status/json/jsonstring") {
 	std::cout << "Json (complex array): " << jsonObj.getJson() << std::endl;
 
 	jsonArray.clear();
-	jsonArray.push_back(JsonString("nissan"));
-	jsonArray.push_back(JsonString("honda"));
-	jsonArray.push_back(JsonString("bmw"));
+	jsonArray.push_back("nissan");
+	jsonArray.push_back("honda");
+	jsonArray.push_back("bmw");
 	jsonObj.clear();
 	jsonObj.append(jsonArray);
 	std::cout << "Array (simple array #1): " << jsonObj.getJson() << std::endl;
