@@ -197,8 +197,8 @@ class StatusCounter {
 			return *this;
 		}
 
-		JsonString	getStatus() const {
-			JsonString statusObject;
+		JsonBuilderObject getStatus() const {
+			JsonBuilderObject statusObject;
 			statusObject["hz"] = _hz;
 			statusObject["roughness"] = _roughness;
 			statusObject["counter"] = _counter;
@@ -242,23 +242,23 @@ static int64_t parseInt64(std::string const& s, bool permissive = false) {
 	throw attribute_not_found();
 }
 
-static JsonString getLocalityInfo(const LocalityData& locality) {
-	JsonString localityObj;
+static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
+	JsonBuilderObject localityObj;
 
 	for(auto it = locality._data.begin(); it != locality._data.end(); it++) {
 		if(it->second.present()) {
 			localityObj[it->first.toString()] = it->second.get().toString();
 		}
 		else {
-			localityObj[it->first.toString()] = JsonString(JsonString::NULLVALUE);
+			localityObj[it->first.toString()] = JsonBuilder();
 		}
 	}
 
 	return localityObj;
 }
 
-static JsonString getError(const TraceEventFields& errorFields) {
-	JsonString statusObj;
+static JsonBuilderObject getError(const TraceEventFields& errorFields) {
+	JsonBuilderObject statusObj;
 	try {
 		if (errorFields.size()) {
 			double time = atof(errorFields.getValue("Time").c_str());
@@ -294,8 +294,8 @@ static JsonString getError(const TraceEventFields& errorFields) {
 	return statusObj;
 }
 
-static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<WorkerInterface, ProcessClass>> workers, Optional<DatabaseConfiguration> configuration, std::set<std::string> *incomplete_reasons) {
-	JsonString machineMap;
+static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<WorkerInterface, ProcessClass>> workers, Optional<DatabaseConfiguration> configuration, std::set<std::string> *incomplete_reasons) {
+	JsonBuilderObject machineMap;
 	double metric;
 	int failed = 0;
 
@@ -304,7 +304,7 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 	std::map<NetworkAddress, LocalityData> locality;
 	std::map<std::string, bool> notExcludedMap;
 	std::map<std::string, int32_t> workerContribMap;
-	std::map<std::string, JsonString> machineJsonMap;
+	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
 	for (auto worker : workers){
 		locality[worker.first.address()] = worker.first.locality;
@@ -318,7 +318,7 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 			continue;
 		}
 
-		JsonString statusObj;  // Represents the status for a machine
+		JsonBuilderObject statusObj;  // Represents the status for a machine
 		const TraceEventFields& event = it->second;
 
 		try {
@@ -340,7 +340,7 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 
 				statusObj["address"] = address;
 
-				JsonString memoryObj;
+				JsonBuilderObject memoryObj;
 
 				metric = parseDouble(event.getValue("TotalMemory"));
 				memoryObj["total_bytes"] = metric;
@@ -353,7 +353,7 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 
 				statusObj["memory"] = memoryObj;
 
-				JsonString cpuObj;
+				JsonBuilderObject cpuObj;
 
 				metric = parseDouble(event.getValue("CPUSeconds"));
 				double cpu_seconds = metric;
@@ -367,20 +367,16 @@ static JsonString machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<W
 
 				statusObj["cpu"] = cpuObj;
 
-				JsonString networkObj;
+				JsonBuilderObject networkObj;
 
 				metric = parseDouble(event.getValue("MbpsSent"));
-				JsonString megabits_sent;
-				megabits_sent["hz"] = metric;
-				networkObj["megabits_sent"] = megabits_sent;
+				networkObj["megabits_sent"] = JsonBuilderObject().setKey("hz", metric);
 
 				metric = parseDouble(event.getValue("MbpsReceived"));
-				JsonString megabits_received;
-				megabits_received["hz"] = metric;
-				networkObj["megabits_received"] = megabits_received;
+				networkObj["megabits_received"] = JsonBuilderObject().setKey("hz", metric);
 
 				metric = parseDouble(event.getValue("RetransSegs"));
-				JsonString retransSegsObj;
+				JsonBuilderObject retransSegsObj;
 				if (elapsed > 0){
 					retransSegsObj["hz"] = metric / elapsed;
 				}
@@ -431,15 +427,15 @@ struct MachineMemoryInfo {
 };
 
 struct RolesInfo {
-	std::multimap<NetworkAddress, JsonString> roles;
-	JsonString& addRole( NetworkAddress address, std::string const& role, UID id) {
-		JsonString obj;
+	std::multimap<NetworkAddress, JsonBuilderObject> roles;
+	JsonBuilderObject& addRole( NetworkAddress address, std::string const& role, UID id) {
+		JsonBuilderObject obj;
 		obj["id"] = id.shortString();
 		obj["role"] = role;
 		return roles.insert( std::make_pair(address, obj ))->second;
 	}
-	JsonString& addRole(std::string const& role, StorageServerInterface& iface, TraceEventFields const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
-		JsonString obj;
+	JsonBuilderObject& addRole(std::string const& role, StorageServerInterface& iface, TraceEventFields const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
+		JsonBuilderObject obj;
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
@@ -467,7 +463,7 @@ struct RolesInfo {
 				versionLag = std::max<int64_t>(versionLag, maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 
-			JsonString dataLag;
+			JsonBuilderObject dataLag;
 			dataLag["versions"] = versionLag;
 			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 			dataLag["seconds"] = dataLagSeconds;
@@ -482,8 +478,8 @@ struct RolesInfo {
 			*pDataLagSeconds = dataLagSeconds;
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
-	JsonString& addRole(std::string const& role, TLogInterface& iface, TraceEventFields const& metrics, Version* pMetricVersion) {
-		JsonString obj;
+	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, TraceEventFields const& metrics, Version* pMetricVersion) {
+		JsonBuilderObject obj;
 		Version	metricVersion = 0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
@@ -509,11 +505,11 @@ struct RolesInfo {
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
 	template <class InterfaceType>
-	JsonString& addRole(std::string const& role, InterfaceType& iface) {
+	JsonBuilderObject& addRole(std::string const& role, InterfaceType& iface) {
 		return addRole(iface.address(), role, iface.id());
 	}
-	JsonStringArray getStatusForAddress( NetworkAddress a ) {
-		JsonStringArray v;
+	JsonBuilderArray getStatusForAddress( NetworkAddress a ) {
+		JsonBuilderArray v;
 		auto it = roles.lower_bound(a);
 		while (it != roles.end() && it->first == a) {
 			v.push_back(it->second);
@@ -523,7 +519,7 @@ struct RolesInfo {
 	}
 };
 
-ACTOR static Future<JsonString> processStatusFetcher(
+ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
 		std::vector<std::pair<WorkerInterface, ProcessClass>> workers,
 		WorkerEvents pMetrics,
@@ -531,20 +527,19 @@ ACTOR static Future<JsonString> processStatusFetcher(
 		WorkerEvents errors,
 		WorkerEvents traceFileOpenErrors,
 		WorkerEvents programStarts,
-		std::map<std::string, JsonString> processIssues,
+		std::map<std::string, JsonBuilderObject> processIssues,
 		vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers,
 		vector<std::pair<TLogInterface, TraceEventFields>> tLogs,
 		Database cx,
 		Optional<DatabaseConfiguration> configuration,
 		std::set<std::string> *incomplete_reasons) {
 
-	// Array to hold one entry for each process
-	state JsonString processMap;
+	state JsonBuilderObject processMap;
 	state double metric;
 
 	// construct a map from a process address to a status object containing a trace file open error
 	// this is later added to the messages subsection
-	state std::map<std::string, JsonString> tracefileOpenErrorMap;
+	state std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
 	state WorkerEvents::iterator traceFileErrorsItr;
 	for(traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end(); ++traceFileErrorsItr) {
 		Void _ = wait(yield());
@@ -553,7 +548,7 @@ ACTOR static Future<JsonString> processStatusFetcher(
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
 				const TraceEventFields& event = traceFileErrorsItr->second;
 				std::string fileName = event.getValue("Filename");
-				JsonString msgObj = JsonString::makeMessage("file_open_error", format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str()).c_str());
+				JsonBuilderObject msgObj = JsonString::makeMessage("file_open_error", format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str()).c_str());
 				msgObj["file_name"] = fileName;
 
 				// Map the address of the worker to the error message object
@@ -608,7 +603,7 @@ ACTOR static Future<JsonString> processStatusFetcher(
 	// Get largest TLog version
 	for(log = tLogs.begin(); log != tLogs.end(); ++log) {
 		Version tLogVersion = 0;
-		JsonString const& roleStatus = roles.addRole( "log", log->first, log->second, &tLogVersion );
+		roles.addRole( "log", log->first, log->second, &tLogVersion );
 		maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
 		Void _ = wait(yield());
 	}
@@ -617,7 +612,7 @@ ACTOR static Future<JsonString> processStatusFetcher(
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
 	for(ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
-		JsonString const& roleStatus = roles.addRole( "storage", ss->first, ss->second, maxTLogVersion, &lagSeconds );
+		roles.addRole( "storage", ss->first, ss->second, maxTLogVersion, &lagSeconds );
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
 		}
@@ -633,14 +628,14 @@ ACTOR static Future<JsonString> processStatusFetcher(
 
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		Void _ = wait(yield());
-		state JsonString statusObj;
+		state JsonBuilderObject statusObj;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
 
 			NetworkAddress address = workerItr->first.address();
 			const TraceEventFields& event = pMetrics[workerItr->first.address()];
 			statusObj["address"] = address.toString();
-			JsonString memoryObj;
+			JsonBuilderObject memoryObj;
 
 			if (event.size() > 0) {
 				std::string zoneID = event.getValue("ZoneID");
@@ -679,21 +674,21 @@ ACTOR static Future<JsonString> processStatusFetcher(
 				metric = parseDouble(event.getValue("DiskReadSectors"));
 				double diskReadSectors = metric;
 
-				JsonString diskObj;
+				JsonBuilderObject diskObj;
 				if (elapsed > 0){
-					JsonString cpuObj;
+					JsonBuilderObject cpuObj;
 					cpuObj["usage_cores"] = std::max(0.0, cpu_seconds / elapsed);
 					statusObj["cpu"] = cpuObj;
 
 					diskObj["busy"] = std::max(0.0, std::min((elapsed - diskIdleSeconds) / elapsed, 1.0));
 
-					JsonString readsObj;
+					JsonBuilderObject readsObj;
 					readsObj["counter"] = diskReadsCount;
 					if (elapsed > 0)
 						readsObj["hz"] = diskReads / elapsed;
 					readsObj["sectors"] = diskReadSectors;
 
-					JsonString writesObj;
+					JsonBuilderObject writesObj;
 					writesObj["counter"] = diskWritesCount;
 					if (elapsed > 0)
 						writesObj["hz"] = diskWrites / elapsed;
@@ -707,26 +702,26 @@ ACTOR static Future<JsonString> processStatusFetcher(
 				diskObj["free_bytes"] = parseInt64(event.getValue("DiskFreeBytes"));
 				statusObj["disk"] = diskObj;
 
-				JsonString networkObj;
+				JsonBuilderObject networkObj;
 
 				networkObj["current_connections"] = parseInt64(event.getValue("CurrentConnections"));
-				JsonString connections_established;
+				JsonBuilderObject connections_established;
 				connections_established["hz"] = parseDouble(event.getValue("ConnectionsEstablished"));
 				networkObj["connections_established"] = connections_established;
-				JsonString connections_closed;
+				JsonBuilderObject connections_closed;
 				connections_closed["hz"] = parseDouble(event.getValue("ConnectionsClosed"));
 				networkObj["connections_closed"] = connections_closed;
-				JsonString connection_errors;
+				JsonBuilderObject connection_errors;
 				connection_errors["hz"] = parseDouble(event.getValue("ConnectionErrors"));
 				networkObj["connection_errors"] = connection_errors;
 
 				metric = parseDouble(event.getValue("MbpsSent"));
-				JsonString megabits_sent;
+				JsonBuilderObject megabits_sent;
 				megabits_sent["hz"] = metric;
 				networkObj["megabits_sent"] = megabits_sent;
 
 				metric = parseDouble(event.getValue("MbpsReceived"));
-				JsonString megabits_received;
+				JsonBuilderObject megabits_received;
 				megabits_received["hz"] = metric;
 				networkObj["megabits_received"] = megabits_received;
 
@@ -773,7 +768,7 @@ ACTOR static Future<JsonString> processStatusFetcher(
 
 			statusObj["memory"] = memoryObj;
 
-			JsonStringArray messages;
+			JsonBuilderArray messages;
 
 			if (errors.count(address) && errors[address].size()) {
 				// returns status object with type and time of error
@@ -821,8 +816,8 @@ ACTOR static Future<JsonString> processStatusFetcher(
 	return processMap;
 }
 
-static JsonString clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
-	JsonString clientStatus;
+static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
+	JsonBuilderObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
 
@@ -833,17 +828,17 @@ static JsonString clientStatusFetcher(ClientVersionMap clientVersionMap, std::ma
 		}
 	}
 
-	JsonStringArray versionsArray = JsonStringArray();
+	JsonBuilderArray versionsArray = JsonBuilderArray();
 	for(auto cv : clientVersions) {
-		JsonString ver;
+		JsonBuilderObject ver;
 		ver["count"] = (int64_t)cv.second.size();
 		ver["client_version"] = cv.first.clientVersion.toString();
 		ver["protocol_version"] = cv.first.protocolVersion.toString();
 		ver["source_version"] = cv.first.sourceVersion.toString();
 
-		JsonStringArray clients = JsonStringArray();
+		JsonBuilderArray clients = JsonBuilderArray();
 		for(auto client : cv.second) {
-			JsonString cli;
+			JsonBuilderObject cli;
 			cli["address"] = client.toString();
 			cli["log_group"] = traceLogGroupMap[client];
 			clients.push_back(cli);
@@ -860,8 +855,8 @@ static JsonString clientStatusFetcher(ClientVersionMap clientVersionMap, std::ma
 	return clientStatus;
 }
 
-ACTOR static Future<JsonString> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
-	state JsonString message;
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+	state JsonBuilderObject message;
 
 	try {
 		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
@@ -967,7 +962,7 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 	}
 }
 
-ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, const char* prefix, const char* description, JsonString *probeObj, JsonStringArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable = nullptr) {
+ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, const char* prefix, const char* description, JsonBuilderObject *probeObj, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable = nullptr) {
 	choose {
 		when(ErrorOr<double> result = wait(errorOr(probe))) {
 			if(result.isError()) {
@@ -991,13 +986,13 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 	return Void();
 }
 
-ACTOR static Future<JsonString> latencyProbeFetcher(Database cx, JsonStringArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable) {
+ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons, bool *isAvailable) {
 	state Transaction trImmediate(cx);
 	state Transaction trDefault(cx);
 	state Transaction trBatch(cx);
 	state Transaction trWrite(cx);
 
-	state JsonString statusObj;
+	state JsonBuilderObject statusObj;
 
 	try {
 		Future<double> immediateGrvProbe = doGrvProbe(&trImmediate, FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1025,7 +1020,7 @@ ACTOR static Future<JsonString> latencyProbeFetcher(Database cx, JsonStringArray
 	return statusObj;
 }
 
-ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> loadConfiguration(Database cx, JsonStringArray *messages, std::set<std::string> *status_incomplete_reasons){
+ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
 	state Optional<DatabaseConfiguration> result;
 	state Optional<bool> fullReplication;
 	state Transaction tr(cx);
@@ -1087,17 +1082,17 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 	return std::make_pair(result, fullReplication);
 }
 
-static JsonString configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
-	JsonString statusObj;
+static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
+	JsonBuilderObject statusObj;
 	try {
 		if(conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
-			statusObj.append(configuration.toJSON());
+			statusObj.addContents(configuration.toJSON());
 
-			JsonStringArray excludedServersArr;
+			JsonBuilderArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
 			for (std::set<AddressExclusion>::iterator it = excludedServers.begin(); it != excludedServers.end(); it++) {
-				JsonString statusObj;
+				JsonBuilderObject statusObj;
 				statusObj["address"] = it->toString();
 				excludedServersArr.push_back(statusObj);
 			}
@@ -1113,8 +1108,8 @@ static JsonString configurationFetcher(Optional<DatabaseConfiguration> conf, Ser
 	return statusObj;
 }
 
-ACTOR static Future<JsonString> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int *minReplicasRemaining) {
-	state JsonString statusObjData;
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int *minReplicasRemaining) {
+	state JsonBuilderObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
@@ -1132,7 +1127,7 @@ ACTOR static Future<JsonString> dataStatusFetcher(std::pair<WorkerInterface, Pro
 		TraceEventFields dataStats = dataInfo[1];
 
 		if (startingStats.size() && startingStats.getValue("State") != "Active") {
-			JsonString stateSectionObj;
+			JsonBuilderObject stateSectionObj;
 			stateSectionObj["name"] = "initializing";
 			stateSectionObj["description"] = "(Re)initializing automatic data distribution";
 			statusObjData["state"] = stateSectionObj;
@@ -1151,7 +1146,7 @@ ACTOR static Future<JsonString> dataStatusFetcher(std::pair<WorkerInterface, Pro
 			int highestPriority = parseInt(md.getValue("HighestPriority"));
 
 			if( averagePartitionSize >= 0 ) {
-				JsonString moving_data;
+				JsonBuilderObject moving_data;
 				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
 				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
 				moving_data["total_written_bytes"] = totalBytesWritten;
@@ -1172,7 +1167,7 @@ ACTOR static Future<JsonString> dataStatusFetcher(std::pair<WorkerInterface, Pro
 			statusObjData["partitions_count"] = shards;
 		}
 
-		JsonStringArray teamTrackers;
+		JsonBuilderArray teamTrackers;
 		for(int i = 0; i < 2; i++) {
 			TraceEventFields inFlight = dataInfo[3 + i];
 			if (!inFlight.size()) {
@@ -1184,12 +1179,12 @@ ACTOR static Future<JsonString> dataStatusFetcher(std::pair<WorkerInterface, Pro
 			int unhealthyServers = parseInt(inFlight.getValue("UnhealthyServers"));
 			int highestPriority = parseInt(inFlight.getValue("HighestPriority"));
 
-			JsonString team_tracker;
+			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
 			team_tracker["in_flight_bytes"] = totalDataInFlight;
 			team_tracker["unhealthy_servers"] = unhealthyServers;
 
-			JsonString stateSectionObj;
+			JsonBuilderObject stateSectionObj;
 			if (highestPriority >= PRIORITY_TEAM_0_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "missing_data";
@@ -1341,13 +1336,13 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 	return extraTlogEligibleMachines;
 }
 
-ACTOR static Future<JsonString> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker,
-	std::string dbName, JsonString *qos, JsonString *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture)
+ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker,
+	std::string dbName, JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture)
 {
-	state JsonString statusObj;
-	state JsonString operationsObj;
-	state JsonString bytesObj;
-	state JsonString keysObj;
+	state JsonBuilderObject statusObj;
+	state JsonBuilderObject operationsObj;
+	state JsonBuilderObject bytesObj;
+	state JsonBuilderObject keysObj;
 
 	// Writes and conflicts
 	try {
@@ -1378,7 +1373,7 @@ ACTOR static Future<JsonString> workloadStatusFetcher(Reference<AsyncVar<struct 
 		operationsObj["writes"] = mutations.getStatus();
 		bytesObj["written"] = mutationBytes.getStatus();
 
-		JsonString transactions;
+		JsonBuilderObject transactions;
 		transactions["conflicted"] = txnConflicts.getStatus();
 		transactions["started"] = txnStartOut.getStatus();
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
@@ -1425,7 +1420,7 @@ ACTOR static Future<JsonString> workloadStatusFetcher(Reference<AsyncVar<struct 
 		(*qos)["released_transactions_per_second"] = transPerSec;
 
 		int reason = parseInt(md.getValue("Reason"));
-		JsonString perfLimit;
+		JsonBuilderObject perfLimit;
 		if (transPerSec > tpsLimit * 0.8) {
 			// If reason is known, set qos.performance_limited_by, otherwise omit
 			if (reason >= 0 && reason < limitReasonEnd) {
@@ -1484,13 +1479,13 @@ ACTOR static Future<JsonString> workloadStatusFetcher(Reference<AsyncVar<struct 
 	return statusObj;
 }
 
-static JsonStringArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
-	JsonStringArray oldTlogsArray;
+static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
+	JsonBuilderArray oldTlogsArray;
 
 	if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
-			JsonString statusObj;
-			JsonStringArray logsObj;
+			JsonBuilderObject statusObj;
+			JsonBuilderArray logsObj;
 			Optional<int32_t> sat_log_replication_factor, sat_log_write_anti_quorum, sat_log_fault_tolerance, log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor, remote_log_fault_tolerance;
 
 			int maxFaultTolerance = 0;
@@ -1498,7 +1493,7 @@ static JsonStringArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Async
 			for(int i = 0; i < it.tLogs.size(); i++) {
 				int failedLogs = 0;
 				for(auto& log : it.tLogs[i].tLogs) {
-					JsonString logObj;
+					JsonBuilderObject logObj;
 					bool failed = !log.present() || !address_workers.count(log.interf().address());
 					logObj["id"] = log.id().shortString();
 					logObj["healthy"] = !failed;
@@ -1555,8 +1550,8 @@ static JsonStringArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Async
 	return oldTlogsArray;
 }
 
-static JsonString faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
-	JsonString statusObj;
+static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
+	JsonBuilderObject statusObj;
 
 	// without losing data
 	int32_t maxMachineFailures = configuration.maxMachineFailuresTolerated();
@@ -1607,14 +1602,13 @@ static std::string getIssueDescription(std::string name) {
 	return name;
 }
 
-static std::map<std::string, JsonString> getProcessIssuesAsMessages( ProcessIssuesMap const& _issues ) {
-	std::map<std::string, JsonString> issuesMap;
+static std::map<std::string, JsonBuilderObject> getProcessIssuesAsMessages( ProcessIssuesMap const& _issues ) {
+	std::map<std::string, JsonBuilderObject> issuesMap;
 
 	try {
 		ProcessIssuesMap issues = _issues;
 		for (auto i : issues) {
-			JsonString message = JsonString::makeMessage(i.second.first.c_str(), getIssueDescription(i.second.first).c_str());
-			issuesMap[i.first.toString()] = message;
+			issuesMap[i.first.toString()] = JsonString::makeMessage(i.second.first.c_str(), getIssueDescription(i.second.first).c_str());
 		}
 	}
 	catch (Error &e) {
@@ -1625,8 +1619,8 @@ static std::map<std::string, JsonString> getProcessIssuesAsMessages( ProcessIssu
 	return issuesMap;
 }
 
-static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issues) {
-	JsonStringArray issuesList;
+static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issues) {
+	JsonBuilderArray issuesList;
 
 	try {
 		ProcessIssuesMap issues = _issues;
@@ -1637,8 +1631,8 @@ static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issue
 		}
 
 		for (auto i : deduplicatedIssues) {
-			JsonString message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
-			JsonStringArray addresses;
+			JsonBuilderObject message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
+			JsonBuilderArray addresses;
 			for(auto addr : i.second) {
 				addresses.push_back(addr);
 			}
@@ -1655,7 +1649,7 @@ static JsonStringArray getClientIssuesAsMessages( ProcessIssuesMap const& _issue
 	return issuesList;
 }
 
-ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
+ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
 	state StatusObject result;
 	state JSONDoc json(result);
 	state double tStart = now();
@@ -1709,14 +1703,14 @@ ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messag
 	}
 
 	json.cleanOps();
-	JsonString statusObj;
-	statusObj.append(result);
+	JsonBuilderObject statusObj;
+	statusObj.addContents(result);
 	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getFinalLength());
 	return statusObj;
 }
 
-ACTOR Future<JsonString> lockedStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, JsonStringArray *messages, std::set<std::string> *incomplete_reasons) {
-	state JsonString statusObj;
+ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, JsonBuilderArray *messages, std::set<std::string> *incomplete_reasons) {
+	state JsonBuilderObject statusObj;
 
 	state Database cx = openDBOnServer(db, TaskDefaultEndpoint, true, false); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
@@ -1774,7 +1768,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state double tStart = timer();
 
 	// Check if master worker is present
-	state JsonStringArray messages;
+	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
 	state std::pair<WorkerInterface, ProcessClass> mWorker;
 
@@ -1815,10 +1809,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// We now have a unique set of workers who were in some way unreachable.  If there is anything in that set, create a message
 		// for it and include the list of unreachable processes.
 		if (mergeUnreachable.size()){
-			JsonString message = JsonString::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
-			JsonStringArray unreachableProcs;
+			JsonBuilderObject message = JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
+			JsonBuilderArray unreachableProcs;
 			for (auto m : mergeUnreachable){
-				unreachableProcs.push_back(JsonString().append("address", m));
+				unreachableProcs.push_back(JsonBuilderObject().setKey("address", m));
 			}
 			message["unreachable_processes"] = unreachableProcs;
 			messages.push_back(message);
@@ -1826,7 +1820,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int) RecoveryStatus::END;
-		state JsonString recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -1836,16 +1830,16 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state WorkerEvents traceFileOpenErrors = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
 		state WorkerEvents programStarts = workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
 
-		state JsonString statusObj;
+		state JsonBuilderObject statusObj;
 		if(db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
 
-		state std::map<std::string, JsonString> processIssues = getProcessIssuesAsMessages(workerIssues);
+		state std::map<std::string, JsonBuilderObject> processIssues = getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers;
 		state vector<std::pair<TLogInterface, TraceEventFields>> tLogs;
-		state JsonString qos;
-		state JsonString data_overlay;
+		state JsonBuilderObject qos;
+		state JsonBuilderObject data_overlay;
 
 		statusObj["protocol_version"] = format("%llx", currentProtocolVersion);
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
@@ -1868,7 +1862,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if (configuration.present()){
 			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
-			JsonString latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
+			JsonBuilderObject latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons, &isAvailable));
 
 			statusObj["database_available"] = isAvailable;
 			if (!latencyProbeResults.empty()) {
@@ -1884,13 +1878,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
-			std::vector<Future<JsonString>> futures2;
+			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 
-			state std::vector<JsonString> workerStatuses = wait(getAll(futures2));
+			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
 			if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && db->get().logSystemConfig.oldTLogs.size() > 0) {
@@ -1902,7 +1896,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleMachines, minReplicasRemaining);
 			}
 
-			JsonString configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
+			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
 			// configArr could be empty
 			if (!configObj.empty())
@@ -1919,8 +1913,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["qos"] = qos;
 
 			// Merge data_overlay into data
-			JsonString &clusterDataSection = workerStatuses[0];
-			clusterDataSection.append(data_overlay);
+			JsonBuilderObject &clusterDataSection = workerStatuses[0];
+
+			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an output-only model
+			clusterDataSection.addContents(data_overlay);
 
 			// If data section not empty, add it to statusObj
 			if (!clusterDataSection.empty())
@@ -1928,7 +1924,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			// Insert database_locked section
 			if(!workerStatuses[3].empty()) {
-				statusObj.append(workerStatuses[3]);
+				statusObj.addContents(workerStatuses[3]);
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
@@ -1937,7 +1933,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				storageServers = _storageServers.get();
 			}
 			else
-				messages.push_back(JsonString::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
+				messages.push_back(JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
 
 			// ...also tlogs
 			ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>> _tLogs = wait(tLogFuture);
@@ -1945,21 +1941,21 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				tLogs = _tLogs.get();
 			}
 			else
-				messages.push_back(JsonString::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
+				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
 		}
 		else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
-			JsonString layers;
-			layers.append("_valid", false);
-			layers.append("_error", "configurationMissing");
+			JsonBuilderObject layers;
+			layers["_valid"] = false;
+			layers["_error"] = "configurationMissing";
 			statusObj["layers"] = layers;
 		}
 
-		JsonString processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 
-		JsonStringArray incompatibleConnectionsArray;
+		JsonBuilderArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
@@ -1970,9 +1966,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["recovery_state"] = recoveryStateStatus;
 
 		// cluster messages subsection;
-		JsonStringArray clientIssuesArr = getClientIssuesAsMessages(clientIssues);
+		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientIssues);
 		if (clientIssuesArr.size() > 0) {
-			JsonString clientIssueMessage = JsonString::makeMessage("client_issues", "Some clients of this cluster have issues.");
+			JsonBuilderObject clientIssueMessage = JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
 			messages.push_back(clientIssueMessage);
 		}
@@ -1980,11 +1976,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.
 		if (!status_incomplete_reasons.empty())
 		{
-			JsonString incomplete_message = JsonString::makeMessage("status_incomplete", "Unable to retrieve all status information.");
+			JsonBuilderObject incomplete_message = JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
 			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
-			JsonStringArray reasons;
+			JsonBuilderArray reasons;
 			for (auto i : status_incomplete_reasons) {
-				reasons.push_back(JsonString().append("description", i));
+				reasons.push_back(JsonBuilderObject().setKey("description", i));
 			}
 			incomplete_message["reasons"] = reasons;
 			messages.push_back(incomplete_message);
@@ -2006,96 +2002,48 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 }
 
-TEST_CASE("status/json/jsonstring") {
-	JsonString jsonObj, testObj;
-	JsonStringArray jsonArray;
+#define CHECK(j, s) { \
+	std::string js = j.getJson(); \
+	printf("json:     '%s'\n", js.c_str()); \
+	printf("expected: '%s'\n\n", s); \
+	ASSERT(js == s); \
+}
 
-	JsonString jsonString1;
-	jsonString1["_valid"] = false;
-	jsonString1["error"] = "configurationMissing";
+TEST_CASE("status/json/builder") {
+	JsonBuilder json;
+	CHECK(json, "null");
 
-	JsonString jsonString2;
-	jsonString2.append("_valid", false);
-	jsonString2["error"] = "configurationMissing";
+	JsonBuilderArray array;
+	CHECK(array, "[]");
 
-	JsonString jsonString3;
-	jsonString3.append("error", "configurationMissing");
-	jsonString3["_valid"] = false;
+	array.push_back(1);
+	CHECK(array, "[1]");
 
-	JsonString jsonString4;
-	jsonString4.append("_valid", false);
-	jsonString4.append("error", "configurationMissing");
+	array.push_back(2);
+	CHECK(array, "[1,2]");
 
-	std::cout << "Json: " << jsonString1.getJson() << std::endl;
+	array.push_back("test");
+	CHECK(array, "[1,2,\"test\"]");
 
-	// Validate equality
-	ASSERT(jsonString1.getJson() == jsonString2.getJson());
-	ASSERT(jsonString1.getJson() != jsonString3.getJson()); // wrong order
-	ASSERT(jsonString1.getJson() == jsonString4.getJson());
+	JsonBuilderObject object;
+	CHECK(object, "{}");
 
-	// Check empty
-	ASSERT(!jsonString1.getJson().empty());
-	ASSERT(JsonString().getJson().empty());
+	object.setKey("a", 5);
+	CHECK(object, "{\"a\":5}");
 
-	// Check clear
-	jsonString1.clear();
-	ASSERT(jsonString1.getJson().empty());
+	object.setKey("b", "hi");
+	CHECK(object, "{\"a\":5,\"b\":\"hi\"}");
 
-	// Set object
-	jsonObj.clear();
-	testObj.clear();
-	jsonObj["first"] = "last";
-	jsonObj["count"] = 3;
-	testObj["pi"] = 3.14159;
-	jsonObj["piobj"] = testObj;
+	object.setKey("c", array);
+	CHECK(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"]}");
 
-	testObj.clear();
-	testObj["val1"] = 7.9;
-	testObj["val2"] = 34;
-	jsonArray.push_back(testObj);
+	JsonBuilderArray array2;
 
-	testObj.clear();
-	testObj["name1"] = "robert";
-	testObj["name2"] = "john";
-	testObj["name3"] = "eric";
-	jsonArray.push_back(testObj);
-	jsonObj.append("name_vals", jsonArray);
+	array2.push_back(json);
+	CHECK(array2, "[null]");
 
-	std::cout << "Json (complex): " << jsonObj.getJson() << std::endl;
-
-	jsonObj.clear();
-	jsonObj.append(jsonArray);
-	std::cout << "Json (complex array): " << jsonObj.getJson() << std::endl;
-
-	jsonArray.clear();
-	jsonArray.push_back("nissan");
-	jsonArray.push_back("honda");
-	jsonArray.push_back("bmw");
-	jsonObj.clear();
-	jsonObj.append(jsonArray);
-	std::cout << "Array (simple array #1): " << jsonObj.getJson() << std::endl;
-
-	jsonObj.clear();
-	testObj.clear();
-	jsonArray.clear();
-	testObj.append("nissan");
-	testObj.append("honda");
-	testObj.append("bmw");
-	jsonArray.push_back(testObj);
-	jsonObj.append(jsonArray);
-	std::cout << "Array (simple array #2): " << jsonObj.getJson() << std::endl;
-
-	jsonObj.clear();
-	testObj.clear();
-	jsonObj["name1"] = "robert";
-	jsonObj["name2"] = "john";
-	jsonObj["name3"] = "eric";
-	testObj["val1"] = 7.9;
-	testObj["val2"] = 34;
-	std::cout << "Merge (obj #1): " << jsonObj.getJson() << std::endl;
-	std::cout << "Merge (obj #2): " << testObj.getJson() << std::endl;
-	jsonObj.append(testObj);
-	std::cout << "Merged: " << jsonObj.getJson() << std::endl;
+	object.setKey("d", array2);
+	CHECK(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
 
 	return Void();
 }
