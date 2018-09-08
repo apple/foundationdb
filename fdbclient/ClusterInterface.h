@@ -27,7 +27,7 @@
 #include "Status.h"
 #include "ClientDBInfo.h"
 #include "ClientWorkerInterface.h"
-#include "flow/JsonString.h"
+#include "JsonString.h"
 
 struct ClusterInterface {
 	RequestStream< struct OpenDatabaseRequest > openDatabase;

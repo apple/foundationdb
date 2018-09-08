@@ -22,7 +22,6 @@
 #define FDBCLIENT_STATUS_H
 
 #include "../fdbrpc/JSONDoc.h"
-#include "../flow/JsonString.h"
 
 struct StatusObject : json_spirit::mObject {
 	typedef json_spirit::mObject Map;
@@ -30,7 +29,6 @@ struct StatusObject : json_spirit::mObject {
 
 	StatusObject() {}
 	StatusObject(json_spirit::mObject const& o) : json_spirit::mObject(o) {}
-	JsonString	toJsonString() const;
 };
 
 template <class Ar>

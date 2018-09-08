@@ -1075,7 +1075,7 @@ static JsonString configurationFetcher(Optional<DatabaseConfiguration> conf, Ser
 	try {
 		if(conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
-			statusObj = configuration.toJSON().toJsonString();
+			statusObj = JsonString( configuration.toJSON() );
 
 			JsonStringArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
@@ -1692,7 +1692,7 @@ ACTOR Future<JsonString> layerStatusFetcher(Database cx, JsonStringArray *messag
 	}
 
 	json.cleanOps();
-	JsonString statusObj = result.toJsonString();
+	JsonString statusObj = JsonString( result );
 	TraceEvent("LayerStatusFetcher").detail("Duration", now()-tStart).detail("StatusSize",statusObj.getLength());
 	return statusObj;
 }

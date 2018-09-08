@@ -4,6 +4,9 @@
 
 #include <string>
 #include <vector>
+#include "flow/flow.h"
+#include "flow/Trace.h"
+#include "fdbrpc/JSONDoc.h"
 
 class JsonString;
 class JsonStringArray;
@@ -17,6 +20,7 @@ class JsonString {
 		explicit JsonString( const JsonStringArray& jsonArray);
 		explicit JsonString( const char* value ); // Used to define values (used in an Array)
 		explicit JsonString( const std::string& value ); // Used to define values (used in an Array)
+		explicit JsonString( const json_spirit::mObject& value );
 
 		JsonString( const std::string& name, const char* value );
 		JsonString( const std::string& name, const std::string& value );
@@ -70,9 +74,6 @@ class JsonString {
 		JsonString& operator=( const JsonString& jsonString );
 
 		std::string getJson() const;
-		void setJson(const std::string& jsonText);
-		JsonString& swapJsonText(std::string& jsonText);
-
 		size_t getLength() const;
 
 		JsonString& clear();
