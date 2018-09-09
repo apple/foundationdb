@@ -16,8 +16,7 @@ template <typename T> class JsonBuilderObjectSetter;
 // Default value is null, as in the JSON type
 class JsonBuilder {
 protected:
-	// Destroyed state is for when the contents can be std::moved'd somewhere useful efficiently
-	enum EType { NULLVALUE, OBJECT, ARRAY, DESTROYED };
+	enum EType { NULLVALUE, OBJECT, ARRAY };
 
 public:
 	// Default value is null, which will be considered "empty"
@@ -66,8 +65,6 @@ protected:
 
 	// Get the text necessary to finish the JSON string
 	const char * getEnd() const {
-		ASSERT(type != DESTROYED);
-
 		switch(type) {
 			case NULLVALUE:
 				return "null";
