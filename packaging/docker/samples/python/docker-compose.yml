@@ -1,0 +1,13 @@
+version: '3'
+services:
+  fdb:
+    image: foundationdb:5.2.5
+    environment:
+      FDB_COORDINATOR: fdbpythonsample_fdb_1
+  app:
+    build:
+      context: app
+    ports:
+      - 5000:5000
+    environment:
+      FDB_COORDINATOR: fdbpythonsample_fdb_1

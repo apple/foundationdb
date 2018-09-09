@@ -63,7 +63,7 @@ You can also use this image to provide files for images that are clients of a
 FoundationDB cluster, by using the `from` argument of the `COPY` command. Some
 files you may want to copy are:
 
-*	`/usr/lib/fdb/libfdb_*.so`: The primary FoundationDB client library
+*	`/usr/lib/libfdb_c.so`: The primary FoundationDB client library
 *	`/usr/lib/fdb/multiversion/libfdb_*.so`: Additional versions of the client
 	library, which you can use if you are setting up a multiversion client.
 *	`/var/fdb/scripts/create_cluster_file.bash`: A script for setting up the

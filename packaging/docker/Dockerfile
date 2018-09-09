@@ -46,8 +46,7 @@ ARG FDB_ADDITIONAL_VERSIONS="5.1.7"
 RUN mkdir -p scripts
 COPY download_multiversion_libraries.bash scripts
 
-RUN mkdir -p /usr/lib/fdb
-ADD $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so /usr/lib/fdb
+ADD $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so /usr/lib/libfdb_c.so
 RUN bash scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS
 
 # Set Up Runtime Scripts and Directoris
