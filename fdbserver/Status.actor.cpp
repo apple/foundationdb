@@ -2048,6 +2048,96 @@ TEST_CASE("status/json/builder") {
 	return Void();
 }
 
+
+json_spirit::mValue randomValue(const std::vector<std::string> &strings) {
+	switch(g_random->randomInt(0, 3)) {
+		case 0:
+			return g_random->randomInt(0, 10000000);
+		case 1:
+			return strings[g_random->randomInt(0, strings.size())];
+		case 2:
+		default:
+			return g_random->random01();
+	};
+}
+
+
+JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level);
+JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level);
+
+JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level) {
+	JsonBuilderArray r;
+	int size = g_random->randomInt(0, 50);
+
+	while(--size) {
+		if(--limit <= 0)
+			break;
+
+		if(level > 0 && g_random->coinflip()) {
+			if(g_random->coinflip())
+				r.push_back(randomDocument(strings, limit, level - 1));
+			else
+				r.push_back(randomArray(strings, limit, level - 1));
+		}
+		else {
+			r.push_back(randomValue(strings));
+		}
+	}
+
+	return r;
+}
+
+JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level) {
+	JsonBuilderObject r;
+	int size = g_random->randomInt(0, 300);
+
+	while(--size) {
+		if(--limit <= 0)
+			break;
+
+		const std::string &key = strings[g_random->randomInt(0, strings.size())];
+
+		if(level > 0 && g_random->coinflip()) {
+			if(g_random->coinflip())
+				r[key] = randomDocument(strings, limit, level - 1);
+			else
+				r[key] = randomArray(strings, limit, level - 1);
+		}
+		else {
+			r[key] = randomValue(strings);
+		}
+	}
+
+	return r;
+}
+
+TEST_CASE("status/json/builderPerf") {
+	std::vector<std::string> strings;
+	int c = 1000000;
+	printf("Generating random strings\n");
+	while(--c)
+		strings.push_back(g_random->randomAlphaNumeric(g_random->randomInt(0, 50)));
+
+	int elements = 100000;
+	int level = 6;
+
+	printf("Generating and serializing random document\n");
+	double start = timer();
+
+	int n = elements;
+	JsonBuilderObject obj = randomDocument(strings, n, level);
+	double generated = timer();
+
+	std::string s = obj.getJson();
+	double end = timer();
+
+	double elapsed = end - start;
+	printf("RESULT: %lu bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
+		s.size(), elements, level, elapsed, generated - start, end - generated, s.size() / elapsed / 1e6, elements / elapsed);
+
+	return Void();
+}
+
 TEST_CASE("status/json/merging") {
 	StatusObject objA, objB, objC;
 	JSONDoc a(objA), b(objB), c(objC);
