@@ -268,6 +268,29 @@ public:
 		return *this;
 	}
 
+	template<typename KT, typename VT> inline JsonBuilderObject & setKeyRawNumber(KT &&name, VT &&val) {
+		if(elements++ > 0) {
+			write(',');
+		}
+		write('"');
+		write(name);
+		write('"');
+		write(':');
+		CheckNumberResult res = checkNumber(val);
+		if(res == CHECKNUMBER_NEEDS_ZERO_START) {
+			write('0');
+		}
+		if(res == CHECKNUMBER_INVALID) {
+			write("-999");
+		} else {
+			write(val);
+		}
+		if(res == CHECKNUMBER_NEEDS_ZERO_END) {
+			write('0');
+		}
+		return *this;
+	}
+
 	template<typename T> inline JsonBuilderObjectSetter<T> operator[](T &&name);
 
 	JsonBuilderObject & addContents(const json_spirit::mObject &obj) {
@@ -280,6 +303,44 @@ public:
 	JsonBuilderObject & addContents(const JsonBuilderObject &obj) {
 		_addContents(obj);
 		return *this;
+	}
+
+private:
+	enum CheckNumberResult {
+		CHECKNUMBER_VALID, CHECKNUMBER_NEEDS_ZERO_START, CHECKNUMBER_NEEDS_ZERO_END, CHECKNUMBER_INVALID
+	};
+
+	// 'raw' write methods
+	inline CheckNumberResult checkNumber(const char *s, int len) {
+		bool needsZero = false;
+		bool foundPeriod = false;
+		bool foundNegative = false;
+		for(int i = 0; i < len; i++) {
+			if(!isdigit(s[i])) {
+				if(s[i]=='.' && !foundPeriod && len>1) {
+					foundPeriod = true;
+					if(i==0) {
+						needsZero = true;
+					}
+					if((i==1 && foundNegative) || i==len-1) {
+						return CHECKNUMBER_NEEDS_ZERO_END;
+					}
+				} else if(i==0 && len>1 && s[i]=='-') {
+					foundNegative = true;
+				} else {
+					return CHECKNUMBER_INVALID;
+				}
+			}
+		}
+		return needsZero ? CHECKNUMBER_NEEDS_ZERO_START : CHECKNUMBER_VALID;
+	}
+
+	inline CheckNumberResult checkNumber(const char* s) {
+		return checkNumber(s, strlen(s));
+	}
+
+	inline CheckNumberResult checkNumber(const StringRef &s) {
+		return checkNumber((char *)s.begin(), s.size());
 	}
 };
 
