@@ -58,15 +58,17 @@ protected:
 	int bytes;
 
 	// 'raw' write methods
-	inline void write( const std::string& s) {
-		bytes += s.size();
-		jsonText.back().append(arena, s.data(), s.size());
+	inline void write(const char *s, int len) {
+		bytes += len;
+		jsonText.back().append(arena, s, len);
 	}
 
 	inline void write(const char* s) {
-		int len = strlen(s);
-		bytes += len;
-		jsonText.back().append(arena, s, len);
+		write(s, strlen(s));
+	}
+
+	inline void write(const StringRef &s) {
+		write((char *)s.begin(), s.size());
 	}
 
 	inline void write(char s) {
