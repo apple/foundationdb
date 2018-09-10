@@ -199,8 +199,14 @@ struct StatusReply {
 		ar & statusStr;
 		if( ar.isDeserializing ) {
 			json_spirit::mValue mv;
-			json_spirit::read_string( statusStr, mv );
-			statusObj = StatusObject(mv.get_obj());
+			if(g_network->isSimulated()) {
+				mv = readJSONStrictly(statusStr);
+			}
+			else {
+				// In non-simulation allow errors because some status data is better than no status data
+				json_spirit::read_string( statusStr, mv );
+			}
+			statusObj = std::move(mv.get_obj());
 		}
 	}
 };
