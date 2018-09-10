@@ -34,30 +34,6 @@
 #include "RecoveryState.h"
 #include "fdbclient/JsonString.h"
 
-json_spirit::mValue readJSONStrictly(const std::string s) {
-	json_spirit::mValue val;
-	std::string::const_iterator i = s.begin();
-	if(!json_spirit::read_range(i, s.end(), val)) {
-		if(g_network->isSimulated()) {
-			printf("MALFORMED: %s\n", s.c_str());
-		}
-		throw json_malformed();
-	}
-
-	// Allow trailing whitespace
-	while(i != s.end()) {
-		if(!isspace(*i)) {
-			if(g_network->isSimulated()) {
-				printf("EXPECTED EOF: %s\n^^^\n%s\n", std::string(s.begin(), i).c_str(), std::string(i, s.end()).c_str());
-			}
-			throw json_eof_expected();
-		}
-		++i;
-	}
-
-	return val;
-}
-
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
