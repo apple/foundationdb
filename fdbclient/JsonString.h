@@ -262,8 +262,7 @@ public:
 		}
 		write('"');
 		write(name);
-		write('"');
-		write(':');
+		write("\":");
 		writeValue(std::forward<VT>(val));
 		return *this;
 	}
@@ -274,8 +273,7 @@ public:
 		}
 		write('"');
 		write(name);
-		write('"');
-		write(':');
+		write("\":");
 		CheckNumberResult res = checkNumber(val);
 		if(res == CHECKNUMBER_NEEDS_ZERO_START) {
 			write('0');
@@ -310,7 +308,6 @@ private:
 		CHECKNUMBER_VALID, CHECKNUMBER_NEEDS_ZERO_START, CHECKNUMBER_NEEDS_ZERO_END, CHECKNUMBER_INVALID
 	};
 
-	// 'raw' write methods
 	inline CheckNumberResult checkNumber(const char *s, int len) {
 		bool needsZero = false;
 		bool foundPeriod = false;
@@ -321,8 +318,9 @@ private:
 					foundPeriod = true;
 					if(i==0) {
 						needsZero = true;
-					}
-					if((i==1 && foundNegative) || i==len-1) {
+					} else if(i==1 && foundNegative) {
+						return CHECKNUMBER_INVALID;
+					} else if(i==len-1) {
 						return CHECKNUMBER_NEEDS_ZERO_END;
 					}
 				} else if(i==0 && len>1 && s[i]=='-') {
