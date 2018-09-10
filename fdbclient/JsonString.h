@@ -193,7 +193,7 @@ protected:
 
 	void writeCoercedAsciiNumber(const char *s, int len) {
 		VString &val = jsonText.back();
-		val.reserve(arena, len + 3);
+		val.reserve(arena, val.size() + len + 3);
 		int written = coerceAsciiNumberToJSON(s, len, val.end());
 		if(written > 0) {
 			val.extendUnsafeNoReallocNoInit(written);
