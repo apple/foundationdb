@@ -2048,20 +2048,6 @@ TEST_CASE("status/json/builder") {
 	return Void();
 }
 
-
-json_spirit::mValue randomValue(const std::vector<std::string> &strings) {
-	switch(g_random->randomInt(0, 3)) {
-		case 0:
-			return g_random->randomInt(0, 10000000);
-		case 1:
-			return strings[g_random->randomInt(0, strings.size())];
-		case 2:
-		default:
-			return g_random->random01();
-	};
-}
-
-
 JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &limit, int level);
 JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit, int level);
 
@@ -2080,7 +2066,15 @@ JsonBuilderArray randomArray(const std::vector<std::string> &strings, int &limit
 				r.push_back(randomArray(strings, limit, level - 1));
 		}
 		else {
-			r.push_back(randomValue(strings));
+			switch(g_random->randomInt(0, 3)) {
+				case 0:
+					r.push_back(g_random->randomInt(0, 10000000));
+				case 1:
+					r.push_back(strings[g_random->randomInt(0, strings.size())]);
+				case 2:
+				default:
+					r.push_back(g_random->random01());
+			}
 		}
 	}
 
@@ -2104,7 +2098,15 @@ JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &l
 				r[key] = randomArray(strings, limit, level - 1);
 		}
 		else {
-			r[key] = randomValue(strings);
+			switch(g_random->randomInt(0, 3)) {
+				case 0:
+					r[key] = g_random->randomInt(0, 10000000);
+				case 1:
+					r[key] = strings[g_random->randomInt(0, strings.size())];
+				case 2:
+				default:
+					r[key] = g_random->random01();
+			}
 		}
 	}
 
@@ -2120,20 +2122,27 @@ TEST_CASE("status/json/builderPerf") {
 
 	int elements = 100000;
 	int level = 6;
+	int iterations = 200;
 
 	printf("Generating and serializing random document\n");
 	double start = timer();
 
-	int n = elements;
-	JsonBuilderObject obj = randomDocument(strings, n, level);
-	double generated = timer();
+	int bytes = 0;
+	double generated = 0;
+	for(int i = 0; i < iterations; i++) {
+		int n = elements;
+		double gstart = timer();
+		JsonBuilderObject obj = randomDocument(strings, n, level);
+		generated += (timer() - gstart);
 
-	std::string s = obj.getJson();
+		std::string s = obj.getJson();
+		bytes += s.size();
+	}
 	double end = timer();
 
 	double elapsed = end - start;
 	printf("RESULT: %lu bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
-		s.size(), elements, level, elapsed, generated - start, end - generated, s.size() / elapsed / 1e6, elements / elapsed);
+		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
 
 	return Void();
 }
