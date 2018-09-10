@@ -26,7 +26,32 @@
 #include "StatusClient.h"
 #include "Status.h"
 #include "json_spirit/json_spirit_writer_template.h"
+#include "json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
+
+json_spirit::mValue readJSONStrictly(const std::string &s) {
+	json_spirit::mValue val;
+	std::string::const_iterator i = s.begin();
+	if(!json_spirit::read_range(i, s.end(), val)) {
+		if(g_network->isSimulated()) {
+			printf("MALFORMED: %s\n", s.c_str());
+		}
+		throw json_malformed();
+	}
+
+	// Allow trailing whitespace
+	while(i != s.end()) {
+		if(!isspace(*i)) {
+			if(g_network->isSimulated()) {
+				printf("EXPECTED EOF: %s\n^^^\n%s\n", std::string(s.begin(), i).c_str(), std::string(i, s.end()).c_str());
+			}
+			throw json_eof_expected();
+		}
+		++i;
+	}
+
+	return val;
+}
 
 uint64_t JSONDoc::expires_reference_version = std::numeric_limits<uint64_t>::max();
 
