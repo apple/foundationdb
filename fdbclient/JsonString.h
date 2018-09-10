@@ -12,7 +12,7 @@ class JsonBuilderArray;
 typedef JsonBuilder JsonString;
 template <typename T> class JsonBuilderObjectSetter;
 
-// Class for building JSON string values.  
+// Class for building JSON string values.
 // Default value is null, as in the JSON type
 class JsonBuilder {
 protected:
@@ -20,15 +20,21 @@ protected:
 
 public:
 	// Default value is null, which will be considered "empty"
-	JsonBuilder() : type(NULLVALUE), elements(0) {}
+	JsonBuilder() : type(NULLVALUE), elements(0), bytes(0) {}
 
 	int getFinalLength() const {
-		return jsonText.size() + strlen(getEnd());
+		return bytes + strlen(getEnd());
 	}
 
 	// TODO: Remove the need for this by changing usages to steal this's content
 	std::string getJson() const {
-		return jsonText + getEnd();
+		std::string result;
+		result.reserve(bytes + 1);
+		for(auto& it : jsonText) {
+			result.append(it.begin(), it.end());
+		}
+		result.append(getEnd());
+		return result;
 	}
 
 	int size() const {
@@ -43,11 +49,35 @@ public:
 
 protected:
 	EType type;
-	std::string jsonText;
+	Arena arena;
+	mutable std::vector<VectorRef<uint8_t>> jsonText;
 	int elements;
+	int bytes;
 
-	template<typename T> inline void write(T &&s) {
-		jsonText.append(std::forward<T>(s));
+	inline void write( const std::string& s) {
+		if(!jsonText.size()) {
+			jsonText.push_back( VectorRef<uint8_t>() );
+		}
+		bytes += s.size();
+		jsonText.back().append(arena, (const uint8_t*)&s[0], s.size());
+		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
+	}
+
+	inline void write(const char* s) {
+		if(!jsonText.size()) {
+			jsonText.push_back( VectorRef<uint8_t>() );
+		}
+		bytes += strlen(s);
+		jsonText.back().append(arena, (const uint8_t*)&s[0], strlen(s));
+		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
+	}
+
+	inline void write(char s) {
+		if(!jsonText.size()) {
+			jsonText.push_back( VectorRef<uint8_t>() );
+		}
+		bytes++;
+		jsonText.back().push_back(arena, s);
 		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
 	}
 
@@ -57,9 +87,66 @@ protected:
 		write(json_spirit::write_string(val));
 	}
 
+	void writeValue(const bool& val) {
+		write(val ? "true" : "false");
+	}
+
+	void writeValue(const int64_t& val) {
+		write(format("%lld",val));
+	}
+
+	void writeValue(const uint64_t& val) {
+		write(format("%llu",val));
+	}
+
+	void writeValue(const int& val) {
+		write(format("%d",val));
+	}
+
+	void writeValue(const double& val) {
+		write(format("%g",val));
+	}
+
+	bool shouldEscape(char c) {
+		switch( c ) {
+			case '"':
+			case '\\':
+			case '\b':
+			case '\f':
+			case '\n':
+			case '\r':
+			case '\t':
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void writeValue(const std::string& val) {
+		write('"');
+		int beginCopy = 0;
+		for (int i = 0; i < val.size(); i++) {
+			if (shouldEscape(val[i])) {
+				jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), i - beginCopy);
+				beginCopy = i + 1;
+				write('\\');
+				write(val[i]);
+			}
+		}
+		if(beginCopy < val.size()) {
+			jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), val.size() - beginCopy);
+		}
+		write('"');
+	}
+
 	// Write the finalized (closed) form of val
 	void writeValue(const JsonBuilder &val) {
-		write(val.jsonText);
+		bytes += val.bytes;
+		for(auto& it : val.jsonText) {
+			jsonText.push_back(it);
+		}
+		val.jsonText.push_back(VectorRef<uint8_t>());
+		arena.dependsOn(val.arena);
 		write(val.getEnd());
 	}
 
@@ -82,12 +169,12 @@ class JsonBuilderArray : public JsonBuilder {
 public:
 	JsonBuilderArray() {
 		type = ARRAY;
-		write("[");
+		write('[');
 	}
 
 	template<typename VT> inline JsonBuilderArray & push_back(VT &&val) {
 		if(elements++ > 0) {
-			write(",");
+			write(',');
 		}
 		writeValue(std::forward<VT>(val));
 		return *this;
@@ -101,7 +188,18 @@ public:
 	}
 
 	JsonBuilderArray & addContents(const JsonBuilderArray &arr) {
-		jsonText.append(arr.jsonText.substr(1));
+		if(!arr.jsonText.size()) {
+			return *this;
+		}
+
+		bytes += arr.bytes - 1;
+		jsonText.push_back(VectorRef<uint8_t>((uint8_t*)&arr.jsonText[0][1], arr.jsonText[0].size()-1));
+		for(int i = 1; i < arr.jsonText.size(); i++) {
+			jsonText.push_back(arr.jsonText[i]);
+		}
+		arr.jsonText.push_back(VectorRef<uint8_t>());
+		arena.dependsOn(arr.arena);
+
 		elements += arr.elements;
 		return *this;
 	}
@@ -111,16 +209,17 @@ class JsonBuilderObject : public JsonBuilder {
 public:
 	JsonBuilderObject() {
 		type = OBJECT;
-		write("{");
+		write('{');
 	}
 
 	template<typename KT, typename VT> inline JsonBuilderObject & setKey(KT &&name, VT &&val) {
 		if(elements++ > 0) {
-			write(",");
+			write(',');
 		}
-		write("\"");
-		write(std::forward<KT>(name));
-		write("\":");
+		write('"');
+		write(name);
+		write('"');
+		write(':');
 		writeValue(std::forward<VT>(val));
 		return *this;
 	}
@@ -135,7 +234,18 @@ public:
 	}
 
 	JsonBuilderObject & addContents(const JsonBuilderObject &obj) {
-		jsonText.append(obj.jsonText.substr(1));
+		if(!obj.jsonText.size()) {
+			return *this;
+		}
+
+		bytes += obj.bytes - 1;
+		jsonText.push_back(VectorRef<uint8_t>((uint8_t*)&obj.jsonText[0][1], obj.jsonText[0].size()-1));
+		for(int i = 1; i < obj.jsonText.size(); i++) {
+			jsonText.push_back(obj.jsonText[i]);
+		}
+		obj.jsonText.push_back(VectorRef<uint8_t>());
+		arena.dependsOn(obj.arena);
+
 		elements += obj.elements;
 		return *this;
 	}
