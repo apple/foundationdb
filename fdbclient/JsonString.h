@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <cmath>
 #include "flow/flow.h"
 #include "flow/Trace.h"
 #include "fdbrpc/JSONDoc.h"
@@ -125,7 +126,15 @@ protected:
 	}
 
 	void writeValue(const double& val) {
-		writeFormat("%g", val);
+		if(std::isfinite(val)) {
+			writeFormat("%g", val);
+		}
+		else if(std::isnan(val)) {
+			write("-999");
+		}
+		else {
+			write("1e99");
+		}
 	}
 
 	bool shouldEscape(char c) {

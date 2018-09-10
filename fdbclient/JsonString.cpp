@@ -29,6 +29,16 @@ int JsonBuilder::coerceAsciiNumberToJSON(const char *s, int len, char *dst) {
 		}
 	}
 
+	// 'inf' becomes 1e99
+	if(*s == 'i') {
+		if(len >= 3 && (strncmp(s, "inf", 3) == 0)) {
+			strcpy(wptr, "1e99");
+			return 4 + wptr - dst;
+		}
+		// Anything else starting with 'i' is a failure
+		return 0;
+	}
+
 	// Skip leading zeroes
 	while(*s == '0') {
 		++s;

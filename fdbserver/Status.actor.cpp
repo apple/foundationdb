@@ -2041,6 +2041,17 @@ TEST_CASE("status/json/builder") {
 	array2.addContents(JsonBuilderArray());
 	ASSERT(checkJson(array2, "[null,1,2,\"test\"]"));
 
+	JsonBuilderObject object3;
+	object3["infinity"] = std::numeric_limits<double>::infinity();
+	object3["nan"] = std::numeric_limits<double>::quiet_NaN();
+	ASSERT(checkJson(object3, "{\"infinity\":1e99,\"nan\":-999}"));
+
+	ASSERT(checkAsciiNumber("inf"));
+	ASSERT(checkAsciiNumber("infA"));
+	ASSERT(checkAsciiNumber("in"));
+	ASSERT(checkAsciiNumber("-inf"));
+	ASSERT(checkAsciiNumber("-infA"));
+	ASSERT(checkAsciiNumber("-in"));
 	ASSERT(checkAsciiNumber("a"));
 	ASSERT(checkAsciiNumber("-1a.0"));
 	ASSERT(checkAsciiNumber("-01a.0"));
