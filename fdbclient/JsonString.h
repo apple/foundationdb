@@ -97,20 +97,33 @@ protected:
 		write(val ? "true" : "false");
 	}
 
+	template<typename T> inline void writeFormat(const char *fmt, const T &val) {
+		VString &dst = jsonText.back();
+		const int limit = 30;
+		dst.reserve(arena, dst.size() + limit);
+		int len = snprintf(dst.end(), limit, fmt, val);
+		if(len > 0 && len < limit) {
+			dst.extendUnsafeNoReallocNoInit(len);
+		}
+		else {
+			write(format(fmt, val));
+		}
+	}
+
 	void writeValue(const int64_t& val) {
-		write(format("%lld",val));
+		writeFormat("%lld", val);
 	}
 
 	void writeValue(const uint64_t& val) {
-		write(format("%llu",val));
+		writeFormat("%llu", val);
 	}
 
 	void writeValue(const int& val) {
-		write(format("%d",val));
+		writeFormat("%d", val);
 	}
 
 	void writeValue(const double& val) {
-		write(format("%g",val));
+		writeFormat("%g", val);
 	}
 
 	bool shouldEscape(char c) {
