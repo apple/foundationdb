@@ -2045,6 +2045,24 @@ TEST_CASE("status/json/builder") {
 	object.setKey("d", array2);
 	CHECK(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
 
+	JsonBuilderObject object2;
+	object2["x"] = 1;
+	object2["y"] = "why";
+	object2["z"] = std::string("zee");
+	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\"}");
+
+	object2.addContents(object);
+	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
+
+	object2.addContents(JsonBuilderObject());
+	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
+
+	array2.addContents(array);
+	CHECK(array2, "[null,1,2,\"test\"]");
+
+	array2.addContents(JsonBuilderArray());
+	CHECK(array2, "[null,1,2,\"test\"]");
+
 	return Void();
 }
 
