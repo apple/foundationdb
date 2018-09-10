@@ -341,39 +341,22 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 				statusObj["address"] = address;
 
 				JsonBuilderObject memoryObj;
-
-				metric = parseDouble(event.getValue("TotalMemory"));
-				memoryObj["total_bytes"] = metric;
-
-				metric = parseDouble(event.getValue("CommittedMemory"));
-				memoryObj["committed_bytes"] = metric;
-
-				metric = parseDouble(event.getValue("AvailableMemory"));
-				memoryObj["free_bytes"] = metric;
-
+				memoryObj.setKeyRawNumber("total_bytes", event.getValue("TotalMemory"));
+				memoryObj.setKeyRawNumber("committed_bytes", event.getValue("CommittedMemory"));
+				memoryObj.setKeyRawNumber("free_bytes", event.getValue("AvailableMemory"));
 				statusObj["memory"] = memoryObj;
 
 				JsonBuilderObject cpuObj;
-
-				metric = parseDouble(event.getValue("CPUSeconds"));
-				double cpu_seconds = metric;
-
-				metric = parseDouble(event.getValue("Elapsed"));
-				double elapsed = metric;
-
+				double cpu_seconds = parseDouble(event.getValue("CPUSeconds"));
+				double elapsed = parseDouble(event.getValue("Elapsed"));
 				if (elapsed > 0){
 					cpuObj["logical_core_utilization"] = std::max(0.0, std::min(cpu_seconds / elapsed, 1.0));
 				}
-
 				statusObj["cpu"] = cpuObj;
 
 				JsonBuilderObject networkObj;
-
-				metric = parseDouble(event.getValue("MbpsSent"));
-				networkObj["megabits_sent"] = JsonBuilderObject().setKey("hz", metric);
-
-				metric = parseDouble(event.getValue("MbpsReceived"));
-				networkObj["megabits_received"] = JsonBuilderObject().setKey("hz", metric);
+				networkObj["megabits_sent"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsSent"));
+				networkObj["megabits_received"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsReceived"));
 
 				metric = parseDouble(event.getValue("RetransSegs"));
 				JsonBuilderObject retransSegsObj;
@@ -381,7 +364,6 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 					retransSegsObj["hz"] = metric / elapsed;
 				}
 				networkObj["tcp_segments_retransmitted"] = retransSegsObj;
-
 				statusObj["network"] = networkObj;
 
 				if (configuration.present()){
@@ -440,14 +422,14 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["stored_bytes"] = parseInt64(metrics.getValue("BytesStored"));
-			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("KvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("KvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("KvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("stored_bytes",metrics.getValue("BytesStored"));
+			obj.setKeyRawNumber("kvstore_used_bytes",metrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes",metrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes",metrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes",metrics.getValue("KvstoreBytesTotal"));
 			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
-			obj["query_queue_max"] = parseInt(metrics.getValue("QueryQueueMax"));
+			obj.setKeyRawNumber("query_queue_max",metrics.getValue("QueryQueueMax"));
 			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
 
 			Version version = parseInt64(metrics.getValue("Version"));
@@ -484,14 +466,14 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("KvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("KvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("KvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("KvstoreBytesTotal"));
-			obj["queue_disk_used_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesUsed"));
-			obj["queue_disk_free_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesFree"));
-			obj["queue_disk_available_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesAvailable"));
-			obj["queue_disk_total_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesTotal"));
+			obj.setKeyRawNumber("kvstore_used_bytes",metrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes",metrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes",metrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes",metrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("queue_disk_used_bytes",metrics.getValue("QueueDiskBytesUsed"));
+			obj.setKeyRawNumber("queue_disk_free_bytes",metrics.getValue("QueueDiskBytesFree"));
+			obj.setKeyRawNumber("queue_disk_available_bytes",metrics.getValue("QueueDiskBytesAvailable"));
+			obj.setKeyRawNumber("queue_disk_total_bytes",metrics.getValue("QueueDiskBytesTotal"));
 			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
 			metricVersion = parseInt64(metrics.getValue("Version"));
@@ -646,33 +628,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 				statusObj["locality"] = getLocalityInfo(workerItr->first.locality);
 
-				statusObj["uptime_seconds"] = parseDouble(event.getValue("UptimeSeconds"));
-
-				metric = parseDouble(event.getValue("CPUSeconds"));
-				double cpu_seconds = metric;
+				statusObj.setKeyRawNumber("uptime_seconds",event.getValue("UptimeSeconds"));
 
 				// rates are calculated over the last elapsed seconds
-				metric = parseDouble(event.getValue("Elapsed"));
-				double elapsed = metric;
-
-				metric = parseDouble(event.getValue("DiskIdleSeconds"));
-				double diskIdleSeconds = metric;
-
-				metric = parseDouble(event.getValue("DiskReads"));
-				double diskReads = metric;
-
-				metric = parseDouble(event.getValue("DiskWrites"));
-				double diskWrites = metric;
-
-				uint64_t diskReadsCount = parseInt64(event.getValue("DiskReadsCount"));
-
-				uint64_t diskWritesCount = parseInt64(event.getValue("DiskWritesCount"));
-
-				metric = parseDouble(event.getValue("DiskWriteSectors"));
-				double diskWriteSectors = metric;
-
-				metric = parseDouble(event.getValue("DiskReadSectors"));
-				double diskReadSectors = metric;
+				double elapsed = parseDouble(event.getValue("Elapsed"));;
+				double cpu_seconds = parseDouble(event.getValue("CPUSeconds"));
+				double diskIdleSeconds = parseDouble(event.getValue("DiskIdleSeconds"));
+				double diskReads = parseDouble(event.getValue("DiskReads"));
+				double diskWrites = parseDouble(event.getValue("DiskWrites"));
 
 				JsonBuilderObject diskObj;
 				if (elapsed > 0){
@@ -683,63 +646,57 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 					diskObj["busy"] = std::max(0.0, std::min((elapsed - diskIdleSeconds) / elapsed, 1.0));
 
 					JsonBuilderObject readsObj;
-					readsObj["counter"] = diskReadsCount;
+					readsObj.setKeyRawNumber("counter",event.getValue("DiskReadsCount"));
 					if (elapsed > 0)
 						readsObj["hz"] = diskReads / elapsed;
-					readsObj["sectors"] = diskReadSectors;
+					readsObj.setKeyRawNumber("sectors",event.getValue("DiskReadSectors"));
 
 					JsonBuilderObject writesObj;
-					writesObj["counter"] = diskWritesCount;
+					writesObj.setKeyRawNumber("counter",event.getValue("DiskWritesCount"));
 					if (elapsed > 0)
 						writesObj["hz"] = diskWrites / elapsed;
-					writesObj["sectors"] = diskWriteSectors;
+					writesObj.setKeyRawNumber("sectors",event.getValue("DiskWriteSectors"));
 
 					diskObj["reads"] = readsObj;
 					diskObj["writes"] = writesObj;
 				}
 
-				diskObj["total_bytes"] = parseInt64(event.getValue("DiskTotalBytes"));
-				diskObj["free_bytes"] = parseInt64(event.getValue("DiskFreeBytes"));
+				diskObj.setKeyRawNumber("total_bytes",event.getValue("DiskTotalBytes"));
+				diskObj.setKeyRawNumber("free_bytes",event.getValue("DiskFreeBytes"));
 				statusObj["disk"] = diskObj;
 
 				JsonBuilderObject networkObj;
 
-				networkObj["current_connections"] = parseInt64(event.getValue("CurrentConnections"));
+				networkObj.setKeyRawNumber("current_connections",event.getValue("CurrentConnections"));
 				JsonBuilderObject connections_established;
-				connections_established["hz"] = parseDouble(event.getValue("ConnectionsEstablished"));
+				connections_established.setKeyRawNumber("hz",event.getValue("ConnectionsEstablished"));
 				networkObj["connections_established"] = connections_established;
 				JsonBuilderObject connections_closed;
-				connections_closed["hz"] = parseDouble(event.getValue("ConnectionsClosed"));
+				connections_closed.setKeyRawNumber("hz",event.getValue("ConnectionsClosed"));
 				networkObj["connections_closed"] = connections_closed;
 				JsonBuilderObject connection_errors;
-				connection_errors["hz"] = parseDouble(event.getValue("ConnectionErrors"));
+				connection_errors.setKeyRawNumber("hz",event.getValue("ConnectionErrors"));
 				networkObj["connection_errors"] = connection_errors;
 
-				metric = parseDouble(event.getValue("MbpsSent"));
 				JsonBuilderObject megabits_sent;
-				megabits_sent["hz"] = metric;
+				megabits_sent.setKeyRawNumber("hz",event.getValue("MbpsSent"));
 				networkObj["megabits_sent"] = megabits_sent;
 
-				metric = parseDouble(event.getValue("MbpsReceived"));
 				JsonBuilderObject megabits_received;
-				megabits_received["hz"] = metric;
+				megabits_received.setKeyRawNumber("hz",event.getValue("MbpsReceived"));
 				networkObj["megabits_received"] = megabits_received;
 
 				statusObj["network"] = networkObj;
 
-				metric = parseDouble(event.getValue("Memory"));
-				memoryObj["used_bytes"] = metric;
-
-				metric = parseDouble(event.getValue("UnusedAllocatedMemory"));
-				memoryObj["unused_allocated_memory"] = metric;
+				memoryObj.setKeyRawNumber("used_bytes",event.getValue("Memory"));
+				memoryObj.setKeyRawNumber("unused_allocated_memory",event.getValue("UnusedAllocatedMemory"));
 			}
 
 			if (programStarts.count(address)) {
 				auto const& psxml = programStarts.at(address);
 
 				if(psxml.size() > 0) {
-					int64_t memLimit = parseInt64(psxml.getValue("MemoryLimit"));
-					memoryObj["limit_bytes"] = memLimit;
+					memoryObj.setKeyRawNumber("limit_bytes",psxml.getValue("MemoryLimit"));
 
 					std::string version;
 					if (psxml.tryGetValue("Version", version)) {
@@ -1142,29 +1099,24 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 			int64_t partitionsInQueue = parseInt64(md.getValue("InQueue"));
 			int64_t partitionsInFlight = parseInt64(md.getValue("InFlight"));
 			int64_t averagePartitionSize = parseInt64(md.getValue("AverageShardSize"));
-			int64_t totalBytesWritten = parseInt64(md.getValue("BytesWritten"));
-			int highestPriority = parseInt(md.getValue("HighestPriority"));
 
 			if( averagePartitionSize >= 0 ) {
 				JsonBuilderObject moving_data;
 				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
 				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
-				moving_data["total_written_bytes"] = totalBytesWritten;
-				moving_data["highest_priority"] = highestPriority;
+				moving_data.setKeyRawNumber("total_written_bytes",md.getValue("BytesWritten"));
+				moving_data.setKeyRawNumber("highest_priority",md.getValue("HighestPriority"));
 
 				// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
 				statusObjData["moving_data"] = moving_data;
-
 				statusObjData["average_partition_size_bytes"] = averagePartitionSize;
 			}
 		}
 
 		if (dataStats.size())
 		{
-			int64_t totalDBBytes = parseInt64(dataStats.getValue("TotalSizeBytes"));
-			statusObjData["total_kv_size_bytes"] = totalDBBytes;
-			int shards = parseInt(dataStats.getValue("Shards"));
-			statusObjData["partitions_count"] = shards;
+			statusObjData.setKeyRawNumber("total_kv_size_bytes",dataStats.getValue("TotalSizeBytes"));
+			statusObjData.setKeyRawNumber("partitions_count",dataStats.getValue("Shards"));
 		}
 
 		JsonBuilderArray teamTrackers;
@@ -1175,14 +1127,12 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 			}
 
 			bool primary = parseInt(inFlight.getValue("Primary"));
-			int64_t totalDataInFlight = parseInt64(inFlight.getValue("TotalBytes"));
-			int unhealthyServers = parseInt(inFlight.getValue("UnhealthyServers"));
 			int highestPriority = parseInt(inFlight.getValue("HighestPriority"));
 
 			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
-			team_tracker["in_flight_bytes"] = totalDataInFlight;
-			team_tracker["unhealthy_servers"] = unhealthyServers;
+			team_tracker.setKeyRawNumber("in_flight_bytes",inFlight.getValue("TotalBytes"));
+			team_tracker.setKeyRawNumber("unhealthy_servers",inFlight.getValue("UnhealthyServers"));
 
 			JsonBuilderObject stateSectionObj;
 			if (highestPriority >= PRIORITY_TEAM_0_LEFT) {
@@ -1395,25 +1345,19 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		int tlogCount = parseInt(md.getValue("TLogs"));
 		int64_t worstFreeSpaceStorageServer = parseInt64(md.getValue("WorstFreeSpaceStorageServer"));
 		int64_t worstFreeSpaceTLog = parseInt64(md.getValue("WorstFreeSpaceTLog"));
-		int64_t worstStorageServerQueue = parseInt64(md.getValue("WorstStorageServerQueue"));
-		int64_t limitingStorageServerQueue = parseInt64(md.getValue("LimitingStorageServerQueue"));
-		int64_t worstTLogQueue = parseInt64(md.getValue("WorstTLogQueue"));
-		int64_t totalDiskUsageBytes = parseInt64(md.getValue("TotalDiskUsageBytes"));
-		int64_t worstVersionLag = parseInt64(md.getValue("WorstStorageServerVersionLag"));
-		int64_t limitingVersionLag = parseInt64(md.getValue("LimitingStorageServerVersionLag"));
-		(*data_overlay)["total_disk_used_bytes"] = totalDiskUsageBytes;
+		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",md.getValue("TotalDiskUsageBytes"));
 
 		if(ssCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
-			(*qos)["worst_queue_bytes_storage_server"] = worstStorageServerQueue;
-			(*qos)["limiting_queue_bytes_storage_server"] = limitingStorageServerQueue;
-			(*qos)["worst_version_lag_storage_server"] = worstVersionLag;
-			(*qos)["limiting_version_lag_storage_server"] = limitingVersionLag;
+			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server",md.getValue("WorstStorageServerQueue"));
+			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server",md.getValue("LimitingStorageServerQueue"));
+			(*qos).setKeyRawNumber("worst_version_lag_storage_server",md.getValue("WorstStorageServerVersionLag"));
+			(*qos).setKeyRawNumber("limiting_version_lag_storage_server",md.getValue("LimitingStorageServerVersionLag"));
 		}
 
 		if(tlogCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_log_server"] = std::max(worstFreeSpaceTLog, (int64_t)0);
-			(*qos)["worst_queue_bytes_log_server"] = worstTLogQueue;
+			(*qos).setKeyRawNumber("worst_queue_bytes_log_server",md.getValue("WorstTLogQueue"));
 		}
 
 		(*qos)["transactions_per_second_limit"] = tpsLimit;

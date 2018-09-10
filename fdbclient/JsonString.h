@@ -255,6 +255,18 @@ public:
 		return *this;
 	}
 
+	template<typename KT, typename VT> inline JsonBuilderObject & setKeyRawNumber(KT &&name, VT &&val) {
+		if(elements++ > 0) {
+			write(',');
+		}
+		write('"');
+		write(name);
+		write('"');
+		write(':');
+		write(val);
+		return *this;
+	}
+
 	template<typename T> inline JsonBuilderObjectSetter<T> operator[](T &&name);
 
 	JsonBuilderObject & addContents(const json_spirit::mObject &obj) {
