@@ -2145,7 +2145,7 @@ TEST_CASE("status/json/builderPerf") {
 	printf("Generating and serializing random document\n");
 	double start = timer();
 
-	int bytes = 0;
+	int64_t bytes = 0;
 	double generated = 0;
 	for(int i = 0; i < iterations; i++) {
 		int n = elements;
@@ -2159,7 +2159,7 @@ TEST_CASE("status/json/builderPerf") {
 	double end = timer();
 
 	double elapsed = end - start;
-	printf("RESULT: %lu bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
+	printf("RESULT: %lld bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
 		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
 
 	return Void();

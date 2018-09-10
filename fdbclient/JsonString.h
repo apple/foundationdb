@@ -206,7 +206,7 @@ public:
 	}
 
 	JsonBuilderArray & addContents(const JsonBuilderArray &arr) {
-		if(!arr.jsonText.size()) {
+		if(arr.empty()) {
 			return *this;
 		}
 
@@ -256,7 +256,7 @@ public:
 	}
 
 	JsonBuilderObject & addContents(const JsonBuilderObject &obj) {
-		if(!obj.jsonText.size()) {
+		if(obj.empty()) {
 			return *this;
 		}
 
