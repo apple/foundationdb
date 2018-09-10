@@ -18,9 +18,12 @@ class JsonBuilder {
 protected:
 	enum EType { NULLVALUE, OBJECT, ARRAY };
 
+	typedef VectorRef<char> VString;
 public:
 	// Default value is null, which will be considered "empty"
-	JsonBuilder() : type(NULLVALUE), elements(0), bytes(0) {}
+	JsonBuilder() : type(NULLVALUE), elements(0), bytes(0) {
+		jsonText.resize(arena, 1);
+	}
 
 	int getFinalLength() const {
 		return bytes + strlen(getEnd());
@@ -50,41 +53,42 @@ public:
 protected:
 	EType type;
 	Arena arena;
-	mutable std::vector<VectorRef<uint8_t>> jsonText;
+	mutable VectorRef<VString> jsonText;
 	int elements;
 	int bytes;
 
+	// 'raw' write methods
 	inline void write( const std::string& s) {
-		if(!jsonText.size()) {
-			jsonText.push_back( VectorRef<uint8_t>() );
-		}
 		bytes += s.size();
-		jsonText.back().append(arena, (const uint8_t*)&s[0], s.size());
-		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
+		jsonText.back().append(arena, s.data(), s.size());
 	}
 
 	inline void write(const char* s) {
-		if(!jsonText.size()) {
-			jsonText.push_back( VectorRef<uint8_t>() );
-		}
-		bytes += strlen(s);
-		jsonText.back().append(arena, (const uint8_t*)&s[0], strlen(s));
-		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
+		int len = strlen(s);
+		bytes += len;
+		jsonText.back().append(arena, s, len);
 	}
 
 	inline void write(char s) {
-		if(!jsonText.size()) {
-			jsonText.push_back( VectorRef<uint8_t>() );
-		}
-		bytes++;
+		++bytes;
 		jsonText.back().push_back(arena, s);
-		//printf("%p: after write: '%s'\n", this, jsonText.c_str());
 	}
 
-	// Catch-all for json spirit types
-	// TODO:  Reduce this to just mArray and mValue, and provide faster version for other types
+	// writeValue() methods write JSON form of the value
 	void writeValue(const json_spirit::mValue &val) {
-		write(json_spirit::write_string(val));
+		switch(val.type()) {
+			case json_spirit::int_type:
+				return writeValue(val.get_int64());
+			case json_spirit::bool_type:
+				return writeValue(val.get_bool());
+			case json_spirit::real_type:
+				return writeValue(val.get_real());
+			case json_spirit::str_type:
+				return writeValue(val.get_str());
+			default:
+				// Catch-all for objects/arrays
+				return write(json_spirit::write_string(val));
+		};
 	}
 
 	void writeValue(const bool& val) {
@@ -122,50 +126,69 @@ protected:
 		}
 	}
 
-	void writeValue(const std::string& val) {
+	void writeValue(const char *val, int len) {
 		write('"');
 		int beginCopy = 0;
-		for (int i = 0; i < val.size(); i++) {
-			if (shouldEscape(val[i])) {
-				jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), i - beginCopy);
-				beginCopy = i + 1;
-				write('\\');
-				write(val[i]);
-			}
-		}
-		if(beginCopy < val.size()) {
-			jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), val.size() - beginCopy);
-		}
-		write('"');
-	}
-
-	void writeValue(const char* val) {
-		write('"');
-		int beginCopy = 0;
-		int len = strlen(val);
+		VString &dst = jsonText.back();
 		for (int i = 0; i < len; i++) {
 			if (shouldEscape(val[i])) {
-				jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), i - beginCopy);
+				dst.append(arena, val + beginCopy, i - beginCopy);
 				beginCopy = i + 1;
 				write('\\');
 				write(val[i]);
 			}
 		}
 		if(beginCopy < len) {
-			jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), len - beginCopy);
+			dst.append(arena, val + beginCopy, len - beginCopy);
 		}
 		write('"');
+	}
+
+	inline void writeValue(const std::string& val) {
+		writeValue(val.data(), val.size());
+	}
+
+	inline void writeValue(const char* val) {
+		writeValue(val, strlen(val));
+	}
+
+	inline void writeValue(const StringRef &s) {
+		writeValue((const char *)s.begin(), s.size());
 	}
 
 	// Write the finalized (closed) form of val
 	void writeValue(const JsonBuilder &val) {
 		bytes += val.bytes;
-		for(auto& it : val.jsonText) {
-			jsonText.push_back(it);
-		}
-		val.jsonText.push_back(VectorRef<uint8_t>());
+		jsonText.append(arena, val.jsonText.begin(), val.jsonText.size());
+		val.jsonText.push_back(arena, VString());
 		arena.dependsOn(val.arena);
 		write(val.getEnd());
+	}
+
+	// Helper function to add contents of another JsonBuilder to this one.
+	// This is only used by the subclasses to combine like-typed (at compile time) objects,
+	// so it can be assumed that the other object has been initialized with an opening character.
+	void _addContents(const JsonBuilder &other) {
+		if(other.empty()) {
+			return;
+		}
+
+		if(elements > 0) {
+			write(',');
+		}
+
+		// Add everything but the first byte of the first string in arr
+		bytes += other.bytes - 1;
+		const VString &front = other.jsonText.front();
+		jsonText.push_back(arena, front.slice(1, front.size() - 1));
+		jsonText.append(arena, other.jsonText.begin() + 1, other.jsonText.size() - 1);
+
+		// Both JsonBuilders would now want to write to the same additional VString capacity memory
+		// if they were modified, so force the other (likely to not be modified again) to start a new one.
+		other.jsonText.push_back(arena, VString());
+
+		arena.dependsOn(other.arena);
+		elements += other.elements;
 	}
 
 	// Get the text necessary to finish the JSON string
@@ -206,23 +229,7 @@ public:
 	}
 
 	JsonBuilderArray & addContents(const JsonBuilderArray &arr) {
-		if(arr.empty()) {
-			return *this;
-		}
-
-		if(elements > 0) {
-			write(',');
-		}
-
-		bytes += arr.bytes - 1;
-		jsonText.push_back(VectorRef<uint8_t>((uint8_t*)&arr.jsonText[0][1], arr.jsonText[0].size()-1));
-		for(int i = 1; i < arr.jsonText.size(); i++) {
-			jsonText.push_back(arr.jsonText[i]);
-		}
-		arr.jsonText.push_back(VectorRef<uint8_t>());
-		arena.dependsOn(arr.arena);
-
-		elements += arr.elements;
+		_addContents(arr);
 		return *this;
 	}
 };
@@ -256,23 +263,7 @@ public:
 	}
 
 	JsonBuilderObject & addContents(const JsonBuilderObject &obj) {
-		if(obj.empty()) {
-			return *this;
-		}
-
-		if(elements > 0) {
-			write(',');
-		}
-
-		bytes += obj.bytes - 1;
-		jsonText.push_back(VectorRef<uint8_t>((uint8_t*)&obj.jsonText[0][1], obj.jsonText[0].size()-1));
-		for(int i = 1; i < obj.jsonText.size(); i++) {
-			jsonText.push_back(obj.jsonText[i]);
-		}
-		obj.jsonText.push_back(VectorRef<uint8_t>());
-		arena.dependsOn(obj.arena);
-
-		elements += obj.elements;
+		_addContents(obj);
 		return *this;
 	}
 };

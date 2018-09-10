@@ -247,7 +247,7 @@ static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
 
 	for(auto it = locality._data.begin(); it != locality._data.end(); it++) {
 		if(it->second.present()) {
-			localityObj[it->first.toString()] = it->second.get().toString();
+			localityObj[it->first.toString()] = it->second.get();
 		}
 		else {
 			localityObj[it->first.toString()] = JsonBuilder();
