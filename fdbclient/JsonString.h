@@ -50,6 +50,8 @@ public:
 
 	static JsonBuilderObject makeMessage(const char *name, const char *description);
 
+	static int coerceAsciiNumberToJSON(const char *s, int len, char *dst);
+
 protected:
 	EType type;
 	Arena arena;
@@ -180,6 +182,26 @@ protected:
 		write(val.getEnd());
 	}
 
+	void writeCoercedAsciiNumber(const char *s, int len) {
+		VString &val = jsonText.back();
+		val.reserve(arena, len + 3);
+		int written = coerceAsciiNumberToJSON(s, len, val.end());
+		if(written > 0) {
+			val.extendUnsafeNoReallocNoInit(written);
+		}
+		else {
+			write("-999");
+		}
+	}
+
+	inline void writeCoercedAsciiNumber(const StringRef &s) {
+		writeCoercedAsciiNumber((const char *)s.begin(), s.size());
+	}
+
+	inline void writeCoercedAsciiNumber(const std::string &s) {
+		writeCoercedAsciiNumber(s.data(), s.size());
+	}
+
 	// Helper function to add contents of another JsonBuilder to this one.
 	// This is only used by the subclasses to combine like-typed (at compile time) objects,
 	// so it can be assumed that the other object has been initialized with an opening character.
@@ -274,18 +296,7 @@ public:
 		write('"');
 		write(name);
 		write("\":");
-		CheckNumberResult res = checkNumber(val);
-		if(res == CHECKNUMBER_NEEDS_ZERO_START) {
-			write('0');
-		}
-		if(res == CHECKNUMBER_INVALID) {
-			write("-999");
-		} else {
-			write(val);
-		}
-		if(res == CHECKNUMBER_NEEDS_ZERO_END) {
-			write('0');
-		}
+		writeCoercedAsciiNumber(val);
 		return *this;
 	}
 
@@ -303,49 +314,6 @@ public:
 		return *this;
 	}
 
-private:
-	enum CheckNumberResult {
-		CHECKNUMBER_VALID, CHECKNUMBER_NEEDS_ZERO_START, CHECKNUMBER_NEEDS_ZERO_END, CHECKNUMBER_INVALID
-	};
-
-	inline CheckNumberResult checkNumber(const char *s, int len) {
-		bool needsZero = false;
-		bool foundPeriod = false;
-		bool foundNegative = false;
-		bool foundDigit = false;
-		int eIdx = -1;
-		for(int i = 0; i < len; i++) {
-			if(!isdigit(s[i])) {
-				if(s[i]=='.' && !foundPeriod && eIdx<0 && len>1) {
-					foundPeriod = true;
-					if(i==0) {
-						needsZero = true;
-					} else if(i==1 && foundNegative) {
-						return CHECKNUMBER_INVALID;
-					} else if(i==len-1) {
-						return CHECKNUMBER_NEEDS_ZERO_END;
-					}
-				} else if(i==0 && len>1 && s[i]=='-') {
-					foundNegative = true;
-				} else if(foundDigit && i!=len-1 && eIdx<0 && (s[i]=='e' || s[i]=='E')) {
-					eIdx = i;
-				} else if(!(i==eIdx+1 && i!=len-1 && (s[i]=='+' || s[i]=='-'))) {
-					return CHECKNUMBER_INVALID;
-				}
-			} else {
-				foundDigit = true;
-			}
-		}
-		return needsZero ? CHECKNUMBER_NEEDS_ZERO_START : CHECKNUMBER_VALID;
-	}
-
-	inline CheckNumberResult checkNumber(const char* s) {
-		return checkNumber(s, strlen(s));
-	}
-
-	inline CheckNumberResult checkNumber(const StringRef &s) {
-		return checkNumber((char *)s.begin(), s.size());
-	}
 };
 
 // Template is the key name, accepted as an r-value if possible to avoid copying if it's a string

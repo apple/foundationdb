@@ -1946,66 +1946,100 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 }
 
-#define CHECK(j, s) { \
-	std::string js = j.getJson(); \
-	printf("json:     '%s'\n", js.c_str()); \
-	printf("expected: '%s'\n\n", s); \
-	ASSERT(js == s); \
+bool checkAsciiNumber(const char *s) {
+	JsonBuilderObject number;
+	number.setKeyRawNumber("number", s);
+	printf("'%s' => %s\n", s, number.getJson().c_str());
+	try {
+		// Make sure it parses as JSON
+		readJSONStrictly(number.getJson());
+	} catch(...) {
+		return false;
+	}
+	return true;
+}
+
+bool checkJson(const JsonBuilder &j, const char *expected) {
+	std::string js = j.getJson();
+	printf("json:     '%s'\n", js.c_str());
+	printf("expected: '%s'\n\n", expected);
+	return js == expected;
 }
 
 TEST_CASE("status/json/builder") {
 	JsonBuilder json;
-	CHECK(json, "null");
+	ASSERT(checkJson(json, "null"));
 
 	JsonBuilderArray array;
-	CHECK(array, "[]");
+	ASSERT(checkJson(array, "[]"));
 
 	array.push_back(1);
-	CHECK(array, "[1]");
+	ASSERT(checkJson(array, "[1]"));
 
 	array.push_back(2);
-	CHECK(array, "[1,2]");
+	ASSERT(checkJson(array, "[1,2]"));
 
 	array.push_back("test");
-	CHECK(array, "[1,2,\"test\"]");
+	ASSERT(checkJson(array, "[1,2,\"test\"]"));
 
 	JsonBuilderObject object;
-	CHECK(object, "{}");
+	ASSERT(checkJson(object, "{}"));
 
 	object.setKey("a", 5);
-	CHECK(object, "{\"a\":5}");
+	ASSERT(checkJson(object, "{\"a\":5}"));
 
 	object.setKey("b", "hi");
-	CHECK(object, "{\"a\":5,\"b\":\"hi\"}");
+	ASSERT(checkJson(object, "{\"a\":5,\"b\":\"hi\"}"));
 
 	object.setKey("c", array);
-	CHECK(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"]}");
+	ASSERT(checkJson(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"]}"));
 
 	JsonBuilderArray array2;
 
 	array2.push_back(json);
-	CHECK(array2, "[null]");
+	ASSERT(checkJson(array2, "[null]"));
 
 	object.setKey("d", array2);
-	CHECK(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
+	ASSERT(checkJson(object, "{\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
 
 	JsonBuilderObject object2;
 	object2["x"] = 1;
 	object2["y"] = "why";
 	object2["z"] = std::string("zee");
-	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\"}");
+	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\"}"));
 
 	object2.addContents(object);
-	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
+	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
 
 	object2.addContents(JsonBuilderObject());
-	CHECK(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}");
+	ASSERT(checkJson(object2, "{\"x\":1,\"y\":\"why\",\"z\":\"zee\",\"a\":5,\"b\":\"hi\",\"c\":[1,2,\"test\"],\"d\":[null]}"));
 
 	array2.addContents(array);
-	CHECK(array2, "[null,1,2,\"test\"]");
+	ASSERT(checkJson(array2, "[null,1,2,\"test\"]"));
 
 	array2.addContents(JsonBuilderArray());
-	CHECK(array2, "[null,1,2,\"test\"]");
+	ASSERT(checkJson(array2, "[null,1,2,\"test\"]"));
+
+	ASSERT(checkAsciiNumber("a"));
+	ASSERT(checkAsciiNumber("-1a.0"));
+	ASSERT(checkAsciiNumber("-01a.0"));
+	ASSERT(checkAsciiNumber("01.0a"));
+	ASSERT(checkAsciiNumber("-1.0"));
+	ASSERT(checkAsciiNumber("-01.0"));
+	ASSERT(checkAsciiNumber("01.0"));
+	ASSERT(checkAsciiNumber("-001"));
+	ASSERT(checkAsciiNumber("000."));
+	ASSERT(checkAsciiNumber("-0001.e-"));
+	ASSERT(checkAsciiNumber("-0001.0e-01"));
+	ASSERT(checkAsciiNumber("-000123e-234"));
+	ASSERT(checkAsciiNumber("-09234.12312e-132"));
+	ASSERT(checkAsciiNumber("-111.e-01"));
+	ASSERT(checkAsciiNumber("-00111.e-01"));
+	ASSERT(checkAsciiNumber("-.e"));
+	ASSERT(checkAsciiNumber("-09234.123a12e-132"));
+	ASSERT(checkAsciiNumber("-11a1.e-01"));
+	ASSERT(checkAsciiNumber("-00111.ae-01"));
+	ASSERT(checkAsciiNumber("-.ea"));
 
 	return Void();
 }
