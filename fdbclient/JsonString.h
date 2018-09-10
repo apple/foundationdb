@@ -139,6 +139,24 @@ protected:
 		write('"');
 	}
 
+	void writeValue(const char* val) {
+		write('"');
+		int beginCopy = 0;
+		int len = strlen(val);
+		for (int i = 0; i < len; i++) {
+			if (shouldEscape(val[i])) {
+				jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), i - beginCopy);
+				beginCopy = i + 1;
+				write('\\');
+				write(val[i]);
+			}
+		}
+		if(beginCopy < len) {
+			jsonText.back().append(arena, (const uint8_t*)&(val[beginCopy]), len - beginCopy);
+		}
+		write('"');
+	}
+
 	// Write the finalized (closed) form of val
 	void writeValue(const JsonBuilder &val) {
 		bytes += val.bytes;
@@ -192,6 +210,10 @@ public:
 			return *this;
 		}
 
+		if(elements > 0) {
+			write(',');
+		}
+
 		bytes += arr.bytes - 1;
 		jsonText.push_back(VectorRef<uint8_t>((uint8_t*)&arr.jsonText[0][1], arr.jsonText[0].size()-1));
 		for(int i = 1; i < arr.jsonText.size(); i++) {
@@ -236,6 +258,10 @@ public:
 	JsonBuilderObject & addContents(const JsonBuilderObject &obj) {
 		if(!obj.jsonText.size()) {
 			return *this;
+		}
+
+		if(elements > 0) {
+			write(',');
 		}
 
 		bytes += obj.bytes - 1;
