@@ -2053,6 +2053,8 @@ TEST_CASE("status/json/builder") {
 	ASSERT(checkAsciiNumber("-11a1.e-01"));
 	ASSERT(checkAsciiNumber("-00111.ae-01"));
 	ASSERT(checkAsciiNumber("-.ea"));
+	ASSERT(checkAsciiNumber("-.e+"));
+	ASSERT(checkAsciiNumber("-.0e+1"));
 
 	return Void();
 }
