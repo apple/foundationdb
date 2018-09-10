@@ -108,7 +108,7 @@ int JsonBuilder::coerceAsciiNumberToJSON(const char *s, int len, char *dst) {
 		}
 
 		// Allow one optional sign
-		if(*s == '-') {
+		if(*s == '-' || *s == '+') {
 			*wptr++ = *s++;
 		}
 
