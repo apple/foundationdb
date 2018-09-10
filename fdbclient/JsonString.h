@@ -182,7 +182,7 @@ protected:
 		// Add everything but the first byte of the first string in arr
 		bytes += other.bytes - 1;
 		const VString &front = other.jsonText.front();
-		jsonText.push_back(arena, front.slice(1, front.size() - 1));
+		jsonText.push_back(arena, front.slice(1, front.size()));
 		jsonText.append(arena, other.jsonText.begin() + 1, other.jsonText.size() - 1);
 
 		// Both JsonBuilders would now want to write to the same additional VString capacity memory
