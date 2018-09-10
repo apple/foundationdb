@@ -1642,11 +1642,19 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter( KVFileCheck(kvFile, true) );
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
-			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
-			g_network->run();
+			Optional<Void> result;
+			try {
+				GenerateIOLogChecksumFile(kvFile);
+				result = Void();
+			}
+			catch(Error &e) {
+				fprintf(stderr, "Fatal Error: %s\n", e.what());
+			}
+
+			f = result;
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
