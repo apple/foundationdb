@@ -1949,13 +1949,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 bool checkAsciiNumber(const char *s) {
 	JsonBuilderObject number;
 	number.setKeyRawNumber("number", s);
-	printf("'%s' => %s\n", s, number.getJson().c_str());
+	std::string js = number.getJson();
+	printf("'%s' => %s\n", s, js.c_str());
+
 	try {
 		// Make sure it parses as JSON
-		readJSONStrictly(number.getJson());
-	} catch(...) {
+		readJSONStrictly(js);
+	} catch(Error &e) {
+		printf("error: %s\n", e.what());
 		return false;
 	}
+
 	return true;
 }
 
@@ -1963,6 +1967,15 @@ bool checkJson(const JsonBuilder &j, const char *expected) {
 	std::string js = j.getJson();
 	printf("json:     '%s'\n", js.c_str());
 	printf("expected: '%s'\n\n", expected);
+
+	try {
+		// Make sure it parses as JSON
+		readJSONStrictly(js);
+	} catch(Error &e) {
+		printf("error: %s\n", e.what());
+		return false;
+	}
+
 	return js == expected;
 }
 
