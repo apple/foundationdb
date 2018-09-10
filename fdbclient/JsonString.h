@@ -312,9 +312,11 @@ private:
 		bool needsZero = false;
 		bool foundPeriod = false;
 		bool foundNegative = false;
+		bool foundDigit = false;
+		int eIdx = -1;
 		for(int i = 0; i < len; i++) {
 			if(!isdigit(s[i])) {
-				if(s[i]=='.' && !foundPeriod && len>1) {
+				if(s[i]=='.' && !foundPeriod && eIdx<0 && len>1) {
 					foundPeriod = true;
 					if(i==0) {
 						needsZero = true;
@@ -325,9 +327,13 @@ private:
 					}
 				} else if(i==0 && len>1 && s[i]=='-') {
 					foundNegative = true;
-				} else {
+				} else if(foundDigit && i!=len-1 && eIdx<0 && (s[i]=='e' || s[i]=='E')) {
+					eIdx = i;
+				} else if(!(i==eIdx+1 && i!=len-1 && (s[i]=='+' || s[i]=='-'))) {
 					return CHECKNUMBER_INVALID;
 				}
+			} else {
+				foundDigit = true;
 			}
 		}
 		return needsZero ? CHECKNUMBER_NEEDS_ZERO_START : CHECKNUMBER_VALID;
