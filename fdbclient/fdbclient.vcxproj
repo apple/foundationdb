@@ -81,7 +81,7 @@
     <ClInclude Include="WriteMap.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="Tuple.h" />
-    <ClInclude Include="JsonString.h" />
+    <ClInclude Include="JsonBuilder.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
@@ -105,7 +105,7 @@
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
-    <ClCompile Include="JsonString.cpp" />
+    <ClCompile Include="JsonBuilder.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>
