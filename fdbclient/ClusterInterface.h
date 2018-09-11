@@ -27,7 +27,6 @@
 #include "Status.h"
 #include "ClientDBInfo.h"
 #include "ClientWorkerInterface.h"
-#include "flow/JsonString.h"
 
 struct ClusterInterface {
 	RequestStream< struct OpenDatabaseRequest > openDatabase;
@@ -193,15 +192,21 @@ struct StatusReply {
 
 	StatusReply() {}
 	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
-	explicit StatusReply(JsonString obj) : statusStr(obj.getJson()) {}
+	explicit StatusReply(std::string &&text) : statusStr(text) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar & statusStr;
 		if( ar.isDeserializing ) {
 			json_spirit::mValue mv;
-			json_spirit::read_string( statusStr, mv );
-			statusObj = StatusObject(mv.get_obj());
+			if(g_network->isSimulated()) {
+				mv = readJSONStrictly(statusStr);
+			}
+			else {
+				// In non-simulation allow errors because some status data is better than no status data
+				json_spirit::read_string( statusStr, mv );
+			}
+			statusObj = std::move(mv.get_obj());
 		}
 	}
 };

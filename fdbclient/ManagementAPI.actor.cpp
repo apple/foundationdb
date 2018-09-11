@@ -1405,8 +1405,9 @@ json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
 }
 
 void schemaCoverage( std::string const& spath, bool covered ) {
-	static std::set<std::string> coveredSchemaPaths;
-	if (coveredSchemaPaths.insert(spath).second) {
+	static std::map<bool, std::set<std::string>> coveredSchemaPaths;
+
+	if( coveredSchemaPaths[covered].insert(spath).second ) {
 		TraceEvent ev(SevInfo, "CodeCoverage");
 		ev.detail("File", "documentation/StatusSchema.json/" + spath).detail("Line", 0);
 		if (!covered)

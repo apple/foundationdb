@@ -81,6 +81,7 @@
     <ClInclude Include="WriteMap.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="Tuple.h" />
+    <ClInclude Include="JsonString.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
@@ -98,13 +99,13 @@
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
-		<ClCompile Include="Status.cpp" />
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
+    <ClCompile Include="JsonString.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>
