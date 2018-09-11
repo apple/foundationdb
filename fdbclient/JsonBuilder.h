@@ -259,11 +259,11 @@ public:
 		write('[');
 	}
 
-	template<typename VT> inline JsonBuilderArray & push_back(VT &&val) {
+	template<typename VT> inline JsonBuilderArray & push_back(const VT &val) {
 		if(elements++ > 0) {
 			write(',');
 		}
-		writeValue(std::forward<VT>(val));
+		writeValue(val);
 		return *this;
 	}
 
@@ -287,18 +287,18 @@ public:
 		write('{');
 	}
 
-	template<typename KT, typename VT> inline JsonBuilderObject & setKey(KT &&name, VT &&val) {
+	template<typename KT, typename VT> inline JsonBuilderObject & setKey(const KT &name, const VT &val) {
 		if(elements++ > 0) {
 			write(',');
 		}
 		write('"');
 		write(name);
 		write("\":");
-		writeValue(std::forward<VT>(val));
+		writeValue(val);
 		return *this;
 	}
 
-	template<typename KT, typename VT> inline JsonBuilderObject & setKeyRawNumber(KT &&name, VT &&val) {
+	template<typename KT, typename VT> inline JsonBuilderObject & setKeyRawNumber(const KT &name, const VT &val) {
 		if(elements++ > 0) {
 			write(',');
 		}
@@ -332,8 +332,8 @@ public:
 	JsonBuilderObjectSetter(JsonBuilderObject &dest, KT &&name) : dest(dest), name(std::forward<KT>(name)) {}
 
 	// Value is accepted as an rvalue if possible
-	template <class VT> inline void operator=(VT &&value) {
-		dest.setKey(name, std::forward<VT>(value));
+	template <class VT> inline void operator=(const VT &value) {
+		dest.setKey(name, value);
 	}
 
 protected:
