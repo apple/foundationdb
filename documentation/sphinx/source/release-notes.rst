@@ -71,6 +71,7 @@ Bindings
 * Several cases where functions in go might previously cause a panic now return a non-``nil`` error. `(PR #532) <https://github.com/apple/foundationdb/pull/532>`_
 * C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] `(Issue #518) <https://github.com/apple/foundationdb/issues/518>`_
 * The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] `(PR #710) <https://github.com/apple/foundationdb/pull/710>`_
+* Java: the `Versionstamp::getUserVersion() </javadoc/com/apple/foundationdb/tuple/Versionstamp.html#getUserVersion-->`_ method did not handle user versions greater than ``0x00FF`` due to operator precedence errors. [6.0.11] `(Issue #761) <https://github.com/apple/foundationdb/issues/761>`_
 
 Other Changes
 -------------
