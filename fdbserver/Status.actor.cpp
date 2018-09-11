@@ -2135,18 +2135,37 @@ TEST_CASE("status/json/builderPerf") {
 
 	int64_t bytes = 0;
 	double generated = 0;
+	double serialized = 0;
 	for(int i = 0; i < iterations; i++) {
 		int n = elements;
-		double gstart = timer();
-		JsonBuilderObject obj = randomDocument(strings, n, level);
-		generated += (timer() - gstart);
+		double start;
 
+		start = timer();
+		JsonBuilderObject obj = randomDocument(strings, n, level);
+		double generate = timer() - start;
+
+		start = timer();
 		std::string s = obj.getJson();
+		double serialize = timer() - start;
+
+		start = timer();
+		json_spirit::mValue mv = readJSONStrictly(s);
+		double jsParse = timer() - start;
+
+		start = timer();
+		std::string jsStr = json_spirit::write_string(mv);
+		double jsSerialize = timer() - start;
+
+		printf("JsonBuilder: %8lu bytes  %-7.5f gen   +  %-7.5f serialize =  %-7.5f\n", s.size(), generate, serialize, generate + serialize);
+		printf("json_spirit: %8lu bytes  %-7.5f parse +  %-7.5f serialize =  %-7.5f\n", jsStr.size(), jsParse, jsSerialize, jsParse + jsSerialize);
+		printf("\n");
+		
+		generated += generate;
+		serialized += serialize;
 		bytes += s.size();
 	}
-	double end = timer();
 
-	double elapsed = end - start;
+	double elapsed = generated + serialized;
 	printf("RESULT: %lld bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
 		bytes, iterations*elements, level, elapsed, generated, elapsed - generated, bytes / elapsed / 1e6, iterations*elements / elapsed);
 
