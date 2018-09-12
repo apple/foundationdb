@@ -45,7 +45,6 @@
     <ClCompile Include="UnitTest.cpp" />
     <ClCompile Include="version.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
-    <ClCompile Include="JsonString.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CompressedInt.h" />
@@ -89,7 +88,6 @@
     <ClInclude Include="ThreadSafeQueue.h" />
     <ClInclude Include="Trace.h" />
     <ClInclude Include="SignalSafeUnwind.h" />
-    <ClInclude Include="JsonString.h" />
     <ClInclude Include="UnitTest.h" />
     <ActorCompiler Include="ThreadHelper.actor.h">
       <EnableCompile>false</EnableCompile>
