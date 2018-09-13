@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.10
+6.0.11
 =====
 
 Features
@@ -26,7 +26,7 @@ Performance
 * Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 * Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
 * A cluster configured with usable_regions=2 did not limit the rate at which it could copy data from the primary DC to the remote DC. This caused poor performance when recovering from a DC outage. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
-* Significantly improved the CPU efficiency of generating status on the cluster controller. [6.0.10] `(PR #738) <https://github.com/apple/foundationdb/pull/738>`_
+* Significantly improved the CPU efficiency of generating status on the cluster controller. [6.0.11] `(PR #758) <https://github.com/apple/foundationdb/pull/758>`_
 
 Fixes
 -----
@@ -71,6 +71,7 @@ Bindings
 * Several cases where functions in go might previously cause a panic now return a non-``nil`` error. `(PR #532) <https://github.com/apple/foundationdb/pull/532>`_
 * C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] `(Issue #518) <https://github.com/apple/foundationdb/issues/518>`_
 * The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] `(PR #710) <https://github.com/apple/foundationdb/pull/710>`_
+* Java: the `Versionstamp::getUserVersion() </javadoc/com/apple/foundationdb/tuple/Versionstamp.html#getUserVersion-->`_ method did not handle user versions greater than ``0x00FF`` due to operator precedence errors. [6.0.11] `(Issue #761) <https://github.com/apple/foundationdb/issues/761>`_
 
 Other Changes
 -------------
