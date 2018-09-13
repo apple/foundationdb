@@ -1250,10 +1250,6 @@ typedef Int64Metric VersionMetric;
 typedef ContinuousMetric<bool> BoolMetric;
 typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
 
-extern template class ContinuousMetric<int64_t>;
-extern template class ContinuousMetric<bool>;
-extern template class ContinuousMetric<Standalone<StringRef>>;
-
 // MetricHandle / EventMetricHandle are wrappers for a Reference<MetricType> which provides
 // the following interface conveniences
 //
