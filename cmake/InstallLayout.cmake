@@ -169,7 +169,8 @@ install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
   DESTINATION "usr/lib/foundationdb"
   COMPONENT server)
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
-  DESTINATION "usr/lib/foundationdb")
+  DESTINATION "usr/lib/foundationdb"
+  COMPONENT server)
 if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
     ${CMAKE_BINARY_DIR}/packaging/rpm)
