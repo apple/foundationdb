@@ -21,43 +21,44 @@
 #include "QueueModel.h"
 #include "LoadBalance.h"
 
-void QueueModel::endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion ) {
+void QueueModel::endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion) {
 	auto& d = data[id];
 	d.smoothOutstanding.addDelta(-delta);
 
-	if(clean) {
+	if (clean) {
 		d.latency = latency;
 	} else {
 		d.latency = std::max(d.latency, latency);
 	}
 
-	if(futureVersion) {
-		if(now() > d.increaseBackoffTime) {
-			d.futureVersionBackoff = std::min( d.futureVersionBackoff * FLOW_KNOBS->FUTURE_VERSION_BACKOFF_GROWTH, FLOW_KNOBS->FUTURE_VERSION_MAX_BACKOFF );
+	if (futureVersion) {
+		if (now() > d.increaseBackoffTime) {
+			d.futureVersionBackoff = std::min(d.futureVersionBackoff * FLOW_KNOBS->FUTURE_VERSION_BACKOFF_GROWTH,
+			                                  FLOW_KNOBS->FUTURE_VERSION_MAX_BACKOFF);
 			d.increaseBackoffTime = now() + d.futureVersionBackoff;
 		}
 		d.failedUntil = now() + d.futureVersionBackoff;
-	} else if(clean) {
+	} else if (clean) {
 		d.futureVersionBackoff = FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF;
 		d.increaseBackoffTime = 0.0;
 	}
 
-	if(penalty > 0) {
+	if (penalty > 0) {
 		d.penalty = penalty;
 	}
 }
 
-QueueData& QueueModel::getMeasurement( uint64_t id ) {
+QueueData& QueueModel::getMeasurement(uint64_t id) {
 	return data[id];
 }
 
-double QueueModel::addRequest( uint64_t id ) {
+double QueueModel::addRequest(uint64_t id) {
 	auto& d = data[id];
 	d.smoothOutstanding.addDelta(d.penalty);
 	return d.penalty;
 }
 
-Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply) {
+Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply* reply) {
 	return *reply;
 }
 
@@ -67,31 +68,31 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*) {
 
 /*
 void QueueModel::addMeasurement( uint64_t id, QueueDetails qd ){
-	if (data[new_index].count(id))
-		total_time[new_index] -= data[new_index][id].queryQueueSize;
-	data[new_index][id] = qd;
-	total_time[new_index] += qd.queryQueueSize;
+    if (data[new_index].count(id))
+        total_time[new_index] -= data[new_index][id].queryQueueSize;
+    data[new_index][id] = qd;
+    total_time[new_index] += qd.queryQueueSize;
 }
 
 TimeEstimate QueueModel::getTimeEstimate( uint64_t id ){
-	if (data[new_index].count(id))          // give the current estimate
-		return data[new_index][id].queryQueueSize;
-	else if (data[1-new_index].count(id))   // if not, old estimate
-		return data[1-new_index][id].queryQueueSize;
-	else									// if not, the average?
-		return getAverageTimeEstimate();
+    if (data[new_index].count(id))          // give the current estimate
+        return data[new_index][id].queryQueueSize;
+    else if (data[1-new_index].count(id))   // if not, old estimate
+        return data[1-new_index][id].queryQueueSize;
+    else									// if not, the average?
+        return getAverageTimeEstimate();
 }
 
 TimeEstimate QueueModel::getAverageTimeEstimate(){
-	if(data[new_index].size() + data[1-new_index].size() > 0)
-		return (total_time[new_index] + total_time[1-new_index]) / (data[new_index].size() + data[1-new_index].size());
-	return 0;
+    if(data[new_index].size() + data[1-new_index].size() > 0)
+        return (total_time[new_index] + total_time[1-new_index]) / (data[new_index].size() + data[1-new_index].size());
+    return 0;
 }
 
 void QueueModel::expire(){
-	data[1-new_index].clear();
-	total_time[1-new_index] = 0;
+    data[1-new_index].clear();
+    total_time[1-new_index] = 0;
 
-	new_index = 1-new_index;
+    new_index = 1-new_index;
 }
 */

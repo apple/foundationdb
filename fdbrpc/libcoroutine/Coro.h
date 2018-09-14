@@ -1,5 +1,5 @@
 /*
-*/
+ */
 
 #ifndef CORO_DEFINED
 #define CORO_DEFINED 1
@@ -10,17 +10,16 @@
 #endif
 
 #if defined(__SYMBIAN32__)
-	#define CORO_STACK_SIZE     8192
-	#define CORO_STACK_SIZE_MIN 1024
+#define CORO_STACK_SIZE 8192
+#define CORO_STACK_SIZE_MIN 1024
 #else
-	//#define CORO_DEFAULT_STACK_SIZE     (65536/2)
-	//#define CORO_DEFAULT_STACK_SIZE  (65536*4)
+//#define CORO_DEFAULT_STACK_SIZE     (65536/2)
+//#define CORO_DEFAULT_STACK_SIZE  (65536*4)
 
-	//128k needed on PPC due to parser
-	#define CORO_DEFAULT_STACK_SIZE (128*1024)
-	#define CORO_STACK_SIZE_MIN 8192
+// 128k needed on PPC due to parser
+#define CORO_DEFAULT_STACK_SIZE (128 * 1024)
+#define CORO_STACK_SIZE_MIN 8192
 #endif
-
 
 #if !defined(__MINGW32__) && defined(WIN32) && 0
 #if defined(BUILDING_CORO_DLL) || defined(BUILDING_IOVMALL_DLL)
@@ -35,7 +34,7 @@
 
 /*
 #if defined(__amd64__) && !defined(__x86_64__)
-	#define __x86_64__ 1
+    #define __x86_64__ 1
 #endif
 */
 
@@ -44,26 +43,26 @@
 #if !defined(USE_FIBERS) && !defined(USE_UCONTEXT) && !defined(USE_SETJMP)
 
 #if defined(WIN32) && defined(HAS_FIBERS)
-#	define USE_FIBERS
+#define USE_FIBERS
 #elif defined(HAS_UCONTEXT)
 //#elif defined(HAS_UCONTEXT) && !defined(__x86_64__)
-#	if !defined(USE_UCONTEXT)
-#		define USE_UCONTEXT
-#	endif
+#if !defined(USE_UCONTEXT)
+#define USE_UCONTEXT
+#endif
 #else
-#	define USE_SETJMP
+#define USE_SETJMP
 #endif
 
 #endif
 
 #if defined(USE_FIBERS)
-	#define CORO_IMPLEMENTATION "fibers"
+#define CORO_IMPLEMENTATION "fibers"
 #elif defined(USE_UCONTEXT)
-	#include <sys/ucontext.h>
-	#define CORO_IMPLEMENTATION "ucontext"
+#include <sys/ucontext.h>
+#define CORO_IMPLEMENTATION "ucontext"
 #elif defined(USE_SETJMP)
-	#include <setjmp.h>
-	#define CORO_IMPLEMENTATION "setjmp"
+#include <setjmp.h>
+#define CORO_IMPLEMENTATION "setjmp"
 #endif
 
 #ifdef __cplusplus
@@ -72,18 +71,17 @@ extern "C" {
 
 typedef struct Coro Coro;
 
-struct Coro
-{
+struct Coro {
 	size_t requestedStackSize;
 	size_t allocatedStackSize;
-	void *stack;
+	void* stack;
 
 #ifdef USE_VALGRIND
 	unsigned int valgrindStackId;
 #endif
 
 #if defined(USE_FIBERS)
-	void *fiber;
+	void* fiber;
 #elif defined(USE_UCONTEXT)
 	ucontext_t env;
 #elif defined(USE_SETJMP)
@@ -93,28 +91,28 @@ struct Coro
 	unsigned char isMain;
 };
 
-//Returns NULL if not enough memory was available to create the Coroutine
-CORO_API Coro *Coro_new(void);
+// Returns NULL if not enough memory was available to create the Coroutine
+CORO_API Coro* Coro_new(void);
 
-CORO_API void Coro_free(Coro *self);
+CORO_API void Coro_free(Coro* self);
 
 // stack
 
-CORO_API void *Coro_stack(Coro *self);
-CORO_API size_t Coro_stackSize(Coro *self);
-CORO_API void Coro_setStackSize_(Coro *self, size_t sizeInBytes);
-CORO_API size_t Coro_bytesLeftOnStack(Coro *self);
-CORO_API int Coro_stackSpaceAlmostGone(Coro *self);
+CORO_API void* Coro_stack(Coro* self);
+CORO_API size_t Coro_stackSize(Coro* self);
+CORO_API void Coro_setStackSize_(Coro* self, size_t sizeInBytes);
+CORO_API size_t Coro_bytesLeftOnStack(Coro* self);
+CORO_API int Coro_stackSpaceAlmostGone(Coro* self);
 
-CORO_API void Coro_initializeMainCoro(Coro *self);
+CORO_API void Coro_initializeMainCoro(Coro* self);
 
-typedef void (CoroStartCallback)(void *);
+typedef void(CoroStartCallback)(void*);
 
-//Returns -1 if not enough memory is available to allocate a coroutine stack.  Otherwise, returns 0
-CORO_API int Coro_startCoro_(Coro *self, Coro *other, void *context, CoroStartCallback *callback);
+// Returns -1 if not enough memory is available to allocate a coroutine stack.  Otherwise, returns 0
+CORO_API int Coro_startCoro_(Coro* self, Coro* other, void* context, CoroStartCallback* callback);
 
-CORO_API void Coro_switchTo_(Coro *self, Coro *next);
-CORO_API void Coro_setup(Coro *self, void *arg); // private
+CORO_API void Coro_switchTo_(Coro* self, Coro* next);
+CORO_API void Coro_setup(Coro* self, void* arg); // private
 
 #ifdef __cplusplus
 }

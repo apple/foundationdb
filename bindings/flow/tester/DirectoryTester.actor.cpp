@@ -25,7 +25,7 @@ using namespace FDB;
 ACTOR Future<std::vector<Tuple>> popTuples(Reference<FlowTesterData> data, int count = 1) {
 	state std::vector<Tuple> tuples;
 
-	while(tuples.size() < count) {
+	while (tuples.size() < count) {
 		Standalone<StringRef> sizeStr = wait(data->stack.pop()[0].value);
 		int size = Tuple::unpack(sizeStr).getInt(0);
 
@@ -33,7 +33,7 @@ ACTOR Future<std::vector<Tuple>> popTuples(Reference<FlowTesterData> data, int c
 		state Tuple tuple;
 
 		state int index;
-		for(index = 0; index < tupleItems.size(); ++index) {
+		for (index = 0; index < tupleItems.size(); ++index) {
 			Standalone<StringRef> itemStr = wait(tupleItems[index].value);
 			tuple.append(Tuple::unpack(itemStr));
 		}
@@ -53,9 +53,9 @@ ACTOR Future<std::vector<IDirectory::Path>> popPaths(Reference<FlowTesterData> d
 	std::vector<Tuple> tuples = wait(popTuples(data, count));
 
 	std::vector<IDirectory::Path> paths;
-	for(auto &tuple : tuples) {
+	for (auto& tuple : tuples) {
 		IDirectory::Path path;
-		for(int i = 0; i < tuple.size(); ++i) {
+		for (int i = 0; i < tuple.size(); ++i) {
 			path.push_back(tuple.getString(i));
 		}
 
@@ -73,9 +73,9 @@ ACTOR Future<IDirectory::Path> popPath(Reference<FlowTesterData> data) {
 std::string pathToString(IDirectory::Path const& path) {
 	std::string str;
 	str += "[";
-	for(int i = 0; i < path.size(); ++i) {
+	for (int i = 0; i < path.size(); ++i) {
 		str += path[i].toString();
-		if(i < path.size() - 1) {
+		if (i < path.size() - 1) {
 			str += ", ";
 		}
 	}
@@ -85,21 +85,21 @@ std::string pathToString(IDirectory::Path const& path) {
 
 IDirectory::Path combinePaths(IDirectory::Path const& path1, IDirectory::Path const& path2) {
 	IDirectory::Path outPath(path1.begin(), path1.end());
-	for(auto p : path2) {
+	for (auto p : path2) {
 		outPath.push_back(p);
 	}
 
 	return outPath;
 }
 
-void logOp(std::string message, bool force=false) {
-	if(LOG_OPS || force) {
+void logOp(std::string message, bool force = false) {
+	if (LOG_OPS || force) {
 		printf("%s\n", message.c_str());
 		fflush(stdout);
 	}
 }
 
-//DIRECTORY_CREATE_SUBSPACE
+// DIRECTORY_CREATE_SUBSPACE
 struct DirectoryCreateSubspaceFunc : InstructionFunc {
 	static const char* name;
 
@@ -107,7 +107,8 @@ struct DirectoryCreateSubspaceFunc : InstructionFunc {
 		state Tuple path = wait(popTuple(data));
 		Tuple rawPrefix = wait(data->stack.waitAndPop());
 
-		logOp(format("Created subspace at %s: %s", tupleToString(path).c_str(), printable(rawPrefix.getString(0)).c_str()));
+		logOp(format("Created subspace at %s: %s", tupleToString(path).c_str(),
+		             printable(rawPrefix.getString(0)).c_str()));
 		data->directoryData.push(new Subspace(path, rawPrefix.getString(0)));
 		return Void();
 	}
@@ -115,7 +116,7 @@ struct DirectoryCreateSubspaceFunc : InstructionFunc {
 const char* DirectoryCreateSubspaceFunc::name = "DIRECTORY_CREATE_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateSubspaceFunc);
 
-//DIRECTORY_CREATE_LAYER
+// DIRECTORY_CREATE_LAYER
 struct DirectoryCreateLayerFunc : InstructionFunc {
 	static const char* name;
 
@@ -126,15 +127,18 @@ struct DirectoryCreateLayerFunc : InstructionFunc {
 		int index2 = args[1].getInt(0);
 		bool allowManualPrefixes = args[2].getInt(0) != 0;
 
-		if(!data->directoryData.directoryList[index1].valid() || !data->directoryData.directoryList[index2].valid()) {
+		if (!data->directoryData.directoryList[index1].valid() || !data->directoryData.directoryList[index2].valid()) {
 			logOp("Create directory layer: None");
 			data->directoryData.push();
-		}
-		else {
+		} else {
 			Subspace* nodeSubspace = data->directoryData.directoryList[index1].subspace.get();
 			Subspace* contentSubspace = data->directoryData.directoryList[index2].subspace.get();
-			logOp(format("Create directory layer: node_subspace (%d) = %s, content_subspace (%d) = %s, allow_manual_prefixes = %d", index1, printable(nodeSubspace->key()).c_str(), index2, printable(nodeSubspace->key()).c_str(), allowManualPrefixes));
-			data->directoryData.push(Reference<IDirectory>(new DirectoryLayer(*nodeSubspace, *contentSubspace, allowManualPrefixes)));
+			logOp(format("Create directory layer: node_subspace (%d) = %s, content_subspace (%d) = %s, "
+			             "allow_manual_prefixes = %d",
+			             index1, printable(nodeSubspace->key()).c_str(), index2, printable(nodeSubspace->key()).c_str(),
+			             allowManualPrefixes));
+			data->directoryData.push(
+			    Reference<IDirectory>(new DirectoryLayer(*nodeSubspace, *contentSubspace, allowManualPrefixes)));
 		}
 
 		return Void();
@@ -143,7 +147,7 @@ struct DirectoryCreateLayerFunc : InstructionFunc {
 const char* DirectoryCreateLayerFunc::name = "DIRECTORY_CREATE_LAYER";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateLayerFunc);
 
-//DIRECTORY_CHANGE
+// DIRECTORY_CHANGE
 struct DirectoryChangeFunc : InstructionFunc {
 	static const char* name;
 
@@ -152,13 +156,16 @@ struct DirectoryChangeFunc : InstructionFunc {
 		data->directoryData.directoryListIndex = index.getInt(0);
 		ASSERT(data->directoryData.directoryListIndex < data->directoryData.directoryList.size());
 
-		if(!data->directoryData.directoryList[data->directoryData.directoryListIndex].valid()) {
+		if (!data->directoryData.directoryList[data->directoryData.directoryListIndex].valid()) {
 			data->directoryData.directoryListIndex = data->directoryData.directoryErrorIndex;
 		}
 
-		if(LOG_DIRS) {
+		if (LOG_DIRS) {
 			DirectoryOrSubspace d = data->directoryData.directoryList[data->directoryData.directoryListIndex];
-			printf("Changed directory to %d (%s @\'%s\')\n", data->directoryData.directoryListIndex, d.typeString().c_str(), d.directory.present() ? pathToString(d.directory.get()->getPath()).c_str() : printable(d.subspace.get()->key()).c_str());
+			printf("Changed directory to %d (%s @\'%s\')\n", data->directoryData.directoryListIndex,
+			       d.typeString().c_str(),
+			       d.directory.present() ? pathToString(d.directory.get()->getPath()).c_str()
+			                             : printable(d.subspace.get()->key()).c_str());
 			fflush(stdout);
 		}
 
@@ -168,7 +175,7 @@ struct DirectoryChangeFunc : InstructionFunc {
 const char* DirectoryChangeFunc::name = "DIRECTORY_CHANGE";
 REGISTER_INSTRUCTION_FUNC(DirectoryChangeFunc);
 
-//DIRECTORY_SET_ERROR_INDEX
+// DIRECTORY_SET_ERROR_INDEX
 struct DirectorySetErrorIndexFunc : InstructionFunc {
 	static const char* name;
 
@@ -182,7 +189,7 @@ struct DirectorySetErrorIndexFunc : InstructionFunc {
 const char* DirectorySetErrorIndexFunc::name = "DIRECTORY_SET_ERROR_INDEX";
 REGISTER_INSTRUCTION_FUNC(DirectorySetErrorIndexFunc);
 
-//DIRECTORY_CREATE_OR_OPEN
+// DIRECTORY_CREATE_OR_OPEN
 struct DirectoryCreateOrOpenFunc : InstructionFunc {
 	static const char* name;
 
@@ -192,11 +199,11 @@ struct DirectoryCreateOrOpenFunc : InstructionFunc {
 		Standalone<StringRef> layer = layerTuple.getType(0) == Tuple::NULL_TYPE ? StringRef() : layerTuple.getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("create_or_open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str()));
+		logOp(format("create_or_open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(),
+		             printable(layer).c_str()));
 
-		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, layer] () {
-			return directory->createOrOpen(instruction->tr, path, layer);
-		}));
+		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(
+		    instruction, [this, directory, layer]() { return directory->createOrOpen(instruction->tr, path, layer); }));
 
 		data->directoryData.push(dirSubspace);
 
@@ -206,7 +213,7 @@ struct DirectoryCreateOrOpenFunc : InstructionFunc {
 const char* DirectoryCreateOrOpenFunc::name = "DIRECTORY_CREATE_OR_OPEN";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateOrOpenFunc);
 
-//DIRECTORY_CREATE
+// DIRECTORY_CREATE
 struct DirectoryCreateFunc : InstructionFunc {
 	static const char* name;
 
@@ -214,14 +221,17 @@ struct DirectoryCreateFunc : InstructionFunc {
 		state IDirectory::Path path = wait(popPath(data));
 		std::vector<Tuple> args = wait(data->stack.waitAndPop(2));
 		Standalone<StringRef> layer = args[0].getType(0) == Tuple::NULL_TYPE ? StringRef() : args[0].getString(0);
-		Optional<Standalone<StringRef>> prefix = args[1].getType(0) == Tuple::NULL_TYPE ? Optional<Standalone<StringRef>>() : args[1].getString(0);
+		Optional<Standalone<StringRef>> prefix =
+		    args[1].getType(0) == Tuple::NULL_TYPE ? Optional<Standalone<StringRef>>() : args[1].getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("create %s: layer=%s, prefix=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str(), prefix.present() ? printable(prefix.get()).c_str() : "<not present>"));
+		logOp(format("create %s: layer=%s, prefix=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(),
+		             printable(layer).c_str(), prefix.present() ? printable(prefix.get()).c_str() : "<not present>"));
 
-		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, layer, prefix] () {
-			return directory->create(instruction->tr, path, layer, prefix);
-		}));
+		Reference<DirectorySubspace> dirSubspace =
+		    wait(executeMutation(instruction, [this, directory, layer, prefix]() {
+			    return directory->create(instruction->tr, path, layer, prefix);
+		    }));
 
 		data->directoryData.push(dirSubspace);
 
@@ -231,7 +241,7 @@ struct DirectoryCreateFunc : InstructionFunc {
 const char* DirectoryCreateFunc::name = "DIRECTORY_CREATE";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateFunc);
 
-//DIRECTORY_OPEN
+// DIRECTORY_OPEN
 struct DirectoryOpenFunc : InstructionFunc {
 	static const char* name;
 
@@ -241,7 +251,8 @@ struct DirectoryOpenFunc : InstructionFunc {
 		Standalone<StringRef> layer = layerTuple.getType(0) == Tuple::NULL_TYPE ? StringRef() : layerTuple.getString(0);
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(), printable(layer).c_str()));
+		logOp(format("open %s: layer=%s", pathToString(combinePaths(directory->getPath(), path)).c_str(),
+		             printable(layer).c_str()));
 		Reference<DirectorySubspace> dirSubspace = wait(directory->open(instruction->tr, path, layer));
 		data->directoryData.push(dirSubspace);
 
@@ -251,7 +262,7 @@ struct DirectoryOpenFunc : InstructionFunc {
 const char* DirectoryOpenFunc::name = "DIRECTORY_OPEN";
 REGISTER_INSTRUCTION_FUNC(DirectoryOpenFunc);
 
-//DIRECTORY_MOVE
+// DIRECTORY_MOVE
 struct DirectoryMoveFunc : InstructionFunc {
 	static const char* name;
 
@@ -259,11 +270,11 @@ struct DirectoryMoveFunc : InstructionFunc {
 		std::vector<IDirectory::Path> paths = wait(popPaths(data, 2));
 
 		Reference<IDirectory> directory = data->directoryData.directory();
-		logOp(format("move %s to %s", pathToString(combinePaths(directory->getPath(), paths[0])).c_str(), pathToString(combinePaths(directory->getPath(), paths[1])).c_str()));
+		logOp(format("move %s to %s", pathToString(combinePaths(directory->getPath(), paths[0])).c_str(),
+		             pathToString(combinePaths(directory->getPath(), paths[1])).c_str()));
 
-		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, paths] () {
-			return directory->move(instruction->tr, paths[0], paths[1]);
-		}));
+		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(
+		    instruction, [this, directory, paths]() { return directory->move(instruction->tr, paths[0], paths[1]); }));
 
 		data->directoryData.push(dirSubspace);
 
@@ -273,7 +284,7 @@ struct DirectoryMoveFunc : InstructionFunc {
 const char* DirectoryMoveFunc::name = "DIRECTORY_MOVE";
 REGISTER_INSTRUCTION_FUNC(DirectoryMoveFunc);
 
-//DIRECTORY_MOVE_TO
+// DIRECTORY_MOVE_TO
 struct DirectoryMoveToFunc : InstructionFunc {
 	static const char* name;
 
@@ -283,9 +294,8 @@ struct DirectoryMoveToFunc : InstructionFunc {
 		Reference<IDirectory> directory = data->directoryData.directory();
 		logOp(format("move %s to %s", pathToString(directory->getPath()).c_str(), pathToString(path).c_str()));
 
-		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(instruction, [this, directory, path] () {
-			return directory->moveTo(instruction->tr, path);
-		}));
+		Reference<DirectorySubspace> dirSubspace = wait(executeMutation(
+		    instruction, [this, directory, path]() { return directory->moveTo(instruction->tr, path); }));
 
 		data->directoryData.push(dirSubspace);
 
@@ -295,27 +305,22 @@ struct DirectoryMoveToFunc : InstructionFunc {
 const char* DirectoryMoveToFunc::name = "DIRECTORY_MOVE_TO";
 REGISTER_INSTRUCTION_FUNC(DirectoryMoveToFunc);
 
-//DIRECTORY_REMOVE
+// DIRECTORY_REMOVE
 struct DirectoryRemoveFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
 		state Reference<IDirectory> directory = data->directoryData.directory();
-		if(count.getInt(0) == 0) {
+		if (count.getInt(0) == 0) {
 			logOp(format("remove %s", pathToString(directory->getPath()).c_str()));
 
-			wait(executeMutation(instruction, [this] () {
-				return directory->remove(instruction->tr);
-			}));
-		}
-		else {
+			wait(executeMutation(instruction, [this]() { return directory->remove(instruction->tr); }));
+		} else {
 			IDirectory::Path path = wait(popPath(data));
 			logOp(format("remove %s", pathToString(combinePaths(directory->getPath(), path)).c_str()));
 
-			wait(executeMutation(instruction, [this, path] () {
-				return directory->remove(instruction->tr, path);
-			}));
+			wait(executeMutation(instruction, [this, path]() { return directory->remove(instruction->tr, path); }));
 		}
 
 		return Void();
@@ -324,27 +329,24 @@ struct DirectoryRemoveFunc : InstructionFunc {
 const char* DirectoryRemoveFunc::name = "DIRECTORY_REMOVE";
 REGISTER_INSTRUCTION_FUNC(DirectoryRemoveFunc);
 
-//DIRECTORY_REMOVE_IF_EXISTS
+// DIRECTORY_REMOVE_IF_EXISTS
 struct DirectoryRemoveIfExistsFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
 		state Reference<IDirectory> directory = data->directoryData.directory();
-		if(count.getInt(0) == 0) {
+		if (count.getInt(0) == 0) {
 			logOp(format("remove_if_exists %s", pathToString(directory->getPath()).c_str()));
 
-			bool _ = wait(executeMutation(instruction, [this] () {
-				return directory->removeIfExists(instruction->tr);
-			}));
-		}
-		else {
+			bool _ =
+			    wait(executeMutation(instruction, [this]() { return directory->removeIfExists(instruction->tr); }));
+		} else {
 			IDirectory::Path path = wait(popPath(data));
 			logOp(format("remove_if_exists %s", pathToString(combinePaths(directory->getPath(), path)).c_str()));
 
-			bool _ = wait(executeMutation(instruction, [this, path] () {
-				return directory->removeIfExists(instruction->tr, path);
-			}));
+			bool _ = wait(executeMutation(instruction,
+			                              [this, path]() { return directory->removeIfExists(instruction->tr, path); }));
 		}
 
 		return Void();
@@ -353,7 +355,7 @@ struct DirectoryRemoveIfExistsFunc : InstructionFunc {
 const char* DirectoryRemoveIfExistsFunc::name = "DIRECTORY_REMOVE_IF_EXISTS";
 REGISTER_INSTRUCTION_FUNC(DirectoryRemoveIfExistsFunc);
 
-//DIRECTORY_LIST
+// DIRECTORY_LIST
 struct DirectoryListFunc : InstructionFunc {
 	static const char* name;
 
@@ -361,12 +363,11 @@ struct DirectoryListFunc : InstructionFunc {
 		Tuple count = wait(data->stack.waitAndPop());
 		state Reference<IDirectory> directory = data->directoryData.directory();
 		state Standalone<VectorRef<StringRef>> subdirs;
-		if(count.getInt(0) == 0) {
+		if (count.getInt(0) == 0) {
 			logOp(format("list %s", pathToString(directory->getPath()).c_str()));
 			Standalone<VectorRef<StringRef>> _subdirs = wait(directory->list(instruction->tr));
 			subdirs = _subdirs;
-		}
-		else {
+		} else {
 			IDirectory::Path path = wait(popPath(data));
 			logOp(format("list %s", pathToString(combinePaths(directory->getPath(), path)).c_str()));
 			Standalone<VectorRef<StringRef>> _subdirs = wait(directory->list(instruction->tr, path));
@@ -374,7 +375,7 @@ struct DirectoryListFunc : InstructionFunc {
 		}
 
 		Tuple subdirTuple;
-		for(auto &sd : subdirs) {
+		for (auto& sd : subdirs) {
 			subdirTuple.append(sd, true);
 		}
 
@@ -385,7 +386,7 @@ struct DirectoryListFunc : InstructionFunc {
 const char* DirectoryListFunc::name = "DIRECTORY_LIST";
 REGISTER_INSTRUCTION_FUNC(DirectoryListFunc);
 
-//DIRECTORY_EXISTS
+// DIRECTORY_EXISTS
 struct DirectoryExistsFunc : InstructionFunc {
 	static const char* name;
 
@@ -393,12 +394,11 @@ struct DirectoryExistsFunc : InstructionFunc {
 		Tuple count = wait(data->stack.waitAndPop());
 		state Reference<IDirectory> directory = data->directoryData.directory();
 		state bool result;
-		if(count.getInt(0) == 0) {
+		if (count.getInt(0) == 0) {
 			bool _result = wait(directory->exists(instruction->tr));
 			result = _result;
 			logOp(format("exists %s: %d", pathToString(directory->getPath()).c_str(), result));
-		}
-		else {
+		} else {
 			state IDirectory::Path path = wait(popPath(data));
 			bool _result = wait(directory->exists(instruction->tr, path));
 			result = _result;
@@ -412,7 +412,7 @@ struct DirectoryExistsFunc : InstructionFunc {
 const char* DirectoryExistsFunc::name = "DIRECTORY_EXISTS";
 REGISTER_INSTRUCTION_FUNC(DirectoryExistsFunc);
 
-//DIRECTORY_PACK_KEY
+// DIRECTORY_PACK_KEY
 struct DirectoryPackKeyFunc : InstructionFunc {
 	static const char* name;
 
@@ -426,17 +426,18 @@ struct DirectoryPackKeyFunc : InstructionFunc {
 const char* DirectoryPackKeyFunc::name = "DIRECTORY_PACK_KEY";
 REGISTER_INSTRUCTION_FUNC(DirectoryPackKeyFunc);
 
-//DIRECTORY_UNPACK_KEY
+// DIRECTORY_UNPACK_KEY
 struct DirectoryUnpackKeyFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple key = wait(data->stack.waitAndPop());
-		Subspace *subspace = data->directoryData.subspace();
-		logOp(format("Unpack %s in subspace with prefix %s", printable(key.getString(0)).c_str(), printable(subspace->key()).c_str()));
+		Subspace* subspace = data->directoryData.subspace();
+		logOp(format("Unpack %s in subspace with prefix %s", printable(key.getString(0)).c_str(),
+		             printable(subspace->key()).c_str()));
 		Tuple tuple = subspace->unpack(key.getString(0));
-		for(int i = 0; i < tuple.size(); ++i) {
-			data->stack.push(tuple.subTuple(i, i+1).pack());
+		for (int i = 0; i < tuple.size(); ++i) {
+			data->stack.push(tuple.subTuple(i, i + 1).pack());
 		}
 
 		return Void();
@@ -445,7 +446,7 @@ struct DirectoryUnpackKeyFunc : InstructionFunc {
 const char* DirectoryUnpackKeyFunc::name = "DIRECTORY_UNPACK_KEY";
 REGISTER_INSTRUCTION_FUNC(DirectoryUnpackKeyFunc);
 
-//DIRECTORY_RANGE
+// DIRECTORY_RANGE
 struct DirectoryRangeFunc : InstructionFunc {
 	static const char* name;
 
@@ -461,7 +462,7 @@ struct DirectoryRangeFunc : InstructionFunc {
 const char* DirectoryRangeFunc::name = "DIRECTORY_RANGE";
 REGISTER_INSTRUCTION_FUNC(DirectoryRangeFunc);
 
-//DIRECTORY_CONTAINS
+// DIRECTORY_CONTAINS
 struct DirectoryContainsFunc : InstructionFunc {
 	static const char* name;
 
@@ -476,15 +477,15 @@ struct DirectoryContainsFunc : InstructionFunc {
 const char* DirectoryContainsFunc::name = "DIRECTORY_CONTAINS";
 REGISTER_INSTRUCTION_FUNC(DirectoryContainsFunc);
 
-//DIRECTORY_OPEN_SUBSPACE
+// DIRECTORY_OPEN_SUBSPACE
 struct DirectoryOpenSubspaceFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple tuple = wait(popTuple(data));
-		Subspace *subspace = data->directoryData.subspace();
+		Subspace* subspace = data->directoryData.subspace();
 		logOp(format("open_subspace %s (at %s)", tupleToString(tuple).c_str(), printable(subspace->key()).c_str()));
-		Subspace *child = new Subspace(subspace->subspace(tuple));
+		Subspace* child = new Subspace(subspace->subspace(tuple));
 		data->directoryData.push(child);
 
 		return Void();
@@ -493,7 +494,7 @@ struct DirectoryOpenSubspaceFunc : InstructionFunc {
 const char* DirectoryOpenSubspaceFunc::name = "DIRECTORY_OPEN_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryOpenSubspaceFunc);
 
-//DIRECTORY_LOG_SUBSPACE
+// DIRECTORY_LOG_SUBSPACE
 struct DirectoryLogSubspaceFunc : InstructionFunc {
 	static const char* name;
 
@@ -509,7 +510,7 @@ struct DirectoryLogSubspaceFunc : InstructionFunc {
 const char* DirectoryLogSubspaceFunc::name = "DIRECTORY_LOG_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryLogSubspaceFunc);
 
-//DIRECTORY_LOG_DIRECTORY
+// DIRECTORY_LOG_DIRECTORY
 struct DirectoryLogDirectoryFunc : InstructionFunc {
 	static const char* name;
 
@@ -519,22 +520,23 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 		state bool exists = wait(directory->exists(instruction->tr));
 
 		state Tuple childrenTuple;
-		if(exists) {
+		if (exists) {
 			Standalone<VectorRef<StringRef>> children = wait(directory->list(instruction->tr));
-			for(auto &c : children) {
+			for (auto& c : children) {
 				childrenTuple.append(c, true);
 			}
-		}	
+		}
 
 		Subspace logSubspace(Tuple().append(data->directoryData.directoryListIndex), prefix.getString(0));
 
 		Tuple pathTuple;
-		for(auto &p : directory->getPath()) {
+		for (auto& p : directory->getPath()) {
 			pathTuple.append(p, true);
 		}
 
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("path"), true), pathTuple.pack());
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("layer"), true), Tuple().append(directory->getLayer()).pack());
+		instruction->tr->set(logSubspace.pack(LiteralStringRef("layer"), true),
+		                     Tuple().append(directory->getLayer()).pack());
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("exists"), true), Tuple().append(exists ? 1 : 0).pack());
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("children"), true), childrenTuple.pack());
 
@@ -544,13 +546,13 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 const char* DirectoryLogDirectoryFunc::name = "DIRECTORY_LOG_DIRECTORY";
 REGISTER_INSTRUCTION_FUNC(DirectoryLogDirectoryFunc);
 
-//DIRECTORY_STRIP_PREFIX
+// DIRECTORY_STRIP_PREFIX
 struct DirectoryStripPrefixFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple str = wait(data->stack.waitAndPop());
-		Subspace *subspace = data->directoryData.subspace();
+		Subspace* subspace = data->directoryData.subspace();
 		ASSERT(str.getString(0).startsWith(subspace->key()));
 		data->stack.pushTuple(str.getString(0).substr(subspace->key().size()));
 		return Void();
@@ -558,4 +560,3 @@ struct DirectoryStripPrefixFunc : InstructionFunc {
 };
 const char* DirectoryStripPrefixFunc::name = "DIRECTORY_STRIP_PREFIX";
 REGISTER_INSTRUCTION_FUNC(DirectoryStripPrefixFunc);
-

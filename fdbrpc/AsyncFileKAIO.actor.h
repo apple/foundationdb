@@ -21,12 +21,13 @@
 #pragma once
 #ifdef __linux__
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILEKAIO_ACTOR_G_H)
-	#define FLOW_ASYNCFILEKAIO_ACTOR_G_H
-	#include "AsyncFileKAIO.actor.g.h"
+#define FLOW_ASYNCFILEKAIO_ACTOR_G_H
+#include "AsyncFileKAIO.actor.g.h"
 #elif !defined(FLOW_ASYNCFILEKAIO_ACTOR_H)
-	#define FLOW_ASYNCFILEKAIO_ACTOR_H
+#define FLOW_ASYNCFILEKAIO_ACTOR_H
 
 #include "IAsyncFile.h"
 #include <fcntl.h>
@@ -39,9 +40,10 @@
 #include <stdio.h>
 #include "flow/Hash3.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-// Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location /data/v7/fdb/
+// Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
+// /data/v7/fdb/
 #define KAIO_LOGGING 0
 
 DESCR struct SlowAioSubmit {
@@ -57,11 +59,11 @@ public:
 
 #if KAIO_LOGGING
 private:
-	#pragma pack(push, 1)
+#pragma pack(push, 1)
 	struct OpLogEntry {
 		OpLogEntry() : result(0) {}
-		enum EOperation { READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
-		enum EStage { START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
+		enum EOperation{ READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
+		enum EStage{ START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
 		int64_t timestamp;
 		uint32_t id;
 		uint32_t checksum;
@@ -76,57 +78,61 @@ private:
 			return ++last;
 		}
 
-		void log(FILE *file) {
-			if(ftell(file) > (int64_t)50 * 1e9)
-				fseek(file, 0, SEEK_SET);
-			if(!fwrite(this, sizeof(OpLogEntry), 1, file))
-				throw io_error();
+		void log(FILE* file) {
+			if (ftell(file) > (int64_t)50 * 1e9) fseek(file, 0, SEEK_SET);
+			if (!fwrite(this, sizeof(OpLogEntry), 1, file)) throw io_error();
 		}
 	};
-	#pragma pop
+#pragma pop
 
-	FILE *logFile;
+	FILE* logFile;
 	struct IOBlock;
-	static void KAIOLogBlockEvent(IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
-	static void KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
-	static void KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage, uint32_t pageOffset = 0, uint32_t result = 0);
+	static void KAIOLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
+	static void KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
+	static void KAIOLogEvent(FILE* logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage,
+	                         uint32_t pageOffset = 0, uint32_t result = 0);
+
 public:
 #else
-	#define KAIOLogBlockEvent(...)
-	#define KAIOLogEvent(...)
+#define KAIOLogBlockEvent(...)
+#define KAIOLogEvent(...)
 #endif
 
-	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, void* ignore ) {
-		ASSERT( flags & OPEN_UNBUFFERED );
+	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode, void* ignore) {
+		ASSERT(flags & OPEN_UNBUFFERED);
 
 		if (flags & OPEN_LOCK)
-			mode |= 02000;  // Enable mandatory locking for this file if it is supported by the filesystem
+			mode |= 02000; // Enable mandatory locking for this file if it is supported by the filesystem
 
 		std::string open_filename = filename;
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
-			ASSERT( (flags & OPEN_CREATE) && (flags & OPEN_READWRITE) && !(flags & OPEN_EXCLUSIVE) );
+			ASSERT((flags & OPEN_CREATE) && (flags & OPEN_READWRITE) && !(flags & OPEN_EXCLUSIVE));
 			open_filename = filename + ".part";
 		}
 
-		int fd = ::open( open_filename.c_str(), openFlags(flags) | O_DIRECT, mode );
-		if (fd<0) {
-			Error e = errno==ENOENT ? file_not_found() : io_error();
-			int ecode = errno;  // Save errno in case it is modified before it is used below
+		int fd = ::open(open_filename.c_str(), openFlags(flags) | O_DIRECT, mode);
+		if (fd < 0) {
+			Error e = errno == ENOENT ? file_not_found() : io_error();
+			int ecode = errno; // Save errno in case it is modified before it is used below
 			TraceEvent ev("AsyncFileKAIOOpenFailed");
-			ev.error(e).detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
-			if(ecode == EINVAL)
+			ev.error(e)
+			    .detail("Filename", filename)
+			    .detailf("Flags", "%x", flags)
+			    .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT)
+			    .detailf("Mode", "0%o", mode)
+			    .GetLastError();
+			if (ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
 		} else {
 			TraceEvent("AsyncFileKAIOOpen")
-				.detail("Filename", filename)
-				.detail("Flags", flags)
-				.detail("Mode", mode)
-				.detail("Fd", fd);
+			    .detail("Filename", filename)
+			    .detail("Flags", flags)
+			    .detail("Mode", mode)
+			    .detail("Fd", fd);
 		}
 
-		Reference<AsyncFileKAIO> r(new AsyncFileKAIO( fd, flags, filename ));
+		Reference<AsyncFileKAIO> r(new AsyncFileKAIO(fd, flags, filename));
 
 		if (flags & OPEN_LOCK) {
 			// Acquire a "write" lock for the entire file
@@ -134,7 +140,9 @@ public:
 			lockDesc.l_type = F_WRLCK;
 			lockDesc.l_whence = SEEK_SET;
 			lockDesc.l_start = 0;
-			lockDesc.l_len = 0;  // "Specifying 0 for l_len has the special meaning: lock all bytes starting at the location specified by l_whence and l_start through to the end of file, no matter how large the file grows."
+			lockDesc.l_len =
+			    0; // "Specifying 0 for l_len has the special meaning: lock all bytes starting at the location specified
+			       // by l_whence and l_start through to the end of file, no matter how large the file grows."
 			lockDesc.l_pid = 0;
 			if (fcntl(fd, F_SETLK, &lockDesc) == -1) {
 				TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
@@ -143,8 +151,8 @@ public:
 		}
 
 		struct stat buf;
-		if (fstat( fd, &buf )) {
-			TraceEvent("AsyncFileKAIOFStatError").detail("Fd",fd).detail("Filename", filename).GetLastError();
+		if (fstat(fd, &buf)) {
+			TraceEvent("AsyncFileKAIOFStatError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
 
@@ -152,8 +160,8 @@ public:
 		return Reference<IAsyncFile>(std::move(r));
 	}
 
-	static void init( Reference<IEventFD> ev, double ioTimeout ) {
-		if( !g_network->isSimulated() ) {
+	static void init(Reference<IEventFD> ev, double ioTimeout) {
+		if (!g_network->isSimulated()) {
 			ctx.countAIOSubmit.init(LiteralStringRef("AsyncFile.CountAIOSubmit"));
 			ctx.countAIOCollect.init(LiteralStringRef("AsyncFile.CountAIOCollect"));
 			ctx.submitMetric.init(LiteralStringRef("AsyncFile.Submit"));
@@ -161,9 +169,9 @@ public:
 			ctx.preSubmitTruncateBytes.init(LiteralStringRef("AsyncFile.PreAIOSubmitTruncateBytes"));
 			ctx.slowAioSubmitMetric.init(LiteralStringRef("AsyncFile.SlowAIOSubmit"));
 		}
-		
-		int rc = io_setup( FLOW_KNOBS->MAX_OUTSTANDING, &ctx.iocx );
-		if (rc<0) {
+
+		int rc = io_setup(FLOW_KNOBS->MAX_OUTSTANDING, &ctx.iocx);
+		if (rc < 0) {
 			TraceEvent("IOSetupError").GetLastError();
 			throw io_error();
 		}
@@ -171,7 +179,7 @@ public:
 		ctx.evfd = ev->getFD();
 		poll(ev);
 
-		g_network->setGlobal(INetwork::enRunCycleFunc, (flowGlobalType) &AsyncFileKAIO::launch);
+		g_network->setGlobal(INetwork::enRunCycleFunc, (flowGlobalType)&AsyncFileKAIO::launch);
 	}
 
 	static int get_eventfd() { return ctx.evfd; }
@@ -180,16 +188,16 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileKAIO>::delref(); }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	virtual Future<int> read(void* data, int length, int64_t offset) {
 		++countFileLogicalReads;
 		++countLogicalReads;
-		//printf("%p Begin logical read\n", getCurrentCoro());
+		// printf("%p Begin logical read\n", getCurrentCoro());
 
-		if(failed) {
+		if (failed) {
 			return io_timeout();
 		}
 
-		IOBlock *io = new IOBlock(IO_CMD_PREAD, fd);
+		IOBlock* io = new IOBlock(IO_CMD_PREAD, fd);
 		io->buf = data;
 		io->nbytes = length;
 		io->offset = offset;
@@ -198,32 +206,32 @@ public:
 		Future<int> result = io->result.getFuture();
 
 #if KAIO_LOGGING
-		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
+		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
 
 		return result;
 	}
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	virtual Future<Void> write(void const* data, int length, int64_t offset) {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
-		//printf("%p Begin logical write\n", getCurrentCoro());
+		// printf("%p Begin logical write\n", getCurrentCoro());
 
-		if(failed) {
+		if (failed) {
 			return io_timeout();
 		}
 
-		IOBlock *io = new IOBlock(IO_CMD_PWRITE, fd);
+		IOBlock* io = new IOBlock(IO_CMD_PWRITE, fd);
 		io->buf = (void*)data;
 		io->nbytes = length;
 		io->offset = offset;
 
-		nextFileSize = std::max( nextFileSize, offset+length );
+		nextFileSize = std::max(nextFileSize, offset + length);
 
 		enqueue(io, "write", this);
 		Future<int> result = io->result.getFuture();
-		
+
 #if KAIO_LOGGING
-		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
+		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
 
 		return success(result);
@@ -232,10 +240,10 @@ public:
 #ifndef FALLOC_FL_ZERO_RANGE
 #define FALLOC_FL_ZERO_RANGE 0x10
 #endif
-	virtual Future<Void> zeroRange( int64_t offset, int64_t length ) override {
+	virtual Future<Void> zeroRange(int64_t offset, int64_t length) override {
 		bool success = false;
 		if (ctx.fallocateZeroSupported) {
-			int rc = fallocate( fd, FALLOC_FL_ZERO_RANGE, offset, length );
+			int rc = fallocate(fd, FALLOC_FL_ZERO_RANGE, offset, length);
 			if (rc == EOPNOTSUPP) {
 				ctx.fallocateZeroSupported = false;
 			}
@@ -245,11 +253,11 @@ public:
 		}
 		return success ? Void() : IAsyncFile::zeroRange(offset, length);
 	}
-	virtual Future<Void> truncate( int64_t size ) {
+	virtual Future<Void> truncate(int64_t size) {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 
-		if(failed) {
+		if (failed) {
 			return io_timeout();
 		}
 
@@ -259,12 +267,12 @@ public:
 		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
 		bool completed = false;
-		if( ctx.fallocateSupported && size >= lastFileSize ) {
-			result = fallocate( fd, 0, 0, size);
+		if (ctx.fallocateSupported && size >= lastFileSize) {
+			result = fallocate(fd, 0, 0, size);
 			if (result != 0) {
 				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
-				if ( fallocateErrCode == EOPNOTSUPP ) {
+				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
+				if (fallocateErrCode == EOPNOTSUPP) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
 				} else {
@@ -275,13 +283,12 @@ public:
 				completed = true;
 			}
 		}
-		if ( !completed )
-			result = ftruncate(fd, size);
+		if (!completed) result = ftruncate(fd, size);
 
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
-		if(result != 0) {
-			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
+		if (result != 0) {
+			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
 
@@ -290,9 +297,9 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> throwErrorIfFailed( Reference<AsyncFileKAIO> self, Future<Void> sync ) {
-		wait( sync );
-		if(self->failed) {
+	ACTOR static Future<Void> throwErrorIfFailed(Reference<AsyncFileKAIO> self, Future<Void> sync) {
+		wait(sync);
+		if (self->failed) {
 			throw io_timeout();
 		}
 		return Void();
@@ -302,7 +309,7 @@ public:
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 
-		if(failed) {
+		if (failed) {
 			return io_timeout();
 		}
 
@@ -312,44 +319,44 @@ public:
 
 		KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
 
-		Future<Void> fsync = throwErrorIfFailed(Reference<AsyncFileKAIO>::addRef(this), AsyncFileEIO::async_fdatasync(fd));  // Don't close the file until the asynchronous thing is done
+		Future<Void> fsync = throwErrorIfFailed(
+		    Reference<AsyncFileKAIO>::addRef(this),
+		    AsyncFileEIO::async_fdatasync(fd)); // Don't close the file until the asynchronous thing is done
 		// Alas, AIO f(data)sync doesn't seem to actually be implemented by the kernel
 		/*IOBlock *io = new IOBlock(IO_CMD_FDSYNC, fd);
 		submit(io, "write");
 		fsync=success(io->result.getFuture());*/
 
 #if KAIO_LOGGING
-		fsync = map(fsync, [=](Void r) mutable { KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE); return r; });
+		fsync = map(fsync, [=](Void r) mutable {
+			KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
+			return r;
+		});
 #endif
 
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
 
-			return AsyncFileEIO::waitAndAtomicRename( fsync, filename+".part", filename );
+			return AsyncFileEIO::waitAndAtomicRename(fsync, filename + ".part", filename);
 		}
 
 		return fsync;
 	}
 	virtual Future<int64_t> size() { return nextFileSize; }
-	virtual int64_t debugFD() {
-		return fd;
-	}
-	virtual std::string getFilename() {
-		return filename;
-	}
+	virtual int64_t debugFD() { return fd; }
+	virtual std::string getFilename() { return filename; }
 	~AsyncFileKAIO() {
 		close(fd);
 
 #if KAIO_LOGGING
-		if(logFile != nullptr)
-			fclose(logFile);
+		if (logFile != nullptr) fclose(logFile);
 #endif
 	}
 
 	static void launch() {
 		if (ctx.queue.size() && ctx.outstanding < FLOW_KNOBS->MAX_OUTSTANDING - FLOW_KNOBS->MIN_SUBMIT) {
 			ctx.submitMetric = true;
-			
+
 			double begin = timer_monotonic();
 			if (!ctx.outstanding) ctx.ioStallBegin = begin;
 
@@ -360,7 +367,7 @@ public:
 			int64_t previousTruncateBytes = ctx.preSubmitTruncateBytes;
 			int64_t largestTruncate = 0;
 
-			for(int i=0; i<n; i++) {
+			for (int i = 0; i < n; i++) {
 				auto io = ctx.queue.top();
 
 				KAIOLogBlockEvent(io, OpLogEntry::LAUNCH);
@@ -369,7 +376,7 @@ public:
 				toStart[i] = io;
 				io->startTime = now();
 
-				if(ctx.ioTimeout > 0) {
+				if (ctx.ioTimeout > 0) {
 					ctx.appendToRequestList(io);
 				}
 
@@ -383,24 +390,24 @@ public:
 				}
 			}
 			double truncateComplete = timer_monotonic();
-			int rc = io_submit( ctx.iocx, n, (linux_iocb**)toStart );
+			int rc = io_submit(ctx.iocx, n, (linux_iocb**)toStart);
 			double end = timer_monotonic();
 
-			if(end-begin > FLOW_KNOBS->SLOW_LOOP_CUTOFF) {
-				ctx.slowAioSubmitMetric->submitDuration = end-truncateComplete;
-				ctx.slowAioSubmitMetric->truncateDuration = truncateComplete-begin;
+			if (end - begin > FLOW_KNOBS->SLOW_LOOP_CUTOFF) {
+				ctx.slowAioSubmitMetric->submitDuration = end - truncateComplete;
+				ctx.slowAioSubmitMetric->truncateDuration = truncateComplete - begin;
 				ctx.slowAioSubmitMetric->numTruncates = ctx.countPreSubmitTruncate - previousTruncateCount;
 				ctx.slowAioSubmitMetric->truncateBytes = ctx.preSubmitTruncateBytes - previousTruncateBytes;
 				ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
 				ctx.slowAioSubmitMetric->log();
 
-				if(g_nondeterministic_random->random01() < end-begin) {
+				if (g_nondeterministic_random->random01() < end - begin) {
 					TraceEvent("SlowKAIOLaunch")
-						.detail("IOSubmitTime", end-truncateComplete)
-						.detail("TruncateTime", truncateComplete-begin)
-						.detail("TruncateCount", ctx.countPreSubmitTruncate - previousTruncateCount)
-						.detail("TruncateBytes", ctx.preSubmitTruncateBytes - previousTruncateBytes)
-						.detail("LargestTruncate", largestTruncate);
+					    .detail("IOSubmitTime", end - truncateComplete)
+					    .detail("TruncateTime", truncateComplete - begin)
+					    .detail("TruncateCount", ctx.countPreSubmitTruncate - previousTruncateCount)
+					    .detail("TruncateBytes", ctx.preSubmitTruncateBytes - previousTruncateBytes)
+					    .detail("LargestTruncate", largestTruncate);
 				}
 			}
 
@@ -408,23 +415,24 @@ public:
 			++ctx.countAIOSubmit;
 
 			double elapsed = timer_monotonic() - begin;
-			g_network->networkMetrics.secSquaredSubmit += elapsed*elapsed/2;	
+			g_network->networkMetrics.secSquaredSubmit += elapsed * elapsed / 2;
 
 			//TraceEvent("Launched").detail("N", rc).detail("Queued", ctx.queue.size()).detail("Elapsed", elapsed).detail("Outstanding", ctx.outstanding+rc);
-			//printf("launched: %d/%d in %f us (%d outstanding; lowest prio %d)\n", rc, ctx.queue.size(), elapsed*1e6, ctx.outstanding + rc, toStart[n-1]->getTask());
-			if (rc<0) {
+			// printf("launched: %d/%d in %f us (%d outstanding; lowest prio %d)\n", rc, ctx.queue.size(), elapsed*1e6,
+			// ctx.outstanding + rc, toStart[n-1]->getTask());
+			if (rc < 0) {
 				if (errno == EAGAIN) {
 					rc = 0;
 				} else {
 					KAIOLogBlockEvent(toStart[0], OpLogEntry::COMPLETE, errno ? -errno : -1000000);
 					// Other errors are assumed to represent failure to issue the first I/O in the list
-					toStart[0]->setResult( errno ? -errno : -1000000 );
+					toStart[0]->setResult(errno ? -errno : -1000000);
 					rc = 1;
 				}
 			} else
 				ctx.outstanding += rc;
 			// Any unsubmitted I/Os need to be requeued
-			for(int i=rc; i<n; i++) {
+			for (int i = rc; i < n; i++) {
 				KAIOLogBlockEvent(toStart[i], OpLogEntry::REQUEUE);
 				ctx.queue.push(toStart[i]);
 			}
@@ -432,6 +440,7 @@ public:
 	}
 
 	bool failed;
+
 private:
 	int fd, flags;
 	int64_t lastFileSize, nextFileSize;
@@ -446,14 +455,16 @@ private:
 		Promise<int> result;
 		Reference<AsyncFileKAIO> owner;
 		int64_t prio;
-		IOBlock *prev;
-		IOBlock *next;
+		IOBlock* prev;
+		IOBlock* next;
 		double startTime;
 #if KAIO_LOGGING
 		int32_t iolog_id;
 #endif
 
-		struct indirect_order_by_priority { bool operator () ( IOBlock* a, IOBlock* b ) { return a->prio < b->prio; } };
+		struct indirect_order_by_priority {
+			bool operator()(IOBlock* a, IOBlock* b) { return a->prio < b->prio; }
+		};
 
 		IOBlock(int op, int fd) : prev(nullptr), next(nullptr), startTime(0) {
 			memset((linux_iocb*)this, 0, sizeof(linux_iocb));
@@ -464,35 +475,49 @@ private:
 #endif
 		}
 
-		int getTask() const { return (prio>>32)+1; }
+		int getTask() const { return (prio >> 32) + 1; }
 
-		ACTOR static void deliver( Promise<int> result, bool failed, int r, int task ) {
-			wait( delay(0, task) );
-			if (failed) result.sendError(io_timeout());
-			else if (r < 0) result.sendError(io_error());
-			else result.send(r);
+		ACTOR static void deliver(Promise<int> result, bool failed, int r, int task) {
+			wait(delay(0, task));
+			if (failed)
+				result.sendError(io_timeout());
+			else if (r < 0)
+				result.sendError(io_error());
+			else
+				result.send(r);
 		}
 
-		void setResult( int r ) {
-			if (r<0) {
+		void setResult(int r) {
+			if (r < 0) {
 				struct stat fst;
-				fstat( aio_fildes, &fst );
+				fstat(aio_fildes, &fst);
 
 				errno = -r;
-				TraceEvent("AsyncFileKAIOIOError").GetLastError().detail("Fd", aio_fildes).detail("Op", aio_lio_opcode).detail("Nbytes", nbytes).detail("Offset", offset).detail("Ptr", int64_t(buf))
-					.detail("Size", fst.st_size).detail("Filename", owner->filename);
+				TraceEvent("AsyncFileKAIOIOError")
+				    .GetLastError()
+				    .detail("Fd", aio_fildes)
+				    .detail("Op", aio_lio_opcode)
+				    .detail("Nbytes", nbytes)
+				    .detail("Offset", offset)
+				    .detail("Ptr", int64_t(buf))
+				    .detail("Size", fst.st_size)
+				    .detail("Filename", owner->filename);
 			}
-			deliver( result, owner->failed, r, getTask() );
+			deliver(result, owner->failed, r, getTask());
 			delete this;
 		}
 
 		void timeout(bool warnOnly) {
-			TraceEvent(SevWarnAlways, "AsyncFileKAIOTimeout").detail("Fd", aio_fildes).detail("Op", aio_lio_opcode).detail("Nbytes", nbytes).detail("Offset", offset).detail("Ptr", int64_t(buf))
-				.detail("Filename", owner->filename);
-			g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
+			TraceEvent(SevWarnAlways, "AsyncFileKAIOTimeout")
+			    .detail("Fd", aio_fildes)
+			    .detail("Op", aio_lio_opcode)
+			    .detail("Nbytes", nbytes)
+			    .detail("Offset", offset)
+			    .detail("Ptr", int64_t(buf))
+			    .detail("Filename", owner->filename);
+			g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType) true);
 
-			if(!warnOnly)
-				owner->failed = true;
+			if (!warnOnly) owner->failed = true;
 		}
 	};
 
@@ -507,10 +532,10 @@ private:
 		Int64MetricHandle countAIOSubmit;
 		Int64MetricHandle countAIOCollect;
 		Int64MetricHandle submitMetric;
-		
+
 		double ioTimeout;
 		bool timeoutWarnOnly;
-		IOBlock *submittedRequestList;
+		IOBlock* submittedRequestList;
 
 		Int64MetricHandle countPreSubmitTruncate;
 		Int64MetricHandle preSubmitTruncateBytes;
@@ -518,7 +543,9 @@ private:
 		EventMetricHandle<SlowAioSubmit> slowAioSubmitMetric;
 
 		uint32_t opsIssued;
-		Context() : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true), fallocateZeroSupported(true), submittedRequestList(nullptr) {
+		Context()
+		  : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true),
+		    fallocateZeroSupported(true), submittedRequestList(nullptr) {
 			setIOTimeout(0);
 		}
 
@@ -527,39 +554,37 @@ private:
 			timeoutWarnOnly = timeout < 0;
 		}
 
-		void appendToRequestList(IOBlock *io) {
+		void appendToRequestList(IOBlock* io) {
 			ASSERT(!io->next && !io->prev);
 
-			if(submittedRequestList) {
+			if (submittedRequestList) {
 				io->prev = submittedRequestList->prev;
 				io->prev->next = io;
 
 				submittedRequestList->prev = io;
 				io->next = submittedRequestList;
-			}
-			else {
+			} else {
 				submittedRequestList = io;
 				io->next = io->prev = io;
 			}
 		}
 
-		void removeFromRequestList(IOBlock *io) {
-			if(io->next == nullptr) {
+		void removeFromRequestList(IOBlock* io) {
+			if (io->next == nullptr) {
 				ASSERT(io->prev == nullptr);
 				return;
 			}
 
 			ASSERT(io->prev != nullptr);
 
-			if(io == io->next) {
+			if (io == io->next) {
 				ASSERT(io == submittedRequestList && io == io->prev);
 				submittedRequestList = nullptr;
-			}
-			else {
+			} else {
 				io->next->prev = io->prev;
 				io->prev->next = io->next;
 
-				if(submittedRequestList == io) {
+				if (submittedRequestList == io) {
 					submittedRequestList = io->next;
 				}
 			}
@@ -569,42 +594,42 @@ private:
 	};
 	static Context ctx;
 
-	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename) : fd(fd), flags(flags), filename(filename), failed(false) {
+	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename)
+	  : fd(fd), flags(flags), filename(filename), failed(false) {
 
-		if( !g_network->isSimulated() ) {
+		if (!g_network->isSimulated()) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
-			countFileLogicalReads.init( LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
+			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
 			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
-			countLogicalReads.init( LiteralStringRef("AsyncFile.CountLogicalReads"));
+			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
 		}
-		
+
 #if KAIO_LOGGING
 		logFile = nullptr;
 		// TODO:  Don't do this hacky investigation-specific thing
 		StringRef fname(filename);
-		if(fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
+		if (fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
 			std::string logFileName = basename(filename);
-			while(logFileName.find("/") != std::string::npos)
+			while (logFileName.find("/") != std::string::npos)
 				logFileName = logFileName.substr(logFileName.find("/") + 1);
-			if(!logFileName.empty()) {
+			if (!logFileName.empty()) {
 				// TODO: don't hardcode this path
 				std::string logPath("/data/v7/fdb/");
 				try {
 					platform::createDirectory(logPath);
 					logFileName = logPath + format("%s.iolog", logFileName.c_str());
 					logFile = fopen(logFileName.c_str(), "r+");
-					if(logFile == nullptr)
-						logFile = fopen(logFileName.c_str(), "w");
-					if(logFile != nullptr)
+					if (logFile == nullptr) logFile = fopen(logFileName.c_str(), "w");
+					if (logFile != nullptr)
 						TraceEvent("KAIOLogOpened").detail("File", filename).detail("LogFile", logFileName);
 					else {
 						TraceEvent(SevWarn, "KAIOLogOpenFailure")
-							.detail("File", filename)
-							.detail("LogFile", logFileName)
-							.detail("ErrorCode", errno)
-							.detail("ErrorDesc", strerror(errno));
+						    .detail("File", filename)
+						    .detail("LogFile", logFileName)
+						    .detail("ErrorCode", errno)
+						    .detail("ErrorDesc", strerror(errno));
 					}
-				} catch(Error &e) {
+				} catch (Error& e) {
 					TraceEvent(SevError, "KAIOLogOpenFailure").error(e);
 				}
 			}
@@ -612,15 +637,15 @@ private:
 #endif
 	}
 
-	void enqueue( IOBlock* io, const char* op, AsyncFileKAIO* owner ) {
-		ASSERT( int64_t(io->buf) % 4096 == 0 && io->offset % 4096 == 0 && io->nbytes % 4096 == 0 );
+	void enqueue(IOBlock* io, const char* op, AsyncFileKAIO* owner) {
+		ASSERT(int64_t(io->buf) % 4096 == 0 && io->offset % 4096 == 0 && io->nbytes % 4096 == 0);
 
 		KAIOLogBlockEvent(owner->logFile, io, OpLogEntry::START);
 
 		io->flags |= 1;
 		io->eventfd = ctx.evfd;
-		io->prio = (int64_t(g_network->getCurrentTask())<<32) - (++ctx.opsIssued);
-		//io->prio = - (++ctx.opsIssued);
+		io->prio = (int64_t(g_network->getCurrentTask()) << 32) - (++ctx.opsIssued);
+		// io->prio = - (++ctx.opsIssued);
 		io->owner = Reference<AsyncFileKAIO>::addRef(owner);
 
 		ctx.queue.push(io);
@@ -628,34 +653,37 @@ private:
 
 	static int openFlags(int flags) {
 		int oflags = 0;
-		ASSERT( bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE) );  // readonly xor readwrite
-		if( flags & OPEN_EXCLUSIVE ) oflags |= O_EXCL;
-		if( flags & OPEN_CREATE )    oflags |= O_CREAT;
-		if( flags & OPEN_READONLY )  oflags |= O_RDONLY;
-		if( flags & OPEN_READWRITE ) oflags |= O_RDWR;
-		if( flags & OPEN_ATOMIC_WRITE_AND_CREATE ) oflags |= O_TRUNC;
+		ASSERT(bool(flags & OPEN_READONLY) != bool(flags & OPEN_READWRITE)); // readonly xor readwrite
+		if (flags & OPEN_EXCLUSIVE) oflags |= O_EXCL;
+		if (flags & OPEN_CREATE) oflags |= O_CREAT;
+		if (flags & OPEN_READONLY) oflags |= O_RDONLY;
+		if (flags & OPEN_READWRITE) oflags |= O_RDWR;
+		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) oflags |= O_TRUNC;
 		return oflags;
 	}
 
-	ACTOR static void poll( Reference<IEventFD> ev ) {
+	ACTOR static void poll(Reference<IEventFD> ev) {
 		loop {
-			int64_t evfd_count = wait( ev->read() );
+			int64_t evfd_count = wait(ev->read());
 
 			wait(delay(0, TaskDiskIOComplete));
 
 			linux_ioresult ev[FLOW_KNOBS->MAX_OUTSTANDING];
-			timespec tm; tm.tv_sec = 0; tm.tv_nsec = 0;
+			timespec tm;
+			tm.tv_sec = 0;
+			tm.tv_nsec = 0;
 
 			int n;
 
 			loop {
-				n = io_getevents( ctx.iocx, 0, FLOW_KNOBS->MAX_OUTSTANDING, ev, &tm );
-				if (n>=0 || errno!=EINTR) break;
+				n = io_getevents(ctx.iocx, 0, FLOW_KNOBS->MAX_OUTSTANDING, ev, &tm);
+				if (n >= 0 || errno != EINTR) break;
 			}
 
 			++ctx.countAIOCollect;
-			// printf("io_getevents: collected %d/%d in %f us (%d queued)\n", n, ctx.outstanding, (timer()-before)*1e6, ctx.queue.size());
-			if (n<0) {
+			// printf("io_getevents: collected %d/%d in %f us (%d queued)\n", n, ctx.outstanding, (timer()-before)*1e6,
+			// ctx.queue.size());
+			if (n < 0) {
 				// printf("io_getevents failed: %d\n", errno);
 				TraceEvent("IOGetEventsError").GetLastError();
 				throw io_error();
@@ -664,29 +692,29 @@ private:
 				double t = timer_monotonic();
 				double elapsed = t - ctx.ioStallBegin;
 				ctx.ioStallBegin = t;
-				g_network->networkMetrics.secSquaredDiskStall += elapsed*elapsed/2;
+				g_network->networkMetrics.secSquaredDiskStall += elapsed * elapsed / 2;
 			}
 
 			ctx.outstanding -= n;
 
-			if(ctx.ioTimeout > 0) {
+			if (ctx.ioTimeout > 0) {
 				double currentTime = now();
-				while(ctx.submittedRequestList && currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
+				while (ctx.submittedRequestList && currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
 					ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
 					ctx.removeFromRequestList(ctx.submittedRequestList);
 				}
 			}
 
-			for(int i=0; i<n; i++) {
+			for (int i = 0; i < n; i++) {
 				IOBlock* iob = static_cast<IOBlock*>(ev[i].iocb);
 
 				KAIOLogBlockEvent(iob, OpLogEntry::COMPLETE, ev[i].result);
 
-				if(ctx.ioTimeout > 0) {
+				if (ctx.ioTimeout > 0) {
 					ctx.removeFromRequestList(iob);
 				}
 
-				iob->setResult( ev[i].result );
+				iob->setResult(ev[i].result);
 			}
 		}
 	}
@@ -694,25 +722,23 @@ private:
 
 #if KAIO_LOGGING
 // Call from contexts where only an ioblock is available, log if its owner is set
-void AsyncFileKAIO::KAIOLogBlockEvent(IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result) {
-	if(ioblock->owner)
-		return KAIOLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
+void AsyncFileKAIO::KAIOLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result) {
+	if (ioblock->owner) return KAIOLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
 }
 
-void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result) {
-	if(logFile != nullptr) {
+void AsyncFileKAIO::KAIOLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result) {
+	if (logFile != nullptr) {
 		// Figure out what type of operation this is
 		OpLogEntry::EOperation op;
-		if(ioblock->aio_lio_opcode == IO_CMD_PREAD)
+		if (ioblock->aio_lio_opcode == IO_CMD_PREAD)
 			op = OpLogEntry::READ;
-		else if(ioblock->aio_lio_opcode == IO_CMD_PWRITE)
+		else if (ioblock->aio_lio_opcode == IO_CMD_PWRITE)
 			op = OpLogEntry::WRITE;
 		else
 			return;
 
 		// Assign this IO operation an io log id number if it doesn't already have one
-		if(ioblock->iolog_id == 0)
-			ioblock->iolog_id = OpLogEntry::nextID();
+		if (ioblock->iolog_id == 0) ioblock->iolog_id = OpLogEntry::nextID();
 
 		OpLogEntry e;
 		e.timestamp = timer_int();
@@ -724,7 +750,8 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntr
 		e.result = result;
 
 		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
-		if( (op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) || (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE) )
+		if ((op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) ||
+		    (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE))
 			e.checksum = hashlittle(ioblock->buf, ioblock->nbytes, 0xab12fd93);
 		else
 			e.checksum = 0;
@@ -733,8 +760,9 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntr
 	}
 }
 
-void AsyncFileKAIO::KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage, uint32_t pageOffset, uint32_t result) {
-	if(logFile != nullptr) {
+void AsyncFileKAIO::KAIOLogEvent(FILE* logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage,
+                                 uint32_t pageOffset, uint32_t result) {
+	if (logFile != nullptr) {
 		OpLogEntry e;
 		e.timestamp = timer_int();
 		e.id = id;
@@ -750,28 +778,27 @@ void AsyncFileKAIO::KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperat
 #endif
 
 ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
-	state void *buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
+	state void* buf =
+	    FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
 	state int iteration = 0;
 
 	state bool opTimedOut = false;
 
-	for(; iteration < numIterations; ++iteration) {
+	for (; iteration < numIterations; ++iteration) {
 		state std::vector<Future<Void>> futures;
 		state int numOps = g_random->randomInt(1, 20);
-		for(; numOps > 0; --numOps) {
-			if(g_random->coinflip()) {
-				futures.push_back(success(f->read(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096)));
-			}
-			else {
-				futures.push_back(f->write(buf, 4096, g_random->randomInt(0, fileSize)/4096*4096));
+		for (; numOps > 0; --numOps) {
+			if (g_random->coinflip()) {
+				futures.push_back(success(f->read(buf, 4096, g_random->randomInt(0, fileSize) / 4096 * 4096)));
+			} else {
+				futures.push_back(f->write(buf, 4096, g_random->randomInt(0, fileSize) / 4096 * 4096));
 			}
 		}
 		state int fIndex = 0;
-		for(; fIndex < futures.size(); ++fIndex) {
+		for (; fIndex < futures.size(); ++fIndex) {
 			try {
 				wait(futures[fIndex]);
-			}
-			catch(Error &e) {
+			} catch (Error& e) {
 				ASSERT(!expectedToSucceed);
 				ASSERT(e.code() == error_code_io_timeout);
 				opTimedOut = true;
@@ -781,12 +808,11 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 		try {
 			wait(f->sync() && delay(0.1));
 			ASSERT(expectedToSucceed);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			ASSERT(!expectedToSucceed && e.code() == error_code_io_timeout);
 		}
 	}
-	
+
 	FastAllocator<4096>::release(buf);
 
 	ASSERT(expectedToSucceed || opTimedOut);
@@ -794,10 +820,13 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 }
 
 TEST_CASE("fdbrpc/AsyncFileKAIO/RequestList") {
-	if(!g_network->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network
+	         ->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
 		try {
-			state Reference<IAsyncFile> f = wait(AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__", IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
-			state int fileSize = 2<<27; // ~100MB
+			state Reference<IAsyncFile> f = wait(AsyncFileKAIO::open(
+			    "/tmp/__KAIO_TEST_FILE__",
+			    IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));
+			state int fileSize = 2 << 27; // ~100MB
 			wait(f->truncate(fileSize));
 
 			// Test that the request list works as intended with default timeout
@@ -814,10 +843,9 @@ TEST_CASE("fdbrpc/AsyncFileKAIO/RequestList") {
 			AsyncFileKAIO::setTimeout(0.0001);
 			wait(runTestOps(f, 10, fileSize, false));
 			ASSERT(((AsyncFileKAIO*)f.getPtr())->failed);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			state Error err = e;
-			if(f) {
+			if (f) {
 				wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
 			}
 			throw err;
@@ -832,5 +860,5 @@ TEST_CASE("fdbrpc/AsyncFileKAIO/RequestList") {
 AsyncFileKAIO::Context AsyncFileKAIO::ctx;
 
 #include "flow/unactorcompiler.h"
-#endif 
+#endif
 #endif

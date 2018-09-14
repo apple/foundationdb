@@ -24,7 +24,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 
 #include "Tester.actor.h"
-#ifdef  __linux__
+#ifdef __linux__
 #include <string.h>
 #endif
 
@@ -39,32 +39,31 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 // NOTE: This was taken from within fdb_c.cpp (where it is defined as a static within the get_range function).
 // If that changes, this will also have to be changed.
 const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
-const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION)/sizeof(int);
+const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION) / sizeof(int);
 
-static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<DatabaseContext> const& db, StringRef const& prefix);
+static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<DatabaseContext> const& db,
+                            StringRef const& prefix);
 
-THREAD_FUNC networkThread( void* api ) {
+THREAD_FUNC networkThread(void* api) {
 	// This is the fdb_flow network we're running on a thread
 	((API*)api)->runNetwork();
 	THREAD_RETURN;
 }
 
-bool hasEnding(std::string const &fullString, std::string const &ending)
-{
+bool hasEnding(std::string const& fullString, std::string const& ending) {
 	if (fullString.length() >= ending.length()) {
 		return (0 == fullString.compare(fullString.length() - ending.length(), ending.length(), ending));
-	}
-	else {
+	} else {
 		return false;
 	}
 }
 
-ACTOR Future<std::vector<Tuple>> waitAndPop(FlowTesterStack *self, int count) {
+ACTOR Future<std::vector<Tuple>> waitAndPop(FlowTesterStack* self, int count) {
 	state std::vector<Tuple> tuples;
 	state std::vector<StackItem> items = self->pop(count);
 
 	state int index;
-	for(index = 0; index < items.size(); ++index) {
+	for (index = 0; index < items.size(); ++index) {
 		Standalone<StringRef> itemStr = wait(items[index].value);
 		tuples.push_back(Tuple::unpack(itemStr));
 	}
@@ -76,7 +75,7 @@ Future<std::vector<Tuple>> FlowTesterStack::waitAndPop(int count) {
 	return ::waitAndPop(this, count);
 }
 
-ACTOR Future<Tuple> waitAndPop(FlowTesterStack *self) {
+ACTOR Future<Tuple> waitAndPop(FlowTesterStack* self) {
 	std::vector<Tuple> tuples = wait(waitAndPop(self, 1));
 	return tuples[0];
 }
@@ -87,41 +86,33 @@ Future<Tuple> FlowTesterStack::waitAndPop() {
 
 std::string tupleToString(Tuple const& tuple) {
 	std::string str = "(";
-	for(int i = 0; i < tuple.size(); ++i) {
+	for (int i = 0; i < tuple.size(); ++i) {
 		Tuple::ElementType type = tuple.getType(i);
-		if(type == Tuple::NULL_TYPE) {
+		if (type == Tuple::NULL_TYPE) {
 			str += "NULL";
-		}
-		else if(type == Tuple::BYTES || type == Tuple::UTF8) {
-			if(type == Tuple::UTF8) {
+		} else if (type == Tuple::BYTES || type == Tuple::UTF8) {
+			if (type == Tuple::UTF8) {
 				str += "u";
 			}
 			str += "\'" + printable(tuple.getString(i)) + "\'";
-		}
-		else if(type == Tuple::INT) {
+		} else if (type == Tuple::INT) {
 			str += format("%ld", tuple.getInt(i));
-		}
-		else if(type == Tuple::FLOAT) {
+		} else if (type == Tuple::FLOAT) {
 			str += format("%f", tuple.getFloat(i));
-		}
-		else if(type == Tuple::DOUBLE) {
+		} else if (type == Tuple::DOUBLE) {
 			str += format("%f", tuple.getDouble(i));
-		}
-		else if(type == Tuple::BOOL) {
+		} else if (type == Tuple::BOOL) {
 			str += tuple.getBool(i) ? "true" : "false";
-		}
-		else if(type == Tuple::UUID) {
+		} else if (type == Tuple::UUID) {
 			Uuid u = tuple.getUuid(i);
 			str += format("%016llx%016llx", *(uint64_t*)u.getData().begin(), *(uint64_t*)(u.getData().begin() + 8));
-		}
-		else if(type == Tuple::NESTED) {
+		} else if (type == Tuple::NESTED) {
 			str += tupleToString(tuple.getNested(i));
-		}
-		else {
+		} else {
 			ASSERT(false);
 		}
 
-		if(i < tuple.size() - 1) {
+		if (i < tuple.size() - 1) {
 			str += ", ";
 		}
 	}
@@ -130,27 +121,34 @@ std::string tupleToString(Tuple const& tuple) {
 	return str;
 }
 
-ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, KeySelectorRef begin, KeySelectorRef end, int limits = 0, bool snapshot = false, bool reverse = false, FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
+ACTOR Future<Standalone<RangeResultRef>> getRange(Reference<Transaction> tr, KeySelectorRef begin, KeySelectorRef end,
+                                                  int limits = 0, bool snapshot = false, bool reverse = false,
+                                                  FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 	state KeySelector ks_begin(begin);
 	state KeySelector ks_end(end);
 	state Standalone<RangeResultRef> results;
 	state int iteration = 1;
-	loop{
-		// printf("=====DB: begin:%s, end:%s, limits:%d\n", printable(begin.key).c_str(), printable(end.key).c_str(), limits);
+	loop {
+		// printf("=====DB: begin:%s, end:%s, limits:%d\n", printable(begin.key).c_str(), printable(end.key).c_str(),
+		// limits);
 		state FDBStandalone<RangeResultRef> r;
 		if (streamingMode == FDB_STREAMING_MODE_ITERATOR && iteration > 1) {
 			int effective_iteration = std::min(iteration, MAX_ITERATION);
 			int bytes_limit = ITERATION_PROGRESSION[effective_iteration - 1];
-			FDBStandalone<RangeResultRef> rTemp = wait(tr->getRange(ks_begin, ks_end, GetRangeLimits(limits, bytes_limit), snapshot, reverse, (FDBStreamingMode)FDB_STREAMING_MODE_EXACT));
+			FDBStandalone<RangeResultRef> rTemp =
+			    wait(tr->getRange(ks_begin, ks_end, GetRangeLimits(limits, bytes_limit), snapshot, reverse,
+			                      (FDBStreamingMode)FDB_STREAMING_MODE_EXACT));
 			r = rTemp;
 		} else {
-			FDBStandalone<RangeResultRef> rTemp =  wait(tr->getRange(ks_begin, ks_end, limits, snapshot, reverse, streamingMode));
+			FDBStandalone<RangeResultRef> rTemp =
+			    wait(tr->getRange(ks_begin, ks_end, limits, snapshot, reverse, streamingMode));
 			r = rTemp;
 		}
 		iteration += 1;
 		// printf("=====DB: count:%d\n", r.size());
-		for (auto & s : r) {
-			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+		for (auto& s : r) {
+			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+			// printable(StringRef(s.value)).c_str());
 			results.push_back_deep(results.arena(), s);
 
 			if (reverse)
@@ -165,34 +163,40 @@ ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, K
 			return results;
 		}
 
-		if(limits > 0) {
+		if (limits > 0) {
 			limits -= r.size();
 		}
 	}
 }
 
-ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, KeyRange keys, int limits = 0, bool snapshot = false, bool reverse = false, FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
+ACTOR Future<Standalone<RangeResultRef>> getRange(Reference<Transaction> tr, KeyRange keys, int limits = 0,
+                                                  bool snapshot = false, bool reverse = false,
+                                                  FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 	state Key begin(keys.begin);
 	state Key end(keys.end);
 	state Standalone<RangeResultRef> results;
 	state int iteration = 1;
-	loop{
+	loop {
 		// printf("=====DB: begin:%s, limits:%d\n", printable(begin).c_str(), limits);
 		KeyRange keyRange(KeyRangeRef(begin, end > begin ? end : begin));
 		state FDBStandalone<RangeResultRef> r;
 		if (streamingMode == FDB_STREAMING_MODE_ITERATOR && iteration > 1) {
 			int effective_iteration = std::min(iteration, MAX_ITERATION);
 			int bytes_limit = ITERATION_PROGRESSION[effective_iteration - 1];
-			FDBStandalone<RangeResultRef> rTemp = wait(tr->getRange(keyRange, GetRangeLimits(limits, bytes_limit), snapshot, reverse, (FDBStreamingMode)FDB_STREAMING_MODE_EXACT));
+			FDBStandalone<RangeResultRef> rTemp =
+			    wait(tr->getRange(keyRange, GetRangeLimits(limits, bytes_limit), snapshot, reverse,
+			                      (FDBStreamingMode)FDB_STREAMING_MODE_EXACT));
 			r = rTemp;
 		} else {
-			FDBStandalone<RangeResultRef> rTemp = wait(tr->getRange(keyRange, limits, snapshot, reverse, streamingMode));
+			FDBStandalone<RangeResultRef> rTemp =
+			    wait(tr->getRange(keyRange, limits, snapshot, reverse, streamingMode));
 			r = rTemp;
 		}
 		iteration += 1;
 		// printf("=====DB: count:%d\n", r.size());
-		for (auto & s : r) {
-			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+		for (auto& s : r) {
+			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+			// printable(StringRef(s.value)).c_str());
 			results.push_back_deep(results.arena(), s);
 
 			if (reverse)
@@ -207,28 +211,29 @@ ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, K
 			return results;
 		}
 
-		if(limits > 0) {
+		if (limits > 0) {
 			limits -= r.size();
 		}
 	}
 }
 
 ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string subspace, std::string msg) {
-	if (!tr)
-		return Void();
+	if (!tr) return Void();
 
-	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
-	// printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(), printable(subspace).c_str(), results.size());
-	for (auto & s : results) {
-		// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+	Standalone<RangeResultRef> results =
+	    wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
+	// printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
+	// printable(subspace).c_str(), results.size());
+	for (auto& s : results) {
+		// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+		// printable(StringRef(s.value)).c_str());
 	}
 
 	return Void();
 }
 
 ACTOR Future<Void> stackSub(FlowTesterStack* stack) {
-	if (stack->data.size() < 2)
-		return Void();
+	if (stack->data.size() < 2) return Void();
 
 	StackItem a = stack->data.back();
 	stack->data.pop_back();
@@ -247,8 +252,7 @@ ACTOR Future<Void> stackSub(FlowTesterStack* stack) {
 }
 
 ACTOR Future<Void> stackConcat(FlowTesterStack* stack) {
-	if(stack->data.size() < 2)
-		return Void();
+	if (stack->data.size() < 2) return Void();
 
 	StackItem a = stack->data.back();
 	stack->data.pop_back();
@@ -267,8 +271,7 @@ ACTOR Future<Void> stackConcat(FlowTesterStack* stack) {
 }
 
 ACTOR Future<Void> stackSwap(FlowTesterStack* stack) {
-	if (stack->data.size() < 3)
-		return Void();
+	if (stack->data.size() < 3) return Void();
 
 	StackItem pop = stack->data.back();
 	stack->data.pop_back();
@@ -277,7 +280,7 @@ ACTOR Future<Void> stackSwap(FlowTesterStack* stack) {
 	int64_t idx = stack->data.size() - 1;
 	int64_t idx1 = idx - Tuple::unpack(sv).getInt(0);
 	if (idx1 < idx) {
-		//printf("=============SWAP:%d,%d\n", idx, stack->data.size());
+		// printf("=============SWAP:%d,%d\n", idx, stack->data.size());
 		StackItem item = stack->data[idx];
 		stack->data[idx] = stack->data[idx1];
 		stack->data[idx1] = item;
@@ -290,7 +293,8 @@ ACTOR Future<Void> printFlowTesterStack(FlowTesterStack* stack) {
 	state int idx;
 	for (idx = stack->data.size() - 1; idx >= 0; --idx) {
 		Standalone<StringRef> value = wait(stack->data[idx].value);
-		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index, printable(value).c_str());
+		// printf("==========stack item:%d, index:%d, value:%s\n", idx, stack->data[idx].index,
+		// printable(value).c_str());
 	}
 	return Void();
 }
@@ -327,8 +331,8 @@ struct EmptyStackFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		//wait(printFlowTesterStack(&(data->stack)));
-		//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+		// wait(printFlowTesterStack(&(data->stack)));
+		// wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 		data->stack.clear();
 		return Void();
 	}
@@ -352,7 +356,7 @@ struct PopFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		for(StackItem item : items) {
+		for (StackItem item : items) {
 			Standalone<StringRef> _ = wait(item.value);
 		}
 		return Void();
@@ -386,11 +390,12 @@ REGISTER_INSTRUCTION_FUNC(ConcatFunc);
 struct LogStackFunc : InstructionFunc {
 	static const char* name;
 
-	ACTOR static Future<Void> logStack(Reference<FlowTesterData> data, std::map<int, StackItem> entries, Standalone<StringRef> prefix) {
+	ACTOR static Future<Void> logStack(Reference<FlowTesterData> data, std::map<int, StackItem> entries,
+	                                   Standalone<StringRef> prefix) {
 		loop {
 			state Reference<Transaction> tr(new Transaction(data->db));
 			try {
-				for(auto it : entries) {
+				for (auto it : entries) {
 					Tuple tk;
 					tk.append(it.first);
 					tk.append((int64_t)it.second.index);
@@ -401,8 +406,7 @@ struct LogStackFunc : InstructionFunc {
 
 				wait(tr->commit());
 				return Void();
-			}
-			catch(Error &e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
@@ -410,18 +414,17 @@ struct LogStackFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.empty())
-			return Void();
+		if (items.empty()) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
 
 		state std::map<int, StackItem> entries;
-		while(data->stack.data.size() > 0) {
+		while (data->stack.data.size() > 0) {
 			state std::vector<StackItem> it = data->stack.pop();
 			ASSERT(it.size() == 1);
 			entries[data->stack.data.size()] = it.front();
-			if(entries.size() == 100) {
+			if (entries.size() == 100) {
 				wait(logStack(data, entries, prefix));
 				entries.clear();
 			}
@@ -439,13 +442,12 @@ REGISTER_INSTRUCTION_FUNC(LogStackFunc);
 // FoundationDB Operations
 //
 ACTOR Future<Standalone<StringRef>> waitForVoid(Future<Void> f) {
-	try{
+	try {
 		wait(f);
 		Tuple t;
 		t.append(LiteralStringRef("RESULT_NOT_PRESENT"));
 		return t.pack();
-	}
-	catch (Error& e){
+	} catch (Error& e) {
 		// printf("FDBError1:%d\n", e.code());
 		Tuple t;
 		t.append(LiteralStringRef("ERROR"));
@@ -458,13 +460,12 @@ ACTOR Future<Standalone<StringRef>> waitForVoid(Future<Void> f) {
 }
 
 ACTOR Future<Standalone<StringRef>> waitForValue(Future<FDBStandalone<KeyRef>> f) {
-	try{
+	try {
 		FDBStandalone<KeyRef> value = wait(f);
 		Tuple t;
 		t.append(value);
 		return t.pack();
-	}
-	catch (Error& e){
+	} catch (Error& e) {
 		// printf("FDBError2:%d\n", e.code());
 		Tuple t;
 		t.append(LiteralStringRef("ERROR"));
@@ -476,8 +477,8 @@ ACTOR Future<Standalone<StringRef>> waitForValue(Future<FDBStandalone<KeyRef>> f
 	}
 }
 
-ACTOR Future<Standalone<StringRef>> waitForValue(Future< Optional<FDBStandalone<ValueRef>> > f) {
-	try{
+ACTOR Future<Standalone<StringRef>> waitForValue(Future<Optional<FDBStandalone<ValueRef>>> f) {
+	try {
 		Optional<FDBStandalone<ValueRef>> value = wait(f);
 		Standalone<StringRef> str;
 		if (value.present())
@@ -488,8 +489,7 @@ ACTOR Future<Standalone<StringRef>> waitForValue(Future< Optional<FDBStandalone<
 		Tuple t;
 		t.append(str);
 		return t.pack();
-	}
-	catch (Error& e){
+	} catch (Error& e) {
 		// printf("FDBError3:%d\n", e.code());
 		Tuple t;
 		t.append(LiteralStringRef("ERROR"));
@@ -506,19 +506,16 @@ ACTOR Future<Standalone<StringRef>> getKey(Future<FDBStandalone<KeyRef>> f, Stan
 		FDBStandalone<KeyRef> key = wait(f);
 		Tuple t;
 
-		if(key.startsWith(prefixFilter)) {
+		if (key.startsWith(prefixFilter)) {
 			t.append(key);
-		}
-		else if(key < prefixFilter) {
+		} else if (key < prefixFilter) {
 			t.append(prefixFilter);
-		}
-		else {
+		} else {
 			t.append(strinc(prefixFilter));
 		}
 
 		return t.pack();
-	}
-	catch(Error& e){
+	} catch (Error& e) {
 		// printf("FDBError4:%d\n", e.code());
 		Tuple t;
 		t.append(LiteralStringRef("ERROR"));
@@ -549,7 +546,7 @@ struct UseTransactionFunc : InstructionFunc {
 		Standalone<StringRef> name = wait(items[0].value);
 		data->trName = name;
 
-		if(trMap.count(data->trName) == 0) {
+		if (trMap.count(data->trName) == 0) {
 			trMap[data->trName] = Reference<Transaction>(new Transaction(data->db));
 		}
 		return Void();
@@ -563,8 +560,7 @@ struct OnErrorFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.empty())
-			return Void();
+		if (items.empty()) return Void();
 
 		Standalone<StringRef> value = wait(items[0].value);
 		int err_code = Tuple::unpack(value).getInt(0);
@@ -582,29 +578,27 @@ struct SetFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
-		if (items.size() != 2)
-			return Void();
+		if (items.size() != 2) return Void();
 
 		Standalone<StringRef> sk = wait(items[0].value);
 		state Standalone<StringRef> key = Tuple::unpack(sk).getString(0);
 		// if (instruction->isDatabase)
-			// printf("SetDatabase:%s, isDatabase:%d\n", printable(key).c_str(), instruction->isDatabase);
+		// printf("SetDatabase:%s, isDatabase:%d\n", printable(key).c_str(), instruction->isDatabase);
 		Standalone<StringRef> sv = wait(items[1].value);
 		Standalone<StringRef> value = Tuple::unpack(sv).getString(0);
-		//printf("SetDatabase:%s:%s:%s\n", printable(key).c_str(), printable(sv).c_str(), printable(value).c_str());
+		// printf("SetDatabase:%s:%s:%s\n", printable(key).c_str(), printable(sv).c_str(), printable(value).c_str());
 
 		Reference<InstructionData> instructionCopy = instruction;
 		Standalone<StringRef> keyCopy = key;
 
-		Future<Void> mutation = executeMutation(instruction, [instructionCopy, keyCopy, value] () -> Future<Void> {
+		Future<Void> mutation = executeMutation(instruction, [instructionCopy, keyCopy, value]() -> Future<Void> {
 			instructionCopy->tr->set(keyCopy, value);
 			return Void();
 		});
 
 		if (instruction->isDatabase) {
 			data->stack.push(waitForVoid(mutation));
-		}
-		else {
+		} else {
 			wait(mutation);
 		}
 
@@ -619,13 +613,12 @@ struct GetFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> sk = wait(items[0].value);
 		state Standalone<StringRef> key = Tuple::unpack(sk).getString(0);
 
-		Future< Optional<FDBStandalone<ValueRef>> > fk = instruction->tr->get(StringRef(key), instruction->isSnapshot);
+		Future<Optional<FDBStandalone<ValueRef>>> fk = instruction->tr->get(StringRef(key), instruction->isSnapshot);
 		data->stack.push(waitForValue(holdWhile(instruction->tr, fk)));
 
 		return Void();
@@ -639,8 +632,7 @@ struct GetKeyFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(4);
-		if (items.size() != 4)
-			return Void();
+		if (items.size() != 4) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> key = Tuple::unpack(s1).getString(0);
@@ -654,8 +646,9 @@ struct GetKeyFunc : InstructionFunc {
 		Standalone<StringRef> s4 = wait(items[3].value);
 		Standalone<StringRef> prefix = Tuple::unpack(s4).getString(0);
 
-		//printf("===================GET_KEY:%s, %ld, %ld\n", printable(key).c_str(), or_equal, offset);
-		Future<FDBStandalone<KeyRef>> fk = instruction->tr->getKey(KeySelector(KeySelectorRef(key, or_equal, offset)), instruction->isSnapshot);
+		// printf("===================GET_KEY:%s, %ld, %ld\n", printable(key).c_str(), or_equal, offset);
+		Future<FDBStandalone<KeyRef>> fk =
+		    instruction->tr->getKey(KeySelector(KeySelectorRef(key, or_equal, offset)), instruction->isSnapshot);
 		data->stack.push(getKey(holdWhile(instruction->tr, fk), prefix));
 
 		return Void();
@@ -731,8 +724,7 @@ struct WaitFutureFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> sk = wait(items[0].value);
 		data->stack.push(StackItem(items[0].index, sk));
@@ -748,23 +740,21 @@ struct ClearFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> sk = wait(items[0].value);
 		Standalone<StringRef> key = Tuple::unpack(sk).getString(0);
 
 		Reference<InstructionData> instructionCopy = instruction;
 
-		Future<Void> mutation = executeMutation(instruction, [instructionCopy, key] () -> Future<Void> {
+		Future<Void> mutation = executeMutation(instruction, [instructionCopy, key]() -> Future<Void> {
 			instructionCopy->tr->clear(key);
 			return Void();
 		});
 
 		if (instruction->isDatabase) {
 			data->stack.push(waitForVoid(mutation));
-		}
-		else {
+		} else {
 			wait(mutation);
 		}
 
@@ -803,8 +793,7 @@ struct GetRangeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(5);
-		if (items.size() != 5)
-			return Void();
+		if (items.size() != 5) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
@@ -821,16 +810,20 @@ struct GetRangeFunc : InstructionFunc {
 		Standalone<StringRef> s5 = wait(items[4].value);
 		FDBStreamingMode mode = (FDBStreamingMode)Tuple::unpack(s5).getInt(0);
 
-		// printf("================GetRange: %s, %s, %d, %d, %d, %d\n", printable(begin).c_str(), printable(end).c_str(), limit, reverse, mode, instruction->isSnapshot);
+		// printf("================GetRange: %s, %s, %d, %d, %d, %d\n", printable(begin).c_str(),
+		// printable(end).c_str(), limit, reverse, mode, instruction->isSnapshot);
 
-		Standalone<RangeResultRef> results = wait(getRange(instruction->tr, KeyRange(KeyRangeRef(begin, end > begin ? end : begin)), limit, instruction->isSnapshot, reverse, mode));
+		Standalone<RangeResultRef> results =
+		    wait(getRange(instruction->tr, KeyRange(KeyRangeRef(begin, end > begin ? end : begin)), limit,
+		                  instruction->isSnapshot, reverse, mode));
 		Tuple t;
-		for (auto & s : results) {
+		for (auto& s : results) {
 			t.append(s.key);
 			t.append(s.value);
-			//printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+			// printable(StringRef(s.value)).c_str());
 		}
-		//printf("=====Results Count:%d, size:%d\n", results.size(), str.size());
+		// printf("=====Results Count:%d, size:%d\n", results.size(), str.size());
 
 		data->stack.push(Tuple().append(t.pack()).pack());
 		return Void();
@@ -844,8 +837,7 @@ struct GetRangeStartsWithFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(4);
-		if (items.size() != 4)
-			return Void();
+		if (items.size() != 4) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
@@ -859,14 +851,18 @@ struct GetRangeStartsWithFunc : InstructionFunc {
 		Standalone<StringRef> s4 = wait(items[3].value);
 		FDBStreamingMode mode = (FDBStreamingMode)Tuple::unpack(s4).getInt(0);
 
-		//printf("================GetRangeStartsWithFunc: %s, %d, %d, %d, %d\n", printable(prefix).c_str(), limit, reverse, mode, isSnapshot);
-		Standalone<RangeResultRef> results = wait(getRange(instruction->tr, KeyRange(KeyRangeRef(prefix, strinc(prefix))), limit, instruction->isSnapshot, reverse, mode));
+		// printf("================GetRangeStartsWithFunc: %s, %d, %d, %d, %d\n", printable(prefix).c_str(), limit,
+		// reverse, mode, isSnapshot);
+		Standalone<RangeResultRef> results =
+		    wait(getRange(instruction->tr, KeyRange(KeyRangeRef(prefix, strinc(prefix))), limit,
+		                  instruction->isSnapshot, reverse, mode));
 		Tuple t;
-		//printf("=====Results Count:%d\n", results.size());
-		for (auto & s : results) {
+		// printf("=====Results Count:%d\n", results.size());
+		for (auto& s : results) {
 			t.append(s.key);
 			t.append(s.value);
-			//printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+			// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+			// printable(StringRef(s.value)).c_str());
 		}
 
 		data->stack.push(Tuple().append(t.pack()).pack());
@@ -881,8 +877,7 @@ struct ClearRangeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
-		if (items.size() != 2)
-			return Void();
+		if (items.size() != 2) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
@@ -893,15 +888,14 @@ struct ClearRangeFunc : InstructionFunc {
 		Reference<InstructionData> instructionCopy = instruction;
 		Standalone<StringRef> beginCopy = begin;
 
-		Future<Void> mutation = executeMutation(instruction, [instructionCopy, beginCopy, end] () -> Future<Void> {
+		Future<Void> mutation = executeMutation(instruction, [instructionCopy, beginCopy, end]() -> Future<Void> {
 			instructionCopy->tr->clear(KeyRangeRef(beginCopy, end));
 			return Void();
 		});
 
 		if (instruction->isDatabase) {
 			data->stack.push(waitForVoid(mutation));
-		}
-		else {
+		} else {
 			wait(mutation);
 		}
 
@@ -916,23 +910,21 @@ struct ClearRangeStartWithFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
 
 		Reference<InstructionData> instructionCopy = instruction;
 
-		Future<Void> mutation = executeMutation(instruction, [instructionCopy, begin] () -> Future<Void> {
+		Future<Void> mutation = executeMutation(instruction, [instructionCopy, begin]() -> Future<Void> {
 			instructionCopy->tr->clear(KeyRangeRef(begin, strinc(begin)));
 			return Void();
 		});
 
 		if (instruction->isDatabase) {
 			data->stack.push(waitForVoid(mutation));
-		}
-		else {
+		} else {
 			wait(mutation);
 		}
 
@@ -947,8 +939,7 @@ struct GetRangeSelectorFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(10);
-		if (items.size() != 10)
-			return Void();
+		if (items.size() != 10) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
@@ -975,27 +966,30 @@ struct GetRangeSelectorFunc : InstructionFunc {
 		state int reverse = Tuple::unpack(s8).getInt(0);
 
 		Standalone<StringRef> s9 = wait(items[8].value);
-		state FDBStreamingMode mode = (FDBStreamingMode) Tuple::unpack(s9).getInt(0);
+		state FDBStreamingMode mode = (FDBStreamingMode)Tuple::unpack(s9).getInt(0);
 
 		Standalone<StringRef> s10 = wait(items[9].value);
 		state Optional<Standalone<StringRef>> prefix;
 		Tuple t10 = Tuple::unpack(s10);
-		if(t10.getType(0) != Tuple::ElementType::NULL_TYPE) {
+		if (t10.getType(0) != Tuple::ElementType::NULL_TYPE) {
 			prefix = t10.getString(0);
 		}
 
-		//printf("================GetRangeSelectorFunc: %s, %d, %ld, %s, %d, %ld, %d, %d, %d, %d, %s\n", printable(begin).c_str(), begin_or_equal, begin_offset,
-		//	printable(end).c_str(), end_or_equal, end_offset,
+		// printf("================GetRangeSelectorFunc: %s, %d, %ld, %s, %d, %ld, %d, %d, %d, %d, %s\n",
+		// printable(begin).c_str(), begin_or_equal, begin_offset, 	printable(end).c_str(), end_or_equal, end_offset,
 		//	limit, reverse, mode, instruction->isSnapshot, printable(prefix).c_str());
-		Future<Standalone<RangeResultRef>> f = getRange(instruction->tr, KeySelectorRef(begin, begin_or_equal, begin_offset), KeySelectorRef(end, end_or_equal, end_offset), limit, instruction->isSnapshot, reverse, mode);
+		Future<Standalone<RangeResultRef>> f =
+		    getRange(instruction->tr, KeySelectorRef(begin, begin_or_equal, begin_offset),
+		             KeySelectorRef(end, end_or_equal, end_offset), limit, instruction->isSnapshot, reverse, mode);
 		Standalone<RangeResultRef> results = wait(holdWhile(instruction->tr, f));
 		Tuple t;
-		//printf("=====Results Count:%d\n", results.size());
-		for (auto & s : results) {
-			if(!prefix.present() || s.key.startsWith(prefix.get())) {
+		// printf("=====Results Count:%d\n", results.size());
+		for (auto& s : results) {
+			if (!prefix.present() || s.key.startsWith(prefix.get())) {
 				t.append(s.key);
 				t.append(s.value);
-				//printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+				// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(),
+				// printable(StringRef(s.value)).c_str());
 			}
 		}
 
@@ -1013,55 +1007,43 @@ struct TuplePackFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state int64_t count = Tuple::unpack(s1).getInt(0);
 
 		state std::vector<StackItem> items1 = data->stack.pop(count);
-		if (items1.size() != count)
-			return Void();
+		if (items1.size() != count) return Void();
 
 		state Tuple tuple;
 		state int i = 0;
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if (g_random->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
-				if(type == Tuple::NULL_TYPE) {
+				if (type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
-				}
-				else if(type == Tuple::INT) {
+				} else if (type == Tuple::INT) {
 					tuple << itemTuple.getInt(0);
-				}
-				else if(type == Tuple::BYTES) {
+				} else if (type == Tuple::BYTES) {
 					tuple.append(itemTuple.getString(0), false);
-				}
-				else if(type == Tuple::UTF8) {
+				} else if (type == Tuple::UTF8) {
 					tuple.append(itemTuple.getString(0), true);
-				}
-				else if(type == Tuple::FLOAT) {
+				} else if (type == Tuple::FLOAT) {
 					tuple << itemTuple.getFloat(0);
-				}
-				else if(type == Tuple::DOUBLE) {
+				} else if (type == Tuple::DOUBLE) {
 					tuple << itemTuple.getDouble(0);
-				}
-				else if(type == Tuple::BOOL) {
+				} else if (type == Tuple::BOOL) {
 					tuple << itemTuple.getBool(0);
-				}
-				else if(type == Tuple::UUID) {
+				} else if (type == Tuple::UUID) {
 					tuple << itemTuple.getUuid(0);
-				}
-				else if(type == Tuple::NESTED) {
+				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
-				}
-				else {
+				} else {
 					ASSERT(false);
 				}
-			}
-			else {
+			} else {
 				tuple << itemTuple;
 			}
 		}
@@ -1079,15 +1061,14 @@ struct TupleUnpackFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		Tuple t = Tuple::unpack(Tuple::unpack(s1).getString(0));
 
 		for (int i = 0; i < t.size(); ++i) {
 			Standalone<StringRef> str = t.subTuple(i, i + 1).pack();
-			//printf("=====value:%s\n", printable(str).c_str());
+			// printf("=====value:%s\n", printable(str).c_str());
 			data->stack.pushTuple(str);
 		}
 		return Void();
@@ -1102,55 +1083,43 @@ struct TupleRangeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state int64_t count = Tuple::unpack(s1).getInt(0);
 
 		state std::vector<StackItem> items1 = data->stack.pop(count);
-		if (items1.size() != count)
-			return Void();
+		if (items1.size() != count) return Void();
 
 		state Tuple tuple;
 		state size_t i = 0;
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
-			if(g_random->coinflip()) {
+			if (g_random->coinflip()) {
 				Tuple::ElementType type = itemTuple.getType(0);
-				if(type == Tuple::NULL_TYPE) {
+				if (type == Tuple::NULL_TYPE) {
 					tuple.appendNull();
-				}
-				else if(type == Tuple::INT) {
+				} else if (type == Tuple::INT) {
 					tuple << itemTuple.getInt(0);
-				}
-				else if(type == Tuple::BYTES) {
+				} else if (type == Tuple::BYTES) {
 					tuple.append(itemTuple.getString(0), false);
-				}
-				else if(type == Tuple::UTF8) {
+				} else if (type == Tuple::UTF8) {
 					tuple.append(itemTuple.getString(0), true);
-				}
-				else if(type == Tuple::FLOAT) {
+				} else if (type == Tuple::FLOAT) {
 					tuple << itemTuple.getFloat(0);
-				}
-				else if(type == Tuple::DOUBLE) {
+				} else if (type == Tuple::DOUBLE) {
 					tuple << itemTuple.getDouble(0);
-				}
-				else if(type == Tuple::BOOL) {
+				} else if (type == Tuple::BOOL) {
 					tuple << itemTuple.getBool(0);
-				}
-				else if(type == Tuple::UUID) {
+				} else if (type == Tuple::UUID) {
 					tuple << itemTuple.getUuid(0);
-				}
-				else if(type == Tuple::NESTED) {
+				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
-				}
-				else {
+				} else {
 					ASSERT(false);
 				}
-			}
-			else {
+			} else {
 				tuple << itemTuple;
 			}
 		}
@@ -1171,25 +1140,23 @@ struct TupleSortFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state int64_t count = Tuple::unpack(s1).getInt(0);
 
 		state std::vector<StackItem> items1 = data->stack.pop(count);
-		if (items1.size() != count)
-			return Void();
+		if (items1.size() != count) return Void();
 
 		state std::vector<Tuple> tuples;
 		state size_t i = 0;
-		for(; i < items1.size(); i++) {
+		for (; i < items1.size(); i++) {
 			Standalone<StringRef> value = wait(items1[i].value);
 			tuples.push_back(Tuple::unpack(value));
 		}
 
 		std::sort(tuples.begin(), tuples.end());
-		for(Tuple const& t : tuples) {
+		for (Tuple const& t : tuples) {
 			data->stack.push(t.pack());
 		}
 
@@ -1205,8 +1172,7 @@ struct EncodeFloatFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		Standalone<StringRef> fBytes = Tuple::unpack(s1).getString(0);
@@ -1232,8 +1198,7 @@ struct EncodeDoubleFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		Standalone<StringRef> dBytes = Tuple::unpack(s1).getString(0);
@@ -1259,8 +1224,7 @@ struct DecodeFloatFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		float fVal = Tuple::unpack(s1).getFloat(0);
@@ -1283,8 +1247,7 @@ struct DecodeDoubleFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		double dVal = Tuple::unpack(s1).getDouble(0);
@@ -1307,8 +1270,7 @@ struct StartThreadFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
@@ -1329,8 +1291,7 @@ struct WaitEmptyFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
@@ -1340,12 +1301,11 @@ struct WaitEmptyFunc : InstructionFunc {
 		loop {
 			try {
 				FDBStandalone<RangeResultRef> results = wait(tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1));
-				if(results.size() > 0) {
+				if (results.size() > 0) {
 					throw not_committed();
 				}
 				break;
-			}
-			catch(Error &e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
@@ -1376,8 +1336,7 @@ struct ReadConflictKeyFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> key = Tuple::unpack(s1).getString(0);
@@ -1397,8 +1356,7 @@ struct WriteConflictKeyFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
-		if (items.size() != 1)
-			return Void();
+		if (items.size() != 1) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> key = Tuple::unpack(s1).getString(0);
@@ -1418,8 +1376,7 @@ struct ReadConflictRangeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
-		if (items.size() != 2)
-			return Void();
+		if (items.size() != 2) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
@@ -1441,8 +1398,7 @@ struct WriteConflictRangeFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
-		if (items.size() != 2)
-			return Void();
+		if (items.size() != 2) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> begin = Tuple::unpack(s1).getString(0);
@@ -1465,8 +1421,7 @@ struct AtomicOPFunc : InstructionFunc {
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(3);
-		if (items.size() != 3)
-			return Void();
+		if (items.size() != 3) return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
 		state Standalone<StringRef> op = Tuple::unpack(s1).getString(0);
@@ -1483,16 +1438,17 @@ struct AtomicOPFunc : InstructionFunc {
 		Standalone<StringRef> keyCopy = key;
 		Standalone<StringRef> valueCopy = value;
 
-		// printf("=========ATOMIC_OP:%s:%s:%s\n", printable(op).c_str(), printable(key).c_str(), printable(value).c_str());
-		Future<Void> mutation = executeMutation(instruction, [instructionCopy, keyCopy, valueCopy, atomicOp] () -> Future<Void> {
-			instructionCopy->tr->atomicOp(keyCopy, valueCopy, atomicOp);
-			return Void();
-		});
+		// printf("=========ATOMIC_OP:%s:%s:%s\n", printable(op).c_str(), printable(key).c_str(),
+		// printable(value).c_str());
+		Future<Void> mutation =
+		    executeMutation(instruction, [instructionCopy, keyCopy, valueCopy, atomicOp]() -> Future<Void> {
+			    instructionCopy->tr->atomicOp(keyCopy, valueCopy, atomicOp);
+			    return Void();
+		    });
 
 		if (instruction->isDatabase) {
 			data->stack.push(waitForVoid(mutation));
-		}
-		else {
+		} else {
 			wait(mutation);
 		}
 
@@ -1511,20 +1467,18 @@ struct UnitTestsFunc : InstructionFunc {
 		ASSERT(!data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(10)));
 
 		ASSERT(API::isAPIVersionSelected());
-		state API *fdb = API::getInstance();
+		state API* fdb = API::getInstance();
 		ASSERT(fdb->getAPIVersion() <= FDB_API_VERSION);
 		try {
 			API::selectAPIVersion(fdb->getAPIVersion() + 1);
 			ASSERT(false);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			ASSERT(e.code() == error_code_api_version_already_set);
 		}
 		try {
 			API::selectAPIVersion(fdb->getAPIVersion() - 1);
 			ASSERT(false);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			ASSERT(e.code() == error_code_api_version_already_set);
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
@@ -1538,22 +1492,25 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
-		const uint64_t timeout = 60*1000;
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
+		const uint64_t timeout = 60 * 1000;
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT,
+		              Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
 		const uint64_t retryLimit = 50;
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_RETRY_LIMIT,
+		              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
 		const uint64_t maxRetryDelay = 100;
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_MAX_RETRY_DELAY, Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_MAX_RETRY_DELAY,
+		              Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_USED_DURING_COMMIT_PROTECTION_DISABLE);
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE, Optional<StringRef>(LiteralStringRef("my_transaction")));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE,
+		              Optional<StringRef>(LiteralStringRef("my_transaction")));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
 
-		Optional<FDBStandalone<ValueRef> > _ = wait(tr->get(LiteralStringRef("\xff")));
+		Optional<FDBStandalone<ValueRef>> _ = wait(tr->get(LiteralStringRef("\xff")));
 		tr->cancel();
 
 		return Void();
-
 	}
 };
 const char* UnitTestsFunc::name = "UNIT_TESTS";
@@ -1570,8 +1527,7 @@ ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, String
 			Standalone<RangeResultRef> results = wait(getRange(tr, testSpec.range()));
 			data->instructions = results;
 			return Void();
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
@@ -1589,8 +1545,8 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		state bool isDirectory = op.startsWith(LiteralStringRef("DIRECTORY_"));
 
 		try {
-			if(LOG_INSTRUCTIONS) {
-				if(op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
+			if (LOG_INSTRUCTIONS) {
+				if (op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
 					printf("%zu. %s\n", idx, tupleToString(opTuple).c_str());
 					fflush(stdout);
 				}
@@ -1602,18 +1558,19 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				op = op.substr(0, op.size() - 9);
 
 			// printf("[==========]%ld/%ld:%s:%s: isDatabase:%d, isSnapshot:%d, stack count:%ld\n",
-				// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(), printable(StringRef(data->instructions[idx].value)).c_str(),
-				// isDatabase, isSnapshot, data->stack.data.size());
+			// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(),
+			// printable(StringRef(data->instructions[idx].value)).c_str(), isDatabase, isSnapshot,
+			// data->stack.data.size());
 
-			//wait(printFlowTesterStack(&(data->stack)));
-			//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+			// wait(printFlowTesterStack(&(data->stack)));
+			// wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 
-			state Reference<InstructionData> instruction = Reference<InstructionData>(new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
+			state Reference<InstructionData> instruction = Reference<InstructionData>(
+			    new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
 			if (isDatabase) {
 				state Reference<Transaction> tr(new Transaction(data->db));
 				instruction->tr = tr;
-			}
-			else {
+			} else {
 				instruction->tr = trMap[data->trName];
 			}
 
@@ -1622,20 +1579,18 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 
 			data->stack.index = idx;
 			wait(InstructionFunc::call(op.toString(), data, instruction));
-		}
-		catch (Error& e) {
-			if(LOG_ERRORS) {
+		} catch (Error& e) {
+			if (LOG_ERRORS) {
 				printf("Error: %s (%d)\n", e.name(), e.code());
 				fflush(stdout);
 			}
 
-			if(isDirectory) {
-				if(opsThatCreateDirectories.count(op.toString())) {
+			if (isDirectory) {
+				if (opsThatCreateDirectories.count(op.toString())) {
 					data->directoryData.directoryList.push_back(DirectoryOrSubspace());
 				}
 				data->stack.pushTuple(LiteralStringRef("DIRECTORY_ERROR"));
-			}
-			else {
+			} else {
 				data->stack.pushError(e.code());
 			}
 		}
@@ -1651,8 +1606,7 @@ ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Data
 		wait(getInstructions(data, prefix));
 		wait(doInstructions(data));
 		wait(waitForAll(data->subThreads));
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		TraceEvent(SevError, "FlowTesterDataRunError").error(e);
 	}
 
@@ -1699,15 +1653,14 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		try {
 			API::getInstance();
 			ASSERT(false);
-		}
-		catch(Error& e) {
+		} catch (Error& e) {
 			ASSERT(e.code() == error_code_api_version_unset);
 		}
 
-		API *fdb = API::selectAPIVersion(apiVersion);
+		API* fdb = API::selectAPIVersion(apiVersion);
 		ASSERT(API::isAPIVersionSelected());
 		ASSERT(fdb->getAPIVersion() == apiVersion);
-		//fdb->setNetworkOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
+		// fdb->setNetworkOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
 
 		// We have to start the fdb_flow network and thread separately!
 		fdb->setupNetwork();
@@ -1723,23 +1676,21 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		// Stopping the network returns from g_network->run() and allows
 		// the program to terminate
 		g_network->stop();
-	}
-	catch(Error &e) {
+	} catch (Error& e) {
 		TraceEvent("ErrorRunningTest").error(e);
-		if(LOG_ERRORS) {
+		if (LOG_ERRORS) {
 			printf("Flow tester encountered error: %s\n", e.name());
 			fflush(stdout);
 		}
 		flushAndExit(1);
 	}
-
 }
 
 ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(600);
+		API* fdb = FDB::API::selectAPIVersion(600);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1750,7 +1701,8 @@ ACTOR void _test_versionstamp() {
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
-		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"),
+		             FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
 		wait(tr->commit()); // should use retry loop
 
@@ -1765,8 +1717,7 @@ ACTOR void _test_versionstamp() {
 		fprintf(stderr, "%s\n", printable(trVersion).c_str());
 
 		g_network->stop();
-	}
-	catch (Error &e) {
+	} catch (Error& e) {
 		TraceEvent("ErrorRunningTest").error(e);
 		if (LOG_ERRORS) {
 			printf("Flow tester encountered error: %s\n", e.name());
@@ -1776,7 +1727,7 @@ ACTOR void _test_versionstamp() {
 	}
 }
 
-int main( int argc, char** argv ) {
+int main(int argc, char** argv) {
 	try {
 		platformInit();
 		registerCrashHandler();
@@ -1808,13 +1759,11 @@ int main( int argc, char** argv ) {
 		g_network->run();
 
 		flushAndExit(FDB_EXIT_SUCCESS);
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.name());
 		TraceEvent(SevError, "MainError").error(e);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
-	}
-	catch (std::exception& e) {
+	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);

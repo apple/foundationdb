@@ -27,7 +27,6 @@
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
 
-
 struct QueueData {
 	Smoother smoothOutstanding;
 	double latency;
@@ -35,29 +34,30 @@ struct QueueData {
 	double failedUntil;
 	double futureVersionBackoff;
 	double increaseBackoffTime;
-	QueueData() : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0), futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
+	QueueData()
+	  : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0),
+	    futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
 };
 
 typedef double TimeEstimate;
 
 class QueueModel {
 public:
-	void endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion );
-	QueueData& getMeasurement( uint64_t id );
-	double addRequest( uint64_t id );
+	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
+	QueueData& getMeasurement(uint64_t id);
+	double addRequest(uint64_t id);
 	double secondMultiplier;
 	double secondBudget;
-	PromiseStream< Future<Void> > addActor;
+	PromiseStream<Future<Void>> addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;
 
 	QueueModel() : secondMultiplier(1.0), secondBudget(0), laggingRequestCount(0) {
-		laggingRequests = actorCollection( addActor.getFuture(), &laggingRequestCount );
+		laggingRequests = actorCollection(addActor.getFuture(), &laggingRequestCount);
 	}
 
-	~QueueModel() {
-		laggingRequests.cancel();
-	}
+	~QueueModel() { laggingRequests.cancel(); }
+
 private:
 	std::map<uint64_t, QueueData> data;
 };
@@ -65,20 +65,20 @@ private:
 /* old queue model
 class QueueModel {
 public:
-	QueueModel() : new_index(0) {
-		total_time[0] = 0;
-		total_time[1] = 0;
-	}
-	void addMeasurement( uint64_t id, QueueDetails qd );
-	TimeEstimate getTimeEstimate( uint64_t id );
-	TimeEstimate getAverageTimeEstimate();
-	QueueDetails getMeasurement( uint64_t id );
-	void expire();
+    QueueModel() : new_index(0) {
+        total_time[0] = 0;
+        total_time[1] = 0;
+    }
+    void addMeasurement( uint64_t id, QueueDetails qd );
+    TimeEstimate getTimeEstimate( uint64_t id );
+    TimeEstimate getAverageTimeEstimate();
+    QueueDetails getMeasurement( uint64_t id );
+    void expire();
 
 private:
-	std::map<uint64_t, QueueDetails> data[2]; 
-	double total_time[2]; 
-	int new_index; // data[new_index] is the new data
+    std::map<uint64_t, QueueDetails> data[2];
+    double total_time[2];
+    int new_index; // data[new_index] is the new data
 };
 */
 

@@ -29,10 +29,16 @@ struct UnblockFutureTaskFunc : TaskFuncBase {
 	static StringRef name;
 
 	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) {
+		return _finish(tr, tb, fb, task);
+	};
 
-	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                  Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		state Reference<TaskFuture> future = futureBucket->unpack(task->params[Task::reservedTaskParamKeyFuture]);
 
 		futureBucket->setOptions(tr);
@@ -46,7 +52,6 @@ struct UnblockFutureTaskFunc : TaskFuncBase {
 
 		return Void();
 	}
-
 };
 StringRef UnblockFutureTaskFunc::name = LiteralStringRef("UnblockFuture");
 REGISTER_TASKFUNC(UnblockFutureTaskFunc);
@@ -55,8 +60,11 @@ struct AddTaskFunc : TaskFuncBase {
 	static StringRef name;
 
 	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { 
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) {
 		task->params[Task::reservedTaskParamKeyType] = task->params[Task::reservedTaskParamKeyAddTask];
 		tb->addTask(tr, task);
 		return Void();
@@ -65,18 +73,21 @@ struct AddTaskFunc : TaskFuncBase {
 StringRef AddTaskFunc::name = LiteralStringRef("AddTask");
 REGISTER_TASKFUNC(AddTaskFunc);
 
-
 struct IdleTaskFunc : TaskFuncBase {
 	static StringRef name;
 	static const uint32_t version = 1;
 
 	StringRef getName() const { return name; };
-	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return tb->finish(tr, task); };
+	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) {
+		return Void();
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb,
+	                    Reference<Task> task) {
+		return tb->finish(tr, task);
+	};
 };
 StringRef IdleTaskFunc::name = LiteralStringRef("idle");
 REGISTER_TASKFUNC(IdleTaskFunc);
-
 
 Key Task::reservedTaskParamKeyType = LiteralStringRef("type");
 Key Task::reservedTaskParamKeyAddTask = LiteralStringRef("_add_task");
@@ -92,14 +103,11 @@ Key Task::reservedTaskParamValidValue = LiteralStringRef("_validvalue");
 // be set for non-default constructor arguments.  To change this behavior look at all
 // Task() default constructions to see if they require params to be empty and call clear.
 Task::Task(Value type, uint32_t version, Value done, unsigned int priority) : extendMutex(1) {
-	if (type.size())
-		params[Task::reservedTaskParamKeyType] = type;
+	if (type.size()) params[Task::reservedTaskParamKeyType] = type;
 
-	if (version > 0)
-		params[Task::reservedTaskParamKeyVersion] = BinaryWriter::toValue(version, Unversioned());
+	if (version > 0) params[Task::reservedTaskParamKeyVersion] = BinaryWriter::toValue(version, Unversioned());
 
-	if (done.size())
-		params[Task::reservedTaskParamKeyDone] = done;
+	if (done.size()) params[Task::reservedTaskParamKeyDone] = done;
 
 	priority = std::min<int64_t>(priority, CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY);
 	if (priority != 0)
@@ -111,8 +119,7 @@ uint32_t Task::getVersion() const {
 	auto itor = params.find(Task::reservedTaskParamKeyVersion);
 	if (itor != params.end()) {
 		version = BinaryReader::fromStringRef<uint32_t>(itor->value, Unversioned());
-	}
-	else {
+	} else {
 		TraceEvent(SevWarn, "InvalidTaskVersion").detail("TaskHasNoVersion", version);
 	}
 
@@ -122,14 +129,16 @@ uint32_t Task::getVersion() const {
 unsigned int Task::getPriority() const {
 	unsigned int priority = 0;
 	auto i = params.find(Task::reservedTaskParamKeyPriority);
-	if(i != params.end())
-		priority = std::min<int64_t>(BinaryReader::fromStringRef<int64_t>(i->value, Unversioned()), CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY);
+	if (i != params.end())
+		priority = std::min<int64_t>(BinaryReader::fromStringRef<int64_t>(i->value, Unversioned()),
+		                             CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY);
 	return priority;
 }
 
 class TaskBucketImpl {
 public:
-	ACTOR static Future<Optional<Key>> getTaskKey(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, int priority = 0) {
+	ACTOR static Future<Optional<Key>> getTaskKey(Reference<ReadYourWritesTransaction> tr,
+	                                              Reference<TaskBucket> taskBucket, int priority = 0) {
 		Standalone<StringRef> uid = StringRef(g_random->randomUniqueID().toString());
 
 		// Get keyspace for the specified priority level
@@ -137,24 +146,22 @@ public:
 
 		// Get a task key that is <= a random UID task key, if successful then return it
 		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		if (space.contains(k)) return Optional<Key>(k);
 
 		// Get a task key that is <= the maximum possible UID, if successful return it.
 		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		if (space.contains(k)) return Optional<Key>(k);
 
 		return Optional<Key>();
 	}
-	
-	ACTOR static Future<Reference<Task>> getOne(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
-		if (taskBucket->priority_batch)
-			tr->setOption( FDBTransactionOptions::PRIORITY_BATCH );
+
+	ACTOR static Future<Reference<Task>> getOne(Reference<ReadYourWritesTransaction> tr,
+	                                            Reference<TaskBucket> taskBucket) {
+		if (taskBucket->priority_batch) tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
 
 		taskBucket->setOptions(tr);
 
-		// give it some chances for the timed out tasks to get into the task loop in the case of 
+		// give it some chances for the timed out tasks to get into the task loop in the case of
 		// many other new tasks get added so that the timed out tasks never get chances to re-run
 		if (g_random->random01() < CLIENT_KNOBS->TASKBUCKET_CHECK_TIMEOUT_CHANCE) {
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
@@ -165,32 +172,33 @@ public:
 
 		// Start looking for a task at each priority, highest first
 		state int pri;
-		for(pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri)
+		for (pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri)
 			taskKeyFutures[pri] = getTaskKey(tr, taskBucket, pri);
-		
+
 		// Task key and subspace it is located in.
 		state Optional<Key> taskKey;
 		state Subspace availableSpace;
 
-		// In priority order from highest to lowest, wait for fetch to finish and if it found a task then cancel the rest.
-		for(pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri) {
+		// In priority order from highest to lowest, wait for fetch to finish and if it found a task then cancel the
+		// rest.
+		for (pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri) {
 			// If we already have a task key then cancel this fetch
-			if(taskKey.present())
+			if (taskKey.present())
 				taskKeyFutures[pri].cancel();
 			else {
 				Optional<Key> key = wait(taskKeyFutures[pri]);
-				if(key.present()) {
+				if (key.present()) {
 					taskKey = key;
 					availableSpace = taskBucket->getAvailableSpace(pri);
 				}
 			}
 		}
 
-		// If we don't have a task key, requeue timed out tasks and try again by calling self. 
-		if(!taskKey.present()) {
+		// If we don't have a task key, requeue timed out tasks and try again by calling self.
+		if (!taskKey.present()) {
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
 			// If there were timeouts, try to get a task since there should now be one in one of the available spaces.
-			if(anyTimeouts) {
+			if (anyTimeouts) {
 				TEST(true); // Try to get one task from timeouts subspace
 				Reference<Task> task = wait(getOne(tr, taskBucket));
 				return task;
@@ -206,13 +214,17 @@ public:
 		state Reference<Task> task(new Task());
 		task->key = taskUID;
 
-		state Standalone<RangeResultRef> values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
+		state Standalone<RangeResultRef> values =
+		    wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
 		Version version = wait(tr->getReadVersion());
-		task->timeoutVersion = version + (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET + CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
+		task->timeoutVersion =
+		    version +
+		    (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET +
+		                                      CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
 
 		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(taskUID);
 
-		for (auto & s : values) {
+		for (auto& s : values) {
 			Key param = taskAvailableSpace.unpack(s.key).getString(0);
 			task->params[param] = s.value;
 			tr->set(timeoutSpace.pack(param), s.value);
@@ -226,20 +238,21 @@ public:
 	}
 
 	// Verify that the user configured task verification key still has the user specificied value
-	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr,
+	                                     Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
 			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("ReservedTaskParamValidKey", "missing");
+			    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			    .detail("ReservedTaskParamValidKey", "missing");
 			return false;
 		}
 
 		if (task->params.find(Task::reservedTaskParamValidValue) == task->params.end()) {
 			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("ReservedTaskParamValidValue", "missing");
+			    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			    .detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+			    .detail("ReservedTaskParamValidValue", "missing");
 			return false;
 		}
 
@@ -249,19 +262,19 @@ public:
 
 		if (!keyValue.present()) {
 			TraceEvent("TB_TaskVerifyInvalidTask")
-				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("KeyValue", "missing");
+			    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			    .detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+			    .detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+			    .detail("KeyValue", "missing");
 			return false;
 		}
 
 		if (keyValue.get().compare(StringRef(task->params[Task::reservedTaskParamValidValue]))) {
 			TraceEvent("TB_TaskVerifyAbortedTask")
-				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("KeyValue", printable(keyValue.get()));
+			    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			    .detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+			    .detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+			    .detail("KeyValue", printable(keyValue.get()));
 			return false;
 		}
 
@@ -275,54 +288,55 @@ public:
 			try {
 				bool verified = wait(taskVerify(tb, tr, task));
 				return verified;
-			}
-			catch (Error &e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> finishTaskRun(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task, Reference<TaskFuncBase> taskFunc, bool verifyTask) {
+	ACTOR static Future<Void> finishTaskRun(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                        Reference<FutureBucket> futureBucket, Reference<Task> task,
+	                                        Reference<TaskFuncBase> taskFunc, bool verifyTask) {
 		bool isFinished = wait(taskBucket->isFinished(tr, task));
 		if (isFinished) {
 			return Void();
 		}
 
 		state bool validTask = true;
-		if( verifyTask ) {
+		if (verifyTask) {
 			bool _validTask = wait(taskVerify(taskBucket, tr, task));
 			validTask = _validTask;
 		}
 		if (!validTask) {
 			wait(taskBucket->finish(tr, task));
-		}
-		else {
+		} else {
 			wait(taskFunc->finish(tr, taskBucket, futureBucket, task));
 		}
 
 		return Void();
 	}
 
-	ACTOR static Future<bool> doOne(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket) {
+	ACTOR static Future<bool> doOne(Database cx, Reference<TaskBucket> taskBucket,
+	                                Reference<FutureBucket> futureBucket) {
 		state Reference<Task> task = wait(taskBucket->getOne(cx));
 		bool result = wait(taskBucket->doTask(cx, futureBucket, task));
 		return result;
 	}
-	
-	ACTOR static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+
+	ACTOR static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket,
+	                                                  Reference<Task> task) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Version versionNow = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			taskBucket->setOptions(tr);
-			return map(tr->getReadVersion(), [=](Version v) {
-				return v;
-			});
+			return map(tr->getReadVersion(), [=](Version v) { return v; });
 		}));
 
 		loop {
 			state FlowLock::Releaser releaser;
 
 			// Wait until we are half way to the timeout version of this task
-			wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) *
+			           (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 
 			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
 			wait(task->extendMutex.take());
@@ -339,16 +353,16 @@ public:
 					task->timeoutVersion = newTimeout;
 					versionNow = tr->getCommittedVersion();
 					break;
-				} catch(Error &e) {
+				} catch (Error& e) {
 					wait(tr->onError(e));
 				}
 			}
 		}
 	}
 
-	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-		if (!task || !TaskFuncBase::isValidTask(task))
-			return false;
+	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket,
+	                                 Reference<FutureBucket> futureBucket, Reference<Task> task) {
+		if (!task || !TaskFuncBase::isValidTask(task)) return false;
 
 		state Reference<TaskFuncBase> taskFunc;
 
@@ -374,34 +388,34 @@ public:
 								return true;
 							}
 							break;
-						}
-						catch (Error &e) {
+						} catch (Error& e) {
 							wait(tr->onError(e));
 						}
 					}
 				}
 
-				wait(taskFunc->execute(cx, taskBucket, futureBucket, task) || extendTimeoutRepeatedly(cx, taskBucket, task));
+				wait(taskFunc->execute(cx, taskBucket, futureBucket, task) ||
+				     extendTimeoutRepeatedly(cx, taskBucket, task));
 
 				if (BUGGIFY) wait(delay(10.0));
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);
 				}));
 			}
-		} catch(Error &e) {
+		} catch (Error& e) {
 			TraceEvent(SevWarn, "TB_ExecuteFailure")
-				.error(e)
-				.detail("TaskUID", task->key.printable())
-				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-				.detail("Priority", task->getPriority());
+			    .error(e)
+			    .detail("TaskUID", task->key.printable())
+			    .detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+			    .detail("Priority", task->getPriority());
 			try {
 				wait(taskFunc->handleError(cx, task, e));
-			} catch(Error &e) {
+			} catch (Error& e) {
 				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
-					.error(e) // output handleError() error instead of original task error
-					.detail("TaskUID", task->key.printable())
-					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-					.detail("Priority", task->getPriority());
+				    .error(e) // output handleError() error instead of original task error
+				    .detail("TaskUID", task->key.printable())
+				    .detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+				    .detail("Priority", task->getPriority());
 			}
 		}
 
@@ -409,62 +423,62 @@ public:
 		return true;
 	}
 
-	ACTOR static Future<Void> dispatch(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+	ACTOR static Future<Void> dispatch(Database cx, Reference<TaskBucket> taskBucket,
+	                                   Reference<FutureBucket> futureBucket, double* pollDelay,
+	                                   int maxConcurrentTasks) {
 		state std::vector<Future<bool>> tasks(maxConcurrentTasks);
-		for(auto &f : tasks)
-			f = Never();
+		for (auto& f : tasks) f = Never();
 
 		// Since the futures have to be kept in a vector to be compatible with waitForAny(), we'll keep a queue
 		// of available slots in it.  Initially, they're all available.
 		state std::vector<int> availableSlots;
-		for(int i = 0; i < tasks.size(); ++i)
-			availableSlots.push_back(i);
+		for (int i = 0; i < tasks.size(); ++i) availableSlots.push_back(i);
 
 		state std::vector<Future<Reference<Task>>> getTasks;
 		state unsigned int getBatchSize = 1;
 
 		loop {
 			// Start running tasks while slots are available and we keep finding work to do
-			while(!availableSlots.empty()) {
+			while (!availableSlots.empty()) {
 				getTasks.clear();
-				for(int i = 0, imax = std::min<unsigned int>(getBatchSize, availableSlots.size()); i < imax; ++i)
+				for (int i = 0, imax = std::min<unsigned int>(getBatchSize, availableSlots.size()); i < imax; ++i)
 					getTasks.push_back(taskBucket->getOne(cx));
 				wait(waitForAllReady(getTasks));
 
 				bool done = false;
-				for(int i = 0; i < getTasks.size(); ++i) {
-					if(getTasks[i].isError()) {
+				for (int i = 0; i < getTasks.size(); ++i) {
+					if (getTasks[i].isError()) {
 						done = true;
 						continue;
 					}
 					Reference<Task> task = getTasks[i].get();
-					if(task) {
+					if (task) {
 						// Start the task
 						int slot = availableSlots.back();
 						availableSlots.pop_back();
 						tasks[slot] = taskBucket->doTask(cx, futureBucket, task);
-					}
-					else
+					} else
 						done = true;
 				}
 
-				if(done) {
+				if (done) {
 					getBatchSize = 1;
 					break;
-				}
-				else
+				} else
 					getBatchSize = std::min<unsigned int>(getBatchSize * 2, maxConcurrentTasks);
 			}
-			
-			// Wait for a task to be done.  Also, if we have any slots available then stop waiting after pollDelay at the latest.
+
+			// Wait for a task to be done.  Also, if we have any slots available then stop waiting after pollDelay at
+			// the latest.
 			Future<Void> w = ready(waitForAny(tasks));
-			if(!availableSlots.empty())
-				w = w || delay(*pollDelay * (0.9 + g_random->random01() / 5));   // Jittered by 20 %, so +/- 10%
+			if (!availableSlots.empty())
+				w = w || delay(*pollDelay * (0.9 + g_random->random01() / 5)); // Jittered by 20 %, so +/- 10%
 			wait(w);
 
-			// Check all of the task slots, any that are finished should be replaced with Never() and their slots added back to availableSlots
-			for(int i = 0; i < tasks.size(); ++i) {
-				if(tasks[i].isReady()) {
+			// Check all of the task slots, any that are finished should be replaced with Never() and their slots added
+			// back to availableSlots
+			for (int i = 0; i < tasks.size(); ++i) {
+				if (tasks[i].isReady()) {
 					availableSlots.push_back(i);
 					tasks[i] = Never();
 				}
@@ -472,7 +486,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> watchPaused(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> paused) {
+	ACTOR static Future<Void> watchPaused(Database cx, Reference<TaskBucket> taskBucket,
+	                                      Reference<AsyncVar<bool>> paused) {
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
@@ -482,36 +497,37 @@ public:
 				state Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
 				wait(tr->commit());
 				wait(watchPausedFuture);
-			}
-			catch (Error &e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
-		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket,
+	                              double* pollDelay, int maxConcurrentTasks) {
+		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>(new AsyncVar<bool>(true));
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 
 		loop {
-			while(paused->get()) {
+			while (paused->get()) {
 				wait(paused->onChange() || watchPausedFuture);
 			}
 
-			wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() || watchPausedFuture);
+			wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() ||
+			     watchPausedFuture);
 		}
 	}
 
-	static Future<Standalone<StringRef>> addIdle(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
+	static Future<Standalone<StringRef>> addIdle(Reference<ReadYourWritesTransaction> tr,
+	                                             Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
 		Reference<Task> newTask(new Task(IdleTaskFunc::name, IdleTaskFunc::version));
 		return taskBucket->addTask(tr, newTask);
 	}
 
-
 	static Future<Standalone<StringRef>> addIdle(Database cx, Reference<TaskBucket> taskBucket) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){return addIdle(tr, taskBucket);});
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return addIdle(tr, taskBucket); });
 	}
 
 	ACTOR static Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
@@ -519,20 +535,18 @@ public:
 
 		// Check all available priorities for keys
 		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
-		for(unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
+		for (unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then the taskbucket is not empty so return false
 		state int i;
-		for(i = 0; i < resultFutures.size(); ++i) {
+		for (i = 0; i < resultFutures.size(); ++i) {
 			Standalone<RangeResultRef> results = wait(resultFutures[i]);
-			if(results.size() > 0)
-				return false;
+			if (results.size() > 0) return false;
 		}
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(), 1));
-		if (values.size() > 0)
-			return false;
+		if (values.size() > 0) return false;
 
 		return true;
 	}
@@ -542,22 +556,22 @@ public:
 
 		// Check all available priorities for emptiness
 		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
-		for(unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
+		for (unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then return true as the level is 'busy'
 		state int i;
-		for(i = 0; i < resultFutures.size(); ++i) {
+		for (i = 0; i < resultFutures.size(); ++i) {
 			Standalone<RangeResultRef> results = wait(resultFutures[i]);
-			if(results.size() > 0)
-				return true;
+			if (results.size() > 0) return true;
 		}
 
 		return false;
 	}
 
 	// Verify that the task's keys are still in the timeout space at the expected timeout prefix
-	ACTOR static Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+	ACTOR static Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                     Reference<Task> task) {
 		taskBucket->setOptions(tr);
 
 		Tuple t;
@@ -565,13 +579,13 @@ public:
 		t.append(task->key);
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
-		if (values.size() > 0)
-			return false;
+		if (values.size() > 0) return false;
 
 		return true;
 	}
 
-	ACTOR static Future<bool> getActiveKey(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Optional<Value> startingValue) {
+	ACTOR static Future<bool> getActiveKey(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                       Optional<Value> startingValue) {
 		taskBucket->setOptions(tr);
 
 		Optional<Value> new_value = wait(tr->get(taskBucket->active.key()));
@@ -585,7 +599,7 @@ public:
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Optional<Value> startingValue;
 
-		loop{
+		loop {
 			try {
 				taskBucket->setOptions(tr);
 
@@ -599,8 +613,7 @@ public:
 
 				wait(tr->commit());
 				break;
-			}
-			catch (Error &e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
@@ -615,27 +628,27 @@ public:
 					wait(delay(CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_DELAY));
 					bool isActiveKey = wait(getActiveKey(tr, taskBucket, startingValue));
 					if (isActiveKey) {
-						TEST(true);	// checkActive return true
+						TEST(true); // checkActive return true
 						return true;
 					}
 					break;
-				} catch( Error &e ) {
-					wait( tr->onError(e) );
+				} catch (Error& e) {
+					wait(tr->onError(e));
 				}
 			}
 		}
 
-		TEST(true);	// checkActive return false
+		TEST(true); // checkActive return false
 		return false;
 	}
 
-	ACTOR static Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
+	ACTOR static Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr,
+	                                          Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		Optional<Value> val  = wait( tr->get( taskBucket->prefix.pack(LiteralStringRef("task_count")) ) );
-		
-		if(!val.present())
-			return 0;
+		Optional<Value> val = wait(tr->get(taskBucket->prefix.pack(LiteralStringRef("task_count"))));
+
+		if (!val.present()) return 0;
 
 		ASSERT(val.get().size() == sizeof(int64_t));
 
@@ -647,31 +660,33 @@ public:
 
 	// Looks for tasks that have timed out and returns them to be available tasks.
 	// Returns True if any tasks were affected.
-	ACTOR static Future<bool> requeueTimedOutTasks(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
+	ACTOR static Future<bool> requeueTimedOutTasks(Reference<ReadYourWritesTransaction> tr,
+	                                               Reference<TaskBucket> taskBucket) {
 		TEST(true); // Looks for tasks that have timed out and returns them to be available tasks.
 		Version end = wait(tr->getReadVersion());
-		state KeyRange range(KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
+		state KeyRange range(
+		    KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
 
-		Standalone<RangeResultRef> values = wait(tr->getRange(range,CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
+		Standalone<RangeResultRef> values = wait(tr->getRange(range, CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
 
 		// Keys will be tuples of (taskUID, param) -> paramValue
-		// Unfortunately we need to know the priority parameter for a taskUID before we can know which available-tasks subspace
-		// to move its keys to.  The cleanest way to do this is to load a new Task() with parameters and once a new task
-		// id is encountered flush the old one using taskBucket->getAvailableSpace(task->getPriority())
+		// Unfortunately we need to know the priority parameter for a taskUID before we can know which available-tasks
+		// subspace to move its keys to.  The cleanest way to do this is to load a new Task() with parameters and once a
+		// new task id is encountered flush the old one using taskBucket->getAvailableSpace(task->getPriority())
 
 		Task task;
 		Key lastKey;
 
-		for(auto &iter : values) {
+		for (auto& iter : values) {
 			Tuple t = taskBucket->timeouts.unpack(iter.key);
 			Key uid = t.getString(1);
 			Key param = t.getString(2);
 
 			// If a new UID is seen, finish moving task to new available space. Safe if task == Task()
-			if(uid != task.key) {
+			if (uid != task.key) {
 				// Get the space for this specific task within its available keyspace for its priority
 				Subspace space = taskBucket->getAvailableSpace(task.getPriority()).get(task.key);
-				for(auto &p : task.params) {
+				for (auto& p : task.params) {
 					tr->set(space.pack(p.key), p.value);
 				}
 				task.params.clear();
@@ -683,18 +698,17 @@ public:
 		}
 
 		// Move the final task, if complete, to its new available keyspace. Safe if task == Task()
-		if(!values.more) {
+		if (!values.more) {
 			Subspace space = taskBucket->getAvailableSpace(task.getPriority()).get(task.key);
-			for(auto &p : task.params)
-				tr->set(space.pack(p.key), p.value);
+			for (auto& p : task.params) tr->set(space.pack(p.key), p.value);
 
-			if(values.size() > 0) {
+			if (values.size() > 0) {
 				tr->clear(range);
 				return true;
 			}
 			return false;
 		}
-			
+
 		ASSERT(lastKey != Key());
 		tr->clear(KeyRangeRef(range.begin, lastKey));
 		return true;
@@ -704,34 +718,39 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", printable(subspace.key())).detail("Count", values.size()).detail("Msg", printable(msg));
+		TraceEvent("TaskBucket")
+		    .detail("DebugPrintRange", "Print DB Range")
+		    .detail("Key", printable(subspace.key()))
+		    .detail("Count", values.size())
+		    .detail("Msg", printable(msg));
 		/*
 		printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
-			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), printable(s.value).c_str());
-			TraceEvent("TaskBucket").detail("DebugPrintRange", printable(msg))
-				.detail("Key", printable(s.key))
-				.detail("Value", printable(s.value));
+		    printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), printable(s.value).c_str());
+		    TraceEvent("TaskBucket").detail("DebugPrintRange", printable(msg))
+		        .detail("Key", printable(s.key))
+		        .detail("Value", printable(s.value));
 		}*/
 
 		return Void();
 	}
 
-	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
+	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
+	                                           Reference<TaskBucket> taskBucket, Reference<Task> task,
+	                                           bool updateParams, Version newTimeoutVersion) {
 		taskBucket->setOptions(tr);
 
 		// First make sure it's safe to keep running
 		wait(taskBucket->keepRunning(tr, task));
-
 
 		// This is where the task definition currently exists
 		state Subspace oldTimeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(task->key);
 		// Update the task's timeout
 		Version version = wait(tr->getReadVersion());
 
-		if(newTimeoutVersion == invalidVersion)
+		if (newTimeoutVersion == invalidVersion)
 			newTimeoutVersion = version + taskBucket->timeout;
-		else if(newTimeoutVersion <= version)  // Ensure that the time extension is to the future
+		else if (newTimeoutVersion <= version) // Ensure that the time extension is to the future
 			newTimeoutVersion = version + 1;
 
 		// This is where the task definition is being moved to
@@ -741,16 +760,16 @@ public:
 		tr->addWriteConflictRange(newTimeoutSpace.range());
 
 		// If we're updating the task params the clear the old space and write params to the new space
-		if(updateParams) {
-			TEST(true);  // Extended a task while updating parameters
-			for(auto &p : task->params) {
+		if (updateParams) {
+			TEST(true); // Extended a task while updating parameters
+			for (auto& p : task->params) {
 				tr->set(newTimeoutSpace.pack(p.key), p.value);
 			}
 		} else {
-			TEST(true);  // Extended a task without updating parameters
+			TEST(true); // Extended a task without updating parameters
 			// Otherwise, read and transplant the params from the old to new timeout spaces
 			Standalone<RangeResultRef> params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
-			for(auto &kv : params) {
+			for (auto& kv : params) {
 				Tuple paramKey = oldTimeoutSpace.unpack(kv.key);
 				tr->set(newTimeoutSpace.pack(paramKey), kv.value);
 			}
@@ -763,23 +782,14 @@ public:
 };
 
 TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBatch, bool lockAware)
-	: prefix(subspace)
-	, active(prefix.get(LiteralStringRef("ac")))
-	, available(prefix.get(LiteralStringRef("av")))
-	, available_prioritized(prefix.get(LiteralStringRef("avp")))
-	, timeouts(prefix.get(LiteralStringRef("to")))
-	, pauseKey(prefix.pack(LiteralStringRef("pause")))
-	, timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS)
-	, system_access(sysAccess)
-	, priority_batch(priorityBatch)
-	, lock_aware(lockAware)
-{
-}
+  : prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
+    available_prioritized(prefix.get(LiteralStringRef("avp"))), timeouts(prefix.get(LiteralStringRef("to"))),
+    pauseKey(prefix.pack(LiteralStringRef("pause"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
+    system_access(sysAccess), priority_batch(priorityBatch), lock_aware(lockAware) {}
 
-TaskBucket::~TaskBucket() {
-}
+TaskBucket::~TaskBucket() {}
 
-Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr){
+Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr) {
 	setOptions(tr);
 
 	tr->clear(prefix.range());
@@ -787,10 +797,10 @@ Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr){
 	return Void();
 }
 
-Future<Void> TaskBucket::changePause(Reference<ReadYourWritesTransaction> tr, bool pause){
+Future<Void> TaskBucket::changePause(Reference<ReadYourWritesTransaction> tr, bool pause) {
 	setOptions(tr);
 
-	if(pause) {
+	if (pause) {
 		tr->set(pauseKey, StringRef());
 	} else {
 		tr->clear(pauseKey);
@@ -809,17 +819,16 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 	// If scheduledVersion is valid then place the task directly into the timeout
 	// space for its scheduled time, otherwise place it in the available space by priority.
 	Version scheduledVersion = ReservedTaskParams::scheduledVersion().getOrDefault(task, invalidVersion);
-	if(scheduledVersion != invalidVersion) {
+	if (scheduledVersion != invalidVersion) {
 		taskSpace = timeouts.get(scheduledVersion).get(key);
-	}
-	else {
+	} else {
 		taskSpace = getAvailableSpace(task->getPriority()).get(key);
 	}
 
-	for (auto & param : task->params)
-		tr->set(taskSpace.pack(param.key), param.value);
+	for (auto& param : task->params) tr->set(taskSpace.pack(param.key), param.value);
 
-	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00"), MutationRef::AddValue);
+	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00"),
+	             MutationRef::AddValue);
 
 	return key;
 }
@@ -829,15 +838,16 @@ void TaskBucket::setValidationCondition(Reference<Task> task, KeyRef vKey, KeyRe
 	task->params[Task::reservedTaskParamValidValue] = vValue;
 }
 
-ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey) {
+ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task,
+                                      KeyRef validationKey) {
 	tb->setOptions(tr);
 
 	Optional<Value> validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
 		TraceEvent(SevError, "TB_AddTaskInvalidKey")
-			.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-			.detail("ValidationKey", printable(validationKey));
+		    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+		    .detail("ValidationKey", printable(validationKey));
 		throw invalid_option_value();
 	}
 
@@ -846,13 +856,12 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTr
 	return tb->addTask(tr, task);
 }
 
-Future<Key> TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey)
-{
+Future<Key> TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey) {
 	return actorAddTask(this, tr, task, validationKey);
 }
 
-Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey, KeyRef validationValue)
-{
+Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, KeyRef validationKey,
+                        KeyRef validationValue) {
 	setValidationCondition(task, validationKey, validationValue);
 	return addTask(tr, task);
 }
@@ -869,7 +878,8 @@ Future<bool> TaskBucket::doTask(Database cx, Reference<FutureBucket> futureBucke
 	return TaskBucketImpl::doTask(cx, Reference<TaskBucket>::addRef(this), futureBucket, task);
 }
 
-Future<Void> TaskBucket::run(Database cx, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+Future<Void> TaskBucket::run(Database cx, Reference<FutureBucket> futureBucket, double* pollDelay,
+                             int maxConcurrentTasks) {
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
 }
 
@@ -877,40 +887,43 @@ Future<Void> TaskBucket::watchPaused(Database cx, Reference<AsyncVar<bool>> paus
 	return TaskBucketImpl::watchPaused(cx, Reference<TaskBucket>::addRef(this), paused);
 }
 
-Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr){
+Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 	return TaskBucketImpl::isEmpty(tr, Reference<TaskBucket>::addRef(this));
 }
 
-Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){
+Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	setOptions(tr);
 
 	Tuple t;
 	t.append(task->timeoutVersion);
 	t.append(task->key);
 
-	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"), MutationRef::AddValue);
+	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"),
+	             MutationRef::AddValue);
 	tr->clear(timeouts.range(t));
-	
+
 	return Void();
 }
 
-Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
-	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams, newTimeoutVersion);
+Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task,
+                                          bool updateParams, Version newTimeoutVersion) {
+	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams,
+	                                     newTimeoutVersion);
 }
 
-Future<bool> TaskBucket::isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){
+Future<bool> TaskBucket::isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	return TaskBucketImpl::isFinished(tr, Reference<TaskBucket>::addRef(this), task);
 }
 
-Future<bool> TaskBucket::isVerified(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){
+Future<bool> TaskBucket::isVerified(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	return TaskBucketImpl::taskVerify(Reference<TaskBucket>::addRef(this), tr, task);
 }
 
-Future<bool> TaskBucket::checkActive(Database cx){
+Future<bool> TaskBucket::checkActive(Database cx) {
 	return TaskBucketImpl::checkActive(cx, Reference<TaskBucket>::addRef(this));
 }
 
-Future<int64_t> TaskBucket::getTaskCount(Reference<ReadYourWritesTransaction> tr){
+Future<int64_t> TaskBucket::getTaskCount(Reference<ReadYourWritesTransaction> tr) {
 	return TaskBucketImpl::getTaskCount(tr, Reference<TaskBucket>::addRef(this));
 }
 
@@ -930,27 +943,21 @@ public:
 		Key lastKey = wait(tr->getKey(lastLessOrEqual(futureBucket->prefix.pack(maxUIDKey))));
 		return !futureBucket->prefix.contains(lastKey);
 	}
-
 };
 
 FutureBucket::FutureBucket(const Subspace& subspace, bool sysAccess, bool lockAware)
-	: prefix(subspace)
-	, system_access(sysAccess)
-	, lock_aware(lockAware)
-{
-}
+  : prefix(subspace), system_access(sysAccess), lock_aware(lockAware) {}
 
-FutureBucket::~FutureBucket() {
-}
+FutureBucket::~FutureBucket() {}
 
-Future<Void> FutureBucket::clear(Reference<ReadYourWritesTransaction> tr){
+Future<Void> FutureBucket::clear(Reference<ReadYourWritesTransaction> tr) {
 	setOptions(tr);
 	tr->clear(prefix.range());
 
 	return Void();
 }
 
-Reference<TaskFuture> FutureBucket::future(Reference<ReadYourWritesTransaction> tr){
+Reference<TaskFuture> FutureBucket::future(Reference<ReadYourWritesTransaction> tr) {
 	setOptions(tr);
 
 	Reference<TaskFuture> taskFuture(new TaskFuture(Reference<FutureBucket>::addRef(this)));
@@ -969,8 +976,8 @@ Reference<TaskFuture> FutureBucket::unpack(Key key) {
 
 class TaskFutureImpl {
 public:
-
-	ACTOR static Future<Void> join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, std::vector<Reference<TaskFuture>> vectorFuture) {
+	ACTOR static Future<Void> join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                               Reference<TaskFuture> taskFuture, std::vector<Reference<TaskFuture>> vectorFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		bool is_set = wait(isSet(tr, taskFuture));
@@ -985,7 +992,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> _join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, std::vector<Reference<TaskFuture>> vectorFuture) {
+	ACTOR static Future<Void> _join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                Reference<TaskFuture> taskFuture, std::vector<Reference<TaskFuture>> vectorFuture) {
 		std::vector<Future<Void>> onSetFutures;
 		for (int i = 0; i < vectorFuture.size(); ++i) {
 			Key key = StringRef(g_random->randomUniqueID().toString());
@@ -994,10 +1002,10 @@ public:
 			task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("UnblockFuture");
 			task->params[Task::reservedTaskParamKeyFuture] = taskFuture->key;
 			task->params[Task::reservedTaskParamKeyBlockID] = key;
-			onSetFutures.push_back( vectorFuture[i]->onSet(tr, taskBucket, task) );
+			onSetFutures.push_back(vectorFuture[i]->onSet(tr, taskBucket, task));
 		}
 
-		wait( waitForAll(onSetFutures) );
+		wait(waitForAll(onSetFutures));
 
 		return Void();
 	}
@@ -1006,25 +1014,24 @@ public:
 		taskFuture->futureBucket->setOptions(tr);
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->blocks.range(), 1));
-		if (values.size() > 0)
-			return false;
+		if (values.size() > 0) return false;
 
 		return true;
 	}
 
-	ACTOR static Future<Void> onSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, Reference<Task> task) {
+	ACTOR static Future<Void> onSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                Reference<TaskFuture> taskFuture, Reference<Task> task) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		bool is_set = wait(isSet(tr, taskFuture));
 
 		if (is_set) {
-			TEST(true);	// is_set == true
+			TEST(true); // is_set == true
 			wait(performAction(tr, taskBucket, taskFuture, task));
-		}
-		else {
-			TEST(true);	// is_set == false
+		} else {
+			TEST(true); // is_set == false
 			Subspace callbackSpace = taskFuture->callbacks.get(StringRef(g_random->randomUniqueID().toString()));
-			for (auto & v : task->params) {
+			for (auto& v : task->params) {
 				tr->set(callbackSpace.pack(v.key), v.value);
 			}
 		}
@@ -1032,7 +1039,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> set(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture) {
+	ACTOR static Future<Void> set(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                              Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		tr->clear(taskFuture->blocks.range());
@@ -1042,7 +1050,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> performAction(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, Reference<Task> task) {
+	ACTOR static Future<Void> performAction(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                        Reference<TaskFuture> taskFuture, Reference<Task> task) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		if (task && TaskFuncBase::isValidTask(task)) {
@@ -1055,7 +1064,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> performAllActions(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture) {
+	ACTOR static Future<Void> performAllActions(Reference<ReadYourWritesTransaction> tr,
+	                                            Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
@@ -1063,15 +1073,16 @@ public:
 
 		std::vector<Future<Void>> actions;
 
-		if(values.size() != 0) {
+		if (values.size() != 0) {
 			state Reference<Task> task(new Task());
 			Key lastTaskID;
-			for (auto & s : values) {
+			for (auto& s : values) {
 				Tuple t = taskFuture->callbacks.unpack(s.key);
 				Key taskID = t.getString(0);
 				Key key = t.getString(1);
-				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make a new task
-				if(taskID.size() != 0 && taskID != lastTaskID) {
+				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make
+				// a new task
+				if (taskID.size() != 0 && taskID != lastTaskID) {
 					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
 					task = Reference<Task>(new Task());
 				}
@@ -1087,7 +1098,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, Reference<Task> task) {
+	ACTOR static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                       Reference<TaskFuture> taskFuture, Reference<Task> task) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		task->params[Task::reservedTaskParamKeyAddTask] = task->params[Task::reservedTaskParamKeyType];
@@ -1097,15 +1109,17 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, Reference<Task> task, KeyRef validationKey) {
+	ACTOR static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                       Reference<TaskFuture> taskFuture, Reference<Task> task,
+	                                       KeyRef validationKey) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		Optional<Value> validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
 			TraceEvent(SevError, "TB_OnSetAddTaskInvalidKey")
-				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("ValidationKey", printable(validationKey));
+			    .detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			    .detail("ValidationKey", printable(validationKey));
 			throw invalid_option_value();
 		}
 
@@ -1117,7 +1131,9 @@ public:
 		return Void();
 	}
 
-	static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture, Reference<Task> task, KeyRef validationKey, KeyRef validationValue) {
+	static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                 Reference<TaskFuture> taskFuture, Reference<Task> task, KeyRef validationKey,
+	                                 KeyRef validationValue) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		task->params[Task::reservedTaskParamValidKey] = validationKey;
@@ -1126,7 +1142,9 @@ public:
 		return onSetAddTask(tr, taskBucket, taskFuture, task);
 	}
 
-	ACTOR static Future<Reference<TaskFuture>> joinedFuture(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<TaskFuture> taskFuture) {
+	ACTOR static Future<Reference<TaskFuture>> joinedFuture(Reference<ReadYourWritesTransaction> tr,
+	                                                        Reference<TaskBucket> taskBucket,
+	                                                        Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
 		std::vector<Reference<TaskFuture>> vectorFuture;
@@ -1137,13 +1155,9 @@ public:
 	}
 };
 
-TaskFuture::TaskFuture()
-{
-}
+TaskFuture::TaskFuture() {}
 
-TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k)
-	: futureBucket(bucket), key(k)
-{
+TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBucket(bucket), key(k) {
 	if (k.size() == 0) {
 		key = g_random->randomUniqueID().toString();
 	}
@@ -1153,8 +1167,7 @@ TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k)
 	callbacks = prefix.get(LiteralStringRef("cb"));
 }
 
-TaskFuture::~TaskFuture(){
-}
+TaskFuture::~TaskFuture() {}
 
 void TaskFuture::addBlock(Reference<ReadYourWritesTransaction> tr, StringRef block_id) {
 	tr->set(blocks.pack(block_id), LiteralStringRef(""));
@@ -1168,7 +1181,8 @@ Future<Void> TaskFuture::performAllActions(Reference<ReadYourWritesTransaction> 
 	return TaskFutureImpl::performAllActions(tr, taskBucket, Reference<TaskFuture>::addRef(this));
 }
 
-Future<Void> TaskFuture::join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, std::vector<Reference<TaskFuture>> vectorFuture) {
+Future<Void> TaskFuture::join(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+                              std::vector<Reference<TaskFuture>> vectorFuture) {
 	return TaskFutureImpl::join(tr, taskBucket, Reference<TaskFuture>::addRef(this), vectorFuture);
 }
 
@@ -1176,27 +1190,33 @@ Future<bool> TaskFuture::isSet(Reference<ReadYourWritesTransaction> tr) {
 	return TaskFutureImpl::isSet(tr, Reference<TaskFuture>::addRef(this));
 }
 
-Future<Void> TaskFuture::onSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+Future<Void> TaskFuture::onSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+                               Reference<Task> task) {
 	return TaskFutureImpl::onSet(tr, taskBucket, Reference<TaskFuture>::addRef(this), task);
 }
 
-Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+                                      Reference<Task> task) {
 	return TaskFutureImpl::onSetAddTask(tr, taskBucket, Reference<TaskFuture>::addRef(this), task);
 }
 
-Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, KeyRef validationKey) {
+Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+                                      Reference<Task> task, KeyRef validationKey) {
 	return TaskFutureImpl::onSetAddTask(tr, taskBucket, Reference<TaskFuture>::addRef(this), task, validationKey);
 }
 
-Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, KeyRef validationKey, KeyRef validationValue) {
-	return TaskFutureImpl::onSetAddTask(tr, taskBucket, Reference<TaskFuture>::addRef(this), task, validationKey, validationValue);
+Future<Void> TaskFuture::onSetAddTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+                                      Reference<Task> task, KeyRef validationKey, KeyRef validationValue) {
+	return TaskFutureImpl::onSetAddTask(tr, taskBucket, Reference<TaskFuture>::addRef(this), task, validationKey,
+	                                    validationValue);
 }
 
-Future<Reference<TaskFuture>> TaskFuture::joinedFuture(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
+Future<Reference<TaskFuture>> TaskFuture::joinedFuture(Reference<ReadYourWritesTransaction> tr,
+                                                       Reference<TaskBucket> taskBucket) {
 	return TaskFutureImpl::joinedFuture(tr, taskBucket, Reference<TaskFuture>::addRef(this));
 }
 
-ACTOR Future<Key> getCompletionKey(TaskCompletionKey *self, Future<Reference<TaskFuture>> f) {
+ACTOR Future<Key> getCompletionKey(TaskCompletionKey* self, Future<Reference<TaskFuture>> f) {
 	Reference<TaskFuture> taskFuture = wait(f);
 	self->joinFuture.clear();
 	self->key = taskFuture->key;

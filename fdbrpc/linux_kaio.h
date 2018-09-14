@@ -20,14 +20,9 @@
 
 // AIO system calls
 
-typedef struct io_context *io_context_t;
+typedef struct io_context* io_context_t;
 
-enum {
-	IO_CMD_PREAD = 0,
-	IO_CMD_PWRITE = 1,
-	IO_CMD_FSYNC = 2,
-	IO_CMD_FDSYNC = 3
-};
+enum { IO_CMD_PREAD = 0, IO_CMD_PWRITE = 1, IO_CMD_FSYNC = 2, IO_CMD_FDSYNC = 3 };
 
 struct linux_iocb {
 	void* data;
@@ -52,6 +47,12 @@ struct linux_ioresult {
 	unsigned long result2;
 };
 
-static int io_setup(unsigned nr_events, io_context_t *ctxp) { return syscall( __NR_io_setup, nr_events, ctxp ); }
-static int io_submit(io_context_t ctx_id, long nrstruct, linux_iocb ** iocbpp ) { return syscall( __NR_io_submit, ctx_id, nrstruct, iocbpp ); }
-static int io_getevents(io_context_t ctx_id, long min_nr, long nr, linux_ioresult *events, struct timespec * timeout ) { return syscall( __NR_io_getevents, ctx_id, min_nr, nr, events, timeout ); }
+static int io_setup(unsigned nr_events, io_context_t* ctxp) {
+	return syscall(__NR_io_setup, nr_events, ctxp);
+}
+static int io_submit(io_context_t ctx_id, long nrstruct, linux_iocb** iocbpp) {
+	return syscall(__NR_io_submit, ctx_id, nrstruct, iocbpp);
+}
+static int io_getevents(io_context_t ctx_id, long min_nr, long nr, linux_ioresult* events, struct timespec* timeout) {
+	return syscall(__NR_io_getevents, ctx_id, min_nr, nr, events, timeout);
+}

@@ -38,7 +38,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
-#include <algorithm>	// std::transform
+#include <algorithm> // std::transform
 #include <string>
 #include <iostream>
 #include <ctime>
@@ -56,7 +56,7 @@ using std::endl;
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
 
-#ifdef  __linux__
+#ifdef __linux__
 #include <execinfo.h>
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
@@ -68,46 +68,77 @@ using std::endl;
 #endif
 
 #include "flow/SimpleOpt.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
-
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
-enum enumProgramExe {
-	EXE_AGENT, EXE_BACKUP, EXE_RESTORE, EXE_DR_AGENT, EXE_DB_BACKUP, EXE_UNDEFINED
-};
+enum enumProgramExe { EXE_AGENT, EXE_BACKUP, EXE_RESTORE, EXE_DR_AGENT, EXE_DB_BACKUP, EXE_UNDEFINED };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST
+	BACKUP_UNDEFINED = 0,
+	BACKUP_START,
+	BACKUP_STATUS,
+	BACKUP_ABORT,
+	BACKUP_WAIT,
+	BACKUP_DISCONTINUE,
+	BACKUP_PAUSE,
+	BACKUP_RESUME,
+	BACKUP_EXPIRE,
+	BACKUP_DELETE,
+	BACKUP_DESCRIBE,
+	BACKUP_LIST
 };
 
-enum enumDBType {
-	DB_UNDEFINED=0, DB_START, DB_STATUS, DB_SWITCH, DB_ABORT, DB_PAUSE, DB_RESUME
-};
+enum enumDBType { DB_UNDEFINED = 0, DB_START, DB_STATUS, DB_SWITCH, DB_ABORT, DB_PAUSE, DB_RESUME };
 
-enum enumRestoreType {
-	RESTORE_UNKNOWN, RESTORE_START, RESTORE_STATUS, RESTORE_ABORT, RESTORE_WAIT
-};
+enum enumRestoreType { RESTORE_UNKNOWN, RESTORE_START, RESTORE_STATUS, RESTORE_ABORT, RESTORE_WAIT };
 
 //
 enum {
 	// Backup constants
-	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE,
-	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
-	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
+	OPT_DESTCONTAINER,
+	OPT_SNAPSHOTINTERVAL,
+	OPT_ERRORLIMIT,
+	OPT_NOSTOPWHENDONE,
+	OPT_EXPIRE_BEFORE_VERSION,
+	OPT_EXPIRE_BEFORE_DATETIME,
+	OPT_EXPIRE_RESTORABLE_AFTER_VERSION,
+	OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
+	OPT_BASEURL,
+	OPT_BLOB_CREDENTIALS,
+	OPT_DESCRIBE_DEEP,
+	OPT_DESCRIBE_TIMESTAMPS,
 
 	// Backup and Restore constants
-	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
+	OPT_TAGNAME,
+	OPT_BACKUPKEYS,
+	OPT_WAITFORDONE,
 
 	// Restore constants
-	OPT_RESTORECONTAINER, OPT_DBVERSION, OPT_PREFIX_ADD, OPT_PREFIX_REMOVE,
+	OPT_RESTORECONTAINER,
+	OPT_DBVERSION,
+	OPT_PREFIX_ADD,
+	OPT_PREFIX_REMOVE,
 
 	// Shared constants
-	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
-	OPT_HELP, OPT_DEVHELP, OPT_VERSION, OPT_PARENTPID, OPT_CRASHONERROR,
-	OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACE, OPT_TRACE_DIR,
-	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_MEMLIMIT, OPT_LOCALITY,
+	OPT_CLUSTERFILE,
+	OPT_QUIET,
+	OPT_DRYRUN,
+	OPT_FORCE,
+	OPT_HELP,
+	OPT_DEVHELP,
+	OPT_VERSION,
+	OPT_PARENTPID,
+	OPT_CRASHONERROR,
+	OPT_NOBUFSTDOUT,
+	OPT_BUFSTDOUTERR,
+	OPT_TRACE,
+	OPT_TRACE_DIR,
+	OPT_KNOB,
+	OPT_TRACE_LOG_GROUP,
+	OPT_MEMLIMIT,
+	OPT_LOCALITY,
 
-	//DB constants
+	// DB constants
 	OPT_SOURCE_CLUSTER,
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP
@@ -115,26 +146,26 @@ enum {
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
@@ -142,38 +173,38 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_WAITFORDONE,      "-w",              SO_NONE },
-	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
-	{ OPT_NOSTOPWHENDONE,   "-z",               SO_NONE },
-	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
-	{ OPT_DESTCONTAINER,    "-d",               SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,    "--destcontainer",  SO_REQ_SEP },
-	{ OPT_SNAPSHOTINTERVAL, "-s",                   SO_REQ_SEP },
-	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval",  SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
-	{ OPT_DRYRUN,          "-n",               SO_NONE },
-	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_WAITFORDONE, "-w", SO_NONE },
+	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
+	{ OPT_NOSTOPWHENDONE, "--no-stop-when-done", SO_NONE },
+	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
+	{ OPT_DRYRUN, "-n", SO_NONE },
+	{ OPT_DRYRUN, "--dryrun", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
@@ -181,215 +212,215 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 
 CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_ERRORLIMIT,      "-e",               SO_REQ_SEP },
-	{ OPT_ERRORLIMIT,      "--errorlimit",     SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_WAITFORDONE,      "-w",              SO_NONE },
-	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_WAITFORDONE, "-w", SO_NONE },
+	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_NOSTOPWHENDONE,   "-z",               SO_NONE },
-	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
+	{ OPT_NOSTOPWHENDONE, "--no-stop-when-done", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_FORCE,           "-f",               SO_NONE },
-	{ OPT_FORCE,           "--force",          SO_NONE },
-	{ OPT_EXPIRE_RESTORABLE_AFTER_VERSION,       "--restorable_after_version",               SO_REQ_SEP },
-	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,      "--restorable_after_timestamp",             SO_REQ_SEP },
-	{ OPT_EXPIRE_BEFORE_VERSION,                 "--expire_before_version",                  SO_REQ_SEP },
-	{ OPT_EXPIRE_BEFORE_DATETIME,                "--expire_before_timestamp",                SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_FORCE, "-f", SO_NONE },
+	{ OPT_FORCE, "--force", SO_NONE },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_VERSION, "--restorable_after_version", SO_REQ_SEP },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, "--restorable_after_timestamp", SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_VERSION, "--expire_before_version", SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_DATETIME, "--expire_before_timestamp", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,     "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
-	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_DESCRIBE_DEEP, "--deep", SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
 
 	SO_END_OF_OPTIONS
@@ -397,61 +428,61 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_BASEURL,         "-b",               SO_REQ_SEP },
-	{ OPT_BASEURL,         "--base_url",       SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BASEURL, "-b", SO_REQ_SEP },
+	{ OPT_BASEURL, "--base_url", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_RESTORECONTAINER,"-r",               SO_REQ_SEP },
-	{ OPT_PREFIX_ADD,      "-add_prefix",      SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE,   "-remove_prefix",   SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
-	{ OPT_WAITFORDONE,      "-w",              SO_NONE },
-	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_DBVERSION,       "--version",        SO_REQ_SEP },
-	{ OPT_DBVERSION,       "-v",               SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_DRYRUN,          "-n",               SO_NONE },
-	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
-	{ OPT_FORCE,           "-f",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_RESTORECONTAINER, "-r", SO_REQ_SEP },
+	{ OPT_PREFIX_ADD, "-add_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX_REMOVE, "-remove_prefix", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
+	{ OPT_WAITFORDONE, "-w", SO_NONE },
+	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_DBVERSION, "--version", SO_REQ_SEP },
+	{ OPT_DBVERSION, "-v", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_DRYRUN, "-n", SO_NONE },
+	{ OPT_DRYRUN, "--dryrun", SO_NONE },
+	{ OPT_FORCE, "-f", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
@@ -459,166 +490,166 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 
 CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
-	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_ERRORLIMIT,      "-e",               SO_REQ_SEP },
-	{ OPT_ERRORLIMIT,      "--errorlimit",     SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
+	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_CLEANUP,         "--cleanup",        SO_NONE },
-	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
-	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_CLEANUP, "--cleanup", SO_NONE },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 #ifdef _WIN32
-	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_SOURCE_CLUSTER,  "-s",               SO_REQ_SEP },
-	{ OPT_SOURCE_CLUSTER,  "--source",         SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
-	{ OPT_TRACE,           "--log",            SO_NONE },
-	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
-	{ OPT_QUIET,           "-q",               SO_NONE },
-	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_VERSION,         "--version",        SO_NONE },
-	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
-	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
-	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
-	{ OPT_HELP,            "-?",               SO_NONE },
-	{ OPT_HELP,            "-h",               SO_NONE },
-	{ OPT_HELP,            "--help",           SO_NONE },
-	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
+	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
@@ -633,12 +664,11 @@ extern void flushTraceFileVoid();
 extern const char* getHGVersion();
 
 #ifdef _WIN32
-void parentWatcher(void *parentHandle) {
+void parentWatcher(void* parentHandle) {
 	HANDLE parent = (HANDLE)parentHandle;
 	int signal = WaitForSingleObject(parent, INFINITE);
 	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+	if (signal == WAIT_OBJECT_0) criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
 }
 
@@ -647,22 +677,25 @@ void parentWatcher(void *parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getHGVersion());
-	printf("protocol %llx\n", (long long) currentProtocolVersion);
+	printf("protocol %llx\n", (long long)currentProtocolVersion);
 }
 
-const char *BlobCredentialInfo = 
-	"  BLOB CREDENTIALS\n"
-	"     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
-	"     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
-	"     These files can be specified with the --blob_credentials argument described above or via the environment variable\n"
-	"     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
-	"     over the environment but all files from both sources are used.\n\n"
-	"     At connect time, the specified files are read in order and the first matching account specification (user@host)\n"
-	"     will be used to obtain the secret key.\n\n"
-	"     The JSON schema is:\n"
-	"        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : \"SECRET\" } } }\n";
+const char* BlobCredentialInfo =
+    "  BLOB CREDENTIALS\n"
+    "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
+    "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
+    "     These files can be specified with the --blob_credentials argument described above or via the environment "
+    "variable\n"
+    "     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
+    "     over the environment but all files from both sources are used.\n\n"
+    "     At connect time, the specified files are read in order and the first matching account specification "
+    "(user@host)\n"
+    "     will be used to obtain the secret key.\n\n"
+    "     The JSON schema is:\n"
+    "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : "
+    "\"SECRET\" } } }\n";
 
-static void printHelpTeaser( const char *name ) {
+static void printHelpTeaser(const char* name) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
 }
 
@@ -670,16 +703,17 @@ static void printAgentUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [OPTIONS]\n\n", exeAgent.toString().c_str());
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
+	       "                 FoundationDB cluster. The default is first the value of the\n"
+	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
+	       "                 then `%s'.\n",
+	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
-		   "                 unspecified, defaults to the current directory. Has\n"
-		   "                 no effect unless --log is specified.\n");
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
-		   "                 Memory limit. The default value is 8GiB. When specified\n"
-		   "                 without a unit, MiB is assumed.\n");
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -701,47 +735,59 @@ static void printAgentUsage(bool devhelp) {
 void printBackupContainerInfo() {
 	printf("                 Backup URL forms:\n\n");
 	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for(auto &f : formats)
-		printf("                     %s\n", f.c_str());
+	for (auto& f : formats) printf("                     %s\n", f.c_str());
 	printf("\n");
 }
 
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list) [OPTIONS]\n\n", exeBackup.toString().c_str());
+	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | "
+	       "list) [OPTIONS]\n\n",
+	       exeBackup.toString().c_str());
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
+	       "                 FoundationDB cluster. The default is first the value of the\n"
+	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
+	       "                 then `%s'.\n",
+	       platform::getDefaultClusterFilePath().c_str());
 	printf("  -d, --destcontainer URL\n"
 	       "                 The Backup container URL for start, describe, expire, and delete operations.\n");
 	printBackupContainerInfo();
 	printf("  -b, --base_url BASEURL\n"
-		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
+	       "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup "
+	       "name.\n");
 	printf("  --blob_credentials FILE\n"
-		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.  See below for more details.\n");
+	       "                 File containing blob credentials in JSON format.  Can be specified multiple times for "
+	       "multiple files.  See below for more details.\n");
 	printf("  --expire_before_timestamp DATETIME\n"
-		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
-		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
+	       "                 Datetime cutoff for expire operations.  Requires a cluster file and will use "
+	       "version/timestamp metadata\n"
+	       "                 in the database to obtain a cutoff version very close to the timestamp given in "
+	       "YYYY-MM-DD.HH:MI:SS format (UTC).\n");
 	printf("  --expire_before_version VERSION\n"
-	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
+	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after "
+	       "VERSION.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
-		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
+	       "                 For expire operations, set minimum acceptable restorability to the version equivalent of "
+	       "DATETIME and later.\n");
 	printf("  --restorable_after_version VERSION\n"
-		   "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
+	       "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
 	printf("  --version_timestamps\n");
-	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
-	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
+	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster "
+	       "file is required.\n");
+	printf(
+	    "  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
-	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	       "                 For start operations, specifies the backup's target snapshot interval as DURATION "
+	       "seconds.  Defaults to %d.\n",
+	       CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
-		   "                 If not specified, the entire database will be backed up.\n");
+	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  -n, --dry-run  For start or restore operations, performs a trial run with no actual changes made.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
-		   "                 Do not stop backup when restorable.\n");
+	       "                 Do not stop backup when restorable.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
@@ -752,25 +798,25 @@ static void printBackupUsage(bool devhelp) {
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
 		printf("  --deep         For describe operations, do not use cached metadata.  Warning: Very slow\n");
-		
 	}
 	printf("\n"
-		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
+	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 	printf("\n");
 	puts(BlobCredentialInfo);
 
 	return;
 }
 
-static void printRestoreUsage(bool devhelp ) {
+static void printRestoreUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s (start | status | abort | wait) [OPTIONS]\n\n", exeRestore.toString().c_str());
-	//printf("  FOLDERS        Paths to folders containing the backup files.\n");
+	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("Options for all commands:\n\n");
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
+	       "                 FoundationDB cluster. The default is first the value of the\n"
+	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
+	       "                 then `%s'.\n",
+	       platform::getDefaultClusterFilePath().c_str());
 	printf("  -t TAGNAME     The restore tag to act on.  Default is 'default'\n");
 	printf("    --tagname TAGNAME\n\n");
 	printf(" Options for start:\n\n");
@@ -785,7 +831,7 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
-	if( devhelp ) {
+	if (devhelp) {
 #ifdef _WIN32
 		printf("  -q             Disable error dialog on crash.\n");
 		printf("  --parentpid PID\n");
@@ -794,7 +840,7 @@ static void printRestoreUsage(bool devhelp ) {
 	}
 
 	printf("\n"
-		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
+	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 	printf("\n");
 	puts(BlobCredentialInfo);
 
@@ -805,16 +851,16 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [OPTIONS]\n\n", exeDatabaseAgent.toString().c_str());
 	printf("  -d CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 destination FoundationDB cluster.\n");
+	       "                 destination FoundationDB cluster.\n");
 	printf("  -s CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 source FoundationDB cluster.\n");
+	       "                 source FoundationDB cluster.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
-		   "                 unspecified, defaults to the current directory. Has\n"
-		   "                 no effect unless --log is specified.\n");
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
-		   "                 Memory limit. The default value is 8GiB. When specified\n"
-		   "                 without a unit, MiB is assumed.\n");
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -831,21 +877,22 @@ static void printDBAgentUsage(bool devhelp) {
 
 static void printDBBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | switch | abort | pause | resume) [OPTIONS]\n\n", exeDatabaseBackup.toString().c_str());
+	printf("Usage: %s (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
+	       exeDatabaseBackup.toString().c_str());
 	printf("  -d, --destination CONNFILE\n"
 	       "                 The path of a file containing the connection string for the\n");
 	printf("                 destination FoundationDB cluster.\n");
 	printf("  -s, --source CONNFILE\n"
 	       "                 The path of a file containing the connection string for the\n"
-		   "                 source FoundationDB cluster.\n");
+	       "                 source FoundationDB cluster.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
-		   "                 If not specified, the entire database will be backed up.\n");
+	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
-		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
+	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -859,11 +906,9 @@ static void printDBBackupUsage(bool devhelp) {
 	return;
 }
 
-static void printUsage(enumProgramExe programExe, bool devhelp)
-{
+static void printUsage(enumProgramExe programExe, bool devhelp) {
 
-	switch (programExe)
-	{
+	switch (programExe) {
 	case EXE_AGENT:
 		printAgentUsage(devhelp);
 		break;
@@ -890,9 +935,8 @@ static void printUsage(enumProgramExe programExe, bool devhelp)
 extern bool g_crashOnError;
 
 // Return the type of program executable based on the name of executable file
-enumProgramExe	getProgramType(std::string programExe)
-{
-	enumProgramExe	enProgramExe = EXE_UNDEFINED;
+enumProgramExe getProgramType(std::string programExe) {
+	enumProgramExe enProgramExe = EXE_UNDEFINED;
 
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
@@ -904,61 +948,58 @@ enumProgramExe	getProgramType(std::string programExe)
 		size_t lastSlash = programExe.find_last_of("\\");
 
 		// Ensure last dot is after last slash, if present
-		if ((lastSlash == std::string::npos)||
-			(lastSlash < lastDot)			)
-		{
+		if ((lastSlash == std::string::npos) || (lastSlash < lastDot)) {
 			programExe = programExe.substr(0, lastDot);
 		}
 	}
 #endif
 
 	// Check if backup agent
-	if ((programExe.length() >= exeAgent.size())																		&&
-		(programExe.compare(programExe.length()-exeAgent.size(), exeAgent.size(), (const char*) exeAgent.begin()) == 0)	)
-	{
+	if ((programExe.length() >= exeAgent.size()) &&
+	    (programExe.compare(programExe.length() - exeAgent.size(), exeAgent.size(), (const char*)exeAgent.begin()) ==
+	     0)) {
 		enProgramExe = EXE_AGENT;
 	}
 
 	// Check if backup
-	else if ((programExe.length() >= exeBackup.size())																	&&
-		(programExe.compare(programExe.length() - exeBackup.size(), exeBackup.size(), (const char*)exeBackup.begin()) == 0))
-	{
+	else if ((programExe.length() >= exeBackup.size()) &&
+	         (programExe.compare(programExe.length() - exeBackup.size(), exeBackup.size(),
+	                             (const char*)exeBackup.begin()) == 0)) {
 		enProgramExe = EXE_BACKUP;
 	}
 
 	// Check if restore
-	else if ((programExe.length() >= exeRestore.size())																		&&
-		(programExe.compare(programExe.length() - exeRestore.size(), exeRestore.size(), (const char*)exeRestore.begin()) == 0))
-	{
+	else if ((programExe.length() >= exeRestore.size()) &&
+	         (programExe.compare(programExe.length() - exeRestore.size(), exeRestore.size(),
+	                             (const char*)exeRestore.begin()) == 0)) {
 		enProgramExe = EXE_RESTORE;
 	}
 
 	// Check if db agent
-	else if ((programExe.length() >= exeDatabaseAgent.size())																		&&
-		(programExe.compare(programExe.length() - exeDatabaseAgent.size(), exeDatabaseAgent.size(), (const char*)exeDatabaseAgent.begin()) == 0))
-	{
+	else if ((programExe.length() >= exeDatabaseAgent.size()) &&
+	         (programExe.compare(programExe.length() - exeDatabaseAgent.size(), exeDatabaseAgent.size(),
+	                             (const char*)exeDatabaseAgent.begin()) == 0)) {
 		enProgramExe = EXE_DR_AGENT;
 	}
 
 	// Check if db backup
-	else if ((programExe.length() >= exeDatabaseBackup.size())																		&&
-		(programExe.compare(programExe.length() - exeDatabaseBackup.size(), exeDatabaseBackup.size(), (const char*)exeDatabaseBackup.begin()) == 0))
-	{
+	else if ((programExe.length() >= exeDatabaseBackup.size()) &&
+	         (programExe.compare(programExe.length() - exeDatabaseBackup.size(), exeDatabaseBackup.size(),
+	                             (const char*)exeDatabaseBackup.begin()) == 0)) {
 		enProgramExe = EXE_DB_BACKUP;
 	}
 
 	return enProgramExe;
 }
 
-enumBackupType	getBackupType(std::string backupType)
-{
-	enumBackupType	enBackupType = BACKUP_UNDEFINED;
+enumBackupType getBackupType(std::string backupType) {
+	enumBackupType enBackupType = BACKUP_UNDEFINED;
 
 	// lowercase the string
 	std::transform(backupType.begin(), backupType.end(), backupType.begin(), ::tolower);
 
 	static std::map<std::string, enumBackupType> values;
-	if(values.empty()) {
+	if (values.empty()) {
 		values["start"] = BACKUP_START;
 		values["status"] = BACKUP_STATUS;
 		values["abort"] = BACKUP_ABORT;
@@ -973,29 +1014,27 @@ enumBackupType	getBackupType(std::string backupType)
 	}
 
 	auto i = values.find(backupType);
-	if(i != values.end())
-		enBackupType = i->second;
+	if (i != values.end()) enBackupType = i->second;
 
 	return enBackupType;
 }
 
 enumRestoreType getRestoreType(std::string name) {
-	if(name == "start") return RESTORE_START;
-	if(name == "abort") return RESTORE_ABORT;
-	if(name == "status") return RESTORE_STATUS;
-	if(name == "wait") return RESTORE_WAIT;
+	if (name == "start") return RESTORE_START;
+	if (name == "abort") return RESTORE_ABORT;
+	if (name == "status") return RESTORE_STATUS;
+	if (name == "wait") return RESTORE_WAIT;
 	return RESTORE_UNKNOWN;
 }
 
-enumDBType getDBType(std::string dbType)
-{
+enumDBType getDBType(std::string dbType) {
 	enumDBType enBackupType = DB_UNDEFINED;
 
 	// lowercase the string
 	std::transform(dbType.begin(), dbType.end(), dbType.begin(), ::tolower);
 
 	static std::map<std::string, enumDBType> values;
-	if(values.empty()) {
+	if (values.empty()) {
 		values["start"] = DB_START;
 		values["status"] = DB_STATUS;
 		values["switch"] = DB_SWITCH;
@@ -1005,13 +1044,13 @@ enumDBType getDBType(std::string dbType)
 	}
 
 	auto i = values.find(dbType);
-	if(i != values.end())
-		enBackupType = i->second;
+	if (i != values.end()) enBackupType = i->second;
 
 	return enBackupType;
 }
 
-ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id, enumProgramExe exe, Database dest) {
+ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id,
+                                         enumProgramExe exe, Database dest) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1020,9 +1059,9 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 	state Version readVer = wait(tr->getReadVersion());
 
-	state json_spirit::mValue layersRootValue;         // Will contain stuff that goes into the doc at the layers status root
-	JSONDoc layersRoot(layersRootValue);               // Convenient mutator / accessor for the layers root
-	JSONDoc op = layersRoot.subDoc(name);              // Operator object for the $expires operation
+	state json_spirit::mValue layersRootValue; // Will contain stuff that goes into the doc at the layers status root
+	JSONDoc layersRoot(layersRootValue); // Convenient mutator / accessor for the layers root
+	JSONDoc op = layersRoot.subDoc(name); // Operator object for the $expires operation
 	// Create the $expires key which is where the rest of the status output will go
 
 	state JSONDoc layerRoot = op.subDoc("$expires");
@@ -1035,15 +1074,15 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	state JSONDoc o = layerRoot.subDoc("instances." + id);
 
 	o.create("version") = FDB_VT_VERSION;
-	o.create("id")      = id;
+	o.create("id") = id;
 	o.create("last_updated") = now();
-	o.create("memory_usage")  = (int64_t)getMemoryUsage();
+	o.create("memory_usage") = (int64_t)getMemoryUsage();
 	o.create("resident_size") = (int64_t)getResidentMemoryUsage();
 	o.create("main_thread_cpu_seconds") = getProcessorTimeThread();
-	o.create("process_cpu_seconds")     = getProcessorTimeProcess();
+	o.create("process_cpu_seconds") = getProcessorTimeProcess();
 	o.create("configured_workers") = CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 
-	if(exe == EXE_AGENT) {
+	if (exe == EXE_AGENT) {
 		static BlobStoreEndpoint::Stats last_stats;
 		static double last_ts = 0;
 		BlobStoreEndpoint::Stats current_stats = BlobStoreEndpoint::s_stats;
@@ -1051,15 +1090,14 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		blobstats.create("total") = current_stats.getJSON();
 		BlobStoreEndpoint::Stats diff = current_stats - last_stats;
 		json_spirit::mObject diffObj = diff.getJSON();
-		if(last_ts > 0)
+		if (last_ts > 0)
 			diffObj["bytes_per_second"] = double(current_stats.bytes_sent - last_stats.bytes_sent) / (now() - last_ts);
 		blobstats.create("recent") = diffObj;
 		last_stats = current_stats;
 		last_ts = now();
 
 		JSONDoc totalBlobStats = layerRoot.subDoc("blob_recent_io");
-		for(auto &p : diffObj)
-			totalBlobStats.create(p.first + ".$sum") = p.second;
+		for (auto& p : diffObj) totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
 		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
@@ -1087,19 +1125,22 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
 
-		wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
+		wait(waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
+		     waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
 
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
-		layerRoot.create("total_workers.$sum") = fBackupPaused.get().present() ? 0 : CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
+		layerRoot.create("total_workers.$sum") =
+		    fBackupPaused.get().present() ? 0 : CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 		layerRoot.create("paused.$latest") = fBackupPaused.get().present();
 
 		int j = 0;
 		for (KeyBackedTag eachTag : backupTags) {
 			Version last_restorable_version = tagLastRestorableVersions[j].get();
-			double last_restorable_seconds_behind = ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			double last_restorable_seconds_behind =
+			    ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)tagStates[j].get();
-			const char *statusText = fba.getStateText(status);
+			const char* statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
 			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
@@ -1107,7 +1148,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("current_status") = statusText;
 			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
 			tagRoot.create("last_restorable_seconds_behind") = last_restorable_seconds_behind;
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
+			tagRoot.create("running_backup") =
+			    (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
@@ -1115,8 +1157,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 			j++;
 		}
-	}
-	else if(exe == EXE_DR_AGENT) {
+	} else if (exe == EXE_DR_AGENT) {
 		state DatabaseBackupAgent dba;
 		state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1129,7 +1170,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey());
 
 		state std::vector<UID> drTagUids;
-		for(int i = 0; i < tagNames.size(); i++) {
+		for (int i = 0; i < tagNames.size(); i++) {
 			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin)));
 			UID tagUID = BinaryReader::fromStringRef<UID>(tagNames[i].value, Unversioned());
 			drTagUids.push_back(tagUID);
@@ -1138,7 +1179,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID));
 		}
 
-		wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) && waitForAll(tagLogBytesDR) && success(fDRPaused));
+		wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) &&
+		     waitForAll(tagLogBytesDR) && success(fDRPaused));
 
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
@@ -1151,14 +1193,17 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)backupStatus[i].get();
 
 			JSONDoc tagRoot = tagsRoot.create(tagName);
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
+			tagRoot.create("running_backup") =
+			    (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytesDR[i].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytesDR[i].get();
 			tagRoot.create("mutation_stream_id") = drTagUids[i].toString();
 
 			if (backupVersion[i].get().present()) {
-				double seconds_behind = ((double)readVer - BinaryReader::fromStringRef<Version>(backupVersion[i].get().get(), Unversioned())) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+				double seconds_behind = ((double)readVer - BinaryReader::fromStringRef<Version>(
+				                                               backupVersion[i].get().get(), Unversioned())) /
+				                        CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 				tagRoot.create("seconds_behind") = seconds_behind;
 				//TraceEvent("BackupMetrics").detail("SecondsBehind", seconds_behind);
 			}
@@ -1174,11 +1219,12 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 // Check for unparseable or expired statuses and delete them.
 // First checks the first doc in the key range, and if it is valid, alive and not "me" then
 // returns.  Otherwise, checks the rest of the range as well.
-ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::string rootKey, std::string name, std::string id, int limit = 1) {
+ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::string rootKey, std::string name,
+                                 std::string id, int limit = 1) {
 	state Standalone<RangeResultRef> docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
 	state bool readMore = false;
 	state int i;
-	for(i = 0; i < docs.size(); ++i) {
+	for (i = 0; i < docs.size(); ++i) {
 		json_spirit::mValue docValue;
 		try {
 			json_spirit::read_string(docs[i].value.toString(), docValue);
@@ -1187,22 +1233,19 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::s
 			JSONDoc::expires_reference_version = tr->getReadVersion().get();
 			// Evaluate the operators in the document, which will reduce to nothing if it is expired.
 			doc.cleanOps();
-			if(!doc.has(name + ".last_updated"))
-				throw Error();
+			if (!doc.has(name + ".last_updated")) throw Error();
 
 			// Alive and valid.
 			// If limit == 1 and id is present then read more
-			if(limit == 1 && doc.has(name + ".instances." + id))
-				readMore = true;
-		} catch(Error &e) {
+			if (limit == 1 && doc.has(name + ".instances." + id)) readMore = true;
+		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
 			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", printable(docs[i].key));
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
-			if(limit == 1)
-				readMore = true;
+			if (limit == 1) readMore = true;
 		}
-		if(readMore) {
+		if (readMore) {
 			limit = 10000;
 			Standalone<RangeResultRef> docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, true));
 			docs = std::move(docs2);
@@ -1221,10 +1264,11 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<RangeResultRef> kvPairs = wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), CLIENT_KNOBS->ROW_LIMIT_UNLIMITED));
+			state Standalone<RangeResultRef> kvPairs =
+			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), CLIENT_KNOBS->ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);
-			for(auto &kv : kvPairs) {
+			for (auto& kv : kvPairs) {
 				json_spirit::mValue docValue;
 				json_spirit::read_string(kv.value.toString(), docValue);
 				modifier.absorb(docValue);
@@ -1232,33 +1276,35 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 			JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 			modifier.cleanOps();
 			return statusDoc;
-		}
-		catch (Error& e) {
+		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
 }
 
-// Read layer status for this layer and get the total count of agent processes (instances) then adjust the poll delay based on that and BACKUP_AGGREGATE_POLL_RATE
-ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, double *pollDelay) {
+// Read layer status for this layer and get the total count of agent processes (instances) then adjust the poll delay
+// based on that and BACKUP_AGGREGATE_POLL_RATE
+ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::string name, double* pollDelay) {
 	loop {
 		try {
 			json_spirit::mObject status = wait(getLayerStatus(src, rootKey));
 			int64_t processes = 0;
 			// If instances count is present and greater than 0 then update pollDelay
-			if(JSONDoc(status).tryGet<int64_t>(name + ".instances_running", processes) && processes > 0) {
+			if (JSONDoc(status).tryGet<int64_t>(name + ".instances_running", processes) && processes > 0) {
 				// The aggregate poll rate is the target poll rate for all agent processes in the cluster
-				// The poll rate (polls/sec) for a single processes is aggregate poll rate / processes, and pollDelay is the inverse of that
+				// The poll rate (polls/sec) for a single processes is aggregate poll rate / processes, and pollDelay is
+				// the inverse of that
 				*pollDelay = (double)processes / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 			}
-		} catch(Error &e) {
+		} catch (Error& e) {
 			TraceEvent(SevWarn, "BackupAgentPollRateUpdateError").error(e);
 		}
 		wait(delay(CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL));
 	}
 }
 
-ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database() ) {
+ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double* pollDelay,
+                                     Database taskDest = Database()) {
 	state std::string id = g_nondeterministic_random->randomUniqueID().toString();
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
@@ -1274,8 +1320,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 			tr->set(metaKey, rootKey);
 			wait(tr->commit());
 			break;
-		}
-		catch (Error& e) {
+		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
@@ -1284,7 +1329,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 	loop {
 		tr->reset();
 		try {
-			loop{
+			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1294,19 +1339,20 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 					tr->set(instanceKey, statusdoc);
 					wait(tr->commit());
 					break;
-				}
-				catch (Error& e) {
+				} catch (Error& e) {
 					wait(tr->onError(e));
 				}
 			}
 
-			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY *
+			           ((1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER) +
+			            2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER)));
 
-			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
-			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
+			// Now that status was written at least once by this process (and hopefully others), start the poll rate
+			// control updater if it wasn't started yet
+			if (!pollRateUpdater.isValid() && pollDelay != nullptr)
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
-		}
-		catch (Error& e) {
+		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
 			wait(delay(10.0));
 		}
@@ -1324,15 +1370,13 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 		try {
 			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
-		}
-		catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled)
-				throw;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) throw;
 
 			TraceEvent(SevError, "DA_runAgent").error(e);
 			fprintf(stderr, "ERROR: DR agent encountered fatal error `%s'\n", e.what());
 
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		}
 	}
 
@@ -1349,24 +1393,22 @@ ACTOR Future<Void> runAgent(Database db) {
 		try {
 			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
-		}
-		catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled)
-				throw;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) throw;
 
 			TraceEvent(SevError, "BA_runAgent").error(e);
 			fprintf(stderr, "ERROR: backup agent encountered fatal error `%s'\n", e.what());
 
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		}
 	}
 
 	return Void();
 }
 
-ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName) {
-	try
-	{
+ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                  std::string tagName) {
+	try {
 		state DatabaseBackupAgent backupAgent(src);
 
 		// Backup everything, if no ranges were specified
@@ -1374,36 +1416,33 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 
-
 		wait(backupAgent.submitBackup(dest, KeyRef(tagName), backupRanges, false, StringRef(), StringRef(), true));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
 
 		if (!agentRunning) {
-			printf("The DR on tag `%s' was successfully submitted but no DR agents are responding.\n", printable(StringRef(tagName)).c_str());
+			printf("The DR on tag `%s' was successfully submitted but no DR agents are responding.\n",
+			       printable(StringRef(tagName)).c_str());
 
 			// Throw an error that will not display any additional information
 			throw actor_cancelled();
-		}
-		else {
+		} else {
 			printf("The DR on tag `%s' was successfully submitted.\n", printable(StringRef(tagName)).c_str());
 		}
 	}
 
 	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An error was encountered during submission\n");
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
-			case error_code_backup_duplicate:
-				fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_duplicate:
+			fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 
@@ -1413,9 +1452,10 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	return Void();
 }
 
-ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun, bool waitForCompletion, bool stopWhenDone) {
-	try
-	{
+ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun,
+                                bool waitForCompletion, bool stopWhenDone) {
+	try {
 		state FileBackupAgent backupAgent;
 
 		// Backup everything, if no ranges were specified
@@ -1438,7 +1478,8 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 			}
 
 			if (waitForCompletion) {
-				printf("Submitted and now waiting for the backup on tag `%s' to complete. (DRY RUN)\n", printable(StringRef(tagName)).c_str());
+				printf("Submitted and now waiting for the backup on tag `%s' to complete. (DRY RUN)\n",
+				       printable(StringRef(tagName)).c_str());
 			}
 
 			else {
@@ -1446,54 +1487,55 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 				bool agentRunning = wait(backupAgent.checkActive(db));
 
 				if (!agentRunning) {
-					printf("The backup on tag `%s' was successfully submitted but no backup agents are responding. (DRY RUN)\n", printable(StringRef(tagName)).c_str());
+					printf("The backup on tag `%s' was successfully submitted but no backup agents are responding. "
+					       "(DRY RUN)\n",
+					       printable(StringRef(tagName)).c_str());
 
 					// Throw an error that will not display any additional information
 					throw actor_cancelled();
-				}
-				else {
-					printf("The backup on tag `%s' was successfully submitted. (DRY RUN)\n", printable(StringRef(tagName)).c_str());
+				} else {
+					printf("The backup on tag `%s' was successfully submitted. (DRY RUN)\n",
+					       printable(StringRef(tagName)).c_str());
 				}
 			}
 		}
 
 		else {
-			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
+			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges,
+			                              stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
-				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
+				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n",
+				       printable(StringRef(tagName)).c_str());
 				int _ = wait(backupAgent.waitBackup(db, tagName));
-			}
-			else {
+			} else {
 				// Check if a backup agent is running
 				bool agentRunning = wait(backupAgent.checkActive(db));
 
 				if (!agentRunning) {
-					printf("The backup on tag `%s' was successfully submitted but no backup agents are responding.\n", printable(StringRef(tagName)).c_str());
+					printf("The backup on tag `%s' was successfully submitted but no backup agents are responding.\n",
+					       printable(StringRef(tagName)).c_str());
 
 					// Throw an error that will not display any additional information
 					throw actor_cancelled();
-				}
-				else {
-					printf("The backup on tag `%s' was successfully submitted.\n", printable(StringRef(tagName)).c_str());
+				} else {
+					printf("The backup on tag `%s' was successfully submitted.\n",
+					       printable(StringRef(tagName)).c_str());
 				}
 			}
 		}
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An error was encountered during submission\n");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
-			case error_code_backup_duplicate:
-				fprintf(stderr, "ERROR: A backup is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_duplicate:
+			fprintf(stderr, "ERROR: A backup is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 
@@ -1503,9 +1545,9 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 	return Void();
 }
 
-ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName) {
-	try
-	{
+ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                  std::string tagName) {
+	try {
 		state DatabaseBackupAgent backupAgent(src);
 
 		// Backup everything, if no ranges were specified
@@ -1513,24 +1555,21 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 
-
 		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef()));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
 	}
 
 	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An error was encountered during submission\n");
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
-			case error_code_backup_duplicate:
-				fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_duplicate:
+			fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 
@@ -1541,16 +1580,13 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 }
 
 ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit) {
-	try
-	{
+	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		std::string	statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 		printf("%s\n", statusText.c_str());
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1559,16 +1595,13 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 }
 
 ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors) {
-	try
-	{
+	try {
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, showErrors, tagName));
+		std::string statusText = wait(backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1577,28 +1610,24 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showError
 }
 
 ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagName, bool partial) {
-	try
-	{
+	try {
 		state DatabaseBackupAgent backupAgent(src);
 
 		wait(backupAgent.abortBackup(dest, Key(tagName), partial));
 		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An error was encountered during submission\n");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
-			case error_code_backup_unneeded:
-				fprintf(stderr, "ERROR: A DR was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_unneeded:
+			fprintf(stderr, "ERROR: A DR was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 		throw;
@@ -1608,27 +1637,23 @@ ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagNam
 }
 
 ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
-	try
-	{
+	try {
 		state FileBackupAgent backupAgent;
 
 		wait(backupAgent.abortBackup(db, tagName));
 
 		printf("The backup on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An error was encountered during submission\n");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
-			case error_code_backup_unneeded:
-				fprintf(stderr, "ERROR: A backup was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_unneeded:
+			fprintf(stderr, "ERROR: A backup was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 		throw;
@@ -1638,18 +1663,15 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 }
 
 ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDone) {
-	try
-	{
+	try {
 		state FileBackupAgent backupAgent;
 
 		int status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
 
 		printf("The backup on tag `%s' %s.\n", printable(StringRef(tagName)).c_str(),
-			BackupAgentBase::getStateText((BackupAgentBase::enumState) status));
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+		       BackupAgentBase::getStateText((BackupAgentBase::enumState)status));
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1658,38 +1680,35 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 }
 
 ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool waitForCompletion) {
-	try
-	{
+	try {
 		state FileBackupAgent backupAgent;
 
 		wait(backupAgent.discontinueBackup(db, StringRef(tagName)));
 
 		// Wait for the backup to complete, if requested
 		if (waitForCompletion) {
-			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
+			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n",
+			       printable(StringRef(tagName)).c_str());
 			int _ = wait(backupAgent.waitBackup(db, tagName));
-		}
-		else {
+		} else {
 			printf("The backup on tag `%s' was successfully discontinued.\n", printable(StringRef(tagName)).c_str());
 		}
 
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		switch (e.code())
-		{
-			case error_code_backup_error:
-				fprintf(stderr, "ERROR: An encounter was error during submission\n");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
+		switch (e.code()) {
+		case error_code_backup_error:
+			fprintf(stderr, "ERROR: An encounter was error during submission\n");
 			break;
-			case error_code_backup_unneeded:
-				fprintf(stderr, "ERROR: A backup in not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_unneeded:
+			fprintf(stderr, "ERROR: A backup in not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
-			case error_code_backup_duplicate:
-				fprintf(stderr, "ERROR: The backup on tag `%s' is already discontinued\n", printable(StringRef(tagName)).c_str());
+		case error_code_backup_duplicate:
+			fprintf(stderr, "ERROR: The backup on tag `%s' is already discontinued\n",
+			        printable(StringRef(tagName)).c_str());
 			break;
-			default:
-				fprintf(stderr, "ERROR: %s\n", e.what());
+		default:
+			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
 		throw;
@@ -1703,10 +1722,8 @@ ACTOR Future<Void> changeBackupResumed(Database db, bool pause) {
 		state FileBackupAgent backupAgent;
 		wait(backupAgent.taskBucket->changePause(db, pause));
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1719,10 +1736,8 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 		state DatabaseBackupAgent backupAgent(src);
 		wait(backupAgent.taskBucket->changePause(dest, pause));
 		printf("All DR agents have been %s.\n", pause ? "paused" : "resumed");
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1730,13 +1745,14 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version dbVersion, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
-	try
-	{
+ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container,
+                              Standalone<VectorRef<KeyRangeRef>> ranges, Version dbVersion, bool performRestore,
+                              bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+	try {
 		state FileBackupAgent backupAgent;
 		state int64_t restoreVersion = -1;
 
-		if(ranges.size() > 1) {
+		if (ranges.size() > 1) {
 			fprintf(stderr, "Currently only a single restore range is supported!\n");
 			throw restore_error();
 		}
@@ -1744,55 +1760,53 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
 		if (performRestore) {
-			if(dbVersion == invalidVersion) {
+			if (dbVersion == invalidVersion) {
 				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
-				if(!desc.maxRestorableVersion.present()) {
+				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
 					throw restore_error();
 				}
 
 				dbVersion = desc.maxRestorableVersion.get();
 			}
-			Version _restoreVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version _restoreVersion =
+			    wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion, verbose, range,
+			                             KeyRef(addPrefix), KeyRef(removePrefix)));
 			restoreVersion = _restoreVersion;
-		}
-		else {
+		} else {
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
 			state BackupDescription description = wait(bc->describeBackup());
 
-			if(dbVersion <= 0) {
+			if (dbVersion <= 0) {
 				wait(description.resolveVersionTimes(db));
-				if(description.maxRestorableVersion.present())
+				if (description.maxRestorableVersion.present())
 					restoreVersion = description.maxRestorableVersion.get();
 				else {
 					fprintf(stderr, "Backup is not restorable\n");
 					throw restore_invalid_version();
 				}
-			}
-			else
+			} else
 				restoreVersion = dbVersion;
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
-			if(!rset.present()) {
+			if (!rset.present()) {
 				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
 				throw restore_invalid_version();
 			}
 
 			// Display the restore information, if requested
 			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long) restoreVersion);
+				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long)restoreVersion);
 				printf("%s\n", description.toString().c_str());
 			}
 		}
 
-		if(waitForDone && verbose) {
+		if (waitForDone && verbose) {
 			// If restore completed then report version restored
-			printf("Restored to version %lld%s\n", (long long) restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+			printf("Restored to version %lld%s\n", (long long)restoreVersion, (performRestore) ? "" : " (DRY RUN)");
 		}
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1800,7 +1814,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 	return Void();
 }
 
-Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
+Reference<IBackupContainer> openBackupContainer(const char* name, std::string destinationContainer) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -1812,10 +1826,8 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	Reference<IBackupContainer> c;
 	try {
 		c = IBackupContainer::openContainer(destinationContainer);
-	}
-	catch (Error& e) {
-		if(!error.empty())
-			error = std::string("[") + error + "]";
+	} catch (Error& e) {
+		if (!error.empty()) error = std::string("[") + error + "]";
 		fprintf(stderr, "ERROR (%s) on %s %s\n", e.what(), destinationContainer.c_str(), error.c_str());
 		printHelpTeaser(name);
 		throw;
@@ -1824,33 +1836,35 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
+ACTOR Future<Void> expireBackupData(const char* name, std::string destinationContainer, Version endVersion,
+                                    std::string endDatetime, Database db, bool force, Version restorableAfterVersion,
+                                    std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
-		Version v = wait( timeKeeperVersionFromDatetime(endDatetime, db) );
+		Version v = wait(timeKeeperVersionFromDatetime(endDatetime, db));
 		endVersion = v;
 	}
 
 	if (!restorableAfterDatetime.empty()) {
-		Version v = wait( timeKeeperVersionFromDatetime(restorableAfterDatetime, db) );
+		Version v = wait(timeKeeperVersionFromDatetime(restorableAfterDatetime, db));
 		restorableAfterVersion = v;
 	}
 
 	if (endVersion == invalidVersion) {
 		fprintf(stderr, "ERROR: No version or date/time is specified.\n");
 		printHelpTeaser(name);
-		throw backup_error();;
+		throw backup_error();
+		;
 	}
 
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		wait(c->expireData(endVersion, force, restorableAfterVersion));
 		printf("All data before version %lld is deleted.\n", endVersion);
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
-		if(e.code() == error_code_backup_cannot_expire)
-			fprintf(stderr, "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use --force to delete data anyway.\n");
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
+		if (e.code() == error_code_backup_cannot_expire)
+			fprintf(stderr, "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum "
+			                "restorability.  Use --force to delete data anyway.\n");
 		else
 			fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
@@ -1859,7 +1873,7 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 	return Void();
 }
 
-ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinationContainer) {
+ACTOR Future<Void> deleteBackupContainer(const char* name, std::string destinationContainer) {
 	try {
 		state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state int numDeleted = 0;
@@ -1867,19 +1881,15 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 
 		loop {
 			choose {
-				when ( wait(done) ) {
+				when(wait(done)) {
 					printf("The entire container has been deleted.\n");
 					break;
 				}
-				when ( wait(delay(3)) ) {
-					printf("%d files have been deleted so far...\n", numDeleted);
-				}
+				when(wait(delay(3))) { printf("%d files have been deleted so far...\n", numDeleted); }
 			}
 		}
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1887,17 +1897,15 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx) {
+ACTOR Future<Void> describeBackup(const char* name, std::string destinationContainer, bool deep,
+                                  Optional<Database> cx) {
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state BackupDescription desc = wait(c->describeBackup(deep));
-		if(cx.present())
-			wait(desc.resolveVersionTimes(cx.get()));
+		if (cx.present()) wait(desc.resolveVersionTimes(cx.get()));
 		printf("%s\n", desc.toString().c_str());
-	}
-	catch (Error& e) {
-		if(e.code() == error_code_actor_cancelled)
-			throw;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) throw;
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1911,8 +1919,7 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 		for (std::string container : containers) {
 			printf("%s\n", container.c_str());
 		}
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -1920,8 +1927,7 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 	return Void();
 }
 
-static std::vector<std::vector<StringRef>> parseLine(std::string &line, bool& err, bool& partial)
-{
+static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial) {
 	err = false;
 	partial = false;
 
@@ -1938,28 +1944,23 @@ static std::vector<std::vector<StringRef>> parseLine(std::string &line, bool& er
 		switch (line[i]) {
 		case ';':
 			if (!quoted) {
-				if (i > offset)
-					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+				if (i > offset) buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
-			}
-			else
+			} else
 				i++;
 			break;
 		case '"':
 			quoted = !quoted;
 			line.erase(i, 1);
-			if (quoted)
-				forcetoken = true;
+			if (quoted) forcetoken = true;
 			break;
 		case ' ':
 			if (!quoted) {
-				buf.push_back(StringRef((uint8_t *)(line.data() + offset),
-					i - offset));
+				buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				offset = i = line.find_first_not_of(' ', i);
 				forcetoken = false;
-			}
-			else
+			} else
 				i++;
 			break;
 		case '\\':
@@ -1982,7 +1983,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string &line, bool& er
 					ret.push_back(std::move(buf));
 					return ret;
 				}
-				char *pEnd;
+				char* pEnd;
 				save = line[i + 4];
 				line[i + 4] = 0;
 				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
@@ -2005,59 +2006,53 @@ static std::vector<std::vector<StringRef>> parseLine(std::string &line, bool& er
 	}
 
 	i -= 1;
-	if (i > offset || forcetoken)
-		buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+	if (i > offset || forcetoken) buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 
 	ret.push_back(std::move(buf));
 
-	if (quoted)
-		partial = true;
+	if (quoted) partial = true;
 
 	return ret;
 }
 
-static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges)
-{
-	bool	err = false, partial = false;
-	int	tokenArray = 0, tokenIndex = 0;
+static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
+	bool err = false, partial = false;
+	int tokenArray = 0, tokenIndex = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
-	for (auto tokens : parsed)
-	{
+	for (auto tokens : parsed) {
 		tokenArray++;
 		tokenIndex = 0;
 
 		/*
 		for (auto token : tokens)
 		{
-			tokenIndex++;
+		    tokenIndex++;
 
-			printf("%4d token #%2d: %s\n", tokenArray, tokenIndex, printable(token).c_str());
+		    printf("%4d token #%2d: %s\n", tokenArray, tokenIndex, printable(token).c_str());
 		}
 		*/
 
 		// Process the keys
 		// <begin> [end]
-		switch (tokens.size())
-		{
+		switch (tokens.size()) {
 			// empty
 		case 0:
 			break;
 
 			// single key range
 		case 1:
-				keyRanges.push_back_deep(keyRanges.arena(), KeyRangeRef(tokens.at(0), strinc(tokens.at(0))));
+			keyRanges.push_back_deep(keyRanges.arena(), KeyRangeRef(tokens.at(0), strinc(tokens.at(0))));
 			break;
 
 			// full key range
 		case 2:
 			try {
 				keyRanges.push_back_deep(keyRanges.arena(), KeyRangeRef(tokens.at(0), tokens.at(1)));
-			}
-			catch (Error& e) {
-				fprintf(stderr, "ERROR: Invalid key range `%s %s' reported error %s\n",
-					tokens.at(0).toString().c_str(), tokens.at(1).toString().c_str(), e.what());
+			} catch (Error& e) {
+				fprintf(stderr, "ERROR: Invalid key range `%s %s' reported error %s\n", tokens.at(0).toString().c_str(),
+				        tokens.at(1).toString().c_str(), e.what());
 				throw invalid_option_value();
 			}
 			break;
@@ -2074,14 +2069,14 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 }
 
 #ifdef ALLOC_INSTRUMENTATION
-extern uint8_t *g_extra_memory;
+extern uint8_t* g_extra_memory;
 #endif
 
 int main(int argc, char* argv[]) {
 	platformInit();
 	initSignalSafeUnwind();
 
-	int	status = FDB_EXIT_SUCCESS;
+	int status = FDB_EXIT_SUCCESS;
 
 	try {
 #ifdef ALLOC_INSTRUMENTATION
@@ -2100,8 +2095,7 @@ int main(int argc, char* argv[]) {
 
 		CSimpleOpt* args = NULL;
 
-		switch (programExe)
-		{
+		switch (programExe) {
 		case EXE_AGENT:
 			args = new CSimpleOpt(argc, argv, g_rgAgentOptions, SO_O_EXACT);
 			break;
@@ -2113,16 +2107,14 @@ int main(int argc, char* argv[]) {
 			if (argc < 2) {
 				printBackupUsage(false);
 				return FDB_EXIT_ERROR;
-			}
-			else {
+			} else {
 				// Get the backup type
 				backupType = getBackupType(argv[1]);
 
 				// Create the appropriate simple opt
-				switch (backupType)
-				{
+				switch (backupType) {
 				case BACKUP_START:
-					args = new CSimpleOpt(argc-1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT);
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT);
 					break;
 				case BACKUP_STATUS:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupStatusOptions, SO_O_EXACT);
@@ -2157,13 +2149,10 @@ int main(int argc, char* argv[]) {
 				case BACKUP_UNDEFINED:
 				default:
 					// Display help, if requested
-					if ((strcmp(argv[1], "-h") == 0)		||
-						(strcmp(argv[1], "--help") == 0)	)
-					{
+					if ((strcmp(argv[1], "-h") == 0) || (strcmp(argv[1], "--help") == 0)) {
 						printBackupUsage(false);
 						return FDB_EXIT_ERROR;
-					}
-					else {
+					} else {
 						fprintf(stderr, "ERROR: Unsupported backup action %s\n", argv[1]);
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
@@ -2177,16 +2166,14 @@ int main(int argc, char* argv[]) {
 			if (argc < 2) {
 				printDBBackupUsage(false);
 				return FDB_EXIT_ERROR;
-			}
-			else {
+			} else {
 				// Get the backup type
 				dbType = getDBType(argv[1]);
 
 				// Create the appropriate simple opt
-				switch (dbType)
-				{
+				switch (dbType) {
 				case DB_START:
-					args = new CSimpleOpt(argc-1, &argv[1], g_rgDBStartOptions, SO_O_EXACT);
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBStartOptions, SO_O_EXACT);
 					break;
 				case DB_STATUS:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBStatusOptions, SO_O_EXACT);
@@ -2206,13 +2193,10 @@ int main(int argc, char* argv[]) {
 				case DB_UNDEFINED:
 				default:
 					// Display help, if requested
-					if ((strcmp(argv[1], "-h") == 0)		||
-						(strcmp(argv[1], "--help") == 0)	)
-					{
+					if ((strcmp(argv[1], "-h") == 0) || (strcmp(argv[1], "--help") == 0)) {
 						printDBBackupUsage(false);
 						return FDB_EXIT_ERROR;
-					}
-					else {
+					} else {
 						fprintf(stderr, "ERROR: Unsupported dr action %s %d\n", argv[1], dbType);
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
@@ -2228,15 +2212,12 @@ int main(int argc, char* argv[]) {
 			}
 			// Get the restore operation type
 			restoreType = getRestoreType(argv[1]);
-			if(restoreType == RESTORE_UNKNOWN) {
+			if (restoreType == RESTORE_UNKNOWN) {
 				// Display help, if requested
-				if ((strcmp(argv[1], "-h") == 0)		||
-					(strcmp(argv[1], "--help") == 0)	)
-				{
+				if ((strcmp(argv[1], "-h") == 0) || (strcmp(argv[1], "--help") == 0)) {
 					printRestoreUsage(false);
 					return FDB_EXIT_ERROR;
-				}
-				else {
+				} else {
 					fprintf(stderr, "ERROR: Unsupported restore command: '%s'\n", argv[1]);
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
@@ -2282,28 +2263,27 @@ int main(int argc, char* argv[]) {
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
-		ESOError	lastError;
+		ESOError lastError;
 		bool partial = true;
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
 		std::vector<std::string> blobCredentials;
 
-		if( argc == 1 ) {
+		if (argc == 1) {
 			printUsage(programExe, false);
-			return FDB_EXIT_ERROR; 
+			return FDB_EXIT_ERROR;
 		}
 
-	#ifdef _WIN32
+#ifdef _WIN32
 		// Windows needs a gentle nudge to format floats correctly
 		//_set_output_format(_TWO_DIGIT_EXPONENT);
-	#endif
+#endif
 
 		while (args->Next()) {
 			lastError = args->LastError();
 
-			switch (lastError)
-			{
+			switch (lastError) {
 			case SO_SUCCESS:
 				break;
 
@@ -2339,212 +2319,208 @@ int main(int argc, char* argv[]) {
 
 			int optId = args->OptionId();
 			switch (optId) {
-				case OPT_HELP:
-					printUsage(programExe, false);
-					return FDB_EXIT_SUCCESS;
-					break;
-				case OPT_DEVHELP:
-					printUsage(programExe, true);
-					return FDB_EXIT_SUCCESS;
-					break;
-				case OPT_VERSION:
-					printVersion();
-					return FDB_EXIT_SUCCESS;
-					break;
-				case OPT_NOBUFSTDOUT:
-					setvbuf(stdout, NULL, _IONBF, 0);
-					setvbuf(stderr, NULL, _IONBF, 0);
-					break;
-				case OPT_BUFSTDOUTERR:
-					setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-					setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
-					break;
-				case OPT_QUIET:
-					quietDisplay = true;
-					break;
-				case OPT_DRYRUN:
-					dryRun = true;
-					break;
-				case OPT_FORCE:
-					forceAction = true;
-					break;
-				case OPT_TRACE:
-					trace = true;
-					break;
-				case OPT_TRACE_DIR:
-					trace = true;
-					traceDir = args->OptionArg();
-					break;
-				case OPT_TRACE_LOG_GROUP:
-					traceLogGroup = args->OptionArg();
-					break;
-				case OPT_LOCALITY: {
-					std::string syn = args->OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-						fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
-						return FDB_EXIT_ERROR;
-					}
-					syn = syn.substr(11);
-					std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
-					break;
-					}
-				case OPT_EXPIRE_BEFORE_DATETIME:
-					expireDatetime = args->OptionArg();
-					break;
-				case OPT_EXPIRE_RESTORABLE_AFTER_DATETIME:
-					expireRestorableAfterDatetime = args->OptionArg();
-					break;
-				case OPT_EXPIRE_BEFORE_VERSION:
-				case OPT_EXPIRE_RESTORABLE_AFTER_VERSION:
-				{
-					const char* a = args->OptionArg();
-					long long ver = 0;
-					if (!sscanf(a, "%lld", &ver)) {
-						fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
-					}
-					if(optId == OPT_EXPIRE_BEFORE_VERSION)
-						expireVersion = ver;
-					else
-						expireRestorableAfterVersion = ver;
-					break;
+			case OPT_HELP:
+				printUsage(programExe, false);
+				return FDB_EXIT_SUCCESS;
+				break;
+			case OPT_DEVHELP:
+				printUsage(programExe, true);
+				return FDB_EXIT_SUCCESS;
+				break;
+			case OPT_VERSION:
+				printVersion();
+				return FDB_EXIT_SUCCESS;
+				break;
+			case OPT_NOBUFSTDOUT:
+				setvbuf(stdout, NULL, _IONBF, 0);
+				setvbuf(stderr, NULL, _IONBF, 0);
+				break;
+			case OPT_BUFSTDOUTERR:
+				setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
+				setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+				break;
+			case OPT_QUIET:
+				quietDisplay = true;
+				break;
+			case OPT_DRYRUN:
+				dryRun = true;
+				break;
+			case OPT_FORCE:
+				forceAction = true;
+				break;
+			case OPT_TRACE:
+				trace = true;
+				break;
+			case OPT_TRACE_DIR:
+				trace = true;
+				traceDir = args->OptionArg();
+				break;
+			case OPT_TRACE_LOG_GROUP:
+				traceLogGroup = args->OptionArg();
+				break;
+			case OPT_LOCALITY: {
+				std::string syn = args->OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+					return FDB_EXIT_ERROR;
 				}
-				case OPT_BASEURL:
-					baseUrl = args->OptionArg();
-					break;
-				case OPT_CLUSTERFILE:
-					clusterFile = args->OptionArg();
-					break;
-				case OPT_DEST_CLUSTER:
-					clusterFile = args->OptionArg();
-					break;
-				case OPT_SOURCE_CLUSTER:
-					sourceClusterFile = args->OptionArg();
-					break;
-				case OPT_CLEANUP:
-					partial = false;
-					break;
-				case OPT_KNOB: {
-					std::string syn = args->OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
-						fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
-						return FDB_EXIT_ERROR;
-					}
-					syn = syn.substr(7);
-					knobs.push_back( std::make_pair( syn, args->OptionArg() ) );
-					break;
-					}
-				case OPT_BACKUPKEYS:
-					try {
-						addKeyRange(args->OptionArg(), backupKeys);
-					}
-					catch (Error &) {
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
-					}
-					break;
-				case OPT_DESTCONTAINER:
-					destinationContainer = args->OptionArg();
-					// If the url starts with '/' then prepend "file://" for backwards compatibility
-					if(StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
-						destinationContainer = std::string("file://") + destinationContainer;
-					break;
-				case OPT_SNAPSHOTINTERVAL: {
-					const char* a = args->OptionArg();
-					if (!sscanf(a, "%d", &snapshotIntervalSeconds)) {
-						fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
-					}
-					break;
+				syn = syn.substr(11);
+				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
+				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
+				break;
+			}
+			case OPT_EXPIRE_BEFORE_DATETIME:
+				expireDatetime = args->OptionArg();
+				break;
+			case OPT_EXPIRE_RESTORABLE_AFTER_DATETIME:
+				expireRestorableAfterDatetime = args->OptionArg();
+				break;
+			case OPT_EXPIRE_BEFORE_VERSION:
+			case OPT_EXPIRE_RESTORABLE_AFTER_VERSION: {
+				const char* a = args->OptionArg();
+				long long ver = 0;
+				if (!sscanf(a, "%lld", &ver)) {
+					fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
 				}
-				case OPT_WAITFORDONE:
-					waitForDone = true;
-					break;
-				case OPT_NOSTOPWHENDONE:
-					stopWhenDone = false;
-					break;
-				case OPT_RESTORECONTAINER:
-					restoreContainer = args->OptionArg();
-					// If the url starts with '/' then prepend "file://" for backwards compatibility
-					if(StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
-						restoreContainer = std::string("file://") + restoreContainer;
-					break;
-				case OPT_DESCRIBE_DEEP:
-					describeDeep = true;
-					break;
-				case OPT_DESCRIBE_TIMESTAMPS:
-					describeTimestamps = true;
-					break;
-				case OPT_PREFIX_ADD:
-					addPrefix = args->OptionArg();
-					break;
-				case OPT_PREFIX_REMOVE:
-					removePrefix = args->OptionArg();
-					break;
-				case OPT_ERRORLIMIT: {
-					const char* a = args->OptionArg();
-					if (!sscanf(a, "%d", &maxErrors)) {
-						fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
-					}
-					break;
+				if (optId == OPT_EXPIRE_BEFORE_VERSION)
+					expireVersion = ver;
+				else
+					expireRestorableAfterVersion = ver;
+				break;
+			}
+			case OPT_BASEURL:
+				baseUrl = args->OptionArg();
+				break;
+			case OPT_CLUSTERFILE:
+				clusterFile = args->OptionArg();
+				break;
+			case OPT_DEST_CLUSTER:
+				clusterFile = args->OptionArg();
+				break;
+			case OPT_SOURCE_CLUSTER:
+				sourceClusterFile = args->OptionArg();
+				break;
+			case OPT_CLEANUP:
+				partial = false;
+				break;
+			case OPT_KNOB: {
+				std::string syn = args->OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					return FDB_EXIT_ERROR;
 				}
-				case OPT_DBVERSION: {
-					const char* a = args->OptionArg();
-					long long dbVersionValue = 0;
-					if (!sscanf(a, "%lld", &dbVersionValue)) {
-						fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						return FDB_EXIT_ERROR;
-					}
-					dbVersion = dbVersionValue;
-					break;
+				syn = syn.substr(7);
+				knobs.push_back(std::make_pair(syn, args->OptionArg()));
+				break;
+			}
+			case OPT_BACKUPKEYS:
+				try {
+					addKeyRange(args->OptionArg(), backupKeys);
+				} catch (Error&) {
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
 				}
-	#ifdef _WIN32
-				case OPT_PARENTPID: {
-					auto pid_str = args->OptionArg();
-					int parent_pid = atoi(pid_str);
-					auto pHandle = OpenProcess( SYNCHRONIZE, FALSE, parent_pid );
-					if( !pHandle ) {
-						TraceEvent("ParentProcessOpenError").GetLastError();
-						fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-						throw platform_error();
-					}
-					startThread(&parentWatcher, pHandle);
-					break;
+				break;
+			case OPT_DESTCONTAINER:
+				destinationContainer = args->OptionArg();
+				// If the url starts with '/' then prepend "file://" for backwards compatibility
+				if (StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
+					destinationContainer = std::string("file://") + destinationContainer;
+				break;
+			case OPT_SNAPSHOTINTERVAL: {
+				const char* a = args->OptionArg();
+				if (!sscanf(a, "%d", &snapshotIntervalSeconds)) {
+					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
 				}
-	#endif
-				case OPT_TAGNAME:
-					tagName = args->OptionArg();
-					tagProvided = true;
-					break;
-				case OPT_CRASHONERROR:
-					g_crashOnError = true;
-					break;
-				case OPT_MEMLIMIT:
-					ti = parse_with_suffix(args->OptionArg(), "MiB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args->OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					memLimit = ti.get();
-					break;
-				case OPT_BLOB_CREDENTIALS:
-					blobCredentials.push_back(args->OptionArg());
-					break;
+				break;
+			}
+			case OPT_WAITFORDONE:
+				waitForDone = true;
+				break;
+			case OPT_NOSTOPWHENDONE:
+				stopWhenDone = false;
+				break;
+			case OPT_RESTORECONTAINER:
+				restoreContainer = args->OptionArg();
+				// If the url starts with '/' then prepend "file://" for backwards compatibility
+				if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+					restoreContainer = std::string("file://") + restoreContainer;
+				break;
+			case OPT_DESCRIBE_DEEP:
+				describeDeep = true;
+				break;
+			case OPT_DESCRIBE_TIMESTAMPS:
+				describeTimestamps = true;
+				break;
+			case OPT_PREFIX_ADD:
+				addPrefix = args->OptionArg();
+				break;
+			case OPT_PREFIX_REMOVE:
+				removePrefix = args->OptionArg();
+				break;
+			case OPT_ERRORLIMIT: {
+				const char* a = args->OptionArg();
+				if (!sscanf(a, "%d", &maxErrors)) {
+					fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				break;
+			}
+			case OPT_DBVERSION: {
+				const char* a = args->OptionArg();
+				long long dbVersionValue = 0;
+				if (!sscanf(a, "%lld", &dbVersionValue)) {
+					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				dbVersion = dbVersionValue;
+				break;
+			}
+#ifdef _WIN32
+			case OPT_PARENTPID: {
+				auto pid_str = args->OptionArg();
+				int parent_pid = atoi(pid_str);
+				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+				if (!pHandle) {
+					TraceEvent("ParentProcessOpenError").GetLastError();
+					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+					throw platform_error();
+				}
+				startThread(&parentWatcher, pHandle);
+				break;
+			}
+#endif
+			case OPT_TAGNAME:
+				tagName = args->OptionArg();
+				tagProvided = true;
+				break;
+			case OPT_CRASHONERROR:
+				g_crashOnError = true;
+				break;
+			case OPT_MEMLIMIT:
+				ti = parse_with_suffix(args->OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args->OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				memLimit = ti.get();
+				break;
+			case OPT_BLOB_CREDENTIALS:
+				blobCredentials.push_back(args->OptionArg());
+				break;
 			}
 		}
 
 		// Process the extra arguments
-		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++)
-		{
-			switch (programExe)
-			{
+		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++) {
+			switch (programExe) {
 			case EXE_AGENT:
 				fprintf(stderr, "ERROR: Backup Agent does not support argument value `%s'\n", args->File(argLoop));
 				printHelpTeaser(argv[0]);
@@ -2563,8 +2539,7 @@ int main(int argc, char* argv[]) {
 				else {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
-					}
-					catch (Error& e) {
+					} catch (Error& e) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
@@ -2594,8 +2569,7 @@ int main(int argc, char* argv[]) {
 				else {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
-					}
-					catch (Error& e) {
+					} catch (Error& e) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
@@ -2609,14 +2583,13 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Delete the simple option object, if defined
-		if (args)
-		{
+		if (args) {
 			delete args;
 			args = NULL;
 		}
 
 		std::string commandLine;
-		for(int a=0; a<argc; a++) {
+		for (int a = 0; a < argc; a++) {
 			if (a) commandLine += ' ';
 			commandLine += argv[a];
 		}
@@ -2625,9 +2598,9 @@ int main(int argc, char* argv[]) {
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
 		CLIENT_KNOBS = clientKnobs;
 
-		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+		for (auto k = knobs.begin(); k != knobs.end(); ++k) {
 			try {
-				if (!clientKnobs->setKnob( k->first, k->second )) {
+				if (!clientKnobs->setKnob(k->first, k->second)) {
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -2641,8 +2614,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (trace) {
-			if(!traceLogGroup.empty())
-				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
+			if (!traceLogGroup.empty()) setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
 
 			if (traceDir.empty())
 				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
@@ -2653,18 +2625,14 @@ int main(int argc, char* argv[]) {
 		}
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 		Error::init();
-		std::set_new_handler( &platform::outOfMemory );
-		setMemoryQuota( memLimit );
+		std::set_new_handler(&platform::outOfMemory);
+		setMemoryQuota(memLimit);
 
 		int total = 0;
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			total += i->second;
-		if (total)
-			printf("%d errors:\n", total);
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0)
-				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
-
+		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i) total += i->second;
+		if (total) printf("%d errors:\n", total);
+		for (auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
+			if (i->second > 0) printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
 
 		Reference<Cluster> cluster;
 		Reference<ClusterConnectionFile> ccf;
@@ -2681,30 +2649,30 @@ int main(int argc, char* argv[]) {
 
 		try {
 			setupNetwork(0, true);
-		}
-		catch (Error& e) {
+		} catch (Error& e) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
 		}
 
-		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
+		// are logged. This thread will eventually run the network, so call it now.
+		TraceEvent::setNetworkThread();
 
 		// Add blob credentials files from the environment to the list collected from the command line.
-		const char *blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-		if(blobCredsFromENV != nullptr) {
+		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		if (blobCredsFromENV != nullptr) {
 			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 			do {
 				StringRef file = t.eat(":");
-				if(file.size() != 0)
-				blobCredentials.push_back(file.toString());
-			} while(t.size() != 0);
+				if (file.size() != 0) blobCredentials.push_back(file.toString());
+			} while (t.size() != 0);
 		}
 
 		// Update the global blob credential files list
-		std::vector<std::string> *pFiles = (std::vector<std::string> *)g_network->global(INetwork::enBlobCredentialFiles);
-		if(pFiles != nullptr) {
-			for(auto &f : blobCredentials) {
+		std::vector<std::string>* pFiles =
+		    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+		if (pFiles != nullptr) {
+			for (auto& f : blobCredentials) {
 				pFiles->push_back(f);
 			}
 		}
@@ -2713,7 +2681,7 @@ int main(int argc, char* argv[]) {
 		// For most modes, initCluster() will open a trace file, but some fdbbackup operations do not require
 		// a cluster so they should use this instead.
 		auto initTraceFile = [&]() {
-			if(trace)
+			if (trace)
 				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
 		};
 
@@ -2721,49 +2689,46 @@ int main(int argc, char* argv[]) {
 			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
 			try {
 				ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
-			}
-			catch (Error& e) {
-				if(!quiet)
+			} catch (Error& e) {
+				if (!quiet)
 					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 				return false;
 			}
 
 			try {
 				cluster = Cluster::createCluster(ccf, -1);
-			}
-			catch (Error& e) {
+			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 				return false;
 			}
 
 			TraceEvent("ProgramStart")
-				.detail("SourceVersion", getHGVersion())
-				.detail("Version", FDB_VT_VERSION )
-				.detail("PackageName", FDB_VT_PACKAGE_NAME)
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-				.detail("CommandLine", commandLine)
-				.detail("MemoryLimit", memLimit)
-				.trackLatest("ProgramStart");
+			    .detail("SourceVersion", getHGVersion())
+			    .detail("Version", FDB_VT_VERSION)
+			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			    .detail("CommandLine", commandLine)
+			    .detail("MemoryLimit", memLimit)
+			    .trackLatest("ProgramStart");
 
 			db = cluster->createDatabase(databaseKey, localities).get();
 			return true;
 		};
 
-		if(sourceClusterFile.size()) {
+		if (sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
-				source_ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
-			}
-			catch (Error& e) {
+				source_ccf =
+				    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
+			} catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
 				return FDB_EXIT_ERROR;
 			}
 
 			try {
 				source_cluster = Cluster::createCluster(source_ccf, -1);
-			}
-			catch (Error& e) {
+			} catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", source_ccf->getFilename().c_str());
 				return FDB_EXIT_ERROR;
@@ -2772,89 +2737,81 @@ int main(int argc, char* argv[]) {
 			source_db = source_cluster->createDatabase(databaseKey, localities).get();
 		}
 
-		switch (programExe)
-		{
+		switch (programExe) {
 		case EXE_AGENT:
-			if(!initCluster())
-				return FDB_EXIT_ERROR;
+			if (!initCluster()) return FDB_EXIT_ERROR;
 			f = stopAfter(runAgent(db));
 			break;
 		case EXE_BACKUP:
-			switch (backupType)
-			{
-			case BACKUP_START:
-			{
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
+			switch (backupType) {
+			case BACKUP_START: {
+				if (!initCluster()) return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
-				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
+				f = stopAfter(submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName,
+				                           dryRun, waitForDone, stopWhenDone));
 				break;
 			}
 
 			case BACKUP_STATUS:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( statusBackup(db, tagName, true) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(statusBackup(db, tagName, true));
 				break;
 
 			case BACKUP_ABORT:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( abortBackup(db, tagName) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(abortBackup(db, tagName));
 				break;
 
 			case BACKUP_WAIT:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( waitBackup(db, tagName, stopWhenDone) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(waitBackup(db, tagName, stopWhenDone));
 				break;
 
 			case BACKUP_DISCONTINUE:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( discontinueBackup(db, tagName, waitForDone) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(discontinueBackup(db, tagName, waitForDone));
 				break;
 
 			case BACKUP_PAUSE:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( changeBackupResumed(db, true) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(changeBackupResumed(db, true));
 				break;
 
 			case BACKUP_RESUME:
-				if(!initCluster())
-					return FDB_EXIT_ERROR;
-				f = stopAfter( changeBackupResumed(db, false) );
+				if (!initCluster()) return FDB_EXIT_ERROR;
+				f = stopAfter(changeBackupResumed(db, false));
 				break;
 
 			case BACKUP_EXPIRE:
 				initTraceFile();
 				// Must have a usable cluster if either expire DateTime options were used
-				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
-					if(!initCluster())
-						return FDB_EXIT_ERROR;
+				if (!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
+					if (!initCluster()) return FDB_EXIT_ERROR;
 				}
-				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
+				f = stopAfter(expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db,
+				                               forceAction, expireRestorableAfterVersion,
+				                               expireRestorableAfterDatetime));
 				break;
 
 			case BACKUP_DELETE:
 				initTraceFile();
-				f = stopAfter( deleteBackupContainer(argv[0], destinationContainer) );
+				f = stopAfter(deleteBackupContainer(argv[0], destinationContainer));
 				break;
 
 			case BACKUP_DESCRIBE:
 				initTraceFile();
 				// If timestamp lookups are desired, require a cluster file
-				if(describeTimestamps && !initCluster())
-					return FDB_EXIT_ERROR;
+				if (describeTimestamps && !initCluster()) return FDB_EXIT_ERROR;
 
-				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
-				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
+				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was
+				// given, but quietly skip them if not.
+				f = stopAfter(describeBackup(argv[0], destinationContainer, describeDeep,
+				                             describeTimestamps ? Optional<Database>(db) : Optional<Database>()));
 				break;
 			case BACKUP_LIST:
 				initTraceFile();
-				f = stopAfter( listBackup(baseUrl) );
+				f = stopAfter(listBackup(baseUrl));
 				break;
 
 			case BACKUP_UNDEFINED:
@@ -2867,62 +2824,60 @@ int main(int argc, char* argv[]) {
 
 			break;
 		case EXE_RESTORE:
-			if(!initCluster())
-				return FDB_EXIT_ERROR;
-			switch(restoreType) {
-				case RESTORE_START:
-					f = stopAfter( runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
-					break;
-				case RESTORE_WAIT:
-					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
-					break;
-				case RESTORE_ABORT:
-					f = stopAfter( map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
-						printf("Tag: %s  State: %s\n", tagName.c_str(), FileBackupAgent::restoreStateText(s).toString().c_str());
-						return Void();
-					}) );
-					break;
-				case RESTORE_STATUS:
-					
-					// If no tag is specifically provided then print all tag status, don't just use "default"
-					if(tagProvided)
-						tag = tagName;
-					f = stopAfter( map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-						printf("%s\n", s.c_str());
-						return Void();
-					}) );
-					break;
-				default:
-					throw restore_error();
+			if (!initCluster()) return FDB_EXIT_ERROR;
+			switch (restoreType) {
+			case RESTORE_START:
+				f = stopAfter(runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay,
+				                         waitForDone, addPrefix, removePrefix));
+				break;
+			case RESTORE_WAIT:
+				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), true)));
+				break;
+			case RESTORE_ABORT:
+				f = stopAfter(
+				    map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
+					    printf("Tag: %s  State: %s\n", tagName.c_str(),
+					           FileBackupAgent::restoreStateText(s).toString().c_str());
+					    return Void();
+				    }));
+				break;
+			case RESTORE_STATUS:
+
+				// If no tag is specifically provided then print all tag status, don't just use "default"
+				if (tagProvided) tag = tagName;
+				f = stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
+					printf("%s\n", s.c_str());
+					return Void();
+				}));
+				break;
+			default:
+				throw restore_error();
 			}
 			break;
 		case EXE_DR_AGENT:
-			if(!initCluster())
-				return FDB_EXIT_ERROR;
-			f = stopAfter( runDBAgent(source_db, db) );
+			if (!initCluster()) return FDB_EXIT_ERROR;
+			f = stopAfter(runDBAgent(source_db, db));
 			break;
 		case EXE_DB_BACKUP:
-			if(!initCluster())
-				return FDB_EXIT_ERROR;
-			switch (dbType)
-			{
+			if (!initCluster()) return FDB_EXIT_ERROR;
+			switch (dbType) {
 			case DB_START:
-				f = stopAfter( submitDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter(submitDBBackup(source_db, db, backupKeys, tagName));
 				break;
 			case DB_STATUS:
-				f = stopAfter( statusDBBackup(source_db, db, tagName, maxErrors) );
+				f = stopAfter(statusDBBackup(source_db, db, tagName, maxErrors));
 				break;
 			case DB_SWITCH:
-				f = stopAfter( switchDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter(switchDBBackup(source_db, db, backupKeys, tagName));
 				break;
 			case DB_ABORT:
-				f = stopAfter( abortDBBackup(source_db, db, tagName, partial) );
+				f = stopAfter(abortDBBackup(source_db, db, tagName, partial));
 				break;
 			case DB_PAUSE:
-				f = stopAfter( changeDBBackupResumed(source_db, db, true) );
+				f = stopAfter(changeDBBackupResumed(source_db, db, true));
 				break;
 			case DB_RESUME:
-				f = stopAfter( changeDBBackupResumed(source_db, db, false) );
+				f = stopAfter(changeDBBackupResumed(source_db, db, false));
 				break;
 			case DB_UNDEFINED:
 			default:
@@ -2939,33 +2894,28 @@ int main(int argc, char* argv[]) {
 
 		runNetwork();
 
-		if(f.isValid() && f.isReady() && !f.isError() && !f.get().present()) {
+		if (f.isValid() && f.isReady() && !f.isError() && !f.get().present()) {
 			status = FDB_EXIT_ERROR;
 		}
 
-		if(fstatus.isValid() && fstatus.isReady() && !fstatus.isError() && fstatus.get().present()) {
+		if (fstatus.isValid() && fstatus.isReady() && !fstatus.isError() && fstatus.get().present()) {
 			status = fstatus.get().get();
 		}
 
-		#ifdef ALLOC_INSTRUMENTATION
+#ifdef ALLOC_INSTRUMENTATION
 		{
-			cout << "Page Counts: "
-				<< FastAllocator<16>::pageCount << " "
-				<< FastAllocator<32>::pageCount << " "
-				<< FastAllocator<64>::pageCount << " "
-				<< FastAllocator<128>::pageCount << " "
-				<< FastAllocator<256>::pageCount << " "
-				<< FastAllocator<512>::pageCount << " "
-				<< FastAllocator<1024>::pageCount << " "
-				<< FastAllocator<2048>::pageCount << " "
-				<< FastAllocator<4096>::pageCount << endl;
+			cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
+			     << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
+			     << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
+			     << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
+			     << FastAllocator<4096>::pageCount << endl;
 
-			vector< std::pair<std::string, const char*> > typeNames;
-			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
+			vector<std::pair<std::string, const char*>> typeNames;
+			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 
 #ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
@@ -2983,19 +2933,20 @@ int main(int argc, char* argv[]) {
 					s = s.substr(LiteralStringRef("struct ").size());
 #endif
 
-				typeNames.push_back( std::make_pair(s, i->first) );
+				typeNames.push_back(std::make_pair(s, i->first));
 			}
 			std::sort(typeNames.begin(), typeNames.end());
-			for(int i=0; i<typeNames.size(); i++) {
+			for (int i = 0; i < typeNames.size(); i++) {
 				const char* n = typeNames[i].second;
 				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n", f.allocCount, -f.deallocCount, f.allocCount-f.deallocCount, f.maxAllocated, typeNames[i].first.c_str());
+				printf("%+d\t%+d\t%d\t%d\t%s\n", f.allocCount, -f.deallocCount, f.allocCount - f.deallocCount,
+				       f.maxAllocated, typeNames[i].first.c_str());
 			}
 
 			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording
 			memSample_entered = true;
 		}
-		#endif
+#endif
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;

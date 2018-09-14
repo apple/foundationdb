@@ -26,7 +26,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef FLOW_ACOMPILER_STATE
 #define FLOW_ACOMPILER_STATE 1
@@ -36,12 +36,12 @@ struct ThreadSafetyWorkload;
 // Parameters passed to each thread
 struct ThreadInfo {
 	int id;
-	ThreadSafetyWorkload *self;
+	ThreadSafetyWorkload* self;
 
 	Promise<Void> done;
 	DeterministicRandom random;
 
-	ThreadInfo(int id, ThreadSafetyWorkload *self) : id(id), self(self), random(g_random->randomInt(1, 1e9)) { }
+	ThreadInfo(int id, ThreadSafetyWorkload* self) : id(id), self(self), random(g_random->randomInt(1, 1e9)) {}
 };
 
 // A thread barrier implementation. Reached() method blocks until the required number of threads reach it.
@@ -52,24 +52,20 @@ struct Barrier {
 	int numRequired;
 	int numReached;
 
-	Barrier() : numRequired(0), numReached(0) { }
+	Barrier() : numRequired(0), numReached(0) {}
 
-	~Barrier() {
-		fire();
-	}
+	~Barrier() { fire(); }
 
 	void decrementNumRequired() {
 		mutex.enter();
-		if(--numRequired == numReached)
-			fire();
+		if (--numRequired == numReached) fire();
 		mutex.leave();
 	}
 
 	void setNumRequired(int numRequired) {
 		mutex.enter();
 		this->numRequired = numRequired;
-		if(numRequired > 0 && numRequired <= numReached)
-			fire();
+		if (numRequired > 0 && numRequired <= numReached) fire();
 		mutex.leave();
 	}
 
@@ -78,9 +74,9 @@ struct Barrier {
 	void reached() {
 		mutex.enter();
 		bool ready = (++numReached == numRequired);
-		Event *myEvent = NULL;
+		Event* myEvent = NULL;
 
-		if(ready)
+		if (ready)
 			fire();
 		else {
 			myEvent = new Event();
@@ -88,7 +84,7 @@ struct Barrier {
 		}
 		mutex.leave();
 
-		if(!ready) {
+		if (!ready) {
 			myEvent->block();
 			delete myEvent;
 		}
@@ -97,8 +93,7 @@ struct Barrier {
 private:
 	void fire() {
 		numReached = 0;
-		for(int i = 0; i < events.size(); ++i)
-			events[i]->set();
+		for (int i = 0; i < events.size(); ++i) events[i]->set();
 
 		events.clear();
 	}
@@ -106,7 +101,7 @@ private:
 
 extern bool noUnseed;
 
-//A workload which uses the thread safe API from multiple threads
+// A workload which uses the thread safe API from multiple threads
 struct ThreadSafetyWorkload : TestWorkload {
 	int threadsPerClient;
 	double threadDuration;
@@ -127,8 +122,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Reference<ITransaction> tr;
 
-	ThreadSafetyWorkload(WorkloadContext const& wcx)
-		: TestWorkload(wcx), tr(NULL), stopped(false) {
+	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), tr(NULL), stopped(false) {
 
 		threadsPerClient = getOption(options, LiteralStringRef("threadsPerClient"), 3);
 		threadDuration = getOption(options, LiteralStringRef("threadDuration"), 60.0);
@@ -142,30 +136,25 @@ struct ThreadSafetyWorkload : TestWorkload {
 		noUnseed = true;
 	}
 
-	virtual std::string description() {
-		return "ThreadSafety";
-	}
+	virtual std::string description() { return "ThreadSafety"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
-		return _start(cx, this);
-	}
+	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 
-	ACTOR Future<Void> _start(Database cx, ThreadSafetyWorkload *self) {
+	ACTOR Future<Void> _start(Database cx, ThreadSafetyWorkload* self) {
 		state std::vector<ThreadInfo*> threadInfo;
 
-		Reference<IDatabase> dbRef = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		Reference<IDatabase> dbRef =
+		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = dbRef;
 
-		if(g_random->coinflip()) {
+		if (g_random->coinflip()) {
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 
 		state int i;
-		for(i = 0; i < self->threadsPerClient; ++i) {
+		for (i = 0; i < self->threadsPerClient; ++i) {
 			threadInfo.push_back(new ThreadInfo(i, self));
 			g_network->startThread(self->threadStart, threadInfo[i]);
 		}
@@ -176,12 +165,11 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->mutex.enter();
 		self->stopped = true;
 		self->mutex.leave();
-			
-		for(i = 0; i < threadInfo.size(); ++i) {
+
+		for (i = 0; i < threadInfo.size(); ++i) {
 			try {
 				wait(threadInfo[i]->done.getFuture());
-			}
-			catch(Error &e) {
+			} catch (Error& e) {
 				self->success = false;
 				printf("Thread %d.%d failed: %s\n", self->clientId, i, e.name());
 				TraceEvent(SevError, "ThreadSafety_ThreadFailed").error(e);
@@ -193,42 +181,42 @@ struct ThreadSafetyWorkload : TestWorkload {
 		return Void();
 	}
 
-	THREAD_FUNC threadStart(void *arg) {
-		ThreadInfo *info = (ThreadInfo*)arg;
+	THREAD_FUNC threadStart(void* arg) {
+		ThreadInfo* info = (ThreadInfo*)arg;
 
 		Error error(error_code_success);
 		try {
 			info->self->runTest(info);
-		}
-		catch(Error &e) {
+		} catch (Error& e) {
 			error = e;
 		}
 
 		info->self->commitBarrier.decrementNumRequired();
 
-		//Signal completion back to the main thread
-		onMainThreadVoid( [=]() { 
-			if(error.code() != error_code_success)
-				info->done.sendError(error);
-			else
-				info->done.send(Void()); 
-		}, NULL );
+		// Signal completion back to the main thread
+		onMainThreadVoid(
+		    [=]() {
+			    if (error.code() != error_code_success)
+				    info->done.sendError(error);
+			    else
+				    info->done.send(Void());
+		    },
+		    NULL);
 
 		THREAD_RETURN;
 	}
 
-	Key getRandomKey(DeterministicRandom &random) {
+	Key getRandomKey(DeterministicRandom& random) {
 		return StringRef(format("ThreadSafetyKey%010d", random.randomInt(0, numKeys)));
 	}
 
-	void runTest(ThreadInfo *info) {
-		//Create a new transaction
+	void runTest(ThreadInfo* info) {
+		// Create a new transaction
 		mutex.enter();
-		if(!tr) {
+		if (!tr) {
 			try {
 				tr = db->createTransaction();
-			}
-			catch(Error &) {
+			} catch (Error&) {
 				mutex.leave();
 				throw;
 			}
@@ -236,32 +224,35 @@ struct ThreadSafetyWorkload : TestWorkload {
 		mutex.leave();
 
 		loop {
-			//Perform a sequence of random operations
-			for(int i = 0; i < info->random.randomInt(1, 10); ++i) {
+			// Perform a sequence of random operations
+			for (int i = 0; i < info->random.randomInt(1, 10); ++i) {
 				int operation = info->random.randomInt(0, 6);
 
 				try {
-					if(operation == 0) 
-						tr->set(getRandomKey(info->random), StringRef(std::string(info->random.randomInt(0, 100), 'x')));
-					else if(operation == 1)
+					if (operation == 0)
+						tr->set(getRandomKey(info->random),
+						        StringRef(std::string(info->random.randomInt(0, 100), 'x')));
+					else if (operation == 1)
 						tr->get(getRandomKey(info->random)).getBlocking();
-					else if(operation == 2) 
-						tr->getKey(KeySelectorRef(getRandomKey(info->random), info->random.randomInt(0, 2) == 1, info->random.randomInt(-10, 11))).getBlocking();
-					else if(operation == 3) {
+					else if (operation == 2)
+						tr->getKey(KeySelectorRef(getRandomKey(info->random), info->random.randomInt(0, 2) == 1,
+						                          info->random.randomInt(-10, 11)))
+						    .getBlocking();
+					else if (operation == 3) {
 						Key key1 = getRandomKey(info->random);
 						Key key2 = getRandomKey(info->random);
 						GetRangeLimits limits(info->random.randomInt(1, 1000), info->random.randomInt(1, 1e6));
-						tr->getRange(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)), limits, info->random.randomInt(0, 2) != 0, info->random.randomInt(0, 2) != 0).getBlocking();
-					}
-					else if(operation == 4)
+						tr->getRange(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)), limits,
+						             info->random.randomInt(0, 2) != 0, info->random.randomInt(0, 2) != 0)
+						    .getBlocking();
+					} else if (operation == 4)
 						tr->clear(getRandomKey(info->random));
-					else if(operation == 5) {
+					else if (operation == 5) {
 						Key key1 = getRandomKey(info->random);
 						Key key2 = getRandomKey(info->random);
 						tr->clear(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)));
 					}
-				}
-				catch(Error &) {
+				} catch (Error&) {
 					break;
 				}
 			}
@@ -270,23 +261,21 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 			// One thread starts a commit, and all threads wait on that commit
 			mutex.enter();
-			if(!commitFuture.isValid()) 
-				commitFuture = tr->commit();
+			if (!commitFuture.isValid()) commitFuture = tr->commit();
 			ThreadFuture<Void> commit = commitFuture;
 			mutex.leave();
 
 			try {
 				commit.getBlocking();
+			} catch (Error&) {
 			}
-			catch(Error &) { }
 
 			commitBarrier.reached();
 
 			mutex.enter();
-			if(commitFuture.isValid())
-				commitFuture = ThreadFuture<Void>();
+			if (commitFuture.isValid()) commitFuture = ThreadFuture<Void>();
 
-			if(stopped) {
+			if (stopped) {
 				mutex.leave();
 				break;
 			}
@@ -295,13 +284,9 @@ struct ThreadSafetyWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return success;
-	}
+	virtual Future<bool> check(Database const& cx) { return success; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 };
 
 WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory("ThreadSafety");

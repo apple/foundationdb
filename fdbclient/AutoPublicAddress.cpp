@@ -28,18 +28,18 @@
 
 #include "CoordinationInterface.h"
 
-uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs ) {
+uint32_t determinePublicIPAutomatically(ClusterConnectionString const& ccs) {
 	try {
 		boost::asio::io_service ioService;
 		boost::asio::ip::udp::socket socket(ioService);
-		boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address_v4(ccs.coordinators()[0].ip), ccs.coordinators()[0].port);
+		boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address_v4(ccs.coordinators()[0].ip),
+		                                        ccs.coordinators()[0].port);
 		socket.connect(endpoint);
 		auto ip = socket.local_endpoint().address().to_v4().to_ulong();
 		socket.close();
 
 		return ip;
-	}
-	catch(boost::system::system_error e) {
+	} catch (boost::system::system_error e) {
 		fprintf(stderr, "Error determining public address: %s\n", e.what());
 		throw bind_failed();
 	}

@@ -31,24 +31,23 @@ typedef uint64_t DBRecoveryCount;
 
 struct MasterInterface {
 	LocalityData locality;
-	RequestStream< ReplyPromise<Void> > waitFailure;
-	RequestStream< struct GetRateInfoRequest > getRateInfo;
-	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
-	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
-	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct GetRateInfoRequest> getRateInfo;
+	RequestStream<struct TLogRejoinRequest>
+	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
+	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().address; }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & locality & waitFailure & getRateInfo & tlogRejoin & changeCoordinators & getCommitVersion;
+		ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		ar& locality& waitFailure& getRateInfo& tlogRejoin& changeCoordinators& getCommitVersion;
 	}
 
-	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
-	}
+	void initEndpoints() { getCommitVersion.getEndpoint(TaskProxyGetConsistentReadVersion); }
 };
 
 struct GetRateInfoRequest {
@@ -57,11 +56,12 @@ struct GetRateInfoRequest {
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions)
+	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & requesterID & totalReleasedTransactions & reply;
+		ar& requesterID& totalReleasedTransactions& reply;
 	}
 };
 
@@ -71,32 +71,33 @@ struct GetRateInfoReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & transactionRate & leaseDuration;
+		ar& transactionRate& leaseDuration;
 	}
 };
 
 struct TLogRejoinRequest {
 	TLogInterface myInterface;
-	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
+	ReplyPromise<bool> reply; // false means someone else registered, so we should re-register.  true means this master
+	                          // is recovered, so don't send again to the same master.
 
-	TLogRejoinRequest() { }
-	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
+	TLogRejoinRequest() {}
+	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & myInterface & reply;
+		ar& myInterface& reply;
 	}
 };
 
 struct ChangeCoordinatorsRequest {
 	Standalone<StringRef> newConnectionString;
-	ReplyPromise<Void> reply;  // normally throws even on success!
+	ReplyPromise<Void> reply; // normally throws even on success!
 
 	ChangeCoordinatorsRequest() {}
 	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString) : newConnectionString(newConnectionString) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & newConnectionString & reply;
+		ar& newConnectionString& reply;
 	}
 };
 
@@ -106,22 +107,16 @@ struct ResolverMoveRef {
 
 	ResolverMoveRef() : dest(0) {}
 	ResolverMoveRef(KeyRangeRef const& range, int dest) : range(range), dest(dest) {}
-	ResolverMoveRef( Arena& a, const ResolverMoveRef& copyFrom ) : range(a, copyFrom.range), dest(copyFrom.dest) {}
+	ResolverMoveRef(Arena& a, const ResolverMoveRef& copyFrom) : range(a, copyFrom.range), dest(copyFrom.dest) {}
 
-	bool operator == ( ResolverMoveRef const& rhs ) const {
-		return range == rhs.range && dest == rhs.dest;
-	}
-	bool operator != ( ResolverMoveRef const& rhs ) const {
-		return range != rhs.range || dest != rhs.dest;
-	}
+	bool operator==(ResolverMoveRef const& rhs) const { return range == rhs.range && dest == rhs.dest; }
+	bool operator!=(ResolverMoveRef const& rhs) const { return range != rhs.range || dest != rhs.dest; }
 
-	size_t expectedSize() const {
-		return range.expectedSize();
-	}
+	size_t expectedSize() const { return range.expectedSize(); }
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ar & range & dest;
+	void serialize(Ar& ar) {
+		ar& range& dest;
 	}
 };
 
@@ -133,11 +128,12 @@ struct GetCommitVersionReply {
 	uint64_t requestNum;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
-	explicit GetCommitVersionReply( Version version, Version prevVersion, uint64_t requestNum ) : version(version), prevVersion(prevVersion), resolverChangesVersion(0), requestNum(requestNum) {}
+	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
+	  : version(version), prevVersion(prevVersion), resolverChangesVersion(0), requestNum(requestNum) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & resolverChanges & resolverChangesVersion & version & prevVersion & requestNum;
+		ar& resolverChanges& resolverChangesVersion& version& prevVersion& requestNum;
 	}
 };
 
@@ -147,13 +143,14 @@ struct GetCommitVersionRequest {
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
-	GetCommitVersionRequest() { }
+	GetCommitVersionRequest() {}
 	GetCommitVersionRequest(uint64_t requestNum, uint64_t mostRecentProcessedRequestNum, UID requestingProxy)
-		: requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum), requestingProxy(requestingProxy) {}
+	  : requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
+	    requestingProxy(requestingProxy) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & requestNum & mostRecentProcessedRequestNum & requestingProxy & reply;
+		ar& requestNum& mostRecentProcessedRequestNum& requestingProxy& reply;
 	}
 };
 
@@ -163,19 +160,15 @@ struct LifetimeToken {
 
 	LifetimeToken() : count(0) {}
 
-	bool isStillValid( LifetimeToken const& latestToken, bool isLatestID ) const {
+	bool isStillValid(LifetimeToken const& latestToken, bool isLatestID) const {
 		return ccID == latestToken.ccID && (count >= latestToken.count || isLatestID);
 	}
-	std::string toString() const {
-		return ccID.shortString() + format("#%lld", count);
-	}
-	void operator++() {
-		++count;
-	}
+	std::string toString() const { return ccID.shortString() + format("#%lld", count); }
+	void operator++() { ++count; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & ccID & count;
+		ar& ccID& count;
 	}
 };
 

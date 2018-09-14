@@ -32,39 +32,50 @@
 
 class UID {
 	uint64_t part[2];
+
 public:
 	UID() { part[0] = part[1] = 0; }
-	UID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
+	UID(uint64_t a, uint64_t b) {
+		part[0] = a;
+		part[1] = b;
+	}
 	std::string toString() const;
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
 
-	bool operator == ( const UID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
-	bool operator != ( const UID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
-	bool operator < ( const UID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+	bool operator==(const UID& r) const { return part[0] == r.part[0] && part[1] == r.part[1]; }
+	bool operator!=(const UID& r) const { return part[0] != r.part[0] || part[1] != r.part[1]; }
+	bool operator<(const UID& r) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
 
 	uint64_t hash() const { return first(); }
 	uint64_t first() const { return part[0]; }
 	uint64_t second() const { return part[1]; }
 
-	static UID fromString( std::string const& );
+	static UID fromString(std::string const&);
 
 	template <class Ar>
-	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		ar & part[0] & part[1];
+	void serialize_unversioned(
+	    Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
+		ar& part[0] & part[1];
 	}
 };
 
-template <class Ar> void load( Ar& ar, UID& uid ) { uid.serialize_unversioned(ar); }
-template <class Ar> void save( Ar& ar, UID const& uid ) { const_cast<UID&>(uid).serialize_unversioned(ar); }
+template <class Ar>
+void load(Ar& ar, UID& uid) {
+	uid.serialize_unversioned(ar);
+}
+template <class Ar>
+void save(Ar& ar, UID const& uid) {
+	const_cast<UID&>(uid).serialize_unversioned(ar);
+}
 
 namespace std {
-	template <>
-	class hash<UID> : public unary_function<UID,size_t> {
-	public:
-		size_t operator()(UID const& u) const { return u.hash(); }
-	};
-}
+template <>
+class hash<UID> : public unary_function<UID, size_t> {
+public:
+	size_t operator()(UID const& u) const { return u.hash(); }
+};
+} // namespace std
 
 class IRandom {
 public:
@@ -73,21 +84,24 @@ public:
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
 	virtual uint32_t randomUInt32() = 0;
 	virtual UID randomUniqueID() = 0;
-	virtual char randomAlphaNumeric()  = 0;
-	virtual std::string randomAlphaNumeric( int length ) = 0;
-	virtual uint64_t peek() const = 0;  // returns something that is probably different for different random states.  Deterministic (and idempotent) for a deterministic generator.
+	virtual char randomAlphaNumeric() = 0;
+	virtual std::string randomAlphaNumeric(int length) = 0;
+	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
+	                                   // Deterministic (and idempotent) for a deterministic generator.
 
 	// The following functions have fixed implementations for now:
 	template <class C>
-	decltype((fake<const C>()[0])) randomChoice( const C& c ) { return c[randomInt(0,(int)c.size())]; }
+	decltype((fake<const C>()[0])) randomChoice(const C& c) {
+		return c[randomInt(0, (int)c.size())];
+	}
 
 	template <class C>
-	void randomShuffle( C& container ) {
+	void randomShuffle(C& container) {
 		int s = (int)container.size();
-		for(int i=0; i<s; i++) {
-			int j = randomInt( i, s );
+		for (int i = 0; i < s; i++) {
+			int j = randomInt(i, s);
 			if (i != j) {
-				std::swap( container[i], container[j] );
+				std::swap(container[i], container[j]);
 			}
 		}
 	}

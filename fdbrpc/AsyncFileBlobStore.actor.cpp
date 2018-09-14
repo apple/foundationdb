@@ -23,34 +23,31 @@
 #include "flow/UnitTest.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() {
-	if(!m_size.isValid())
-		m_size = m_bstore->objectSize(m_bucket, m_object);
+	if (!m_size.isValid()) m_size = m_bstore->objectSize(m_bucket, m_object);
 	return m_size;
 }
 
-Future<int> AsyncFileBlobStoreRead::read( void *data, int length, int64_t offset ) {
+Future<int> AsyncFileBlobStoreRead::read(void* data, int length, int64_t offset) {
 	return m_bstore->readObject(m_bucket, m_object, data, length, offset);
 }
-
 
 ACTOR Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
 	printf("Starting fake sender %d which will send send %d bytes.\n", id, bytes);
 	state double ts = timer();
 	state int total = 0;
-	while(total < bytes) {
-		state int r = std::min<int>(g_random->randomInt(0,1000), bytes - total);
+	while (total < bytes) {
+		state int r = std::min<int>(g_random->randomInt(0, 1000), bytes - total);
 		wait(t->getAllowance(r));
 		total += r;
 	}
 	double dur = timer() - ts;
-	printf("Sender %d: Sent %d in %fs, %f/s\n", id, total, dur, total/dur);
+	printf("Sender %d: Sent %d in %fs, %f/s\n", id, total, dur, total / dur);
 	return Void();
 }
 
 TEST_CASE("backup/throttling") {
 	// Test will not work in simulation.
-	if(g_network->isSimulated())
-		return Void();
+	if (g_network->isSimulated()) return Void();
 
 	state int limit = 100000;
 	state Reference<IRateControl> t(new SpeedLimit(limit, 1));
@@ -61,13 +58,18 @@ TEST_CASE("backup/throttling") {
 	state int total = 0;
 	int s;
 	s = 500000;
-	f.push_back(sendStuff(id++, t, s)); total += s;
-	f.push_back(sendStuff(id++, t, s)); total += s;
+	f.push_back(sendStuff(id++, t, s));
+	total += s;
+	f.push_back(sendStuff(id++, t, s));
+	total += s;
 	s = 50000;
-	f.push_back(sendStuff(id++, t, s)); total += s;
-	f.push_back(sendStuff(id++, t, s)); total += s;
+	f.push_back(sendStuff(id++, t, s));
+	total += s;
+	f.push_back(sendStuff(id++, t, s));
+	total += s;
 	s = 5000;
-	f.push_back(sendStuff(id++, t, s)); total += s;
+	f.push_back(sendStuff(id++, t, s));
+	total += s;
 
 	wait(waitForAll(f));
 	double dur = timer() - ts;
@@ -77,5 +79,3 @@ TEST_CASE("backup/throttling") {
 
 	return Void();
 }
-
-

@@ -44,88 +44,84 @@
 //   1111 1111 1111 1111 0nnn nnnn N{13}  111 bits  16 bytes
 //   1111 1111 1111 1111 10nn nnnn N{14}  118 bits  17 bytes
 //   1111 1111 1111 1111 110n nnnn N{15}  125 bits  18 bytes
-template<typename IntType>
+template <typename IntType>
 struct CompressedInt {
 	CompressedInt(IntType i = 0) : value(i) {}
 	IntType value;
-	template <class Ar> void serialize(Ar &ar) {
-		if(ar.isDeserializing) {
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if (ar.isDeserializing) {
 			uint8_t b;
-			ar & b;
-			int bytesToRead = 0;              // Additional bytes to read after the required first byte
-			bool positive = (b & 0x80) != 0;  // Sign bit
-			if(!positive)
-				b = ~b;                  // Negative, so invert bytes read
-			b &= 0x7f;                   // Clear sign bit
+			ar& b;
+			int bytesToRead = 0; // Additional bytes to read after the required first byte
+			bool positive = (b & 0x80) != 0; // Sign bit
+			if (!positive) b = ~b; // Negative, so invert bytes read
+			b &= 0x7f; // Clear sign bit
 
-			uint8_t hb = 0x40;           // Next header bit to test
+			uint8_t hb = 0x40; // Next header bit to test
 			// Scan the unary len bits across multiple bytes if needed
-			while(1) {
-				if(hb == 0) {       // Go to next byte if needed
-					ar & b;         // Read byte
-					if(!positive)
-						b = ~b;     // Negative, so invert bytes read
+			while (1) {
+				if (hb == 0) { // Go to next byte if needed
+					ar& b; // Read byte
+					if (!positive) b = ~b; // Negative, so invert bytes read
 
-					hb = 0x80;      // Reset header test bit position
-					--bytesToRead;  // Decrement bytes to read since a byte was just read
+					hb = 0x80; // Reset header test bit position
+					--bytesToRead; // Decrement bytes to read since a byte was just read
 				}
-				if((b & hb) == 0)   // If a 0 is found, found the end of the unary sequence
+				if ((b & hb) == 0) // If a 0 is found, found the end of the unary sequence
 					break;
-				++bytesToRead;      // Found a 1 so increment bytes to read
-				b &= ~hb;           // Clear the bit just tested.
-				hb >>= 1;           // Shift header test bit to next lowest position
+				++bytesToRead; // Found a 1 so increment bytes to read
+				b &= ~hb; // Clear the bit just tested.
+				hb >>= 1; // Shift header test bit to next lowest position
 			}
 
-			value = b;                    // b contains the highest byte of value
-			while(bytesToRead-- != 0) {
-				ar & b;                   // Read byte
-				if(!positive)
-					b = ~b;               // Negative, so invert bytes read
-				value <<= 8;              // Shift value up to make room for new byte
-				value |= b;               // OR the byte into place
+			value = b; // b contains the highest byte of value
+			while (bytesToRead-- != 0) {
+				ar& b; // Read byte
+				if (!positive) b = ~b; // Negative, so invert bytes read
+				value <<= 8; // Shift value up to make room for new byte
+				value |= b; // OR the byte into place
 			}
 
-			if(!positive)                 // If negative, reverse all bits
+			if (!positive) // If negative, reverse all bits
 				value = ~value;
-		}
-		else {
+		} else {
 			uint8_t buf[sizeof(IntType) * 2];
-			int iv = sizeof(buf);               // Index of last written value byte
-			bool neg = value < 0;               // If value is negative, flip its bits
+			int iv = sizeof(buf); // Index of last written value byte
+			bool neg = value < 0; // If value is negative, flip its bits
 			IntType v = neg ? ~value : value;
 
 			// Write the value bytes from LSB to the rightmost zero byte to the output buffer
-			while(v) {
+			while (v) {
 				buf[--iv] = (uint8_t)v;
 				v >>= 8;
 			};
 
 			int bitlen = (sizeof(buf) - iv) * 8; // Value bits written so far
-			if(bitlen != 0) {                    // Reduce bit length by leading 0s in highest value byte
-				uint8_t b = buf[iv];             // Get highest value byte
-				while(!(b & 0x80)) {             // While its highest bit is not a 1
-					--bitlen;                    // Decrement bit length
-					b <<= 1;                     // Shift left to test next lowest position
+			if (bitlen != 0) { // Reduce bit length by leading 0s in highest value byte
+				uint8_t b = buf[iv]; // Get highest value byte
+				while (!(b & 0x80)) { // While its highest bit is not a 1
+					--bitlen; // Decrement bit length
+					b <<= 1; // Shift left to test next lowest position
 				}
 			}
 
-			int encodedLen = bitlen / 7 + 1;                 // Calculate length of total encoded value
-			int iStart = sizeof(buf) - encodedLen;           // Starting index of encoded output byte
-			for(int ih = iStart; ih < iv; ++ih)              // Clear any bytes not initialized with a value bit
+			int encodedLen = bitlen / 7 + 1; // Calculate length of total encoded value
+			int iStart = sizeof(buf) - encodedLen; // Starting index of encoded output byte
+			for (int ih = iStart; ih < iv; ++ih) // Clear any bytes not initialized with a value bit
 				buf[ih] = 0;
 			int ih = iStart;
-			uint8_t b = 0x80;                                // First unary len bit to set
-			for(int hb = encodedLen; hb > 0; --hb) {         // Set the sign bit and all but the last unary len bit to 1
-				if(b == 0) {                                 // Start writing a new byte if needed
+			uint8_t b = 0x80; // First unary len bit to set
+			for (int hb = encodedLen; hb > 0; --hb) { // Set the sign bit and all but the last unary len bit to 1
+				if (b == 0) { // Start writing a new byte if needed
 					++ih;
 					b = 0x80;
 				}
 				buf[ih] |= b;
 				b >>= 1;
 			}
-			if(neg)                                          // If negative, bit flip the entire encoded thing
-				for(int i = iStart; i < sizeof(buf); ++i)
-					buf[i] = ~buf[i];
+			if (neg) // If negative, bit flip the entire encoded thing
+				for (int i = iStart; i < sizeof(buf); ++i) buf[i] = ~buf[i];
 
 			ar.serializeBytes(buf + iStart, encodedLen);
 		}

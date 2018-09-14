@@ -26,51 +26,53 @@
 #include "flow/TDMetric.actor.h"
 
 struct NotifiedVersion {
-	NotifiedVersion( StringRef& name, StringRef const &id, Version version = 0 ) : val(name, id, version) { val = version; }
-	NotifiedVersion( Version version = 0 ) : val(StringRef(), StringRef(), version) {}
+	NotifiedVersion(StringRef& name, StringRef const& id, Version version = 0) : val(name, id, version) {
+		val = version;
+	}
+	NotifiedVersion(Version version = 0) : val(StringRef(), StringRef(), version) {}
 
-	void initMetric(const StringRef& name, const StringRef &id) { 
+	void initMetric(const StringRef& name, const StringRef& id) {
 		Version version = val;
-		val.init(name, id); 
+		val.init(name, id);
 		val = version;
 	}
 
-	Future<Void> whenAtLeast( Version limit ) {
-		if (val >= limit) 
-			return Void();
+	Future<Void> whenAtLeast(Version limit) {
+		if (val >= limit) return Void();
 		Promise<Void> p;
-		waiting.push( std::make_pair(limit,p) );
+		waiting.push(std::make_pair(limit, p));
 		return p.getFuture();
 	}
 
 	Version get() const { return val; }
 
-	void set( Version v ) {
-		ASSERT( v >= val );
+	void set(Version v) {
+		ASSERT(v >= val);
 		if (v != val) {
 			val = v;
 
 			std::vector<Promise<Void>> toSend;
-			while ( waiting.size() && v >= waiting.top().first ) {
+			while (waiting.size() && v >= waiting.top().first) {
 				Promise<Void> p = std::move(waiting.top().second);
 				waiting.pop();
 				toSend.push_back(p);
 			}
-			for(auto& p : toSend) {
+			for (auto& p : toSend) {
 				p.send(Void());
 			}
 		}
 	}
 
-	void operator=( Version v ) {
-		set( v );
-	}
+	void operator=(Version v) { set(v); }
 
 	NotifiedVersion(NotifiedVersion&& r) noexcept(true) : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
-	void operator=(NotifiedVersion&& r) noexcept(true) { waiting = std::move(r.waiting); val = std::move(r.val); }
+	void operator=(NotifiedVersion&& r) noexcept(true) {
+		waiting = std::move(r.waiting);
+		val = std::move(r.val);
+	}
 
 private:
-	typedef std::pair<Version,Promise<Void>> Item;
+	typedef std::pair<Version, Promise<Void>> Item;
 	struct ItemCompare {
 		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
 	};

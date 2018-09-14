@@ -35,39 +35,40 @@ typedef struct HashElem HashElem;
 ** element pointed to plus the next _ht.count-1 elements in the list.
 **
 ** Hash.htsize and Hash.ht may be zero.  In that case lookup is done
-** by a linear search of the global list.  For small tables, the 
+** by a linear search of the global list.  For small tables, the
 ** Hash.ht table is never allocated because if there are few elements
 ** in the table, it is faster to do a linear search than to manage
 ** the hash table.
 */
 struct Hash {
-  unsigned int htsize;      /* Number of buckets in the hash table */
-  unsigned int count;       /* Number of entries in this table */
-  HashElem *first;          /* The first element of the array */
-  struct _ht {              /* the hash table */
-    int count;                 /* Number of entries with this hash */
-    HashElem *chain;           /* Pointer to first entry with this hash */
-  } *ht;
+	unsigned int htsize; /* Number of buckets in the hash table */
+	unsigned int count; /* Number of entries in this table */
+	HashElem* first; /* The first element of the array */
+	struct _ht { /* the hash table */
+		int count; /* Number of entries with this hash */
+		HashElem* chain; /* Pointer to first entry with this hash */
+	} * ht;
 };
 
-/* Each element in the hash table is an instance of the following 
+/* Each element in the hash table is an instance of the following
 ** structure.  All elements are stored on a single doubly-linked list.
 **
 ** Again, this structure is intended to be opaque, but it can't really
 ** be opaque because it is used by macros.
 */
 struct HashElem {
-  HashElem *next, *prev;       /* Next and previous elements in the table */
-  void *data;                  /* Data associated with this element */
-  const char *pKey; int nKey;  /* Key associated with this element */
+	HashElem *next, *prev; /* Next and previous elements in the table */
+	void* data; /* Data associated with this element */
+	const char* pKey;
+	int nKey; /* Key associated with this element */
 };
 
 /*
 ** Access routines.  To delete, insert a NULL pointer.
 */
 void sqlite3HashInit(Hash*);
-void *sqlite3HashInsert(Hash*, const char *pKey, int nKey, void *pData);
-void *sqlite3HashFind(const Hash*, const char *pKey, int nKey);
+void* sqlite3HashInsert(Hash*, const char* pKey, int nKey, void* pData);
+void* sqlite3HashFind(const Hash*, const char* pKey, int nKey);
 void sqlite3HashClear(Hash*);
 
 /*
@@ -82,9 +83,9 @@ void sqlite3HashClear(Hash*);
 **     // do something with pData
 **   }
 */
-#define sqliteHashFirst(H)  ((H)->first)
-#define sqliteHashNext(E)   ((E)->next)
-#define sqliteHashData(E)   ((E)->data)
+#define sqliteHashFirst(H) ((H)->first)
+#define sqliteHashNext(E) ((E)->next)
+#define sqliteHashData(E) ((E)->data)
 /* #define sqliteHashKey(E)    ((E)->pKey) // NOT USED */
 /* #define sqliteHashKeysize(E) ((E)->nKey)  // NOT USED */
 

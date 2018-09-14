@@ -23,18 +23,17 @@
 #pragma once
 
 #if 1
-#define INJECT_FAULT( error_type, context ) \
-	do { \
-	if (should_inject_fault && should_inject_fault( context, __FILE__, __LINE__, error_code_##error_type )) \
-			throw error_type().asInjectedFault(); \
-	} while(0)
+#define INJECT_FAULT(error_type, context)                                                                              \
+	do {                                                                                                               \
+		if (should_inject_fault && should_inject_fault(context, __FILE__, __LINE__, error_code_##error_type))          \
+			throw error_type().asInjectedFault();                                                                      \
+	} while (0)
 
-#define SHOULD_INJECT_FAULT( context ) \
-	(should_inject_fault && should_inject_fault( context, __FILE__, __LINE__, 0 ))
+#define SHOULD_INJECT_FAULT(context) (should_inject_fault && should_inject_fault(context, __FILE__, __LINE__, 0))
 
-extern bool (*should_inject_fault)( const char* context, const char* file, int line, int error_code );
+extern bool (*should_inject_fault)(const char* context, const char* file, int line, int error_code);
 #else
-#define INJECT_FAULT( error_type, context )
+#define INJECT_FAULT(error_type, context)
 #endif
 
 #endif

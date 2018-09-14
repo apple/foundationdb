@@ -22,7 +22,7 @@
 
 static size_t find_string_terminator(const StringRef data, size_t offset) {
 	size_t i = offset;
-	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i+1] != (uint8_t)'\xff')) {
+	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i + 1] != (uint8_t)'\xff')) {
 		i += (data[i] == '\x00' ? 2 : 1);
 	}
 
@@ -33,19 +33,16 @@ Tuple::Tuple(StringRef const& str) {
 	data.append(data.arena(), str.begin(), str.size());
 
 	size_t i = 0;
-	while(i < data.size()) {
+	while (i < data.size()) {
 		offsets.push_back(i);
 
-		if(data[i] == '\x01' || data[i] == '\x02') {
-			i = find_string_terminator(str, i+1) + 1;
-		}
-		else if(data[i] >= '\x0c' && data[i] <= '\x1c') {
+		if (data[i] == '\x01' || data[i] == '\x02') {
+			i = find_string_terminator(str, i + 1) + 1;
+		} else if (data[i] >= '\x0c' && data[i] <= '\x1c') {
 			i += abs(data[i] - '\x14') + 1;
-		}
-		else if(data[i] == '\x00') {
+		} else if (data[i] == '\x00') {
 			i += 1;
-		}
-		else {
+		} else {
 			throw invalid_tuple_data_type();
 		}
 	}
@@ -56,7 +53,7 @@ Tuple Tuple::unpack(StringRef const& str) {
 }
 
 Tuple& Tuple::append(Tuple const& tuple) {
-	for(size_t offset : tuple.offsets) {
+	for (size_t offset : tuple.offsets) {
 		offsets.push_back(offset + data.size());
 	}
 
@@ -72,8 +69,8 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	data.append(data.arena(), &utfChar, 1);
 
 	size_t lastPos = 0;
-	for(size_t pos = 0; pos < str.size(); ++pos) {
-		if(str[pos] == '\x00') {
+	for (size_t pos = 0; pos < str.size(); ++pos) {
+		if (str[pos] == '\x00') {
 			data.append(data.arena(), str.begin() + lastPos, pos - lastPos);
 			data.push_back(data.arena(), (uint8_t)'\x00');
 			data.push_back(data.arena(), (uint8_t)'\xff');
@@ -87,28 +84,28 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	return *this;
 }
 
-Tuple& Tuple::append( int64_t value ) {
+Tuple& Tuple::append(int64_t value) {
 	uint64_t swap = value;
 	bool neg = false;
 
-	offsets.push_back( data.size() );
+	offsets.push_back(data.size());
 
-	if ( value < 0 ) {
+	if (value < 0) {
 		value = ~(-value);
 		neg = true;
 	}
 
 	swap = bigEndian64(value);
 
-	for ( int i = 0; i < 8; i++ ) {
-		if ( ((uint8_t*)&swap)[i] != (neg ? 255 : 0) ) {
-			data.push_back( data.arena(), (uint8_t)(20 + (8-i) * (neg ? -1 : 1)) );
-			data.append( data.arena(), ((const uint8_t *)&swap) + i, 8 - i );
+	for (int i = 0; i < 8; i++) {
+		if (((uint8_t*)&swap)[i] != (neg ? 255 : 0)) {
+			data.push_back(data.arena(), (uint8_t)(20 + (8 - i) * (neg ? -1 : 1)));
+			data.append(data.arena(), ((const uint8_t*)&swap) + i, 8 - i);
 			return *this;
 		}
 	}
 
-	data.push_back( data.arena(), (uint8_t)'\x14' );
+	data.push_back(data.arena(), (uint8_t)'\x14');
 	return *this;
 }
 
@@ -119,43 +116,39 @@ Tuple& Tuple::appendNull() {
 }
 
 Tuple::ElementType Tuple::getType(size_t index) const {
-	if(index >= offsets.size()) {
+	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
 
 	uint8_t code = data[offsets[index]];
 
-	if(code == '\x00') {
+	if (code == '\x00') {
 		return ElementType::NULL_TYPE;
-	}
-	else if(code == '\x01') {
+	} else if (code == '\x01') {
 		return ElementType::BYTES;
-	}
-	else if(code == '\x02') {
+	} else if (code == '\x02') {
 		return ElementType::UTF8;
-	}
-	else if(code >= '\x0c' && code <= '\x1c') {
+	} else if (code >= '\x0c' && code <= '\x1c') {
 		return ElementType::INT;
-	}
-	else {
+	} else {
 		throw invalid_tuple_data_type();
 	}
 }
 
 Standalone<StringRef> Tuple::getString(size_t index) const {
-	if(index >= offsets.size()) {
+	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
 
 	uint8_t code = data[offsets[index]];
-	if(code != '\x01' && code != '\x02') {
+	if (code != '\x01' && code != '\x02') {
 		throw invalid_tuple_data_type();
 	}
 
 	size_t b = offsets[index] + 1;
 	size_t e;
 	if (offsets.size() > index + 1) {
-		e = offsets[index+1];
+		e = offsets[index + 1];
 	} else {
 		e = data.size();
 	}
@@ -164,18 +157,18 @@ Standalone<StringRef> Tuple::getString(size_t index) const {
 	VectorRef<uint8_t> staging;
 
 	for (size_t i = b; i < e; ++i) {
-		if(data[i] == '\x00') {
+		if (data[i] == '\x00') {
 			staging.append(result.arena(), data.begin() + b, i - b);
 			++i;
 			b = i + 1;
 
-			if(i < e) {
+			if (i < e) {
 				staging.push_back(result.arena(), '\x00');
 			}
 		}
 	}
 
-	if(b < e) {
+	if (b < e) {
 		staging.append(result.arena(), data.begin() + b, e - b);
 	}
 
@@ -184,7 +177,7 @@ Standalone<StringRef> Tuple::getString(size_t index) const {
 }
 
 int64_t Tuple::getInt(size_t index) const {
-	if(index >= offsets.size()) {
+	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
 
@@ -193,23 +186,23 @@ int64_t Tuple::getInt(size_t index) const {
 
 	ASSERT(offsets[index] < data.size());
 	uint8_t code = data[offsets[index]];
-	if(code < '\x0c' || code > '\x1c') {
+	if (code < '\x0c' || code > '\x1c') {
 		throw invalid_tuple_data_type();
 	}
 
 	int8_t len = code - '\x14';
 
-	if ( len < 0 ) {
+	if (len < 0) {
 		len = -len;
 		neg = true;
 	}
 
-	memset( &swap, neg ? '\xff' : 0, 8 - len );
-	memcpy( ((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, len );
+	memset(&swap, neg ? '\xff' : 0, 8 - len);
+	memcpy(((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, len);
 
-	swap = bigEndian64( swap );
+	swap = bigEndian64(swap);
 
-	if ( neg ) {
+	if (neg) {
 		swap = -(~swap);
 	}
 
@@ -232,12 +225,13 @@ KeyRange Tuple::range(Tuple const& tuple) const {
 	end.append(keyRange.arena(), tuple.pack().begin(), tuple.pack().size());
 	end.push_back(keyRange.arena(), uint8_t('\xff'));
 
-	keyRange.KeyRangeRef::operator=(KeyRangeRef(StringRef(begin.begin(), begin.size()), StringRef(end.begin(), end.size())));
+	keyRange.KeyRangeRef::operator=(
+	    KeyRangeRef(StringRef(begin.begin(), begin.size()), StringRef(end.begin(), end.size())));
 	return keyRange;
 }
 
 Tuple Tuple::subTuple(size_t start, size_t end) const {
-	if(start >= offsets.size() || end <= start) {
+	if (start >= offsets.size() || end <= start) {
 		return Tuple();
 	}
 

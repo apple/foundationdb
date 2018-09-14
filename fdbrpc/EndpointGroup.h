@@ -25,7 +25,8 @@
 #include "flow.h"
 
 // EndpointGroup makes it easier to implement backward compatibility for interface serialization
-// It also provides a central place to implement more compact serialization for a group of related endpoints in the future.
+// It also provides a central place to implement more compact serialization for a group of related endpoints in the
+// future.
 
 /* Typical usage:
 
@@ -42,33 +43,32 @@ void serialize(Ar& ar) {
 
 */
 
-
 template <class Ar>
 struct EndpointGroup : NonCopyable {
 	Ar& ar;
 	bool enabled;
 
-	explicit EndpointGroup( Ar& ar ) : ar(ar), enabled(true) {
-		ASSERT( ar.protocolVersion() != 0 );
-	}
-	EndpointGroup( EndpointGroup&& g ) : ar(g.ar), enabled(g.enabled) {}
+	explicit EndpointGroup(Ar& ar) : ar(ar), enabled(true) { ASSERT(ar.protocolVersion() != 0); }
+	EndpointGroup(EndpointGroup&& g) : ar(g.ar), enabled(g.enabled) {}
 
-	EndpointGroup& require( bool condition ) {
+	EndpointGroup& require(bool condition) {
 		enabled = enabled && condition;
 		return *this;
 	}
 
 	template <class T>
-	EndpointGroup& operator & (PromiseStream<T>& stream) {
+	EndpointGroup& operator&(PromiseStream<T>& stream) {
 		if (enabled)
-			ar & stream;
+			ar& stream;
 		else if (Ar::isDeserializing)
-			stream.sendError( incompatible_protocol_version() );
+			stream.sendError(incompatible_protocol_version());
 		return *this;
 	}
 };
 
 template <class Ar>
-EndpointGroup<Ar> endpointGroup( Ar& ar ) { return EndpointGroup<Ar>(ar); }
+EndpointGroup<Ar> endpointGroup(Ar& ar) {
+	return EndpointGroup<Ar>(ar);
+}
 
 #endif

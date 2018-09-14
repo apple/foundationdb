@@ -24,7 +24,6 @@
 
 #include "Platform.h"
 
-
 // backtrace() and exception unwinding in glibc both call dl_iterate_phdr(),
 // which takes the loader lock and so is not async signal safe.  Profiling or slow task
 // profiling can deadlock when they interrupt the unwinding of an exception.

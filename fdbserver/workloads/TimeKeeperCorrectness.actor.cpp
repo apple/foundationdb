@@ -28,21 +28,16 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	std::map<int64_t, Version> inMemTimeKeeper;
 
 	TimeKeeperCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 20.0 );
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 20.0);
 	}
 
-	virtual std::string description() {
-		return "TimeKeeperCorrectness";
-	}
+	virtual std::string description() { return "TimeKeeperCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload *self) {
+	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload* self) {
 		TraceEvent(SevInfo, "TKCorrectness_Start");
 
 		state double start = now();
@@ -55,7 +50,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					Version v = wait(tr.getReadVersion());
 					self->inMemTimeKeeper[curTime] = v;
 					break;
-				} catch (Error &e) {
+				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
 			}
@@ -68,37 +63,36 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(cx, this);
-	}
+	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 
-	ACTOR static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload *self) {
+	ACTOR static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload* self) {
 		state KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr =
+		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 
 		TraceEvent(SevInfo, "TKCorrectness_CheckStart")
-				.detail("TimeKeeperMaxEntries", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
-				.detail("TimeKeeperDelay", SERVER_KNOBS->TIME_KEEPER_DELAY);
+		    .detail("TimeKeeperMaxEntries", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
+		    .detail("TimeKeeperDelay", SERVER_KNOBS->TIME_KEEPER_DELAY);
 
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				std::vector<std::pair<int64_t, Version>> allItems = wait(
-						dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2));
+				std::vector<std::pair<int64_t, Version>> allItems =
+				    wait(dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2));
 
 				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
 					TraceEvent(SevError, "TKCorrectness_TooManyEntries")
-							.detail("Expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
-							.detail("Found", allItems.size());
+					    .detail("Expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
+					    .detail("Found", allItems.size());
 					return false;
 				}
 
 				if (allItems.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
 					TraceEvent(SevWarnAlways, "TKCorrectness_TooFewEntries")
-							.detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
-							.detail("Found", allItems.size());
+					    .detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
+					    .detail("Found", allItems.size());
 				}
 
 				for (auto item : allItems) {
@@ -109,25 +103,23 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 					if (item.second >= it->second) {
 						TraceEvent(SevError, "TKCorrectness_VersionIncorrectBounds")
-								.detail("ClusterTime", item.first)
-								.detail("ClusterVersion", item.second)
-								.detail("LocalTime", it->first)
-								.detail("LocalVersion", it->second);
+						    .detail("ClusterTime", item.first)
+						    .detail("ClusterVersion", item.second)
+						    .detail("LocalTime", it->first)
+						    .detail("LocalVersion", it->second);
 						return false;
 					}
 				}
 
 				TraceEvent(SevInfo, "TKCorrectness_Passed");
 				return true;
-			} catch (Error & e) {
+			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return _check(cx, this);
-	}
+	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
 };
 
 WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory("TimeKeeperCorrectness");
