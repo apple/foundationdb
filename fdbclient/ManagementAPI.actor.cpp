@@ -1398,6 +1398,27 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 	}
 }
 
+ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
+	state ReadYourWritesTransaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res = wait( tr.get(primaryDatacenterKey) );
+			if(res.present() && res.get() == dcId) {
+				return Void();
+			}
+
+			state Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
+			Void _ = wait(tr.commit());
+			Void _ = wait(watchFuture);
+			tr.reset();
+		} catch (Error& e) {
+			Void _ = wait( tr.onError(e) );
+		}
+	}
+}
+
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
 	if (type == json_spirit::int_type)
 		return json_spirit::real_type;

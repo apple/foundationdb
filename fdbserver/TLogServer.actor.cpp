@@ -258,8 +258,6 @@ struct TLogData : NonCopyable {
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 
-	Version prevVersion;
-
 	struct peekTrackerData {
 		std::map<int, Promise<Version>> sequence_version;
 		double lastUpdate;
@@ -277,7 +275,7 @@ struct TLogData : NonCopyable {
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
-			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
+			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
 			  updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
@@ -1204,7 +1202,6 @@ ACTOR Future<Void> tLogCommit(
 		}
 
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
-		self->prevVersion = logData->version.get();
 		logData->version.set( req.version );
 
 		if(req.debugID.present())
@@ -1350,14 +1347,14 @@ ACTOR Future<Void> cleanupPeekTrackers( TLogData* self ) {
 	}
 }
 
-void getQueuingMetrics( TLogData* self, TLogQueuingMetricsRequest const& req ) {
+void getQueuingMetrics( TLogData* self, Reference<LogData> logData, TLogQueuingMetricsRequest const& req ) {
 	TLogQueuingMetricsReply reply;
 	reply.localTime = now();
 	reply.instanceID = self->instanceID;
 	reply.bytesInput = self->bytesInput;
 	reply.bytesDurable = self->bytesDurable;
 	reply.storageBytes = self->persistentData->getStorageBytes();
-	reply.v = self->prevVersion;
+	reply.v = logData->queueCommittedVersion.get();
 	req.reply.send( reply );
 }
 
@@ -1409,7 +1406,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			logData->addActor.send( tLogLock(self, reply, logData) );
 		}
 		when (TLogQueuingMetricsRequest req = waitNext(tli.getQueuingMetrics.getFuture())) {
-			getQueuingMetrics(self, req);
+			getQueuingMetrics(self, logData, req);
 		}
 		when (TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())){
 			if (req.debugID.present() ) {
@@ -1516,8 +1513,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					}
 
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
-					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
-					self->prevVersion = logData->version.get();
 					logData->version.set( ver );
 					Void _ = wait( yield(TaskTLogCommit) );
 				}
@@ -1554,8 +1549,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						}
 
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
-						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
-						self->prevVersion = logData->version.get();
 						logData->version.set( ver );
 						Void _ = wait( yield(TaskTLogCommit) );
 					}
@@ -1975,7 +1968,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 					self->largeDiskQueueCommitBytes.set(true);
 				}
 
-				self->prevVersion = logData->version.get();
 				logData->version.set( req.recoverAt );
 			}
 

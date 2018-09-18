@@ -809,9 +809,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
 			return;
 		}
-		ASSERT(popLocality == tagLocalityInvalid);
 		for(auto& t : tLogs) {
-			if(t->locality == tagLocalitySpecial || t->locality == tag.locality || tag.locality < 0) {
+			if(t->locality == tagLocalitySpecial || t->locality == tag.locality || (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
 				for(auto& log : t->logServers) {
 					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 					if (prev < upTo)
@@ -1200,13 +1199,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			int modifiedLogSets = 0;
 			int removedLogSets = 0;
 			if(primaryLocality >= 0) {
-				bool remoteIsLocal = false;
 				auto copiedLogs = modifiedState.tLogs;
 				for(auto& coreSet : copiedLogs) {
 					if(coreSet.locality != primaryLocality && coreSet.locality >= 0) {
 						foundRemote = true;
 						remoteLocality = coreSet.locality;
-						remoteIsLocal = coreSet.isLocal;
 						modifiedState.tLogs.clear();
 						modifiedState.tLogs.push_back(coreSet);
 						modifiedState.tLogs[0].isLocal = true;
@@ -1216,14 +1213,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 				}
 
-				ASSERT( !remoteIsLocal );
-
 				while( !foundRemote && modifiedState.oldTLogData.size() ) {
 					for(auto& coreSet : modifiedState.oldTLogData[0].tLogs) {
 						if(coreSet.locality != primaryLocality && coreSet.locality >= tagLocalitySpecial) {
 							foundRemote = true;
 							remoteLocality = coreSet.locality;
-							remoteIsLocal = coreSet.isLocal;
 							if(coreSet.isLocal) {
 								modifiedState.tLogs = modifiedState.oldTLogData[0].tLogs;
 								modifiedState.logRouterTags = modifiedState.oldTLogData[0].logRouterTags;
@@ -1242,14 +1236,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(foundRemote) {
-					for(int i = 0; i < modifiedState.oldTLogData.size() && !remoteIsLocal; i++) {
+					for(int i = 0; i < modifiedState.oldTLogData.size(); i++) {
 						bool found = false;
 						auto copiedLogs = modifiedState.oldTLogData[i].tLogs;
 						for(auto& coreSet : copiedLogs) {
 							if(coreSet.locality == remoteLocality || coreSet.locality == tagLocalitySpecial) {
 								found = true;
-								remoteIsLocal = coreSet.isLocal;
-								if(!coreSet.isLocal) {
+								if(!coreSet.isLocal || copiedLogs.size() > 1) {
 									modifiedState.oldTLogData[i].tLogs.clear();
 									modifiedState.oldTLogData[i].tLogs.push_back(coreSet);
 									modifiedState.oldTLogData[i].tLogs[0].isLocal = true;

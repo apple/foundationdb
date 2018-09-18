@@ -236,6 +236,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA,       0.1 );
 	init( COMMIT_TRANSACTION_BATCH_COUNT_MAX,                   32768 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_COUNT_MAX = 1000; // Do NOT increase this number beyond 32768, as CommitIds only budget 2 bytes for storing transaction id within each batch
 	init( COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,              8LL << 30 ); if (randomize && BUGGIFY) COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT = g_random->randomInt64(100LL << 20,  8LL << 30);
+	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
+	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,          10.0 );
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -247,8 +249,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RESOLVER_COALESCE_TIME,                                1.0 );
 	init( BUGGIFIED_ROW_LIMIT,                  APPLY_MUTATION_BYTES ); if( randomize && BUGGIFY ) BUGGIFIED_ROW_LIMIT = g_random->randomInt(3, 30);
 	init( PROXY_SPIN_DELAY,                                     0.01 );
-	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                 0.5  );
-	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,         10.0 );
+	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
+	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)

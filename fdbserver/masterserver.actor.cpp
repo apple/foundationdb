@@ -1282,8 +1282,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	Void _ = wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
-	if( debugResult )
-		TraceEvent(SevError, "DBRecoveryDurabilityError");
+	if( debugResult ) {
+		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError");
+	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid).detail("TLogs", self->logSystem->describe()).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
