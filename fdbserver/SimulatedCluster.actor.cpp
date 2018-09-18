@@ -705,8 +705,8 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
-	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
 	bool generateFearless = minimumRegions > 1 || g_random->random01() < 0.5;
+	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);

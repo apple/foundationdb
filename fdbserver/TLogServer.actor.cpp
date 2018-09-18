@@ -1354,7 +1354,7 @@ void getQueuingMetrics( TLogData* self, Reference<LogData> logData, TLogQueuingM
 	reply.bytesInput = self->bytesInput;
 	reply.bytesDurable = self->bytesDurable;
 	reply.storageBytes = self->persistentData->getStorageBytes();
-	reply.v = logData->queueCommittedVersion.get();
+	reply.v = logData->durableKnownCommittedVersion;
 	req.reply.send( reply );
 }
 
