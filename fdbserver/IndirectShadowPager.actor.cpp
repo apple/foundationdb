@@ -429,15 +429,7 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	ASSERT(recovery.isReady());
 	ASSERT(committing.isReady());
 
-	if(referencePageID != invalidLogicalPageID) {
-		PageVersionMap &rpv = pageTable[referencePageID];
-		ASSERT(!rpv.empty());
-		updateVersion = rpv.back().first;
-	}
-	else {
-		ASSERT(updateVersion > latestVersion || updateVersion == 0);
-	}
-
+	ASSERT(updateVersion > latestVersion || updateVersion == 0);
 	ASSERT(pageID < pageTable.size());
 
 	PageVersionMap &pageVersionMap = pageTable[pageID];
@@ -447,8 +439,17 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	// TODO: should this be conditional on the write succeeding?
 	bool updateExisting = updateVersion == 0;
 	if(updateExisting) {
-		ASSERT(pageVersionMap.size());
-		updateVersion = pageVersionMap.back().first;
+		// If there is no existing latest version to update then there must be a referencePageID from which to get a latest version
+		if(pageVersionMap.empty()) {
+			ASSERT(referencePageID != invalidLogicalPageID);
+			PageVersionMap &rpv = pageTable[referencePageID];
+			ASSERT(!rpv.empty());
+			updateVersion = rpv.back().first;
+		}
+		else {
+			ASSERT(pageVersionMap.size());
+			updateVersion = pageVersionMap.back().first;
+		}
 	}
 
 	PhysicalPageID physicalPageID = pagerFile.allocatePage(pageID, updateVersion);

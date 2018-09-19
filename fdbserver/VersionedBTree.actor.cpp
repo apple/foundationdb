@@ -801,7 +801,7 @@ private:
 
 				for(int e = 0, eEnd = extPages.size(); e < eEnd; ++e) {
 					LogicalPageID eid = (p != pEnd) ? *p++ : m_pager->allocateLogicalPage();
-					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%lld (%d of %lu)\n", actor_debug, eid, version, e, extPages.size());
+					debug_printf("%p: writePages(): Writing extension page op=write id=%u @%lld (%d of %lu) referencePage=%u\n", actor_debug, eid, version, e + 1, extPages.size(), id);
 					newPage->extensionPages[e] = eid;
 					// If replacing the primary page below (version == 0) then pass the primary page's ID as the reference page ID
 					m_pager->writePage(eid, extPages[e], version, (version == 0) ? id : invalidLogicalPageID);
@@ -883,7 +883,7 @@ private:
 		pageGets.push_back(std::move(raw));
 
 		for(int i = 0; i < pTreePage->extensionPageCount; ++i) {
-			debug_printf("readPage() Reading extension page op=read id=%u @%lld ext=%d/%d\nn", pTreePage->extensionPages[i], snapshot->getVersion(), i, (int)pTreePage->extensionPageCount);
+			debug_printf("readPage() Reading extension page op=read id=%u @%lld ext=%d/%d\n", pTreePage->extensionPages[i], snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
 			pageGets.push_back(snapshot->getPhysicalPage(pTreePage->extensionPages[i]));
 		}
 
