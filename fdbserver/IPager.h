@@ -40,6 +40,7 @@
 #define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
 
 typedef uint32_t LogicalPageID; // uint64_t?
+static const int invalidLogicalPageID = LogicalPageID(-1);
 
 class IPage {
 public:
@@ -62,7 +63,6 @@ public:
 class IPagerSnapshot {
 public:
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) = 0;
-	virtual void invalidateReturnedPages() = 0;
 	virtual Version getVersion() const = 0;
 
 	virtual ~IPagerSnapshot() {}
@@ -100,10 +100,11 @@ public:
 	// If updateVersion is 0, we are signalling to the pager that we are reusing the LogicalPageID entry at the current latest version of pageID.
 	// 
 	// Otherwise, we will add a new entry for LogicalPageID at the specified version. In that case, updateVersion must be larger than any version 
-	// written to this page previously, and it must be larger than any version committed
+	// written to this page previously, and it must be larger than any version committed.  If referencePageID is given, the latest version of that
+	// page will be used for the write, which *can* be less than the latest committed version.
 	//
 	// Permitted to fail (ASSERT) during recovery.
-	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion) = 0;
+	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID = invalidLogicalPageID) = 0;
 
 	// Signals to the pager that no more reads will be performed in the range [begin, end). 
 	// Permitted to fail (ASSERT) during recovery.

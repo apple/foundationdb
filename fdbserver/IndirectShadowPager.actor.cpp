@@ -100,10 +100,6 @@ Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(Logi
 	return pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version);
 }
 
-void IndirectShadowPagerSnapshot::invalidateReturnedPages() {
-	arena = Arena();
-}
-
 template <class T>
 T bigEndian(T val) {
 	static_assert(sizeof(T) <= 8, "Can't compute bigEndian on integers larger than 8 bytes");
@@ -429,11 +425,19 @@ void IndirectShadowPager::freePhysicalPageID(PhysicalPageID pageID) {
 	}
 }
 
-void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion) {
+void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID) {
 	ASSERT(recovery.isReady());
 	ASSERT(committing.isReady());
 
-	ASSERT(updateVersion > latestVersion || updateVersion == 0);
+	if(referencePageID != invalidLogicalPageID) {
+		PageVersionMap &rpv = pageTable[referencePageID];
+		ASSERT(!rpv.empty());
+		updateVersion = rpv.back().first;
+	}
+	else {
+		ASSERT(updateVersion > latestVersion || updateVersion == 0);
+	}
+
 	ASSERT(pageID < pageTable.size());
 
 	PageVersionMap &pageVersionMap = pageTable[pageID];

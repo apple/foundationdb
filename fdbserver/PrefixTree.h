@@ -395,7 +395,6 @@ private:
 			// key will be a reference returned from prefixSource->getKeyRef()
 			// See comments near keyBuffer and key for more info.
 			initKeyBufferSpace();
-			printf("prefix len %d\n", parser.prefixLen);
 			key = prefixSource->getKeyRef(parser.prefixLen);
 		}
 
@@ -513,7 +512,6 @@ public:
 		}
 
 		Cursor(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
-			printf("root = %p\n", root);
 			init(root, prevAncestor, nextAncestor);
 		}
 
@@ -526,8 +524,6 @@ public:
 			if(path.size() < initialPathCapacity)
 				path.resize(initialPathCapacity);
 			pathLen = initialPathLen;
-			printf("init: \nprev=%s\nnext=%s\n", prevAncestor.toHexString(15).c_str(), nextAncestor.toHexString(15).c_str());
-			printf("init: source_next flag %d\n", root->flags & Node::PREFIX_SOURCE_NEXT);
 			path[0].init(nextAncestor);
 			path[1].init(prevAncestor);
 			path[2].init(root, &path[root->flags & Node::PREFIX_SOURCE_NEXT ? 0 : 1], false, 1);
@@ -919,7 +915,7 @@ public:
 		int splitLen;   // Bytes after prefix required to make traversal decision
 		int suffixLen;  // Remainder of key bytes after split key portion
 
-		printf("build: '%s'\n  prefixLen %d  prefixSourceNext %d\n", key.toHexString().c_str(), prefixLen, prefixSourceNext);
+		//printf("build: '%s'\n  prefixLen %d  prefixSourceNext %d\n", key.toHexString().c_str(), prefixLen, prefixSourceNext);
 
 		// 2 entries or less means no right child, so just put all remaining key bytes into split string.
 		if(count < 3) {

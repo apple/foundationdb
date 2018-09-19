@@ -60,7 +60,6 @@ class MemoryPagerSnapshot : public IPagerSnapshot, ReferenceCounted<MemoryPagerS
 public:
 	MemoryPagerSnapshot(MemoryPager *pager, Version version) : pager(pager), version(version) {}
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
-	virtual void invalidateReturnedPages() {}
 	virtual Version getVersion() const {
 		return version;
 	}
@@ -89,7 +88,7 @@ public:
 
 	virtual LogicalPageID allocateLogicalPage();
 	virtual void freeLogicalPage(LogicalPageID pageID, Version version);
-	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion);
+	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID);
 	virtual void forgetVersions(Version begin, Version end);
 	virtual Future<Void> commit();
 
@@ -198,9 +197,15 @@ void MemoryPager::freeLogicalPage(LogicalPageID pageID, Version version) {
 	}
 }
 
-void MemoryPager::writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion) {
+void MemoryPager::writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID) {
 	ASSERT(updateVersion > latestVersion || updateVersion == 0);
 	ASSERT(pageID < pageTable.size());
+
+	if(referencePageID != invalidLogicalPageID) {
+		PageVersionMap &rpv = pageTable[referencePageID];
+		ASSERT(!rpv.empty());
+		updateVersion = rpv.back().first;
+	}
 
 	PageVersionMap &pageVersionMap = pageTable[pageID];
 

@@ -71,14 +71,12 @@ public:
 	IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version) : pager(pager), version(version) {}
 
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
-	virtual void invalidateReturnedPages();
 
 	virtual Version getVersion() const {
 		return version;
 	}
 
 	virtual ~IndirectShadowPagerSnapshot() {
-		invalidateReturnedPages();
 	}
 
 	virtual void addref() {
@@ -89,7 +87,6 @@ public:
 		ReferenceCounted<IndirectShadowPagerSnapshot>::delref();
 	}
 
-	Arena arena;
 private:
 	IndirectShadowPager *pager;
 	Version version;
@@ -144,7 +141,7 @@ public:
 
 	virtual LogicalPageID allocateLogicalPage();
 	virtual void freeLogicalPage(LogicalPageID pageID, Version version);
-	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion);
+	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID);
 	virtual void forgetVersions(Version begin, Version end);
 	virtual Future<Void> commit();
 
