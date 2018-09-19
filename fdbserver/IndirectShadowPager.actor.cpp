@@ -440,11 +440,13 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	bool updateExisting = updateVersion == 0;
 	if(updateExisting) {
 		// If there is no existing latest version to update then there must be a referencePageID from which to get a latest version
+		// so get that version and change this to a normal update
 		if(pageVersionMap.empty()) {
 			ASSERT(referencePageID != invalidLogicalPageID);
 			PageVersionMap &rpv = pageTable[referencePageID];
 			ASSERT(!rpv.empty());
 			updateVersion = rpv.back().first;
+			updateExisting = false;
 		}
 		else {
 			ASSERT(pageVersionMap.size());
