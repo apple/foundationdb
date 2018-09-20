@@ -802,6 +802,20 @@ public:
 			return false;
 		}
 
+		if(!clusterControllerProcessId.present()) {
+			return false;
+		}
+
+		auto ccWorker = id_worker.find(clusterControllerProcessId.get());
+		if(ccWorker == id_worker.end()) {
+			return false;
+		}
+
+		// Do not trigger better master exists if the cluster controller is excluded, since the master will change anyways once the cluster controller is moved
+		if(ccWorker->second.priorityInfo.isExcluded) {
+			return false;
+		}
+
 		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].priority > db.config.regions[1].priority &&
 			db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 			checkRegions(db.config.regions);
