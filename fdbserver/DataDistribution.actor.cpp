@@ -258,13 +258,14 @@ struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
 	bool isWrongConfiguration;
+	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
-	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false) {}
-	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false) {}
+	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality; }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -309,7 +310,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	loop {
-		if( statusMap->count(server.id()) ) {
+		if( statusMap->get(server.id()).initialized ) {
 			bool unhealthy = statusMap->get(server.id()).isUnhealthy();
 			if(unhealthy && !status->isUnhealthy()) {
 				(*unhealthyServers)--;
@@ -1329,7 +1330,7 @@ struct DDTeamCollection {
 		}
 		server_info.erase( removedServer );
 
-		if(server_status.count(removedServer) && server_status.get(removedServer).isUnhealthy()) {
+		if(server_status.get(removedServer).initialized && server_status.get(removedServer).isUnhealthy()) {
 			unhealthyServers--;
 		}
 		server_status.clear( removedServer );
