@@ -558,6 +558,7 @@ struct DDTeamCollection {
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Future<Void> readyToStart;
 	Future<Void> checkTeamDelay;
+	bool addSubsetComplete;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -598,7 +599,7 @@ struct DDTeamCollection {
 		Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> const& serverChanges,
 		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 		Reference<AsyncVar<bool>> processingUnhealthy)
-		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
+		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder( Void() ), addSubsetComplete(false),
 		 configuration(configuration), serverChanges(serverChanges), readyToStart(readyToStart), checkTeamDelay( delay( SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution) ),
 		 initialFailureReactionDelay( delayed( readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution ) ), healthyTeamCount( 0 ), storageServerSet(new LocalityMap<UID>()),
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
@@ -649,7 +650,7 @@ struct DDTeamCollection {
 		while( !self->teamBuilder.isReady() )
 			Void _ = wait( self->teamBuilder );
 
-		if( self->doBuildTeams ) {
+		if( self->doBuildTeams && self->readyToStart.isReady() ) {
 			self->doBuildTeams = false;
 			try {
 				loop {
@@ -845,7 +846,7 @@ struct DDTeamCollection {
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
 			for(auto server : self->badTeams[idx]->servers) {
-				if(server->inDesiredDC) {
+				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
 					servers.push_back(server);
 				}
 			}
@@ -928,7 +929,6 @@ struct DDTeamCollection {
 			Void _ = wait( yield() );
 		}
 
-		Void _ = wait( addSubsetOfEmergencyTeams(self) );
 		return Void();
 	}
 
@@ -1167,6 +1167,11 @@ struct DDTeamCollection {
 	//
 	// buildTeams will not count teams larger than teamSize against the desired teams.
 	ACTOR Future<Void> buildTeams( DDTeamCollection* self ) {
+		if(!self->addSubsetComplete) {
+			self->addSubsetComplete = true;
+			Void _ = wait( addSubsetOfEmergencyTeams(self) );
+		}
+
 		state int desiredTeams;
 		int serverCount = 0;
 		int uniqueDataCenters = 0;
@@ -1729,8 +1734,6 @@ ACTOR Future<Void> storageServerTracker(
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
-	Void _ = wait( self->readyToStart );
-	
 	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
