@@ -427,6 +427,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
+             "ssd-redwood-1",
              "memory"
          ]},
          "coordinators_count":1,
