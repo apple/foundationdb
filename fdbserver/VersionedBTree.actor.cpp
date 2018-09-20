@@ -234,7 +234,11 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 			}
 			else {
 				ASSERT(blockCount > 1);
-				btPageMem = new uint8_t[pageSize];
+				btPageMem = new uint8_t[usableBlockSize * blockCount];
+#if VALGRIND
+				// Prevent valgrind errors caused by writing random unneeded bytes to disk.
+				memset(btPageMem, 0, usableBlockSize * blockCount);
+#endif
 			}
 
 			btPage->flags = newFlags;
