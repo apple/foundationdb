@@ -354,9 +354,9 @@ ACTOR Future<Void> commit(IPager *pager) {
 	static int commitNum = 1;
 	state int myCommit = commitNum++;
 
-	fprintf(stderr, "Commit%d\n", myCommit);
+	debug_printf("Commit%d\n", myCommit);
 	Void _ = wait(pager->commit());
-	fprintf(stderr, "FinishedCommit%d\n", myCommit);
+	debug_printf("FinishedCommit%d\n", myCommit);
 	return Void();
 }
 
@@ -364,9 +364,9 @@ ACTOR Future<Void> read(IPager *pager, LogicalPageID pageID, Version version, Ve
 	static int readNum = 1;
 	state int myRead = readNum++;
 	state Reference<IPagerSnapshot> readSnapshot = pager->getReadSnapshot(version);
-	fprintf(stderr, "Read%d\n", myRead);
+	debug_printf("Read%d\n", myRead);
 	Reference<const IPage> readPage = wait(readSnapshot->getPhysicalPage(pageID));
-	fprintf(stderr, "FinishedRead%d\n", myRead);
+	debug_printf("FinishedRead%d\n", myRead);
 	ASSERT(validatePage(readPage, pageID, expectedVersion >= 0 ? expectedVersion : version));
 	return Void();
 }
@@ -375,7 +375,7 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	state Reference<IPage> page = pager->newPageBuffer();
 
 	Version latestVersion = wait(pager->getLatestVersion());
-	fprintf(stderr, "Got latest version: %lld\n", latestVersion);
+	debug_printf("Got latest version: %lld\n", latestVersion);
 
 	state Version version = latestVersion+1;
 	state Version v1 = version;

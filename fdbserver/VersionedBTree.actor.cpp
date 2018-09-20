@@ -2095,7 +2095,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 static void nullWaitHandler( const boost::system::error_code& ) {}
 
 TEST_CASE("/redwood/correctness") {
-	state bool useDisk = true;
+	state bool useDisk = true;  // MemoryPager is not being maintained currently.
 
 	state std::string pagerFile = "unittest_pageFile";
 	state IPager *pager;
