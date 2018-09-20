@@ -164,7 +164,7 @@ void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) 
 	}
 }
 
-Future<Void> AsyncFileCached::truncate_impl( int64_t size ) {
+Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	++countFileCacheWrites;
 	++countCacheWrites;
 
@@ -214,7 +214,11 @@ Future<Void> AsyncFileCached::truncate_impl( int64_t size ) {
 			++p;
 	}
 
-	return truncate_underlying( this, size, waitForAll( actors ) );
+	// Wait for the page truncations to finish, then truncate the underlying file
+	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+	return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(waitForAll(actors), [=](Void _) -> Future<Void> {
+		return uncached->truncate(size);
+	});
 }
 
 Future<Void> AsyncFileCached::flush() {

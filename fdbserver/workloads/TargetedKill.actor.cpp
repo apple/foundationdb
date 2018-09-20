@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
@@ -28,6 +27,7 @@
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct TargetedKillWorkload : TestWorkload {
 	std::string machineToKill;
@@ -81,7 +81,7 @@ struct TargetedKillWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> assassin( Database cx, TargetedKillWorkload* self ) {
-		Void _ = wait( delay( self->killAt ) );
+		wait( delay( self->killAt ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 
 		NetworkAddress machine;
@@ -126,7 +126,7 @@ struct TargetedKillWorkload : TestWorkload {
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 
-		Void _ = wait( self->killEndpoint( machine, cx, self ) );
+		wait( self->killEndpoint( machine, cx, self ) );
 
 		return Void();
 	}

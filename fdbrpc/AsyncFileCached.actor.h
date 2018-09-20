@@ -32,6 +32,7 @@
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct EvictablePage {
 	void* data;
@@ -122,7 +123,7 @@ public:
 		// If there is a truncate in progress before the the write position then we must 
 		// wait for it to complete.
 		if(length + offset > self->currentTruncateSize)
-			Void _ = wait(self->currentTruncate);
+			wait(self->currentTruncate);
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
 		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
@@ -130,8 +131,8 @@ public:
 			++self->countFileCacheWritesBlocked;
 			++self->countCacheWritesBlocked;
 		}
-		Void r = wait(f);
-		return r;
+		wait(f);
+		return Void();
 	}
 
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
@@ -141,26 +142,21 @@ public:
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
 
-	Future<Void> truncate_impl( int64_t size );
-
-	// Enforces ordering of truncates and maintains currentTruncate and currentTruncateSize
-	// so writers can wait behind truncates that would affect them.
-	ACTOR static Future<Void> wait_then_truncate(AsyncFileCached *self, int64_t size) {
-		Void _ = wait(self->currentTruncate);
-		self->currentTruncateSize = size;
-		self->currentTruncate = self->truncate_impl(size);
-		Void _ = wait(self->currentTruncate);
-		return Void();
-	}
-
+	// This waits for previously started truncates to finish and then truncates
 	virtual Future<Void> truncate( int64_t size ) {
-		return wait_then_truncate(this, size);
+		return truncate_impl(this, size);
 	}
 
+	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
+	Future<Void> changeFileSize( int64_t size );
 
-	ACTOR Future<Void> truncate_underlying( AsyncFileCached* self, int64_t size, Future<Void> truncates ) {
-		Void _ = wait( truncates );
-		Void _ = wait( self->uncached->truncate( size ) );
+	// This wrapper for the actual truncation operation enforces ordering of truncates.
+	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
+	ACTOR static Future<Void> truncate_impl(AsyncFileCached *self, int64_t size) {
+		wait(self->currentTruncate);
+		self->currentTruncateSize = size;
+		self->currentTruncate = self->changeFileSize(size);
+		wait(self->currentTruncate);
 		return Void();
 	}
 
@@ -284,8 +280,8 @@ private:
 	Future<Void> quiesce();
 
 	ACTOR static Future<Void> waitAndSync( AsyncFileCached* self, Future<Void> flush ) {
-		Void _ = wait( flush );
-		Void _ = wait( self->uncached->sync() );
+		wait( flush );
+		wait( self->uncached->sync() );
 		return Void();
 	}
 
@@ -341,7 +337,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> waitAndWrite( AFCPage* self, void const* data, int length, int offset ) {
-		Void _ = wait( self->notReading );
+		wait( self->notReading );
 		memcpy( static_cast<uint8_t*>(self->data) + offset, data, length );
 		return Void();
 	}
@@ -385,7 +381,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> waitAndRead( AFCPage* self, void* data, int length, int offset ) {
-		Void _ = wait( self->notReading );
+		wait( self->notReading );
 		memcpy( data, static_cast<uint8_t const*>(self->data) + offset, length );
 		return Void();
 	}
@@ -415,7 +411,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			++self->writeThroughCount;
 			self->updateFlushableIndex();
 
-			Void _ = wait( self->notReading && self->notFlushing );
+			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
@@ -425,7 +421,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 				auto f = self->owner->uncached->write( self->data, self->pageCache->pageSize, self->pageOffset );
 
-				Void _ = wait( f );
+				wait( f );
 			}
 		}
 		catch(Error& e) {
@@ -482,7 +478,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> truncate_impl( AFCPage* self ) {
-		Void _ = wait( self->notReading && self->notFlushing && yield() );
+		wait( self->notReading && self->notFlushing && yield() );
 		delete self;
 		return Void();
 	}
@@ -536,4 +532,5 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	int zeroCopyRefCount;  // references held by "zero-copy" reads
 };
 
+#include "flow/unactorcompiler.h"
 #endif

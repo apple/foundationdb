@@ -115,7 +115,7 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 
 		ACTOR Future<Void> holdRefUntilStopped( Pool* p ) {
 			p->addref();
-			Void _ = wait( p->allStopped.getResult() );
+			wait( p->allStopped.getResult() );
 			p->delref();
 			return Void();
 		}
@@ -178,7 +178,7 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 
 	ACTOR Future<Void> stopOnError( WorkPool* w ) {
 		try { 
-			Void _ = wait( w->getError() );  
+			wait( w->getError() );  
 		} catch (Error& e) {
 			w->error = e;
 		}
@@ -213,7 +213,7 @@ public:
 	ACTOR static void startWorker( Worker* w ) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
-		Void _ = wait( delay(0, g_network->getCurrentTask() ));
+		wait( delay(0, g_network->getCurrentTask() ));
 		w->start();
 	}
 	virtual void post( PThreadAction action ) {
@@ -265,11 +265,11 @@ typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 ACTOR void coroSwitcher( Future<Void> what, int taskID, Coro* coro ) {
 	try {
 		state double t = now();
-		Void _ = wait(what);
+		wait(what);
 		//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
 		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
 	} catch (Error&) {}
-	Void _ = wait( delay(0, taskID) );
+	wait( delay(0, taskID) );
 	Coro_switchTo_( swapCoro(coro), coro );
 }
 

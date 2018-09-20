@@ -123,7 +123,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 		TraceEvent("PagerOpenedDataFile").detail("Filename", pager->pageFileName);
 
-		Void _ = wait(pager->dataFile->sync());
+		wait(pager->dataFile->sync());
 
 		state int64_t fileSize = wait(pager->dataFile->size());
 		TraceEvent("PagerGotFileSize").detail("Size", fileSize);
@@ -255,7 +255,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 }
 
 ACTOR Future<Void> housekeeper(IndirectShadowPager *pager) {
-	Void _ = wait(pager->recovery);
+	wait(pager->recovery);
 
 	loop {
 		state LogicalPageID pageID = 0;
@@ -264,10 +264,10 @@ ACTOR Future<Void> housekeeper(IndirectShadowPager *pager) {
 			// Right now, this delays 10ms every 400K pages, which means we have 1s of delay for every
 			// 40M pages. In total, we introduce 100s delay for a max size 4B page file.
 			if(pageID % 400000 == 0) {
-				Void _ = wait(delay(0.01)); 
+				wait(delay(0.01)); 
 			}
 			else {
-				Void _ = wait(yield());
+				wait(yield());
 			}
 
 			auto& pageVersionMap = pager->pageTable[pageID];
@@ -313,7 +313,7 @@ ACTOR Future<Void> housekeeper(IndirectShadowPager *pager) {
 
 ACTOR Future<Void> forwardError(Future<Void> f, Promise<Void> target) {
 	try {
-		Void _ = wait(f);
+		wait(f);
 	}
 	catch(Error &e) {
 		if(target.canBeSet()) {
@@ -407,7 +407,7 @@ void IndirectShadowPager::freeLogicalPage(LogicalPageID pageID, Version version)
 }
 
 ACTOR Future<Void> waitAndFreePhysicalPageID(IndirectShadowPager *pager, PhysicalPageID pageID, Future<Void> canFree) {
-	Void _ = wait(canFree);
+	wait(canFree);
 	pager->pagerFile.freePage(pageID);
 	return Void();
 }
@@ -497,7 +497,7 @@ ACTOR Future<Void> commitImpl(IndirectShadowPager *pager, Future<Void> previousC
 	state Future<Void> outstandingWrites = pager->writeActors.signalAndCollapse();
 	state Version commitVersion = pager->latestVersion;
 
-	Void _ = wait(previousCommit);
+	wait(previousCommit);
 
 	pager->logVersion(IndirectShadowPager::LATEST_VERSION_KEY, commitVersion);
 
@@ -505,10 +505,10 @@ ACTOR Future<Void> commitImpl(IndirectShadowPager *pager, Future<Void> previousC
 	// This is probably best done once we have better control of the log, where we can write a commit entry
 	// here without syncing the file.
 
-	Void _ = wait(outstandingWrites);
+	wait(outstandingWrites);
 
-	Void _ = wait(pager->dataFile->sync());
-	Void _ = wait(pager->pageTableLog->commit());
+	wait(pager->dataFile->sync());
+	wait(pager->pageTableLog->commit());
 	
 	pager->committedVersion = std::max(pager->committedVersion, commitVersion);
 
@@ -528,7 +528,7 @@ void IndirectShadowPager::setLatestVersion(Version version) {
 }
 
 ACTOR Future<Version> getLatestVersionImpl(IndirectShadowPager *pager) {
-	Void _ = wait(pager->recovery);
+	wait(pager->recovery);
 	return pager->latestVersion;
 }
 
@@ -547,23 +547,23 @@ Future<Void> IndirectShadowPager::onClosed() {
 ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
 	pager->recovery = Never(); // TODO: this is a hacky way to prevent users from performing operations after calling shutdown. Implement a better mechanism 
 
-	Void _ = wait(pager->writeActors.signal());
-	Void _ = wait(pager->operations.signal());
-	Void _ = wait(pager->committing);
+	wait(pager->writeActors.signal());
+	wait(pager->operations.signal());
+	wait(pager->committing);
 
 	pager->housekeeping.cancel();
 	pager->pagerFile.shutdown();
 
 	state Future<Void> pageTableClosed = pager->pageTableLog->onClosed();
 	if(dispose) {
-		Void _ = wait(IAsyncFileSystem::filesystem()->deleteFile(pager->pageFileName, true));
+		wait(IAsyncFileSystem::filesystem()->deleteFile(pager->pageFileName, true));
 		pager->pageTableLog->dispose();
 	}
 	else {
 		pager->pageTableLog->close();
 	}
 
-	Void _ = wait(pageTableClosed);
+	wait(pageTableClosed);
 
 	pager->closed.send(Void());
 	delete pager;
@@ -605,7 +605,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	// We are relying on the use of AsyncFileCached for performance here. We expect that all write actors will complete immediately (with a possible yield()),
 	// so this wait should either be nonexistent or just a yield.
 	// This causes a crash due to lifetime issues, and isn't necessary when using AsyncFileCached.
-	//Void _ = wait(pager->writeActors.signalAndCollapse());
+	//wait(pager->writeActors.signalAndCollapse());
 	//IndirectShadowPager::BusyPage &bp = i->second;
 
 	if(bp.readerCount == 1) {
@@ -717,7 +717,7 @@ ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, L
 
 	try {
 		try {
-			Void _ = wait(pager->dataFile->readZeroCopy(&data, &bytes, from * IndirectShadowPage::PAGE_BYTES));
+			wait(pager->dataFile->readZeroCopy(&data, &bytes, from * IndirectShadowPage::PAGE_BYTES));
 		}
 		catch(Error &e) {
 			zeroCopied = false;
@@ -728,7 +728,7 @@ ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, L
 
 		ASSERT(bytes == IndirectShadowPage::PAGE_BYTES);
 		checksum(pager->basename, page->mutate(), bytes, logical, to, true);
-		Void _ = wait(pager->dataFile->write(data, bytes, to * IndirectShadowPage::PAGE_BYTES));
+		wait(pager->dataFile->write(data, bytes, to * IndirectShadowPage::PAGE_BYTES));
 		if(zeroCopied) {
 			pager->dataFile->releaseZeroCopy(data, bytes, from * IndirectShadowPage::PAGE_BYTES);
 		}
@@ -750,7 +750,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 	loop {
 		state double start = now();
 		while(!pagerFile->canVacuum()) {
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		}
 
 		ASSERT(!pagerFile->freePages.empty());
@@ -768,7 +768,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 				state PhysicalPageID newPage = pagerFile->allocatePage(logicalPageInfo.first, logicalPageInfo.second);
 
 				debug_printf("%s: Vacuuming: copying page %u to %u\n", pager->pageFileName.c_str(), lastUsedPage, newPage);
-				Void _ = wait(copyPage(pager, page, logicalPageInfo.first, lastUsedPage, newPage));
+				wait(copyPage(pager, page, logicalPageInfo.first, lastUsedPage, newPage));
 
 				auto &pageVersionMap = pager->pageTable[logicalPageInfo.first];
 				auto itr = IndirectShadowPager::pageVersionMapLowerBound(pageVersionMap, logicalPageInfo.second);
@@ -809,10 +809,10 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 			pagerFile->freePages.erase(freePageItr, pagerFile->freePages.end());
 			ASSERT(pagerFile->vacuumQueue.empty() || pagerFile->vacuumQueue.rbegin()->first < eraseStartPage);
 
-			Void _ = wait(pager->dataFile->truncate(pagerFile->pagesAllocated * IndirectShadowPage::PAGE_BYTES));
+			wait(pager->dataFile->truncate(pagerFile->pagesAllocated * IndirectShadowPage::PAGE_BYTES));
 		}
 
-		Void _ = wait(delayUntil(start + (double)IndirectShadowPage::PAGE_BYTES / SERVER_KNOBS->VACUUM_BYTES_PER_SECOND)); // TODO: figure out the correct mechanism here
+		wait(delayUntil(start + (double)IndirectShadowPage::PAGE_BYTES / SERVER_KNOBS->VACUUM_BYTES_PER_SECOND)); // TODO: figure out the correct mechanism here
 	}
 }
 
@@ -920,11 +920,11 @@ extern Future<Void> simplePagerTest(IPager* const& pager);
 TEST_CASE("fdbserver/indirectshadowpager/simple") {
 	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
 
-	Void _ = wait(simplePagerTest(pager));
+	wait(simplePagerTest(pager));
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
-	Void _ = wait(closedFuture);
+	wait(closedFuture);
 
 	return Void();
 }

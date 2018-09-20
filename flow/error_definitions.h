@@ -192,6 +192,8 @@ ERROR( task_invalid_version, 2381, "Invalid task version")
 ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
+ERROR( json_malformed, 2401, "JSON string was malformed")
+ERROR( json_eof_expected, 2402, "JSON string did not terminate where expected")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

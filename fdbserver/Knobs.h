@@ -67,6 +67,7 @@ public:
 	int PARALLEL_GET_MORE_REQUESTS;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 	int64_t VERSIONS_PER_BATCH;
+	int CONCURRENT_LOG_ROUTER_READS;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -161,6 +162,8 @@ public:
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
+	int MIN_NOTIFICATIONS;
+	double NOTIFICATION_FULL_CLEAR_TIME;
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;
 	double CANDIDATE_GROWTH_RATE;
@@ -248,6 +251,7 @@ public:
 	int MOVE_KEYS_KRM_LIMIT;
 	int MOVE_KEYS_KRM_LIMIT_BYTES; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
 	int MAX_SKIP_TAGS;
+	double MAX_ADDED_SOURCES_MULTIPLIER;
 
 	//FdbServer
 	double MIN_REBOOT_TIME;
@@ -268,6 +272,7 @@ public:
 	double SPRING_BYTES_TLOG;
 	int64_t TLOG_SPILL_THRESHOLD;
 	int64_t TLOG_HARD_LIMIT_BYTES;
+	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

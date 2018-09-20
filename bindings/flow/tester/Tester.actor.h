@@ -32,6 +32,7 @@
 #include "bindings/flow/IDirectory.h"
 #include "bindings/flow/Subspace.h"
 #include "bindings/flow/DirectoryLayer.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define LOG_ALL 0
 #define LOG_INSTRUCTIONS LOG_ALL || 0
@@ -224,13 +225,13 @@ Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionDa
 		try {
 			state decltype(fake<F>()().getValue()) result = wait(func());
 			if(instruction->isDatabase) {
-				Void _ = wait(instruction->tr->commit());
+				wait(instruction->tr->commit());
 			}
 			return result;
 		}
 		catch(Error &e) {
 			if(instruction->isDatabase) {
-				Void _ = wait(instruction->tr->onError(e));
+				wait(instruction->tr->onError(e));
 			}
 			else {
 				throw;
@@ -239,4 +240,5 @@ Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionDa
 	}
 }
 
+#include "flow/unactorcompiler.h"
 #endif

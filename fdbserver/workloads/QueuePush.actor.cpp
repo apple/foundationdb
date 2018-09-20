@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int keyBytes = 16;
 
@@ -98,7 +98,7 @@ struct QueuePushWorkload : TestWorkload {
 			self->clients.push_back( self->writeClient( cx, self ) );
 		}
 
-		Void _ = wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
+		wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
 		self->clients.clear();
 		return Void();
 	}
@@ -137,11 +137,11 @@ struct QueuePushWorkload : TestWorkload {
 								StringRef(self->valueString) );
 
 					start = now();
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					self->commitLatencies.addSample( now() - start );
 					break;
 				} catch( Error& e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 					++self->retries;
 				}
 			}

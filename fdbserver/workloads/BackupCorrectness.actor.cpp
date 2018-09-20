@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 
 //A workload which test the correctness of backup and restore process
@@ -125,10 +125,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			Void _ = wait( backupAgent->taskBucket->changePause(cx, true) );
-			Void _ = wait( delay(30*g_random->random01()) );
-			Void _ = wait( backupAgent->taskBucket->changePause(cx, false) );
-			Void _ = wait( delay(120*g_random->random01()) );
+			wait( backupAgent->taskBucket->changePause(cx, true) );
+			wait( delay(30*g_random->random01()) );
+			wait( backupAgent->taskBucket->changePause(cx, false) );
+			wait( delay(120*g_random->random01()) );
 		}
 	}
 
@@ -137,7 +137,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		loop {
 			std::string status = wait(agent.getStatus(cx, true, tag));
 			puts(status.c_str());
-			Void _ = wait(delay(2.0));
+			wait(delay(2.0));
 		}
 	}
 
@@ -147,16 +147,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state UID	randomID = g_nondeterministic_random->randomUniqueID();
 
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
-		Void _ = wait( delay( startDelay ));
+		wait( delay( startDelay ));
 
 		if (startDelay || BUGGIFY) {
 			TraceEvent("BARW_DoBackupAbortBackup1", randomID).detail("Tag", printable(tag)).detail("StartDelay", startDelay);
 
 			try {
-				Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
+				wait(backupAgent->abortBackup(cx, tag.toString()));
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_DoBackupAbortBackupException", randomID).detail("Tag", printable(tag)).error(e);
+				TraceEvent("BARW_DoBackupAbortBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded)
 					throw;
 			}
@@ -168,10 +168,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state Future<Void> status = statusLoop(cx, tag.toString());
 
 		try {
-			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
-			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).detail("Tag", printable(tag)).error(e);
+			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
@@ -181,7 +181,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
 			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time
-			Void _ = wait(stopDifferentialFuture);
+			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
 
 			try {
@@ -197,7 +197,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state bool restorable = false;
 					if(lastBackupContainer) {
 						state BackupDescription desc = wait(lastBackupContainer->describeBackup());
-						Void _ = wait(desc.resolveVersionTimes(cx));
+						wait(desc.resolveVersionTimes(cx));
 						printf("BackupDescription:\n%s\n", desc.toString().c_str());
 						restorable = desc.maxRestorableVersion.present();
 					}
@@ -230,21 +230,21 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							.detail("WaitStatus", resultWait)
 							.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
 							.detail("Restorable", restorable);
-						Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
+						wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
 						TraceEvent("BARW_DoBackupDiscontinueBackup", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
-						Void _ = wait(backupAgent->discontinueBackup(cx, tag));
+						wait(backupAgent->discontinueBackup(cx, tag));
 					}
 				}
 
 				else {
 					TraceEvent("BARW_DoBackupDiscontinueBackup", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
-					Void _ = wait(backupAgent->discontinueBackup(cx, tag));
+					wait(backupAgent->discontinueBackup(cx, tag));
 				}
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).detail("Tag", printable(tag)).error(e);
+				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
@@ -279,7 +279,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 
@@ -322,7 +322,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state Future<Void> startRestore = delay(self->restoreAfter);
 
 			// backup
-			Void _ = wait(delay(self->backupAfter));
+			wait(delay(self->backupAfter));
 
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
 			state Promise<Void> submitted;
@@ -330,13 +330,13 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 			if (self->abortAndRestartAfter) {
 				TraceEvent("BARW_DoBackup2", randomID).detail("Tag", printable(self->backupTag)).detail("AbortWait", self->abortAndRestartAfter);
-				Void _ = wait(submitted.getFuture());
+				wait(submitted.getFuture());
 				b = b && doBackup(self, self->abortAndRestartAfter, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter, Promise<Void>());
 			}
 
 			TraceEvent("BARW_DoBackupWait", randomID).detail("BackupTag", printable(self->backupTag)).detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 			try {
-				Void _ = wait(b);
+				wait(b);
 			} catch( Error &e ) {
 				if(e.code() != error_code_database_locked)
 					throw;
@@ -359,20 +359,20 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), g_random->randomInt(0, 100), self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_SubmitBackup2Exception", randomID).detail("BackupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_SubmitBackup2Exception", randomID).error(e).detail("BackupTag", printable(self->backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
 			}
 
 			TEST(!startRestore.isReady()); //Restore starts at specified time
-			Void _ = wait(startRestore);
+			wait(startRestore);
 			
 			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
-					Void _ = wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
+					wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
-				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					for (auto &kvrange : self->backupRanges)
 						tr->clear(kvrange);
 					return Void();
@@ -394,13 +394,13 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
-					Void _ = wait(delay(g_random->randomInt(0, 10)));
+					wait(delay(g_random->randomInt(0, 10)));
 					for(restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
 						FileBackupAgent::ERestoreState rs = wait(backupAgent.abortRestore(cx, restoreTags[restoreIndex]));
 						// The restore may have already completed, or the abort may have been done before the restore
 						// was even able to start.  Only run a new restore if the previous one was actually aborted.
 						if (rs == FileBackupAgent::ERestoreState::ABORTED) {
-							Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 								tr->clear(self->backupRanges[restoreIndex]);
 								return Void();
 							}));
@@ -409,7 +409,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				Void _ = wait(waitForAll(restores));
+				wait(waitForAll(restores));
 
 				for (auto &restore : restores) {
 					assert(!restore.isError());
@@ -420,17 +420,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
 				extraTasks = true;
 				try {
-					Void _ = wait(extraBackup);
+					wait(extraBackup);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_ExtraBackupException", randomID).detail("BackupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_ExtraBackupException", randomID).error(e).detail("BackupTag", printable(self->backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
 
 				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
 				try {
-					Void _ = wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
+					wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
@@ -466,7 +466,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					if ((taskCount) && (0)) {
 						TraceEvent("BARW_EndingNonzeroTaskCount", randomID).detail("BackupTag", printable(self->backupTag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 						printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
-						Void _ = wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+						wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
 					}
 
 					loop {
@@ -475,7 +475,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						TraceEvent("BARW_NonzeroTaskWait", randomID).detail("BackupTag", printable(self->backupTag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
-						Void _ = wait(delay(5.0));
+						wait(delay(5.0));
 						tr->commit();
 						tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 						int64_t _taskCount = wait( backupAgent.getTaskCount(tr) );
@@ -538,12 +538,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 				catch (Error &e) {
 					TraceEvent("BARW_CheckException", randomID).error(e);
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
 			if (displaySystemKeys) {
-				Void _ = wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+				wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
 			}
 
 			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));

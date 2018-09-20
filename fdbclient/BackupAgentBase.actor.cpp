@@ -346,7 +346,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 
 			//add lock
 			releaser.release();
-			Void _ = wait(lock->take(TaskDefaultYield, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
+			wait(lock->take(TaskDefaultYield, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
 			releaser = FlowLock::Releaser(*lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
 			state Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, limits));
@@ -357,7 +357,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if(g_random->random01() < 0.5)
-					Void _ = wait(delay(6.0));
+					wait(delay(6.0));
 			}
 
 			releaser.remaining -= values.expectedSize(); //its the responsibility of the caller to release after this point
@@ -411,13 +411,13 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				rangevalue.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if(g_random->random01() < 0.5)
-					Void _ = wait(delay(6.0));
+					wait(delay(6.0));
 			}
 
 			//add lock
-			Void _ = wait(active);
+			wait(active);
 			releaser.release();
-			Void _ = wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
+			wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
 			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 
 			int index(0);
@@ -468,7 +468,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 		catch (Error &e) {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -531,7 +531,7 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
 		totalBytes += mutationSize;
-		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
+		wait( commitLock->take(TaskDefaultYield, mutationSize) );
 		addActor.send( commitLock->releaseWhen( success(commit.getReply(req)), mutationSize ) );
 
 		if(endOfStream) {
@@ -571,7 +571,7 @@ ACTOR Future<Void> coalesceKeyVersionCache(Key uid, Version endVersion, Referenc
 		req.transaction.read_snapshot = committedVersion->get();
 		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
-		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
+		wait( commitLock->take(TaskDefaultYield, mutationSize) );
 		addActor.send( commitLock->releaseWhen( success(commit.getReply(req)), mutationSize ) );
 	}
 
@@ -587,7 +587,7 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 	try {
 		loop {
 			if(beginVersion >= *endVersion) {
-				Void _ = wait( commitLock.take(TaskDefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES) );
+				wait( commitLock.take(TaskDefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES) );
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if(beginVersion >= *endVersion) {
 					return Void();
@@ -615,7 +615,7 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 				if(error.isError()) throw error.getError();
 			}
 
-			Void _ = wait(coalesceKeyVersionCache(uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
+			wait(coalesceKeyVersionCache(uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
 		}
 	} catch( Error &e ) {
@@ -715,7 +715,7 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 					}
 				}
 			}
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 
 			if (!endVersion.present() && (backupVersions.size() == 1 || currEndVersion >= nextSmallestVersion)) {
 				return Void();
@@ -725,7 +725,7 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 			}
 			tr->reset();
 		} catch (Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }

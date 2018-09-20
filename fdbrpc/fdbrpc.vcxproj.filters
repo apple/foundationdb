@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ActorCompiler Include="sim2.actor.cpp" />
@@ -25,6 +25,7 @@
     <ActorCompiler Include="AsyncFileBlobStore.actor.h" />
     <ActorCompiler Include="AsyncFileReadAhead.actor.h" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
+    <ActorCompiler Include="networksender.actor.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Locality.cpp" />

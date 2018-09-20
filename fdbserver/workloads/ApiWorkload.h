@@ -22,12 +22,11 @@
 #define FDBSERVER_APIWORKLOAD_H
 #pragma once
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-
 #include "MemoryKeyValueStore.h"
+#include "flow/actorcompiler.h"
 
 //an enumeration of apis being tested
 enum TransactionType
@@ -283,7 +282,7 @@ struct ApiWorkload : TestWorkload {
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			extraDB = extraCluster->createDatabase().get();
 		}
 	}
 
@@ -383,5 +382,7 @@ struct ApiWorkload : TestWorkload {
 	//The transaction factory used to create transactions in this run
 	Reference<TransactionFactoryInterface> transactionFactory;
 };
+
+#include "flow/unactorcompiler.h"
 
 #endif

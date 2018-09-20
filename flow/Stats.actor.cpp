@@ -69,7 +69,7 @@ void Counter::clear() {
 }
 
 ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, double interval, CounterCollection* counters, std::string trackLatestName) {
-	Void _ = wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
+	wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
 
 	for (ICounter* c : counters->counters)
 		c->resetInterval();
@@ -90,6 +90,6 @@ ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, d
 			te.trackLatest(trackLatestName.c_str());
 
 		last_interval = now();
-		Void _ = wait(delay(interval));
+		wait(delay(interval));
 	}
 }

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // SOMEDAY: Make this actually run on multiple clients
 
@@ -145,7 +145,7 @@ struct InventoryTestWorkload : TestWorkload {
 					return false;
 				return true;
 			} catch (Error& e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -168,7 +168,7 @@ struct InventoryTestWorkload : TestWorkload {
 	{
 		state double lastTime = now();
 		loop {
-			Void _ = wait( poisson( &lastTime, transactionDelay ) );
+			wait( poisson( &lastTime, transactionDelay ) );
 			state double st = now();
 			state Transaction tr( cx );
 			if (g_random->random01() < fractionWriteTransactions) {
@@ -183,17 +183,17 @@ struct InventoryTestWorkload : TestWorkload {
 						todo.push_back( self->inventoryTestWrite( &tr, *p ) );
 					try {
 						try {
-							Void _ = wait( waitForAll(todo) );
+							wait( waitForAll(todo) );
 						} catch (Error& e) {
 							if (e.code() == error_code_actor_cancelled)
 								for(auto p = products.begin(); p != products.end(); ++p )
 									self->maxExpectedResults[ *p ]--;
 							throw e;
 						}
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 					++self->retries;
 					for(auto p = products.begin(); p != products.end(); ++p )
@@ -207,7 +207,7 @@ struct InventoryTestWorkload : TestWorkload {
 						Optional<Value> val = wait( tr.get( self->chooseProduct() ) );
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 				}
 			}

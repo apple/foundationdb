@@ -230,20 +230,20 @@ struct Profiler {
 		// Open and truncate output file
 		state Reference<SyncFileForSim> outFile =  Reference<SyncFileForSim>(new SyncFileForSim(outfn));
 		state int64_t outOffset = 0;
-		Void _ = wait( outFile->truncate(outOffset) );
+		wait( outFile->truncate(outOffset) );
 
-		Void _ = wait( outFile->write( self->environmentInfoWriter.getData(), self->environmentInfoWriter.getLength(), outOffset ) );
+		wait( outFile->write( self->environmentInfoWriter.getData(), self->environmentInfoWriter.getLength(), outOffset ) );
 		outOffset += self->environmentInfoWriter.getLength();
 
 		loop {
-			Void _ = wait( self->network->delay(1.0, TaskMinPriority) || self->network->delay(2.0, TaskMaxPriority) );
+			wait( self->network->delay(1.0, TaskMinPriority) || self->network->delay(2.0, TaskMaxPriority) );
 
 			self->enableSignal(false);
 			std::swap( self->output_buffer, otherBuffer );
 			self->enableSignal(true);
 
-			Void _ = wait( otherBuffer->writeTo(outFile, outOffset) );
-			Void _ = wait( outFile->flush() );
+			wait( otherBuffer->writeTo(outFile, outOffset) );
+			wait( outFile->flush() );
 			otherBuffer->clear();
 		}
 	}

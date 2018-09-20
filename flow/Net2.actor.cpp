@@ -26,7 +26,6 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "actorcompiler.h"
 #include "network.h"
 #include "IThreadPool.h"
 #include "boost/range.hpp"
@@ -41,6 +40,7 @@
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
@@ -48,13 +48,19 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys
-//                                                 xyzdev
-//                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A570010001LL;
-uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
+//
+// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+//
+//                                                       xyzdev
+//                                                       vvvv
+const uint64_t currentProtocolVersion        = 0x0FDB00B061020001LL;
+const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
+// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
+static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -240,7 +246,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value());
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -277,7 +283,7 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect( to, std::move(p) );
 
-			Void _ = wait( onConnected );
+			wait( onConnected );
 			self->init();
 			return self;
 		} catch (Error&) {
@@ -411,15 +417,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
+			TraceEvent(SevWarn, "N2_CloseError", id).suppressFor(1.0).detail("Message", error.value());
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 };
@@ -452,7 +458,7 @@ private:
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
-			Void _ = wait( f );
+			wait( f );
 			conn->accept( NetworkAddress(peer_endpoint.address().to_v4().to_ulong(), peer_endpoint.port()) );
 
 			return conn;
@@ -514,7 +520,7 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 		double processTime = timer_monotonic();
 		double systemTime = timer();
 		TraceEvent("ProcessTimeOffset").detailf("ProcessTime", "%lf", processTime).detailf("SystemTime", "%lf", systemTime).detailf("OffsetFromSystemTime", "%lf", processTime - systemTime);
-		Void _ = wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
+		wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
 	}
 }
 
@@ -900,11 +906,11 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 			x = invalid_local_address();
 		else
 			x = bind_failed();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (std::exception const& e) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (...) {
 		Error x = unknown_error();

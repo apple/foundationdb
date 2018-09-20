@@ -37,10 +37,11 @@
 #include "BlobStore.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template<typename T> static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 	try {
-		Void _ = wait(success(f) || p.getFuture());
+		wait(success(f) || p.getFuture());
 		return f.get();
 	} catch(Error &e) {
 		if(p.canBeSet())
@@ -106,7 +107,7 @@ public:
 			data = (const uint8_t *)data + finishlen;
 
 			// End current part (and start new one)
-			Void _ = wait(f->endCurrentPart(f.getPtr(), true));
+			wait(f->endCurrentPart(f.getPtr(), true));
 			p = f->m_parts.back().getPtr();
 		}
 
@@ -140,12 +141,12 @@ public:
 		if(f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
 			part->finalizeMD5();
-			Void _ = wait(f->m_bstore->writeEntireFileFromBuffer(f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
+			wait(f->m_bstore->writeEntireFileFromBuffer(f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
 			return Void();
 		}
 
 		// There are at least 2 parts.  End the last part (which could be empty)
-		Void _ = wait(f->endCurrentPart(f));
+		wait(f->endCurrentPart(f));
 
 		state BlobStoreEndpoint::MultiPartSetT partSet;
 		state std::vector<Reference<Part>>::iterator p;
@@ -158,7 +159,7 @@ public:
 		}
 
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required the upload ID so it is ready
-		Void _ = wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
+		wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
 
 		return Void();
 	}
@@ -220,7 +221,7 @@ private:
 			return Void();
 
 		// Wait for an upload slot to be available
-		Void _ = wait(f->m_concurrentUploads.take());
+		wait(f->m_concurrentUploads.take());
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to m_error
 		// Also, hold a releaser for the concurrent upload slot while all that is going on.
@@ -291,4 +292,5 @@ public:
 
 };
 
+#include "flow/unactorcompiler.h"
 #endif

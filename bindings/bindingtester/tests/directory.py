@@ -114,7 +114,7 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False)))
+            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False, is_partition=(layer=='partition'))))
             # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
             #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
@@ -378,7 +378,7 @@ class DirectoryTest(Test):
 
     def get_result_specifications(self):
         return [
-            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1),
+            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1021]),
             ResultSpecification(self.directory_log, ordering_index=0),
             ResultSpecification(self.subspace_log, ordering_index=0)
         ]

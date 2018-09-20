@@ -139,15 +139,11 @@ struct TraceEvent {
 	TraceEvent( Severity, const char* type, UID id = UID() );
 	TraceEvent( struct TraceInterval&, UID id = UID() );
 	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
-	TraceEvent(const char* type, const StringRef& id);   // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, const StringRef& id);
-	TraceEvent(const char* type, const Optional<Standalone<StringRef>>& id);   // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, const Optional<Standalone<StringRef>>& id);
 
-	static bool isEnabled( const char* type, Severity = SevMax );
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
+	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false);
 
 	TraceEvent& detail( std::string key, std::string value );
@@ -172,6 +168,8 @@ public:
 	TraceEvent& backtrace(const std::string& prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
+
+	//Cannot call other functions which could disable the trace event afterwords
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
 
 	TraceEvent& GetLastError();
@@ -184,19 +182,20 @@ public:
 	DynamicEventMetric *tmpEventMetric;  // This just just a place to store fields
 
 private:
+	bool initialized;
 	bool enabled;
 	std::string trackingKey;
 	TraceEventFields fields;
-	int length;
 	Severity severity;
 	const char *type;
 	UID id;
+	Error err;
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
 
-	bool init( Severity, const char* type );
-	bool init( Severity, struct TraceInterval& );
+	bool init();
+	bool init( struct TraceInterval& );
 };
 
 struct ITraceLogWriter {
@@ -262,6 +261,9 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+
+void addTraceRole(std::string role);
+void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern trace_clock_t g_trace_clock;

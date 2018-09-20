@@ -160,7 +160,7 @@ ACTOR Future<int> actorFuzz6( FutureStream<int> inputStream, PromiseStream<int> 
 		outputStream.send( 228205 );
 		state int i213703; for(i213703 = 0; i213703 < 5; i213703++) {
 			outputStream.send( 686961 );
-			Void _ = wait( error ); // throw operation_failed()
+			wait( error ); // throw operation_failed()
 			outputStream.send( 453057 );
 		}
 		outputStream.send( 318329 );
@@ -360,7 +360,7 @@ ACTOR Future<int> actorFuzz19( FutureStream<int> inputStream, PromiseStream<int>
 							outputStream.send( 507597 );
 							if ( (++ifstate&1) == 0 ) {
 								outputStream.send( 165706 );
-								Void _ = wait( error ); // throw operation_failed()
+								wait( error ); // throw operation_failed()
 								outputStream.send( 517934 );
 							} else {
 								outputStream.send( 310975 );

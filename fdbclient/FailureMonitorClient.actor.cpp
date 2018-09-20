@@ -94,14 +94,14 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					waitfor = reply.clientRequestIntervalMS * .001;
 					nextRequest = delayJittered( waitfor, TaskFailureMonitor );
 				}
-				when( Void _ = wait( requestTimeout ) ) {
+				when( wait( requestTimeout ) ) {
 					g_network->setCurrentTask(TaskDefaultDelay);
 					requestTimeout = Never();
 					TraceEvent(SevWarn, "FailureMonitoringServerDown").detail("OldServerID",controller.id());
 					monitor->setStatus( controller.failureMonitoring.getEndpoint().address, FailureStatus(true) );
 					fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().address );
 				}
-				when( Void _ = wait( nextRequest ) ) {
+				when( wait( nextRequest ) ) {
 					g_network->setCurrentTask(TaskDefaultDelay);
 					nextRequest = Never();
 
@@ -137,6 +137,6 @@ ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct Clus
 
 	loop {
 		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();
-		Void _ = wait( ci->onChange() );
+		wait( ci->onChange() );
 	}
 }

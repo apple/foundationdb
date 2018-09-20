@@ -524,7 +524,7 @@ public:
 			writeEmptyPage(page, BTreePage::IS_LEAF, self->m_usablePageSizeOverride);
 			self->writePage(self->m_root, page, latest, StringRef(), StringRef());
 			self->m_pager->setLatestVersion(latest);
-			Void _ = wait(self->m_pager->commit());
+			wait(self->m_pager->commit());
 		}
 		self->m_lastCommittedVersion = latest;
 		return Void();
@@ -1149,7 +1149,7 @@ private:
 				childPageIDs.push_back(pageID);
 			}
 
-			Void _ = wait(waitForAll(futureChildren));
+			wait(waitForAll(futureChildren));
 
 			bool modified = false;
 			for(int i = 0; i < futureChildren.size(); ++i) {
@@ -1284,7 +1284,7 @@ private:
 		self->m_latestCommit = committed.getFuture();
 
 		// Wait for the latest commit that started to be finished.
-		Void _ = wait(previousCommit);
+		wait(previousCommit);
 		debug_printf("%s: Beginning commit of version %lld\n", self->m_name.c_str(), writeVersion);
 
 		// Get the latest version from the pager, which is what we will read at
@@ -1297,7 +1297,7 @@ private:
 
 		self->m_pager->setLatestVersion(writeVersion);
 		debug_printf("%s: Committing pager %lld\n", self->m_name.c_str(), writeVersion);
-		Void _ = wait(self->m_pager->commit());
+		wait(self->m_pager->commit());
 		debug_printf("%s: Committed version %lld\n", self->m_name.c_str(), writeVersion);
 
 		// Now that everything is committed we must delete the mutation buffer.
@@ -1400,7 +1400,7 @@ private:
 
 		ACTOR static Future<Void> reset(InternalCursor *self) {
 			if(self->m_path.empty()) {
-				Void _ = wait(pushPage(self, beginKey, endKey, self->m_root));
+				wait(pushPage(self, beginKey, endKey, self->m_root));
 			}
 			else {
 				self->m_path.resize(1);
@@ -1411,7 +1411,7 @@ private:
 
 		ACTOR static Future<Void> seekLessThanOrEqual_impl(InternalCursor *self, KeyRef key) {
 			state TraversalPathT &path = self->m_path;
-			Void _ = wait(reset(self));
+			wait(reset(self));
 
 			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
 
@@ -1434,7 +1434,7 @@ private:
 					// first record in the leaf page, which means we must move backwards 1 step in the database to find the
 					// record < key, if such a record exists.
 					if(!foundLTE) {
-						Void _ = wait(self->move(false));
+						wait(self->move(false));
 					}
 					else {
 						// Found the target record
@@ -1452,7 +1452,7 @@ private:
 					state LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
 					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to Page id=%d.  %s\n", 
 						key.toHexString().c_str(), newPage, self->toString("  ").c_str());
-					Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
+					wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
 				}
 			}
 		}
@@ -1517,7 +1517,7 @@ private:
 				// Get the page that the path's last entry points to
 				LogicalPageID childPageID = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
 
-				Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), childPageID));
+				wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), childPageID));
 				p = &(path.back());
 				// No page traversed to in this manner should be empty.
 				ASSERT(p->btPage->count != 0);
@@ -1603,13 +1603,13 @@ private:
 			state Key target = KeyVersionValueRef::searchKey(key, self->m_version);
 			self->m_kv = Optional<KeyValueRef>();
 
-			Void _ = wait(icur.seekLessThanOrEqual(target));
+			wait(icur.seekLessThanOrEqual(target));
 			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toHexString(15).c_str(), icur.toString().c_str());
 
 			// If we found the target key, return it as it is valid for any cmp option
 			if(icur.valid() && icur.kvv.value.present() && icur.kvv.key == key) {
 				debug_printf("Reading full kv pair starting from: %s\n", icur.kvv.toString().c_str());
-				Void _ = wait(self->readFullKVPair(self));
+				wait(self->readFullKVPair(self));
 				return Void();
 			}
 
@@ -1622,16 +1622,16 @@ private:
 			if(cmp > 0) {
 				// icur is at a record < key, possibly before the start of the tree so move forward at least once.
 				loop {
-					Void _ = wait(icur.move(true));
+					wait(icur.move(true));
 					if(!icur.valid() || icur.kvv.key > key)
 						break;
 				}
 				// Get the next present key at the target version.  Handles invalid cursor too.
-				Void _ = wait(self->next(needValue));
+				wait(self->next(needValue));
 			}
 			else if(cmp < 0) {
 				// Move to previous present kv pair at the target version
-				Void _ = wait(self->prev(needValue));
+				wait(self->prev(needValue));
 			}
 
 			return Void();
@@ -1647,7 +1647,7 @@ private:
 			if(self->m_kv.present()) {
 				while(i.valid() && i.kvv.key <= self->m_kv.get().key) {
 					debug_printf("Cursor::next(): Advancing internal cursor to get passed previous returned user key.  cursor %s\n", i.toString().c_str());
-					Void _ = wait(i.move(true));
+					wait(i.move(true));
 				}
 			}
 
@@ -1657,7 +1657,7 @@ private:
 				iLast = i;
 				if(!i.valid())
 					break;
-				Void _ = wait(i.move(true));
+				wait(i.move(true));
 				// If the previous cursor position was a set at a version at or before v and the new cursor position
 				// is not valid or a newer version of the same key or a different key, then get the full record
 				// for the previous cursor position
@@ -1672,7 +1672,7 @@ private:
 					// Assume that next is the most likely next move, so save the one-too-far cursor position.
 					std::swap(i, iLast);
 					// readFullKVPair will have to go backwards to read the value
-					Void _ = wait(readFullKVPair(self));
+					wait(readFullKVPair(self));
 					std::swap(i, iLast);
 					return Void();
 				}
@@ -1691,7 +1691,7 @@ private:
 			// Make sure we are one record before the last user key
 			if(self->m_kv.present()) {
 				while(i.valid() && i.kvv.key >= self->m_kv.get().key) {
-					Void _ = wait(i.move(false));
+					wait(i.move(false));
 				}
 			}
 
@@ -1701,19 +1701,19 @@ private:
 				if(i.kvv.version <= v) {
 					// If it's present, return it
 					if(i.kvv.value.present()) {
-						Void _ = wait(readFullKVPair(self));
+						wait(readFullKVPair(self));
 						return Void();
 					}
 					// Value wasn't present as of the latest version <= v, so move backward to a new key
 					state Key clearedKey = i.kvv.key;
 					while(1) {
-						Void _ = wait(i.move(false));
+						wait(i.move(false));
 						if(!i.valid() || i.kvv.key != clearedKey)
 							break;
 					}
 				}
 				else {
-					Void _ = wait(i.move(false));
+					wait(i.move(false));
 				}
 			}
 
@@ -1753,7 +1753,7 @@ private:
 					if(bytesLeft == 0)
 						break;
 					ASSERT(bytesLeft > 0);
-					Void _ = wait(self->m_icursor.move(fwd));
+					wait(self->m_icursor.move(fwd));
 					ASSERT(self->m_icursor.valid());
 				}
 			}
@@ -1795,7 +1795,7 @@ public:
 	}
 
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwoodUnversioned *self) {
-		Void _ = wait(self->m_tree->init());
+		wait(self->m_tree->init());
 		Version v = wait(self->m_tree->getLatestVersion());
 		self->m_tree->setWriteVersion(v + 1);
 		return Void();
@@ -1810,7 +1810,7 @@ public:
 			self->m_pager->dispose();
 		else
 			self->m_pager->close();
-		Void _ = wait(closedFuture);
+		wait(closedFuture);
 		self->m_closed.send(Void());
 		if(self->m_error.canBeSet()) {
 			self->m_error.send(Never());
@@ -1857,7 +1857,7 @@ public:
 	}
 
 	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRangeRef keys, int rowLimit, int byteLimit) {
-		Void _ = wait(self->m_init);
+		wait(self->m_init);
 		state Standalone<VectorRef<KeyValueRef>> result;
 		state int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
@@ -1866,19 +1866,19 @@ public:
 
 		state Version readVersion = self->m_tree->getLastCommittedVersion();
 		if(rowLimit >= 0) {
-			Void _ = wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
+			wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
 			while(cur->isValid() && cur->getKey() < keys.end) {
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
 				accumulatedBytes += kv.expectedSize();
 				result.push_back(result.arena(), kv);
 				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
 					break;
-				Void _ = wait(cur->next(true));
+				wait(cur->next(true));
 			}
 		} else {
-			Void _ = wait(cur->findLastLessOrEqual(keys.end, true, 0));
+			wait(cur->findLastLessOrEqual(keys.end, true, 0));
 			if(cur->isValid() && cur->getKey() == keys.end)
-				Void _ = wait(cur->prev(true));
+				wait(cur->prev(true));
 
 			while(cur->isValid() && cur->getKey() >= keys.begin) {
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
@@ -1886,7 +1886,7 @@ public:
 				result.push_back(result.arena(), kv);
 				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
 					break;
-				Void _ = wait(cur->prev(true));
+				wait(cur->prev(true));
 			}
 		}
 		return result;
@@ -1897,11 +1897,11 @@ public:
 	}
 
 	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, Optional< UID > debugID) {
-		Void _ = wait(self->m_init);
+		wait(self->m_init);
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
-		Void _ = wait(cur->findEqual(key));
+		wait(cur->findEqual(key));
 		if(cur->isValid()) {
 			return cur->getValue();
 		}
@@ -1913,10 +1913,10 @@ public:
 	}
 
 	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, int maxLength, Optional< UID > debugID) {
-		Void _ = wait(self->m_init);
+		wait(self->m_init);
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
-		Void _ = wait(cur->findEqual(key));
+		wait(cur->findEqual(key));
 		if(cur->isValid()) {
 			Value v = cur->getValue();
 			int len = std::min(v.size(), maxLength);
@@ -1977,11 +1977,11 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	if(g_random->coinflip()) {
 		debug_printf("VerifyRange: Dummy seek\n");
 		state Key randomKey = randomKV().key;
-		Void _ = wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
+		wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
 
 	debug_printf("VerifyRange: Actual seek\n");
-	Void _ = wait(cur->findFirstEqualOrGreater(start, true, 0));
+	wait(cur->findFirstEqualOrGreater(start, true, 0));
 
 	state std::vector<KeyValue> results;
 
@@ -2021,7 +2021,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		}
 
 		results.push_back(KeyValue(KeyValueRef(cur->getKey(), cur->getValue())));
-		Void _ = wait(cur->next(true));
+		wait(cur->next(true));
 	}
 
 	// Make sure there are no further written kv pairs that would be present at this version.
@@ -2053,9 +2053,9 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	}
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	Void _ = wait(cur->findLastLessOrEqual(end, true, 0));
+	wait(cur->findLastLessOrEqual(end, true, 0));
 	if(cur->isValid() && cur->getKey() == end)
-		Void _ = wait(cur->prev(true));
+		wait(cur->prev(true));
 
 	state std::vector<KeyValue>::const_reverse_iterator r = results.rbegin();
 
@@ -2078,7 +2078,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		}
 
 		++r;
-		Void _ = wait(cur->prev(true));
+		wait(cur->prev(true));
 	}
 
 	if(r != results.rend()) {
@@ -2107,7 +2107,7 @@ TEST_CASE("/redwood/correctness") {
 
 	state int pageSize = 100; //g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
-	Void _ = wait(btree->init());
+	wait(btree->init());
 
 	state int maxCommits = 10;
 	state int maxVersionsPerCommit = 4;
@@ -2173,7 +2173,7 @@ TEST_CASE("/redwood/correctness") {
 				}
 			}
 		}
-		Void _ = wait(btree->commit());
+		wait(btree->commit());
 
 		// Check that all writes can be read at their written versions
 		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written.cbegin();
@@ -2187,12 +2187,12 @@ TEST_CASE("/redwood/correctness") {
 			delete btree;
 			Future<Void> closedFuture = pager->onClosed();
 			pager->close();
-			Void _ = wait(closedFuture);
+			wait(closedFuture);
 
 			pager = new IndirectShadowPager(pagerFile);
 
 			btree = new VersionedBTree(pager, pagerFile, pageSize);
-			Void _ = wait(btree->init());
+			wait(btree->init());
 
 			Version v = wait(btree->getLatestVersion());
 			ASSERT(v == version);
@@ -2207,7 +2207,7 @@ TEST_CASE("/redwood/correctness") {
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
 			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
-			Void _ = wait(cur->findEqual(key));
+			wait(cur->findEqual(key));
 
 			if(val.present()) {
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
@@ -2247,7 +2247,7 @@ TEST_CASE("/redwood/correctness") {
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
-	Void _ = wait(closedFuture);
+	wait(closedFuture);
 
 	return Void();
 }
@@ -2255,7 +2255,7 @@ TEST_CASE("/redwood/correctness") {
 TEST_CASE("/redwood/performance/set") {
 	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
 	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
-	Void _ = wait(btree->init());
+	wait(btree->init());
 
 	state int nodeCount = 100000;
 	state int maxChangesPerVersion = 100;
@@ -2286,17 +2286,17 @@ TEST_CASE("/redwood/performance/set") {
 		}
 
 		if(g_random->random01() < .01) {
-			Void _ = wait(btree->commit());
+			wait(btree->commit());
 			double elapsed = now() - startTime;
 			printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 
-	Void _ = wait(btree->commit());
+	wait(btree->commit());
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
-	Void _ = wait(closedFuture);
+	wait(closedFuture);
 
 	double elapsed = now() - startTime;
 	printf("Wrote (final) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);

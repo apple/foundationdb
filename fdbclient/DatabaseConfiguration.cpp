@@ -177,7 +177,8 @@ bool DatabaseConfiguration::isValid() const {
 		usableRegions <= 2 &&
 		regions.size() <= 2 &&
 		( usableRegions == 1 || regions.size() == 2 ) &&
-		( regions.size() == 0 || regions[0].priority >= 0 ) ) ) {
+		( regions.size() == 0 || regions[0].priority >= 0 ) &&
+		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
 		return false;
 	}
 

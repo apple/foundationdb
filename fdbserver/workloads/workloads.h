@@ -22,11 +22,11 @@
 #define FDBSERVER_WORKLOADS_H
 #pragma once
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/TesterInterface.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"
 
 /*
  * Gets an Value from a list of key/value pairs, using a default value if the key is not present.
@@ -54,13 +54,11 @@ private:
 
 struct TestWorkload : NonCopyable, WorkloadContext {
 	int phases;
-	Value dbName;
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
 	explicit TestWorkload(WorkloadContext const& wcx) 
 		: WorkloadContext(wcx)
 	{
-		dbName = getOption( options, LiteralStringRef("dbName"), StringRef() );
 		bool runSetup = getOption( options, LiteralStringRef("runSetup"), true );
 		phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if( runSetup )
@@ -199,7 +197,7 @@ public:
 
 Future<DistributedTestResults> runWorkload( 
 		Database const& cx, std::vector< TesterInterface > const& testers, 
-		StringRef const& database, TestSpec const& spec );
+		TestSpec const& spec );
 
 void logMetrics( vector<PerfMetric> metrics );
 
@@ -216,5 +214,8 @@ Future<Void> databaseWarmer( Database const& cx );
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&, std::string phase, int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
 							int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0);
+
+
+#include "flow/unactorcompiler.h"
 
 #endif

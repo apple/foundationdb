@@ -108,7 +108,10 @@ STATIC_LIBS :=
 VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)))))
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
-CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow FDBLibTLS
+CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow
+ifndef TLS_DISABLED
+CPP_PROJECTS += FDBLibTLS
+endif
 OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)
@@ -143,7 +146,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester fdb_c_tests
 
 Makefiles: $(MK_GENERATED)
 
@@ -157,6 +160,11 @@ $(CPP_MK_GENERATED): build/vcxprojtom4.py build/vcxproj.mk Makefile
 
 DEPSDIR := .deps
 OBJDIR := .objs
+CMDDIR := .cmds
+
+COMPILE_COMMANDS_JSONS := $(addprefix $(CMDDIR)/,$(addsuffix /compile_commands.json,${CPP_PROJECTS}))
+compile_commands.json: build/concatinate_jsons.py ${COMPILE_COMMANDS_JSONS}
+	@build/concatinate_jsons.py ${COMPILE_COMMANDS_JSONS}
 
 include $(MK_INCLUDE)
 
@@ -166,6 +174,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
+	@rm -rf $(CMDDIR) compile_commands.json
 	@find . -name "*.g.cpp" -exec rm -f {} \; -or -name "*.g.h" -exec rm -f {} \;
 
 targets:
@@ -192,13 +201,16 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@rm -r .libstdc++
 
 docpreview: javadoc
-	TARGETS= $(MAKE) -C documentation docpreview
+	@echo "Generating     docpreview"
+	@TARGETS= $(MAKE) -C documentation docpreview
 
 docpreview_clean:
-	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
+	@echo "Cleaning       docpreview"
+	@CLEAN_TARGETS= $(MAKE) -C documentation -s --no-print-directory docpreview_clean
 
 packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc
-	TARGETS= $(MAKE) -C documentation docpackage
+	@echo "Packaging      documentation"
+	@TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
 	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
 	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION).tar.gz

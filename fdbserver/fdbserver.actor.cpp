@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/PerfMetric.h"
@@ -73,6 +72,7 @@
 #endif
 
 #include "flow/SimpleOpt.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
@@ -247,75 +247,6 @@ bool debugMutation( const char* context, Version version, MutationRef const& mut
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return false; }
 #endif
 
-Future<Void> debugQueryServer( DebugQueryRequest const& req ) {
-	Standalone<VectorRef<DebugEntryRef>> reply;
-
-	for(auto v = debugEntries.begin(); v != debugEntries.end(); ++v)
-		for(auto m = v->begin(); m != v->end(); ++m) {
-			if (m->mutation.type == m->mutation.ClearRange || m->mutation.type == m->mutation.DebugKeyRange) {
-				if (!KeyRangeRef(m->mutation.param1, m->mutation.param2).contains( req.search ))
-					continue;
-			} else if (m->mutation.type == m->mutation.SetValue) {
-				if (m->mutation.param1 != req.search)
-					continue;
-			}
-			reply.push_back( reply.arena(), *m );
-		}
-
-	req.reply.send(reply);
-	return Void();
-}
-
-auto sortByTime = [](DebugEntryRef const& a, DebugEntryRef const& b) { return a.time < b.time; };
-
-/*ACTOR Future<Void> debugSearchMutationCluster( ZookeeperInterface zk, Key key ) {
-	state ZKWatch<ClusterControllerFullInterface> ccWatch(zk, LiteralStringRef("ClusterController"));
-	state ClusterControllerFullInterface cc = wait( ccWatch.get() );
-
-	ASSERT( ccWatch.getLastVersion() );
-
-	Optional<vector<WorkerInterface>> workerList = wait( cc.getWorkers.tryGetReply( GetWorkersRequest() ) );
-	if( !workerList.present() ) {
-		printf("ERROR: CC interface not in ZK\n");
-		return Void();
-	}
-	state vector<WorkerInterface> workers = workerList.get();
-
-	state vector<Future<Standalone<VectorRef<DebugEntryRef>>>> replies( workers.size() );
-	for(int w=0; w<workers.size(); w++) {
-		DebugQueryRequest req;
-		req.search = key;
-		replies[w] = timeoutError(workers[w].debugQuery.getReply( req ), 5.0);
-	}
-	//state vector<Standalone<VectorRef<DebugEntryRef>>> result = wait( getAll( replies ) );
-	Void _ = wait(waitForAllReady( replies ));
-	state vector<Standalone<VectorRef<DebugEntryRef>>> result( workers.size() );
-	for(int r=0; r<result.size(); r++) {
-		if (replies[r].isError())
-			printf("ERROR: Couldn't get results from '%s'\n", workers[r].debugQuery.getEndpoint().address.toString().c_str());
-		else
-			result[r] = replies[r].get();
-	}
-	ASSERT( result.size() == workers.size() );
-
-	Standalone<VectorRef<DebugEntryRef>> all;
-	for(int r=0; r<result.size(); r++)
-		all.append( all.arena(), &result[r][0], result[r].size() );
-	std::sort( all.begin(), all.end(), sortByTime );
-	printf("\n\n");
-	for(auto e = all.begin(); e != all.end(); ++e) {
-		const char* type =
-			e->mutation.type == MutationRef::SetValue ? "SetValue" :
-			e->mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			e->mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			"UnknownMutation";
-		printf("%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", e->time, e->address.toString().c_str(), e->context.toString().c_str(), e->version, type, printable(e->mutation.param1).c_str(), printable(e->mutation.param2).c_str());
-	}
-	printf("\n\n");
-
-	return Void();
-}*/
-
 #ifdef _WIN32
 #include <sddl.h>
 
@@ -417,7 +348,7 @@ UID getSharedMemoryMachineId() {
 
 
 ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess() ) {
-	Void _ = wait( trigger );
+	wait( trigger );
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator.killProcess( m, ISimulator::KillInstantly );
@@ -536,7 +467,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				return Void();
 			} catch (Error& e) {
 				fclose(output);
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	} catch (Error& e) {

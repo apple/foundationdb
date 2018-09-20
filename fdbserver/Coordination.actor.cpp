@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -111,7 +111,7 @@ private:
 
 	ACTOR static Future<Void> onErr( Future<Future<Void>> e ) {
 		Future<Void> f = wait(e);
-		Void _ = wait(f);
+		wait(f);
 		return Void();
 	}
 
@@ -136,7 +136,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			if (v.readGen < req.gen) {
 				v.readGen = req.gen;
 				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
-				Void _ = wait(store->commit());
+				wait(store->commit());
 			}
 			req.reply.send( GenerationRegReadReply( v.val, v.writeGen, v.readGen ) );
 		}
@@ -148,7 +148,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
 				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
-				Void _ = wait(store->commit());
+				wait(store->commit());
 				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
 				wrq.reply.send( v.writeGen );
@@ -204,10 +204,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state std::set<LeaderInfo> availableCandidates;
 	state std::set<LeaderInfo> availableLeaders;
 	state Optional<LeaderInfo> currentNominee;
-	state vector<ReplyPromise<Optional<LeaderInfo>>> notify;
+	state Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
 	state Future<Void> nextInterval = delay( 0 );
 	state double candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 	state int leaderIntervalCount = 0;
+	state Future<Void> notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
@@ -255,7 +256,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			req.reply.send( Void() );
 			return Void();
 		}
-		when ( Void _ = wait(nextInterval) ) {
+		when ( wait(nextInterval) ) {
 			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
 				!currentNominee.present())
 			{
@@ -274,14 +275,24 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					nextNominee = Optional<LeaderInfo>();
 				}
 
-				if ( currentNominee.present() != nextNominee.present() || (currentNominee.present() && currentNominee.get().leaderChangeRequired(nextNominee.get())) || !availableLeaders.size() ) {
+				bool foundCurrentNominee = false;
+				if(currentNominee.present()) {
+					for(auto& it : availableLeaders) {
+						if(currentNominee.get().equalInternalId(it)) {
+							foundCurrentNominee = true;
+							break;
+						}
+					}
+				}
+
+				if ( !nextNominee.present() || !foundCurrentNominee || currentNominee.get().leaderChangeRequired(nextNominee.get()) ) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 						.detail("Changed", nextNominee != currentNominee).detail("Key", printable(key));
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
 					currentNominee = nextNominee;
-				} else if (currentNominee.present() && nextNominee.present() && currentNominee.get().equalInternalId(nextNominee.get())) {
+				} else if (currentNominee.get().equalInternalId(nextNominee.get())) {
 					// leader becomes better
 					currentNominee = nextNominee;
 				}
@@ -299,6 +310,13 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 				availableLeaders.clear();
 				availableCandidates.clear();
+			}
+		}
+		when( wait(notifyCheck) ) {
+			notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
+			if(!notify.empty() && currentNominee.present()) {
+				notify.front().send( currentNominee.get() );
+				notify.pop_front();
 			}
 		}
 	}
@@ -348,7 +366,7 @@ struct LeaderRegisterCollection {
 		self->forward[ key ] = forwardInfo;
 		OnDemandStore &store = *self->pStore;
 		store->set( KeyValueRef( key.withPrefix( fwdKeys.begin ), conn.toString() ) );
-		Void _ = wait(store->commit());
+		wait(store->commit());
 		return Void();
 	}
 
@@ -369,7 +387,7 @@ struct LeaderRegisterCollection {
 	ACTOR static Future<Void> wrap( LeaderRegisterCollection* self, Key key, Future<Void> actor ) {
 		state Error e;
 		try { 
-			Void _ = wait(actor); 
+			wait(actor); 
 		} catch (Error& err) {
 			if (err.code() == error_code_actor_cancelled)
 				throw;
@@ -388,7 +406,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state LeaderRegisterCollection regs( pStore );
 	state ActorCollection forwarders(false);
 
-	Void _ = wait( LeaderRegisterCollection::init( &regs ) ); 
+	wait( LeaderRegisterCollection::init( &regs ) ); 
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
@@ -421,7 +439,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				regs.getInterface(req.key).forward.send(req);
 			}
 		}
-		when( Void _ = wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
+		when( wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
 	}
 }
 
@@ -434,7 +452,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().address).detail("Folder", dataFolder);
 
 	try {
-		Void _ = wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
+		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

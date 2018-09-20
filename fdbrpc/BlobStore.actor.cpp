@@ -182,7 +182,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
-		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url).suppressFor(60, true);
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").suppressFor(60).detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
 		throw backup_invalid_url();
 	}
 }
@@ -207,7 +207,7 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 }
 
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
-	Void _ = wait(b->requestRateRead->getAllowance(1));
+	wait(b->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
@@ -221,7 +221,7 @@ Future<bool> BlobStoreEndpoint::objectExists(std::string const &bucket, std::str
 }
 
 ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
-	Void _ = wait(b->requestRateDelete->getAllowance(1));
+	wait(b->requestRateDelete->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
@@ -249,7 +249,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {
+				when(wait(done)) {
 					done = Never();
 				}
 
@@ -267,7 +267,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 
 			// This is just a precaution to avoid having too many outstanding delete actors waiting to run
 			while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
-				Void _ = wait(deleteFutures.front());
+				wait(deleteFutures.front());
 				deleteFutures.pop_front();
 			}
 		}
@@ -277,7 +277,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 	}
 
 	while(deleteFutures.size() > 0) {
-		Void _ = wait(deleteFutures.front());
+		wait(deleteFutures.front());
 		deleteFutures.pop_front();
 	}
 
@@ -289,7 +289,7 @@ Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
-	Void _ = wait(b->requestRateWrite->getAllowance(1));
+	wait(b->requestRateWrite->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket;
 	HTTP::Headers headers;
@@ -302,7 +302,7 @@ Future<Void> BlobStoreEndpoint::createBucket(std::string const &bucket) {
 }
 
 ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
-	Void _ = wait(b->requestRateRead->getAllowance(1));
+	wait(b->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
@@ -341,11 +341,11 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		if(json.type() == json_spirit::obj_type)
 			return json.get_obj();
 		else
-			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
+			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").suppressFor(60).detail("File", path);
 
 	} catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, errorEventType).detail("File", path).error(e).suppressFor(60, true);
+			TraceEvent(SevWarn, errorEventType).error(e).suppressFor(60).detail("File", path);
 	}
 
 	return Optional<json_spirit::mObject>();
@@ -360,7 +360,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 	for(auto &f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
 
-	Void _ = wait(waitForAll(reads));
+	wait(waitForAll(reads));
 
 	std::string key = b->key + "@" + b->host;
 
@@ -408,10 +408,9 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 
 		// If the connection expires in the future then return it
 		if(rconn.expirationTime > now()) {
-		TraceEvent("BlobStoreEndpointReusingConnected")
+		TraceEvent("BlobStoreEndpointReusingConnected").suppressFor(60)
 			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			.detail("ExpiresIn", rconn.expirationTime - now())
-			.suppressFor(60, true);
+			.detail("ExpiresIn", rconn.expirationTime - now());
 			return rconn;
 		}
 	}
@@ -420,13 +419,12 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
 
-	TraceEvent("BlobStoreEndpointNewConnection")
+	TraceEvent("BlobStoreEndpointNewConnection").suppressFor(60)
 		.detail("RemoteEndpoint", conn->getPeerAddress())
-		.detail("ExpiresIn", b->knobs.max_connection_life)
-		.suppressFor(60, true);
+		.detail("ExpiresIn", b->knobs.max_connection_life);
 
 	if(b->lookupSecret)
-		Void _ = wait(b->updateSecret());
+		wait(b->updateSecret());
 
 	return BlobStoreEndpoint::ReusableConnection({conn, now() + b->knobs.max_connection_life});
 }
@@ -450,7 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
-	Void _ = wait(bstore->concurrentRequests.take());
+	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
@@ -489,7 +487,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// when a new connection is established and setAuthHeaders() would need the updated secret.
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
-			Void _ = wait(bstore->requestRate->getAllowance(1));
+			wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
 			r->convertToJSONifXML();
 
@@ -521,6 +519,16 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		retryable = retryable && (thisTry < maxTries);
 
 		TraceEvent event(SevWarn, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
+
+		// Attach err to trace event if present, otherwise extract some stuff from the response
+		if(err.present()) {
+			event.error(err.get());
+		}
+		event.suppressFor(60);
+		if(!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
 		event.detail("ConnectionEstablished", connectionEstablished);
 
 		if(remoteAddress.present())
@@ -530,8 +538,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		event.detail("Verb", verb)
 			 .detail("Resource", resource)
-			 .detail("ThisTry", thisTry)
-			 .suppressFor(60, true);
+			 .detail("ThisTry", thisTry);
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt limit.
 		if(!r || r->code != 429)
@@ -541,13 +548,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		double delay = nextRetryDelay;
 		// Double but limit the *next* nextRetryDelay.
 		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
-
-		// Attach err to trace event if present, otherwise extract some stuff from the response
-		if(err.present())
-			event.error(err.get());
-		else {
-			event.detail("ResponseCode", r->code);
-		}
 
 		if(retryable) {
 			// If r is valid then obey the Retry-After response header if present.
@@ -566,7 +566,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
-			Void _ = wait(::delay(delay));
+			wait(::delay(delay));
 		}
 		else {
 			// We can't retry, so throw something.
@@ -618,7 +618,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	state std::vector<Future<Void>> subLists;
 
 	while(more) {
-		Void _ = wait(bstore->concurrentLists.take());
+		wait(bstore->concurrentLists.take());
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
@@ -702,18 +702,18 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					lastFile = result.commonPrefixes.back();
 
 				if(lastFile.empty()) {
-					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").detail("Resource", fullResource).suppressFor(60, true);
+					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").suppressFor(60).detail("Resource", fullResource);
 					throw backup_error();
 				}
 			}
 		} catch(Error &e) {
 			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
+				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").error(e).suppressFor(60).detail("Resource", fullResource);
 			throw http_bad_response();
 		}
 	}
 
-	Void _ = wait(waitForAll(subLists));
+	wait(waitForAll(subLists));
 
 	return Void();
 }
@@ -736,7 +736,7 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {
+				when(wait(done)) {
 					done = Never();
 				}
 
@@ -826,7 +826,7 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 }
 
 ACTOR Future<std::string> readEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
-	Void _ = wait(bstore->requestRateRead->getAllowance(1));
+	wait(bstore->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
@@ -844,8 +844,8 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
-	Void _ = wait(bstore->concurrentUploads.take());
+	wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = std::string("/") + bucket + "/" + object;
@@ -870,7 +870,7 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std
 
 	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate an MD5 sum of it.
 	// TODO:  If this actor is used to send large files then combine the summing and packetization into a loop with a yield() every 20k or so.
-	Void _ = wait(yield());
+	wait(yield());
 
 	MD5_CTX sum;
 	::MD5_Init(&sum);
@@ -881,7 +881,7 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std
 	std::string contentMD5 = base64::encoder::from_string(sumBytes);
 	contentMD5.resize(contentMD5.size() - 1);
 
-	Void _ = wait(writeEntireFileFromBuffer_impl(bstore, bucket, object, &packets, content.size(), contentMD5));
+	wait(writeEntireFileFromBuffer_impl(bstore, bucket, object, &packets, content.size(), contentMD5));
 	return Void();
 }
 
@@ -896,7 +896,7 @@ Future<Void> BlobStoreEndpoint::writeEntireFileFromBuffer(std::string const &buc
 ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, void *data, int length, int64_t offset) {
 	if(length <= 0)
 		return 0;
-	Void _ = wait(bstore->requestRateRead->getAllowance(1));
+	wait(bstore->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
@@ -916,7 +916,7 @@ Future<int> BlobStoreEndpoint::readObject(std::string const &bucket, std::string
 }
 
 ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
-	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
@@ -936,8 +936,8 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
-	Void _ = wait(bstore->concurrentUploads.take());
+	wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
@@ -966,7 +966,7 @@ Future<std::string> BlobStoreEndpoint::uploadPart(std::string const &bucket, std
 
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, BlobStoreEndpoint::MultiPartSetT parts) {
 	state UnsentPacketQueue part_list();  // NonCopyable state var so must be declared at top of actor
-	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
+	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
 	for(auto &p : parts)

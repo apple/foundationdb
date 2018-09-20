@@ -621,6 +621,7 @@ public:
 	}
 
 	VectorRef( T* data, int size ) : data(data), m_size(size), m_capacity(size) {}
+	VectorRef( T* data, int size, int capacity ) : data(data), m_size(size), m_capacity(capacity) {}
 	//VectorRef( const VectorRef<T>& toCopy ) : data( toCopy.data ), m_size( toCopy.m_size ), m_capacity( toCopy.m_capacity ) {}
 	//VectorRef<T>& operator=( const VectorRef<T>& );
 
@@ -714,6 +715,10 @@ public:
 
 	int capacity() const {
 		return m_capacity;
+	}
+
+	void extendUnsafeNoReallocNoInit(int amount) {
+		m_size += amount;
 	}
 
 private:

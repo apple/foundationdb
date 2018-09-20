@@ -85,12 +85,12 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_cl
 			throw std::runtime_error("FDBLibTLSServerError");
 		}
 		if (tls_configure(tls_sctx, policy->tls_cfg) == -1) {
-			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_sctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSConfigureError");
 		}
 		if (tls_accept_cbs(tls_sctx, &tls_ctx, tls_read_func, tls_write_func, this) == -1) {
-			TraceEvent(SevError, "FDBLibTLSAcceptError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSAcceptError", uid).detail("LibTLSErrorMessage", tls_error(tls_sctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSAcceptError");
 		}
@@ -369,7 +369,7 @@ int FDBLibTLSSession::handshake() {
 	case TLS_WANT_POLLOUT:
 		return WANT_WRITE;
 	default:
-		TraceEvent("FDBLibTLSHandshakeError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
+		TraceEvent("FDBLibTLSHandshakeError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 		return FAILED;
 	}
 }
@@ -389,7 +389,7 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 		return (int)n;
 	}
 	if (n == 0) {
-		TraceEvent("FDBLibTLSReadEOF").suppressFor(1.0, true);
+		TraceEvent("FDBLibTLSReadEOF").suppressFor(1.0);
 		return FAILED;
 	}
 	if (n == TLS_WANT_POLLIN)
@@ -397,7 +397,7 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 	if (n == TLS_WANT_POLLOUT)
 		return WANT_WRITE;
 
-	TraceEvent("FDBLibTLSReadError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
+	TraceEvent("FDBLibTLSReadError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;
 }
 
@@ -416,7 +416,7 @@ int FDBLibTLSSession::write(const uint8_t* data, int length) {
 		return (int)n;
 	}
 	if (n == 0) {
-		TraceEvent("FDBLibTLSWriteEOF", uid).suppressFor(1.0, true);
+		TraceEvent("FDBLibTLSWriteEOF", uid).suppressFor(1.0);
 		return FAILED;
 	}
 	if (n == TLS_WANT_POLLIN)
@@ -424,6 +424,6 @@ int FDBLibTLSSession::write(const uint8_t* data, int length) {
 	if (n == TLS_WANT_POLLOUT)
 		return WANT_WRITE;
 
-	TraceEvent("FDBLibTLSWriteError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
+	TraceEvent("FDBLibTLSWriteError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;
 }

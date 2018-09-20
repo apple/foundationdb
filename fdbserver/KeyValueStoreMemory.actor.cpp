@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "IKeyValueStore.h"
 #include "IDiskQueue.h"
 #include "flow/IndexedSet.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
@@ -56,7 +56,7 @@ extern bool noUnseed;
 
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent );
+	KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
 	// IClosable
 	virtual Future<Void> getError() { return log->getError(); }
@@ -427,7 +427,7 @@ private:
 		return log->push( LiteralStringRef("\x01") ); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
-	ACTOR static Future<Void> recover( KeyValueStoreMemory* self ) {
+	ACTOR static Future<Void> recover( KeyValueStoreMemory* self, bool exactRecovery ) {
 		// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into permanent variables
 		// (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions over the uncommitted versions)
 		// the uncommitted and committed variables should be equal initially (to whatever makes sense if there are no committed transactions recovered)
@@ -555,10 +555,15 @@ private:
 					loggingDelay = delay(1.0);
 				}
 
-				Void _ = wait( yield() );
+				wait( yield() );
 			}
 
 			if (zeroFillSize) {
+				if( exactRecovery ) {
+					TraceEvent(SevError, "KVSMemExpectedExact", self->id);
+					ASSERT(false);
+				}
+
 				TEST( true );  // Fixing a partial commit at the end of the KeyValueStoreMemory log
 				for(int i=0; i<zeroFillSize; i++)
 					self->log->push( StringRef((const uint8_t*)"",1) );
@@ -611,7 +616,7 @@ private:
 	}
 
 	ACTOR static Future<Void> snapshot( KeyValueStoreMemory* self ) {
-		Void _ = wait(self->recovering);
+		wait(self->recovering);
 
 		state Key nextKey = self->recoveredSnapshotKey;
 		state bool nextKeyAfter = false; //setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
@@ -623,7 +628,7 @@ private:
 		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
 
 		loop {
-			Void _ = wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
+			wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
 
 			if(self->resetSnapshot) {
 				nextKey = Key();
@@ -681,34 +686,34 @@ private:
 	}
 
 	ACTOR static Future<Optional<Value>> waitAndReadValue( KeyValueStoreMemory* self, Key key ) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readValue(key).get();
 	}
 	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix( KeyValueStoreMemory* self, Key key, int maxLength) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readValuePrefix(key, maxLength).get();
 	}
 	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> waitAndReadRange( KeyValueStoreMemory* self, KeyRange keys, int rowLimit, int byteLimit ) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
-		Void _ = wait(self->recovering);
-		Void _ = wait(self->commit(sequential));
+		wait(self->recovering);
+		wait(self->commit(sequential));
 		return Void();
 	}
 	ACTOR static Future<Void> commitAndUpdateVersions( KeyValueStoreMemory* self, Future<Void> commit, IDiskQueue::location location ) {
-		Void _ = wait( commit );
+		wait( commit );
 		self->log->pop(location);
 		return Void();
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent )
+KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery )
 	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0),
 	  committedDataSize(0), transactionSize(0), transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true)
 {
-	recovering = recover( this );
+	recovering = recover( this, exactRecovery );
 	snapshotting = snapshot( this );
 	commitActors = actorCollection( addActor.getFuture() );
 }
@@ -716,9 +721,9 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
 	IDiskQueue *log = openDiskQueue( basename, ext, logID);
-	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false );
+	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
 }
 
-IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent ) {
-	return new KeyValueStoreMemory( queue, logID, memoryLimit, disableSnapshot, replaceContent );
+IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
+	return new KeyValueStoreMemory( queue, logID, memoryLimit, disableSnapshot, replaceContent, exactRecovery );
 }

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct Increment : TestWorkload {
 	int actorCount, nodeCount;
@@ -83,7 +83,7 @@ struct Increment : TestWorkload {
 		state double lastTime = now();
 		try {
 			loop {
-				Void _ = wait( poisson( &lastTime, delay ) );
+				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
 				state Transaction tr(cx);
@@ -91,12 +91,12 @@ struct Increment : TestWorkload {
 					try {
 						tr.atomicOp(intToTestKey(g_random->randomInt(0,self->nodeCount/2)), LiteralStringRef("\x01"), MutationRef::AddValue);
 						tr.atomicOp(intToTestKey(g_random->randomInt(self->nodeCount/2,self->nodeCount)), LiteralStringRef("\x01"), MutationRef::AddValue);
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 					++self->retries;
 				}
@@ -104,8 +104,7 @@ struct Increment : TestWorkload {
 				self->totalLatency += now() - tstart;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
-				TraceEvent(SevError, "IncrementClient").error(e);
+			TraceEvent(SevError, "IncrementClient").error(e);
 			throw;
 		}
 	}
@@ -155,7 +154,7 @@ struct Increment : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(e);
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}

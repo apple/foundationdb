@@ -99,7 +99,7 @@ bool ClusterConnectionFile::fileContentsUpToDate(ClusterConnectionString &fileCo
 		return fileConnectionString.toString() == cs.toString();
 	}
 	catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ClusterFileError").detail("Filename", filename).error(e);
+		TraceEvent(SevWarnAlways, "ClusterFileError").error(e).detail("Filename", filename);
 		return false; // Swallow the error and report that the file is out of date
 	}
 }
@@ -118,7 +118,7 @@ bool ClusterConnectionFile::writeFile() {
 
 			return true;
 		} catch( Error &e ) {
-			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile").detail("Filename", filename).detail("ConnStr", cs.toString()).error(e);
+			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile").error(e).detail("Filename", filename).detail("ConnStr", cs.toString());
 		}
 	}
 
@@ -309,17 +309,17 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation ) {
 	loop {
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
-		Void _ = wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
+		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
+		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
 
 		if (li != *info) {
 			*info = li;
 			nomineeChange->trigger();
 
 			if( li.present() && li.get().forward )
-				Void _ = wait( Future<Void>(Never()) );
-			Void _ = wait( Future<Void>(Void()) );
+				wait( Future<Void>(Never()) );
+			wait( Future<Void>(Void()) );
 		}
 	}
 }
@@ -420,7 +420,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
-		Void _ = wait( nomineeChange.onTrigger() || allActors );
+		wait( nomineeChange.onTrigger() || allActors );
 	}
 }
 

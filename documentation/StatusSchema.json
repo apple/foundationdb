@@ -421,11 +421,35 @@
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0,
          "partitions_count":2,
-         "moving_data":{  
+         "moving_data":{
             "total_written_bytes":0,
             "in_flight_bytes":0,
-            "in_queue_bytes":0
+            "in_queue_bytes":0,
+            "highest_priority":0
          },
+         "team_trackers":[
+            {
+                "primary":true,
+                "in_flight_bytes":0,
+                "unhealthy_servers":0,
+                "state":{
+                    "healthy":true,
+                    "min_replicas_remaining":0,
+                    "name":{
+                       "$enum":[
+                          "initializing",
+                          "missing_data",
+                          "healing",
+                          "healthy_repartitioning",
+                          "healthy_removing_server",
+                          "healthy_rebalancing",
+                          "healthy"
+                       ]
+                    },
+                    "description":""
+                }
+            }
+         ],
          "least_operating_space_bytes_storage_server":0,
          "max_machine_failures_without_losing_data":0
       },

@@ -355,7 +355,7 @@ ACTOR Future<Void> commit(IPager *pager) {
 	state int myCommit = commitNum++;
 
 	debug_printf("Commit%d\n", myCommit);
-	Void _ = wait(pager->commit());
+	wait(pager->commit());
 	debug_printf("FinishedCommit%d\n", myCommit);
 	return Void();
 }
@@ -384,7 +384,7 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 
 	writePage(pager, page, pageID1, v1);
 	pager->setLatestVersion(v1);
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
 	state LogicalPageID pageID2 = pager->allocateLogicalPage();
 
@@ -393,17 +393,17 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	writePage(pager, page, pageID1, v2);
 	writePage(pager, page, pageID2, v2);
 	pager->setLatestVersion(v2);
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
-	Void _ = wait(read(pager, pageID1, v2));
-	Void _ = wait(read(pager, pageID1, v1));
+	wait(read(pager, pageID1, v2));
+	wait(read(pager, pageID1, v1));
 
 	state Version v3 = ++version;
 	writePage(pager, page, pageID1, v3, false);
 	pager->setLatestVersion(v3);
 
-	Void _ = wait(read(pager, pageID1, v2, v3));
-	Void _ = wait(read(pager, pageID1, v3, v3));
+	wait(read(pager, pageID1, v2, v3));
+	wait(read(pager, pageID1, v3, v3));
 
 	state LogicalPageID pageID3 = pager->allocateLogicalPage();
 
@@ -411,9 +411,9 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	writePage(pager, page, pageID2, v4);
 	writePage(pager, page, pageID3, v4);
 	pager->setLatestVersion(v4);
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
-	Void _ = wait(read(pager, pageID2, v4, v4));
+	wait(read(pager, pageID2, v4, v4));
 
 	state Version v5 = ++version;
 	writePage(pager, page, pageID2, v5);
@@ -425,14 +425,14 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	pager->freeLogicalPage(pageID2, v5);
 	pager->freeLogicalPage(pageID3, v3);
 	pager->setLatestVersion(v6);
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
 	pager->forgetVersions(0, v4);
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
-	Void _ = wait(delay(3.0));
+	wait(delay(3.0));
 
-	Void _ = wait(commit(pager));
+	wait(commit(pager));
 
 	return Void();
 }
@@ -441,12 +441,12 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 TEST_CASE("fdbserver/memorypager/simple") {
 	state IPager *pager = new MemoryPager();
 
-	Void _ = wait(simplePagerTest(pager));
+	wait(simplePagerTest(pager));
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->dispose();
 
-	Void _ = wait(closedFuture);
+	wait(closedFuture);
 	return Void();
 }
 */

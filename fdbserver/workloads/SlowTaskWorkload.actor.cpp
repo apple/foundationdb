@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/SignalSafeUnwind.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
@@ -45,7 +45,7 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> go() {
-		Void _ = wait( delay(1) );
+		wait( delay(1) );
 		int64_t phc = dl_iterate_phdr_calls;
 		int64_t exc = 0;
 		fprintf(stderr, "Slow task starting\n");

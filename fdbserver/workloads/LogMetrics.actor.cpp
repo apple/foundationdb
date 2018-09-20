@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -29,6 +28,7 @@
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogMetricsWorkload : TestWorkload {
 	std::string dataFolder;
@@ -61,7 +61,7 @@ struct LogMetricsWorkload : TestWorkload {
 		for(int i = 0; i < workers.size(); i++) {
 			workers[i].first.setMetricsRate.send( req );
 		}
-		//Void _ = wait( waitForAll( replies ) );
+		//wait( waitForAll( replies ) );
 
 		br << rate;
 		loop {
@@ -70,10 +70,10 @@ struct LogMetricsWorkload : TestWorkload {
 				Version v = wait( tr.getReadVersion() );
 				tr.set(fastLoggingEnabled, br.toStringRef());
 				tr.makeSelfConflicting();
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch(Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -81,13 +81,13 @@ struct LogMetricsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start( Database cx, LogMetricsWorkload *self ) {
-		Void _ = wait( delay( self->logAt ) );
+		wait( delay( self->logAt ) );
 
-		Void _ = wait( self->setSystemRate( self, cx, self->logsPerSecond ) );
-		Void _ = wait( timeout( recurring( &systemMonitor, 1.0 / self->logsPerSecond ), self->logDuration, Void() ) );
+		wait( self->setSystemRate( self, cx, self->logsPerSecond ) );
+		wait( timeout( recurring( &systemMonitor, 1.0 / self->logsPerSecond ), self->logDuration, Void() ) );
 
 		// We're done, set everything back
-		Void _ = wait( self->setSystemRate( self, cx, 1.0 ) );
+		wait( self->setSystemRate( self, cx, 1.0 ) );
 
 		return Void();
 	}
