@@ -135,6 +135,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::ProxyClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
