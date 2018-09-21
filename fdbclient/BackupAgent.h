@@ -730,8 +730,8 @@ public:
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
 		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() >= firstSnapshot.get().get()) {
-				return lastLog.get().get();
+			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
+				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});
