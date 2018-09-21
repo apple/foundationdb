@@ -27,41 +27,23 @@
 #include "ClusterInterface.h"
 #include "IClientApi.h"
 
-class ThreadSafeDatabase;
-
-class ThreadSafeCluster : public ICluster, public ThreadSafeReferenceCounted<ThreadSafeCluster>, private NonCopyable {
-public:
-	static ThreadFuture<Reference<ICluster>> create( std::string connFilename, int apiVersion = -1 );
-	~ThreadSafeCluster();
-	ThreadFuture<Reference<IDatabase>> createDatabase();
-
-	void setOption( FDBClusterOptions::Option option, Optional<StringRef> value  = Optional<StringRef>() );
-
-	ThreadFuture<Void> onConnected();  // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
-
-	void addref() { ThreadSafeReferenceCounted<ThreadSafeCluster>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<ThreadSafeCluster>::delref(); }
-
-private:
-	ThreadSafeCluster( Cluster* cluster ) : cluster(cluster) { }
-	Cluster* cluster;
-	friend Reference<ICluster> constructThreadSafeCluster( Cluster* cluster );
-};
-
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
 	~ThreadSafeDatabase();
+	static ThreadFuture<Reference<IDatabase>> create( std::string connFilename, int apiVersion=-1 );
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
+	ThreadFuture<Reference<IDatabase>> createDatabase();
 	Reference<ITransaction> createTransaction();
 
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+
+	ThreadFuture<Void> onConnected();  // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
 
 	void addref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
 private:
-	friend class ThreadSafeCluster;
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;
 public:  // Internal use only
@@ -138,7 +120,7 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
+	ThreadFuture<Reference<IDatabase>> createDatabase(const char *clusterFilePath);
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 

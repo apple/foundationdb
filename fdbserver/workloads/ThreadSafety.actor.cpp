@@ -158,6 +158,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if(g_random->coinflip()) {
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 

@@ -497,10 +497,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if( work.useDatabase ) {
-			Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
-			Database _cx = wait(cluster->createDatabase(locality));
-			cx = _cx;
-
+			cx = Database::createDatabase(ccf, -1, locality);
 			wait( delay(1.0) );
 		}
 
@@ -1028,8 +1025,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		Database _cx = wait( DatabaseContext::createDatabase( ci, Reference<Cluster>(), locality ) );
-		cx = _cx;
+		cx = DatabaseContext::create(ci, Reference<ClusterConnectionFile>(), locality);
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");

@@ -1483,14 +1483,6 @@ ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 	}
 }
 
-ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, bool doCheckStatus ) {
-	state Database db = wait( cluster->createDatabase() );
-	if (doCheckStatus) {
-		wait( makeInterruptable( checkStatus( Void(), ccf )) );
-	}
-	return db;
-}
-
 ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) {
 	wait( makeInterruptable( tr->commit() ) );
 	auto ver = tr->getCommittedVersion();
@@ -2294,12 +2286,10 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
-	state bool connected = false;
 	state bool opened = false;
 	state bool intrans = false;
 
 	state Database db;
-	state Reference<Cluster> cluster;
 	state Reference<ReadYourWritesTransaction> tr;
 
 	state bool writeMode = false;
@@ -2326,10 +2316,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		cluster = Cluster::createCluster(ccf->getFilename().c_str(), -1);
-		connected = true;
-		if (!opt.exec.present())
+		db = Database::createDatabase(ccf, -1);
+		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
+		}
 	}
 	catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
@@ -2349,28 +2339,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.trackLatest("ProgramStart");
 	}
 
-	if (connected) {
-		try {
-			Database _db = wait( openDatabase( ccf, cluster, !opt.exec.present() && opt.initialStatusCheck ) );
-			db = _db;
-			tr = Reference<ReadYourWritesTransaction>();
-			opened = true;
-			if (!opt.exec.present() && !opt.initialStatusCheck)
-				printf("\n");
-		} catch (Error& e) {
-			if(e.code() != error_code_actor_cancelled) {
-				printf("ERROR: %s (%d)\n", e.what(), e.code());
-				printf("Unable to open database\n");
-			}
-			return 1;
-		}
-	}
-
 	if (!opt.exec.present()) {
+		if(opt.initialStatusCheck) {
+			wait( makeInterruptable( checkStatus( Void(), ccf )) );
+		}
+		else {
+			printf("\n");
+		}
+
 		printf("Welcome to the fdbcli. For help, type `help'.\n");
-
 		validOptions = options->getValidOptions();
-
 	}
 
 	state bool is_error = false;
@@ -2499,14 +2477,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (!connected) {
-					printf("ERROR: Not connected\n");
-					is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "waitconnected")) {
-					wait( makeInterruptable( cluster->onConnected() ) );
+					wait( makeInterruptable( db->onConnected() ) );
 					continue;
 				}
 
@@ -3207,13 +3179,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			if(e.code() != error_code_actor_cancelled)
 				printf("ERROR: %s (%d)\n", e.what(), e.code());
 			is_error = true;
-			if (connected && opened) {
-				if (intrans) {
-					printf("Rolling back current transaction\n");
-					intrans = false;
-					options = &globalOptions;
-					options->apply(tr);
-				}
+			if (opened && intrans) {
+				printf("Rolling back current transaction\n");
+				intrans = false;
+				options = &globalOptions;
+				options->apply(tr);
 			}
 		}
 

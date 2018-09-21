@@ -94,7 +94,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	virtual Future<Void> setup( Database const& cx ) {
 		if (apiVersion500)
-			cx->cluster->apiVersion = 500;
+			cx->apiVersion = 500;
 
 		if(clientId != 0)
 			return Void();

@@ -124,9 +124,9 @@ public:
 	Future<Void> debug_onIdle() {  return reading; }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
-	Error deferred_error;
+	Error deferredError;
 
-	void checkDeferredError() { tr.checkDeferredError(); if (deferred_error.code() != invalid_error_code) throw deferred_error; }
+	void checkDeferredError() { tr.checkDeferredError(); if (deferredError.code() != invalid_error_code) throw deferredError; }
 
 	void getWriteConflicts( KeyRangeMap<bool> *result );
 
