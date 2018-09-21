@@ -802,17 +802,8 @@ public:
 			return false;
 		}
 
-		if(!clusterControllerProcessId.present()) {
-			return false;
-		}
-
-		auto ccWorker = id_worker.find(clusterControllerProcessId.get());
-		if(ccWorker == id_worker.end()) {
-			return false;
-		}
-
 		// Do not trigger better master exists if the cluster controller is excluded, since the master will change anyways once the cluster controller is moved
-		if(ccWorker->second.priorityInfo.isExcluded) {
+		if(id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
 			return false;
 		}
 
@@ -1321,7 +1312,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 }
 
 ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
-	state Future<Void> failed = waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+	state Future<Void> failed = worker.address() == g_network->getLocalAddress() ? Never() : waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
 	loop {
 		choose {
