@@ -268,18 +268,17 @@ struct TLogData : NonCopyable {
 	std::map<UID, peekTrackerData> peekTracker;
 	WorkerCache<TLogInterface> tlogCache;
 
-	Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
-
 	PromiseStream<Future<Void>> sharedActors;
 	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
+	FlowLock persistentDataCommitLock;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
-			  updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
+			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
 };
@@ -655,12 +654,13 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	}
 
 	state Reference<LogData> logData = self->id_data[self->queueOrder.front()];
-	state Version nextVersion = logData->version.get();
+	state Version nextVersion = 0;
 	state int totalSize = 0;
 
 	state int tagLocality = 0;
 	state int tagId = 0;
 	state Reference<LogData::TagData> tagData;
+	state FlowLock::Releaser commitLockReleaser;
 
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
@@ -680,8 +680,10 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 
 				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
 				if (nextVersion > logData->persistentDataVersion) {
-					self->updatePersist = updatePersistentData(self, logData, nextVersion);
-					wait( self->updatePersist );
+					wait( self->persistentDataCommitLock.take() );
+					commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+					wait( updatePersistentData(self, logData, nextVersion) );
+					commitLockReleaser.release();
 				} else {
 					wait( delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL, TaskUpdateStorage) );
 				}
@@ -716,8 +718,10 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 		wait( delay(0, TaskUpdateStorage) );
 
 		if (nextVersion > logData->persistentDataVersion) {
-			self->updatePersist = updatePersistentData(self, logData, nextVersion);
-			wait( self->updatePersist );
+			wait( self->persistentDataCommitLock.take() );
+			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+			wait( updatePersistentData(self, logData, nextVersion) );
+			commitLockReleaser.release();
 		}
 
 		if( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT ) {
@@ -1228,6 +1232,9 @@ ACTOR Future<Void> tLogCommit(
 }
 
 ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData ) {
+	wait( self->persistentDataCommitLock.take() );
+	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	IKeyValueStore *storage = self->persistentData;
 	storage->set( persistFormat );
@@ -1244,7 +1251,6 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId);
-	wait( self->updatePersist );
 	wait( self->persistentData->commit() );
 	return Void();
 }

@@ -258,13 +258,14 @@ struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
 	bool isWrongConfiguration;
+	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
-	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false) {}
-	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false) {}
+	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality; }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -309,7 +310,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	loop {
-		if( statusMap->count(server.id()) ) {
+		if( statusMap->get(server.id()).initialized ) {
 			bool unhealthy = statusMap->get(server.id()).isUnhealthy();
 			if(unhealthy && !status->isUnhealthy()) {
 				(*unhealthyServers)--;
@@ -557,6 +558,7 @@ struct DDTeamCollection {
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Future<Void> readyToStart;
 	Future<Void> checkTeamDelay;
+	bool addSubsetComplete;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -597,7 +599,7 @@ struct DDTeamCollection {
 		Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> const& serverChanges,
 		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 		Reference<AsyncVar<bool>> processingUnhealthy)
-		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
+		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder( Void() ), addSubsetComplete(false),
 		 configuration(configuration), serverChanges(serverChanges), readyToStart(readyToStart), checkTeamDelay( delay( SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution) ),
 		 initialFailureReactionDelay( delayed( readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution ) ), healthyTeamCount( 0 ), storageServerSet(new LocalityMap<UID>()),
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
@@ -648,7 +650,7 @@ struct DDTeamCollection {
 		while( !self->teamBuilder.isReady() )
 			wait( self->teamBuilder );
 
-		if( self->doBuildTeams ) {
+		if( self->doBuildTeams && self->readyToStart.isReady() ) {
 			self->doBuildTeams = false;
 			try {
 				loop {
@@ -843,7 +845,7 @@ struct DDTeamCollection {
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
 			for(auto server : self->badTeams[idx]->servers) {
-				if(server->inDesiredDC) {
+				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
 					servers.push_back(server);
 				}
 			}
@@ -926,7 +928,6 @@ struct DDTeamCollection {
 			wait( yield() );
 		}
 
-		wait( addSubsetOfEmergencyTeams(self) );
 		return Void();
 	}
 
@@ -1165,6 +1166,11 @@ struct DDTeamCollection {
 	//
 	// buildTeams will not count teams larger than teamSize against the desired teams.
 	ACTOR Future<Void> buildTeams( DDTeamCollection* self ) {
+		if(!self->addSubsetComplete) {
+			self->addSubsetComplete = true;
+			wait( addSubsetOfEmergencyTeams(self) );
+		}
+
 		state int desiredTeams;
 		int serverCount = 0;
 		int uniqueDataCenters = 0;
@@ -1328,7 +1334,7 @@ struct DDTeamCollection {
 		}
 		server_info.erase( removedServer );
 
-		if(server_status.count(removedServer) && server_status.get(removedServer).isUnhealthy()) {
+		if(server_status.get(removedServer).initialized && server_status.get(removedServer).isUnhealthy()) {
 			unhealthyServers--;
 		}
 		server_status.clear( removedServer );
@@ -1369,8 +1375,8 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 	state bool lastAnyUndesired = false;
 	state bool wrongSize = team->getServerIDs().size() != self->configuration.storageTeamSize;
 	state bool lastReady = self->initialFailureReactionDelay.isReady();
-	state bool lastHealthy = team->isHealthy();
-	state bool lastOptimal = team->isOptimal() && lastHealthy;
+	state bool lastHealthy;
+	state bool lastOptimal;
 	state bool lastWrongConfiguration = team->isWrongConfiguration();
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 	state bool firstCheck = true;
@@ -1409,21 +1415,25 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 			change.push_back( self->zeroHealthyTeams->onChange() );
 
 			bool healthy = self->satisfiesPolicy(team->servers) && !anyUndesired && team->getServerIDs().size() == self->configuration.storageTeamSize && serversLeft == self->configuration.storageTeamSize;
+			team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 			lastReady = self->initialFailureReactionDelay.isReady();
 			lastZeroHealthy = self->zeroHealthyTeams->get();
 
 			if (firstCheck) {
+				firstCheck = false;
 				if (healthy) {
 					self->healthyTeamCount++;
 					self->zeroHealthyTeams->set(false);
 				}
+				lastHealthy = healthy;
 
 				if (optimal) {
 					self->optimalTeamCount++;
 					self->zeroOptimalTeams.set(false);
 				}
+				lastOptimal = optimal;
 			}
 
 			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
@@ -1432,18 +1442,18 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 					.detail("LastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
 					.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
 
-				team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 				team->setWrongConfiguration( anyWrongConfiguration );
 
-				if( !firstCheck && optimal != lastOptimal ) {
+				if( optimal != lastOptimal ) {
+					lastOptimal = optimal;
 					self->optimalTeamCount += optimal ? 1 : -1;
 
 					ASSERT( self->optimalTeamCount >= 0 );
 					self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 				}
-				lastOptimal = optimal;
 
-				if( !firstCheck && lastHealthy != healthy ) {
+				if( lastHealthy != healthy ) {
+					lastHealthy = healthy;
 					self->healthyTeamCount += healthy ? 1 : -1;
 
 					ASSERT( self->healthyTeamCount >= 0 );
@@ -1459,7 +1469,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 						.detail("Optimal", optimal)
 						.detail("OptimalTeamCount", self->optimalTeamCount);
 				}
-				lastHealthy = healthy;
 
 				lastServersLeft = serversLeft;
 				lastAnyUndesired = anyUndesired;
@@ -1544,7 +1553,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 				}
 			}
 
-			firstCheck = false;
 			// Wait for any of the machines to change status
 			wait( quorum( change, 1 ) );
 			wait( yield() );
@@ -1725,8 +1733,6 @@ ACTOR Future<Void> storageServerTracker(
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
-	wait( self->readyToStart );
-	
 	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
