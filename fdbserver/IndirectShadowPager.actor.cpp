@@ -373,6 +373,7 @@ LogicalPageID IndirectShadowPager::allocateLogicalPage() {
 	}
 
 	ASSERT(allocatedPage >= SERVER_KNOBS->PAGER_RESERVED_PAGES);
+	debug_printf("op=allocate id=%u\n", allocatedPage);
 	return allocatedPage;
 }
 

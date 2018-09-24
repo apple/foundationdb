@@ -66,7 +66,7 @@ struct BTreePage {
 		std::string r;
 		r += format("BTreePage op=%s id=%d ver=%lld ptr=%p flags=0x%X count=%d kvBytes=%d\nlowerBoundKey='%s'\nupperBoundKey='%s'",
 					write ? "write" : "read", id, ver, this, (int)flags, (int)count, (int)kvBytes,
-					lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
+					lowerBoundKey.toHexString(20).c_str(), upperBoundKey.toHexString(20).c_str());
 		try {
 			if(count > 0) {
 				PrefixTree::Cursor c = tree().getCursor(lowerBoundKey, upperBoundKey);
@@ -88,11 +88,11 @@ struct BTreePage {
 						}
 					} catch(Error &e) {
 					}
-					r += format("['%s']", c.getKeyRef().toHexString().c_str());
+					r += format("['%s']", c.getKeyRef().toHexString(20).c_str());
 
 					r += " -> ";
 					if(flags && IS_LEAF)
-						r += format("'%s'", c.getValueRef().toHexString().c_str());
+						r += format("'%s'", c.getValueRef().toHexString(20).c_str());
 					else
 						r += format("Page id=%u", *(const uint32_t *)c.getValueRef().begin());
 
@@ -182,12 +182,14 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 				if(count < minimumEntries || spaceAvailable > pageSize / 2) {
 					// Figure out how many additional whole or partial blocks are needed
 					int newBlocks = 1 + (spaceNeeded - spaceAvailable - 1) / netTreeBlockSize;
-					blockCount += newBlocks;
-					// Add space from new blocks but subtract additional overhead for storing them.
-					pageSize += (newBlocks * netTreeBlockSize);
-					fits = true;
+					int newPageSize = pageSize + (newBlocks * netTreeBlockSize);
+					if(newPageSize <= PrefixTree::MaximumTreeSize()) {
+						blockCount += newBlocks;
+						pageSize = newPageSize;
+						fits = true;
+					}
 				}
-				else {
+				if(!fits) {
 					// Flush page
 					if(minimalBoundaries) {
 						// Note that prefixLen is guaranteed to be < entry.key.size() because entries are in increasing order and cannot repeat.
@@ -216,7 +218,7 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 		if(flush) {
 			end = i == iEnd;  // i could have been moved above
 			int count = i - start;
-			debug_printf("Flushing page start=%d i=%d\nlower='%s'\nupper='%s'\n", start, i, pageLowerBound.toHexString().c_str(), pageUpperBound.toHexString().c_str());
+			debug_printf("Flushing page start=%d i=%d\nlower='%s'\nupper='%s'\n", start, i, pageLowerBound.toHexString(20).c_str(), pageUpperBound.toHexString(20).c_str());
 			ASSERT(pageLowerBound <= pageUpperBound);
 			for(int j = start; j < i; ++j) {
 				debug_printf(" %d: %s -> %s\n", j, entries[j].key.toHexString(15).c_str(), entries[j].value.toHexString(15).c_str());
@@ -375,7 +377,7 @@ struct KeyVersionValueRef {
 		Standalone<KeyVersionValueRef> result;
 		if(kv.key.size() != 0) {
 #if REDWOOD_DEBUG
-			try { Tuple t = Tuple::unpack(kv.key); } catch(Error &e) { debug_printf("UNPACK FAIL %s %s\n", kv.key.toHexString().c_str(), platform::get_backtrace().c_str()); }
+			try { Tuple t = Tuple::unpack(kv.key); } catch(Error &e) { debug_printf("UNPACK FAIL %s %s\n", kv.key.toHexString(20).c_str(), platform::get_backtrace().c_str()); }
 #endif
 			Tuple k = Tuple::unpack(kv.key);
 			int s = k.size();
@@ -780,8 +782,8 @@ private:
 		if(pages.size() != 1) {
 			if(previousID != m_root) {
 				for(auto id : logicalPageIDs) {
-					debug_printf("%p: writePages(): Deleting logical page not to be reused, op=del id=%u @%lld\n", actor_debug, id, version);
-					m_pager->freeLogicalPage(id, version);
+					//debug_printf("%p: writePages(): Deleting logical page not to be reused, op=del id=%u @%lld\n", actor_debug, id, version);
+					//m_pager->freeLogicalPage(id, version);
 				}
 			}
 			logicalPageIDs.clear();
@@ -823,8 +825,9 @@ private:
 
 		// If there were unused logical IDs that were available for reuse, delete them
 		while(p != pEnd) {
-			debug_printf("%p: writePages(): Deleting logical page left unused, op=del id=%u @%lld\n", actor_debug, *p, version);
-			m_pager->freeLogicalPage(*p++, version);
+			//debug_printf("%p: writePages(): Deleting logical page left unused, op=del id=%u @%lld\n", actor_debug, *p, version);
+			//m_pager->freeLogicalPage(*p++, version);
+			++p;
 		}
 
 		return firstLogicalPageIDs;
@@ -898,7 +901,7 @@ private:
 
 	// Returns list of (version, list of (lower_bound, list of children) )
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
-		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
+		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBoundKey.toHexString(20).c_str(), upperBoundKey.toHexString(20).c_str());
 
 		// Decode the (likely truncate) upper and lower bound keys for this subtree.
 		state KeyVersionValue lowerBoundKVV = KeyVersionValue::unpack(lowerBoundKey);
@@ -1114,7 +1117,7 @@ private:
 			for(int i=0; i<pages.size(); i++) {
 				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
 				Key lowerBound = (i == 0) ? lowerBoundKey : pages[i].lowerBound;
-				debug_printf("%p Adding page to results: %s => %d\n", this, lowerBound.toHexString().c_str(), newPageIDs[i]);
+				debug_printf("%p Adding page to results: %s => %d\n", this, lowerBound.toHexString(20).c_str(), newPageIDs[i]);
 				results.back().second.push_back( {lowerBound, newPageIDs[i]} );
 			}
 
@@ -1141,8 +1144,8 @@ private:
 				existingCursorValid = existingCursor.moveNext();
 				Key childUpperBound = existingCursorValid ? existingCursor.getKey() : upperBoundKey;
 
-				debug_printf("lower          '%s'\n", childLowerBound.toHexString().c_str());
-				debug_printf("upper          '%s'\n", childUpperBound.toHexString().c_str());
+				debug_printf("lower          '%s'\n", childLowerBound.toHexString(20).c_str());
+				debug_printf("upper          '%s'\n", childUpperBound.toHexString(20).c_str());
 				ASSERT(childLowerBound <= childUpperBound);
 
 				futureChildren.push_back(self->commitSubtree(self, mutationBuffer, snapshot, pageID, childLowerBound, childUpperBound));
@@ -1351,7 +1354,7 @@ private:
 			r += format("InternalCursor(%p) ver=%lld oob=%d valid=%d", this, m_pages->getVersion(), outOfBound, valid());
 			r += format("\n%s  KVV: %s", wrapPrefix, kvv.toString().c_str());
 			for(const PageEntryLocation &p : m_path) {
-				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString().c_str(), p.cursor.getValueRef().toHexString().c_str()) : "invalid";
+				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString(20).c_str(), p.cursor.getValueRef().toHexString(20).c_str()) : "invalid";
 				r += format("\n%s  Page id=%d (%d records, %d bytes)  Cursor %s", wrapPrefix, p.pageNumber, p.btPage->count, p.btPage->kvBytes, cur.c_str());
 			}
 			return r;
@@ -1413,7 +1416,7 @@ private:
 			state TraversalPathT &path = self->m_path;
 			wait(reset(self));
 
-			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
+			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
 
 			loop {
 				state PageEntryLocation *p = &path.back();
@@ -1422,12 +1425,12 @@ private:
 					ASSERT(path.size() == 1);  // This must be the root page.
 					self->outOfBound = -1;
 					self->kvv.version = invalidVersion;
-					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 
 				state bool foundLTE = p->cursor.seekLessThanOrEqual(key);
-				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", key.toHexString().c_str(), foundLTE, self->toString("  ").c_str());
+				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", key.toHexString(20).c_str(), foundLTE, self->toString("  ").c_str());
 				
 				if(p->btPage->flags & BTreePage::IS_LEAF) {
 					// It is possible for the current leaf key to be between the page's lower bound (in the parent page) and the 
@@ -1440,7 +1443,7 @@ private:
 						// Found the target record
 						self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
 					}
-					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 				else {
@@ -1451,7 +1454,7 @@ private:
 
 					state LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
 					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to Page id=%d.  %s\n", 
-						key.toHexString().c_str(), newPage, self->toString("  ").c_str());
+						key.toHexString(20).c_str(), newPage, self->toString("  ").c_str());
 					wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
 				}
 			}
@@ -2105,20 +2108,20 @@ TEST_CASE("/redwood/correctness") {
 	else
 		pager = createMemoryPager();
 
-	state int pageSize = 100; //g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
+	state int pageSize = g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	wait(btree->init());
 
-	state int maxCommits = 10;
-	state int maxVersionsPerCommit = 4;
-	state int maxChangesPerVersion = 5;
+	state int maxCommits = 100;
+	state int maxVersionsPerCommit = 10;
+	state int maxChangesPerVersion = 100;
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
 	// TODO:  Handle arbitrarily large keys
-	state int maxKeySize = pageSize / 3;
+	state int maxKeySize = std::min(pageSize * 8, 30000);
 	ASSERT(maxKeySize > 0);
-	state int maxValueSize = pageSize * 10;
+	state int maxValueSize = pageSize * 25;
 
 	printf("Using page size %d, max key size %d, max value size %d\n", pageSize, maxKeySize, maxValueSize);
 

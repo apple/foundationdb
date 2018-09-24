@@ -106,6 +106,10 @@ struct PrefixTree {
 	typedef KeyValueRef EntryRef;
 	typedef Standalone<EntryRef> Entry;
 
+	static int MaximumTreeSize() {
+		return std::numeric_limits<uint16_t>::max();
+	};
+
 	struct Node {
 		uint8_t flags;
 
@@ -225,7 +229,9 @@ struct PrefixTree {
 				return nullptr;
 			}
 			int keyLen() const {
-				return prefixLen + leftPos + (valuePos - suffixPos);
+				int len = prefixLen + leftPos + (valuePos - suffixPos);
+				ASSERT(len >= 0);
+				return len;
 			}
 
 			void init(const Node *n) {
@@ -667,9 +673,9 @@ public:
 					s += "childDir=";
 					s += (path[i].nodeIsLeftChild ? "left " : "right ");
 				}
-				s += format("prefix='%s'", path[i].getPrefix().toHexString().c_str());
+				s += format("prefix='%s'", path[i].getPrefix().toHexString(20).c_str());
 				if(node != nullptr) {
-					s += format(" split='%s' suffix='%s' value='%s'", node->getSplitString().toHexString().c_str(), node->getSuffixString().toHexString().c_str(), node->getValueString().toHexString().c_str());
+					s += format(" split='%s' suffix='%s' value='%s'", node->getSplitString().toHexString(20).c_str(), node->getSuffixString().toHexString(20).c_str(), node->getValueString().toHexString(20).c_str());
 				}
 				else
 					s += ") ";
@@ -882,9 +888,11 @@ public:
 		else {
 			size = sizeof(size) + build(root, begin, end, nextAncestor, prevAncestor);
 		}
+		ASSERT(size <= MaximumTreeSize());
 		return size;
 	}
 
+private:
 	static uint16_t build(Node &root, const EntryRef *begin, const EntryRef *end, const StringRef &nextAncestor, const StringRef &prevAncestor) {
 		ASSERT(end != begin);
 
@@ -915,7 +923,7 @@ public:
 		int splitLen;   // Bytes after prefix required to make traversal decision
 		int suffixLen;  // Remainder of key bytes after split key portion
 
-		//printf("build: '%s'\n  prefixLen %d  prefixSourceNext %d\n", key.toHexString().c_str(), prefixLen, prefixSourceNext);
+		//printf("build: '%s'\n  prefixLen %d  prefixSourceNext %d\n", key.toHexString(20).c_str(), prefixLen, prefixSourceNext);
 
 		// 2 entries or less means no right child, so just put all remaining key bytes into split string.
 		if(count < 3) {
@@ -1028,7 +1036,7 @@ public:
 		}
 
 /*
-printf("\nBuilt: key '%s'  c %d  p %d  spl %d  suf %d\nRaw: %s\n", key.toString().c_str(), count, prefixLen, splitLen, suffixLen, StringRef(&root.flags, p8 - &root.flags).toHexString().c_str());
+printf("\nBuilt: key '%s'  c %d  p %d  spl %d  suf %d\nRaw: %s\n", key.toString().c_str(), count, prefixLen, splitLen, suffixLen, StringRef(&root.flags, p8 - &root.flags).toHexString(20).c_str());
 Node::Parser p(&root);
 printf("parser: headerLen %d prefixLen %d leftPos %d rightPos %d split %s suffix %s val %s\n", 
 	   p.headerLen, p.prefixLen, p.leftPos, p.rightPos, p.splitString().toString().c_str(), p.suffixString().toString().c_str(), p.valueString().toString().c_str());

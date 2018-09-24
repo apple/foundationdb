@@ -29,7 +29,7 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_always(args...) fprintf(stdout, args)
+#define debug_printf_always(args...) fprintf(stderr, args)
 
 #if REDWOOD_DEBUG
   #define debug_printf debug_printf_always
