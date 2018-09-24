@@ -803,6 +803,11 @@ public:
 			return false;
 		}
 
+		// Do not trigger better master exists if the cluster controller is excluded, since the master will change anyways once the cluster controller is moved
+		if(id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
 		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].priority > db.config.regions[1].priority &&
 			db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 			checkRegions(db.config.regions);
@@ -1303,7 +1308,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 }
 
 ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
-	state Future<Void> failed = waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+	state Future<Void> failed = worker.address() == g_network->getLocalAddress() ? Never() : waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
 	loop {
 		choose {
