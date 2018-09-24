@@ -269,7 +269,7 @@ struct SQLiteDB : NonCopyable {
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
 		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
 		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
-			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("Filename", filename).detail("ErrorTotal", errors);
+			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheckResults").detail("Filename", filename).detail("ErrorTotal", errors);
 			if(e != nullptr) {
 				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
 				char *lineStart = e;
