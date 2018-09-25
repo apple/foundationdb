@@ -75,7 +75,6 @@ class IDatabase {
 public:
 	virtual ~IDatabase() {}
 
-	virtual ThreadFuture<Reference<IDatabase>> createDatabase() = 0;
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 

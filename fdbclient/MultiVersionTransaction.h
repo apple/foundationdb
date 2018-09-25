@@ -159,10 +159,9 @@ private:
 
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
-	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBCluster *cluster, FdbCApi::FDBDatabase *db) : api(api), cluster(cluster), db(db) {}
+	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db) {}
 	~DLDatabase() { api->databaseDestroy(db); }
 
-	ThreadFuture<Reference<IDatabase>> createDatabase();
 	Reference<ITransaction> createTransaction();
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
@@ -171,8 +170,6 @@ public:
 
 private:
 	const Reference<FdbCApi> api;
-
-	FdbCApi::FDBCluster* const cluster;
 	FdbCApi::FDBDatabase* const db;
 };
 
@@ -284,7 +281,6 @@ public:
 	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
 	~MultiVersionDatabase();
 
-	ThreadFuture<Reference<IDatabase>> createDatabase();
 	Reference<ITransaction> createTransaction();
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 

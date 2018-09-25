@@ -33,7 +33,6 @@ public:
 	static ThreadFuture<Reference<IDatabase>> create( std::string connFilename, int apiVersion=-1 );
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
-	ThreadFuture<Reference<IDatabase>> createDatabase();
 	Reference<ITransaction> createTransaction();
 
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );

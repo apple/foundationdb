@@ -56,12 +56,6 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
-ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createDatabase() {
-	return onMainThread([this](){
-		return Future<Reference<IDatabase>>(Reference<IDatabase>::addRef(this));
-	});
-}
-
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	return Reference<ITransaction>(new ThreadSafeTransaction(this));
 }

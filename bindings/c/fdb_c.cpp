@@ -37,6 +37,7 @@ int g_api_version = 0;
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
 
+#define CLUSTER(c) ((char*)c)
 #define DB(d) ((IDatabase*)d)
 #define TXN(t) ((ITransaction*)t)
 
@@ -236,7 +237,7 @@ extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster ) {
 	CATCH_AND_RETURN(
 		*out_cluster = (FDBCluster*)
-		( (TSAV( Reference<IDatabase>, f )->get() ).extractPtr() ); );
+		( (TSAV( char*, f )->get() ) ); );
 }
 
 extern "C" DLLEXPORT
@@ -293,7 +294,12 @@ fdb_error_t fdb_future_get_string_array(
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
-	return (FDBFuture*) API->createDatabase( cluster_file_path ? cluster_file_path : "").extractPtr();
+	char *path = NULL;
+	if(cluster_file_path) {
+		path = (char*)malloc(strlen(cluster_file_path));
+		strcpy(path, cluster_file_path);
+	}
+	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
 
 extern "C" DLLEXPORT
@@ -308,7 +314,7 @@ fdb_error_t fdb_cluster_set_option( FDBCluster* c,
 
 extern "C" DLLEXPORT
 void fdb_cluster_destroy( FDBCluster* c ) {
-	CATCH_AND_DIE( DB(c)->delref(); );
+	CATCH_AND_DIE( free(c); );
 }
 
 extern "C" DLLEXPORT
@@ -319,7 +325,7 @@ FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
-	return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>(DB(c))).extractPtr();
+	return (FDBFuture*) API->createDatabase( CLUSTER(c) ? CLUSTER(c) : "").extractPtr();
 }
 
 extern "C" DLLEXPORT

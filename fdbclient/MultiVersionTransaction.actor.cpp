@@ -212,10 +212,6 @@ void DLTransaction::reset() {
 }
 
 // DLDatabase
-ThreadFuture<Reference<IDatabase>> DLDatabase::createDatabase() {
-	return Reference<IDatabase>::addRef(this);
-}
-
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction *tr;
 	api->databaseCreateTransaction(db, &tr);
@@ -370,7 +366,8 @@ ThreadFuture<Reference<IDatabase>> DLApi::createDatabase(const char *clusterFile
 		return ErrorOr<ThreadFuture<Reference<IDatabase>>>(toThreadFuture<Reference<IDatabase>>(innerApi, f, [cluster](FdbCApi::FDBFuture *f, FdbCApi *api) {
 			FdbCApi::FDBDatabase *db;
 			api->futureGetDatabase(f, &db);
-			return Reference<IDatabase>(new DLDatabase(Reference<FdbCApi>::addRef(api), cluster.get(), db));
+			api->clusterDestroy(cluster.get());
+			return Reference<IDatabase>(new DLDatabase(Reference<FdbCApi>::addRef(api), db));
 		}));
 	});
 }
@@ -699,10 +696,6 @@ void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 
 MultiVersionDatabase::DatabaseState::DatabaseState()
 	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))), currentClientIndex(-1) {}
-
-ThreadFuture<Reference<IDatabase>> MultiVersionDatabase::createDatabase() {
-	return ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>::addRef(this));
-}
 
 // Only called from main thread
 void MultiVersionDatabase::DatabaseState::stateChanged() {
