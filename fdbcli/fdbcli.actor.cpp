@@ -2286,7 +2286,6 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
-	state bool opened = false;
 	state bool intrans = false;
 
 	state Database db;
@@ -2569,12 +2568,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						bool err = wait( setClass(db, tokens) );
 						if (err) is_error = true;
 					}
-					continue;
-				}
-
-				if (!opened) {
-					printf("ERROR: No database open\n");
-					is_error = true;
 					continue;
 				}
 
@@ -3179,7 +3172,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			if(e.code() != error_code_actor_cancelled)
 				printf("ERROR: %s (%d)\n", e.what(), e.code());
 			is_error = true;
-			if (opened && intrans) {
+			if (intrans) {
 				printf("Rolling back current transaction\n");
 				intrans = false;
 				options = &globalOptions;

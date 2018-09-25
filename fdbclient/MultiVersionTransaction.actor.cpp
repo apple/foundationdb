@@ -361,13 +361,15 @@ ThreadFuture<Reference<IDatabase>> DLApi::createDatabase(const char *clusterFile
 			return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.getError());
 		}
 
-		FdbCApi::FDBFuture *f = innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2);
-
-		return ErrorOr<ThreadFuture<Reference<IDatabase>>>(toThreadFuture<Reference<IDatabase>>(innerApi, f, [cluster](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		auto dbFuture = toThreadFuture<Reference<IDatabase>>(innerApi, innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2), [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 			FdbCApi::FDBDatabase *db;
 			api->futureGetDatabase(f, &db);
-			api->clusterDestroy(cluster.get());
 			return Reference<IDatabase>(new DLDatabase(Reference<FdbCApi>::addRef(api), db));
+		});
+
+		return ErrorOr<ThreadFuture<Reference<IDatabase>>>(mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(dbFuture, [cluster, innerApi](ErrorOr<Reference<IDatabase>> db) {
+			innerApi->clusterDestroy(cluster.get());
+			return db;
 		}));
 	});
 }
@@ -632,8 +634,7 @@ void MultiVersionDatabase::Connector::connect() {
 				connectionFuture.cancel();
 			}
 			
-			ThreadFuture<Reference<IDatabase>> dbFuture;
-			dbFuture = client->api->createDatabase(clusterFilePath.c_str());
+			ThreadFuture<Reference<IDatabase>> dbFuture = client->api->createDatabase(clusterFilePath.c_str());
 			connectionFuture = flatMapThreadFuture<Reference<IDatabase>, Void>(dbFuture, [this](ErrorOr<Reference<IDatabase>> db) {
 				if(db.isError()) {
 					return ErrorOr<ThreadFuture<Void>>(db.getError());

@@ -217,6 +217,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 	loop {
 		wait( delay( CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID ) );
 		TraceEvent("TransactionMetrics")
+			.detail("Cluster", cx->cluster && cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString() : "")
 			.detail("ReadVersions", cx->transactionReadVersions)
 			.detail("LogicalUncachedReads", cx->transactionLogicalReads)
 			.detail("PhysicalReadRequests", cx->transactionPhysicalReads)

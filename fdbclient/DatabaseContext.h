@@ -51,7 +51,7 @@ public:
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
 public:
-	// For internal (fdbserver) use only: create a database context for a DB with already known client info
+	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
 

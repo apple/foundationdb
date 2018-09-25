@@ -31,6 +31,7 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
+ *   FDBCluster -> char
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
@@ -325,7 +326,7 @@ FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
-	return (FDBFuture*) API->createDatabase( CLUSTER(c) ? CLUSTER(c) : "").extractPtr();
+	return (FDBFuture*) API->createDatabase( c ? CLUSTER(c) : "").extractPtr();
 }
 
 extern "C" DLLEXPORT
