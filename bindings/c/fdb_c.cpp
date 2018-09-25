@@ -296,7 +296,7 @@ extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
 	char *path = NULL;
 	if(cluster_file_path) {
-		path = (char*)malloc(strlen(cluster_file_path));
+		path = new char[strlen(cluster_file_path) + 1];
 		strcpy(path, cluster_file_path);
 	}
 	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
@@ -314,7 +314,7 @@ fdb_error_t fdb_cluster_set_option( FDBCluster* c,
 
 extern "C" DLLEXPORT
 void fdb_cluster_destroy( FDBCluster* c ) {
-	CATCH_AND_DIE( free(c); );
+	CATCH_AND_DIE( delete[] CLUSTER(c); );
 }
 
 extern "C" DLLEXPORT
