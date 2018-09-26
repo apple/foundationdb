@@ -251,11 +251,7 @@ void DLApi::init() {
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network");
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network");
-	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster");
-
-	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database");
-	loadClientFunction(&api->clusterSetOption, lib, fdbCPath, "fdb_cluster_set_option");
-	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy");
+	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
 	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
@@ -282,7 +278,6 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
-	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster");
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
 	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
@@ -293,6 +288,11 @@ void DLApi::init() {
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy");
+
+	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
+	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
+	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
+	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
@@ -346,7 +346,7 @@ void DLApi::stopNetwork() {
 	}
 }
 
-ThreadFuture<Reference<IDatabase>> DLApi::createDatabase(const char *clusterFilePath) {
+ThreadFuture<Reference<IDatabase>> DLApi::createDatabase609(const char *clusterFilePath) {
 	FdbCApi::FDBFuture *f = api->createCluster(clusterFilePath);
 
 	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
@@ -372,6 +372,24 @@ ThreadFuture<Reference<IDatabase>> DLApi::createDatabase(const char *clusterFile
 			return db;
 		}));
 	});
+}
+
+Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
+	if(headerVersion >= 610) {
+		FdbCApi::FDBDatabase *db;
+		api->createDatabase(clusterFilePath, &db);
+		return Reference<IDatabase>(new DLDatabase(api, db));
+	}
+	else {
+		auto f = DLApi::createDatabase609(clusterFilePath);
+
+		f.blockUntilReady();
+		if(f.isError()) {
+			throw f.getError();
+		}
+
+		return f.get();
+	}
 }
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
@@ -634,25 +652,15 @@ void MultiVersionDatabase::Connector::connect() {
 				connectionFuture.cancel();
 			}
 			
-			ThreadFuture<Reference<IDatabase>> dbFuture = client->api->createDatabase(clusterFilePath.c_str());
-			connectionFuture = flatMapThreadFuture<Reference<IDatabase>, Void>(dbFuture, [this](ErrorOr<Reference<IDatabase>> db) {
-				if(db.isError()) {
-					return ErrorOr<ThreadFuture<Void>>(db.getError());
+			candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
+			tr = candidateDatabase->createTransaction();
+			connectionFuture = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
+				// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
+				if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
+					return ErrorOr<Void>(v.getError());
 				}
 				else {
-					candidateDatabase = db.get();
-					tr = db.get()->createTransaction();
-					auto versionFuture = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
-						// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-						if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
-							return ErrorOr<Void>(v.getError());
-						}
-						else {
-							return ErrorOr<Void>(Void());
-						}
-					});
-
-					return ErrorOr<ThreadFuture<Void>>(versionFuture);
+					return ErrorOr<Void>(Void());
 				}
 			});
 
@@ -1113,11 +1121,11 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 	}
 }
 
-ThreadFuture<Reference<IDatabase>> MultiVersionApi::createDatabase(const char *clusterFilePath) {
+Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
-		return network_not_setup();
+		throw network_not_setup();
 	}
 	lock.leave();
 
@@ -1126,21 +1134,15 @@ ThreadFuture<Reference<IDatabase>> MultiVersionApi::createDatabase(const char *c
 		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, Reference<IDatabase>()));
 	}
 
-	auto databaseFuture = localClient->api->createDatabase(clusterFilePath);
+	auto db = localClient->api->createDatabase(clusterFilePath);
 	if(bypassMultiClientApi) {
-		return databaseFuture;
+		return db;
 	}
 	else {
 		for(auto it : externalClients) {
 			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
 		}
-		return mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(databaseFuture, [this, clusterFile](ErrorOr<Reference<IDatabase>> database) {
-			if(database.isError()) {
-				return database;
-			}
-
-			return ErrorOr<Reference<IDatabase>>(Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, database.get())));
-		});
+		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, db));
 	}
 }
 
