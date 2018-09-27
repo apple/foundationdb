@@ -406,18 +406,25 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj.setKeyRawNumber("stored_bytes",metrics.getValue("BytesStored"));
-			obj.setKeyRawNumber("kvstore_used_bytes",metrics.getValue("KvstoreBytesUsed"));
-			obj.setKeyRawNumber("kvstore_free_bytes",metrics.getValue("KvstoreBytesFree"));
-			obj.setKeyRawNumber("kvstore_available_bytes",metrics.getValue("KvstoreBytesAvailable"));
-			obj.setKeyRawNumber("kvstore_total_bytes",metrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("stored_bytes", metrics.getValue("BytesStored"));
+			obj.setKeyRawNumber("kvstore_used_bytes", metrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes", metrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes", metrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes", metrics.getValue("KvstoreBytesTotal"));
 			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
-			obj.setKeyRawNumber("query_queue_max",metrics.getValue("QueryQueueMax"));
+			obj.setKeyRawNumber("query_queue_max", metrics.getValue("QueryQueueMax"));
 			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
+			obj["bytes_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
+			obj["keys_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
+			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
+			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
 
 			Version version = parseInt64(metrics.getValue("Version"));
+			Version durableVersion = parseInt64(metrics.getValue("DurableVersion"));
+
 			obj["data_version"] = version;
+			obj["durable_version"] = durableVersion;
 
 			int64_t versionLag = parseInt64(metrics.getValue("VersionLag"));
 			if(maxTLogVersion > 0) {
@@ -434,7 +441,12 @@ struct RolesInfo {
 			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 			dataLag["seconds"] = dataLagSeconds;
 
+			JsonBuilderObject durableLag;
+			durableLag["versions"] = version - durableVersion;
+			durableLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+
 			obj["data_lag"] = dataLag;
+			obj["durable_lag"] = durableLag;
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)

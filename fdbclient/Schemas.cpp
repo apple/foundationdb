@@ -85,12 +85,37 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "data_version":12341234,
+                  "durable_version":12341234,
                   "data_lag": {
+                     "seconds":5.0,
+                     "versions":12341234
+                  },
+                  "durable_lag": {
                      "seconds":5.0,
                      "versions":12341234
                   },
                   "id":"eb84471d68c12d1d26f692a50000003f",
                   "finished_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "bytes_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "keys_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutation_bytes":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutations":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
