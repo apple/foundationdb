@@ -1948,10 +1948,16 @@ IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) 
 	return new KeyValueStoreRedwoodUnversioned(filename, logID);
 }
 
+int randomSize(int max) {
+	int exp = g_random->randomInt(0, 6);
+	int limit = (pow(10.0, exp) / 1e5 * max) + 1;
+	int n = g_random->randomInt(0, max);
+	return n;
+}
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
-	int kLen = g_random->randomInt(1, keySize);
-	int vLen = g_random->randomInt(0, valueSize);
+	int kLen = randomSize(1 + keySize);
+	int vLen = randomSize(valueSize);
 	KeyValue kv;
 	kv.key = makeString(kLen, kv.arena());
 	kv.value = makeString(vLen, kv.arena());
@@ -2089,9 +2095,6 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
 	}
 
-	if(errors > 0)
-		throw internal_error();
-
 	return errors;
 }
 
@@ -2112,18 +2115,16 @@ TEST_CASE("/redwood/correctness") {
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	wait(btree->init());
 
-	state int maxCommits = 100;
-	state int maxVersionsPerCommit = 10;
-	state int maxChangesPerVersion = 100;
+	state int mutationBytesTarget = g_random->randomInt(100, 20e6);
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
 	// TODO:  Handle arbitrarily large keys
 	state int maxKeySize = std::min(pageSize * 8, 30000);
 	ASSERT(maxKeySize > 0);
-	state int maxValueSize = pageSize * 25;
+	state int maxValueSize = std::min(pageSize * 25, 100000);
 
-	printf("Using page size %d, max key size %d, max value size %d\n", pageSize, maxKeySize, maxValueSize);
+	printf("Using page size %d, max key size %d, max value size %d, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, mutationBytesTarget);
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
@@ -2132,121 +2133,166 @@ TEST_CASE("/redwood/correctness") {
 	printf("Starting from version: %lld\n", lastVer);
 
 	state Version version = lastVer + 1;
-	state int commits = 1 + g_random->randomInt(0, maxCommits);
-	//printf("Will do %d commits\n", commits);
-	state double insertTime = 0;
+	state int mutationBytes = 0;
+
+	btree->setWriteVersion(version);
+	
+	state double mutateTime = 0;
 	state int64_t keyBytesInserted = 0;
 	state int64_t ValueBytesInserted = 0;
 
-	while(commits--) {
-		state double startTime = now();
-		int versions = g_random->randomInt(1, maxVersionsPerCommit);
-		debug_printf("  Commit will have %d versions\n", versions);
-		while(versions--) {
+	state double startTime = timer();
+
+	while(mutationBytes < mutationBytesTarget) {
+		// Sometimes advance the version
+		if(g_random->random01() < 0.10) {
 			++version;
 			btree->setWriteVersion(version);
-			int changes = g_random->randomInt(0, maxChangesPerVersion);
-			debug_printf("    Version %lld will have %d changes\n", version, changes);
-			while(changes--) {
-				if(g_random->random01() < .10) {
-					// Delete a random range
-					Key start = randomKV().key;
-					Key end = randomKV().key;
-					if(end <= start)
-						end = keyAfter(start);
-					KeyRangeRef range(start, end);
-					debug_printf("      Clear '%s' to '%s' @%lld\n", start.toString().c_str(), end.toString().c_str(), version);
-					auto w = keys.lower_bound(start);
-					auto wEnd = keys.lower_bound(end);
-					while(w != wEnd) {
-						debug_printf("   Clearing key '%s' @%lld\n", w->toString().c_str(), version);
-						written[std::make_pair(w->toString(), version)] = Optional<std::string>();
-						++w;
+		}
+
+		// Sometimes do a clear range
+		if(g_random->random01() < .10) {
+			Key start = randomKV(maxKeySize, 1).key;
+			Key end = (g_random->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
+
+			// Sometimes replace start and/or end with a close actual (previously used) value
+			if(g_random->random01() < .10) {
+				auto i = keys.upper_bound(start);
+				if(i != keys.end())
+					start = *i;
+			}
+			if(g_random->random01() < .10) {
+				auto i = keys.upper_bound(end);
+				if(i != keys.end())
+					end = *i;
+			}
+
+			if(end == start)
+				end = keyAfter(start);
+			else if(end < start) {
+				std::swap(end, start);
+			}
+
+			KeyRangeRef range(start, end);
+			debug_printf("      Clear '%s' to '%s' @%lld\n", start.toString().c_str(), end.toString().c_str(), version);
+			auto e = written.lower_bound(std::make_pair(start.toString(), 0));
+			if(e != written.end()) {
+				auto last = e;
+				auto eEnd = written.lower_bound(std::make_pair(end.toString(), 0));
+				while(e != eEnd) {
+					auto w = *e;
+					++e;
+					// If e key is different from last and last was present then insert clear for last's key at version
+					if(last != eEnd && ((e == eEnd || e->first.first != last->first.first) && last->second.present())) {
+						debug_printf("         Clearing key '%s' @%lld\n", last->first.first.c_str(), version);
+						mutationBytes += (last->first.first.size() + last->second.get().size());
+						// If the last set was at version then just make it not present
+						if(last->first.second == version) {
+							last->second = Optional<std::string>();
+						}
+						else {
+							written[std::make_pair(last->first.first, version)] = Optional<std::string>();
+						}
 					}
-					btree->clear(range);
-				}
-				else {
-					KeyValue kv = randomKV(maxKeySize, maxValueSize);
-					keyBytesInserted += kv.key.size();
-					ValueBytesInserted += kv.value.size();
-					debug_printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
-					btree->set(kv);
-					written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
-					keys.insert(kv.key);
+					last = e;
 				}
 			}
+
+			btree->clear(range);
 		}
-		wait(btree->commit());
-
-		// Check that all writes can be read at their written versions
-		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written.cbegin();
-		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written.cend();
-		state int errors = 0;
-
-		insertTime += now() - startTime;
-		printf("Checking changes committed thus far.\n");
-		if(useDisk && g_random->random01() < .1) {
-			printf("Reopening disk btree\n");
-			delete btree;
-			Future<Void> closedFuture = pager->onClosed();
-			pager->close();
-			wait(closedFuture);
-
-			pager = new IndirectShadowPager(pagerFile);
-
-			btree = new VersionedBTree(pager, pagerFile, pageSize);
-			wait(btree->init());
-
-			Version v = wait(btree->getLatestVersion());
-			ASSERT(v == version);
-		}
-
-		// Read back every key at every version set or cleared and verify the result.
-		while(i != iEnd) {
-			state std::string key = i->first.first;
-			state Version ver = i->first.second;
-			state Optional<std::string> val = i->second;
-
-			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
-
-			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
-			wait(cur->findEqual(key));
-
-			if(val.present()) {
-				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
-					++errors;
-					if(!cur->isValid())
-						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
-					else if(cur->getKey() != key)
-						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
-					else if(cur->getValue() != val.get())
-						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
-				}
-			} else {
-				if(cur->isValid() && cur->getKey() == key) {
-					++errors;
-					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
-				}
+		else {
+			// Set a key
+			KeyValue kv = randomKV(maxKeySize, maxValueSize);
+			// Sometimes change key to a close previously used key
+			if(g_random->random01() < .01) {
+				auto i = keys.upper_bound(kv.key);
+				if(i != keys.end())
+					kv.key = StringRef(kv.arena(), *i);
 			}
-			++i;
+			keyBytesInserted += kv.key.size();
+			ValueBytesInserted += kv.value.size();
+			mutationBytes += (kv.key.size() + kv.value.size());
+			debug_printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+			btree->set(kv);
+			written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
+			keys.insert(kv.key);
 		}
 
-		// For every version written thus far, range read a random range and verify the results.
-		state Version iVersion = lastVer;
-		while(iVersion < version) {
-			int e = wait(verifyRandomRange(btree, iVersion, &written));
+		// Sometimes (and at end) commit then check all results
+		if(mutationBytes >= std::min(mutationBytesTarget, (int)20e6) || g_random->random01() < .002) {
+			wait(btree->commit());
+			mutateTime += timer() - startTime;
+
+			// Check that all writes can be read at their written versions
+			state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written.cbegin();
+			state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written.cend();
+			state int errors = 0;
+
+			printf("Cumulative: %d total mutation bytes (kv bytes inserted %lld %lld) in %f seconds.\n", mutationBytes, keyBytesInserted, ValueBytesInserted, mutateTime);
+			printf("Checking all changes committed thus far.\n");
+
+			if(useDisk && g_random->random01() < .1) {
+				printf("Reopening disk btree\n");
+				delete btree;
+				Future<Void> closedFuture = pager->onClosed();
+				pager->close();
+				wait(closedFuture);
+
+				pager = new IndirectShadowPager(pagerFile);
+
+				btree = new VersionedBTree(pager, pagerFile, pageSize);
+				wait(btree->init());
+
+				Version v = wait(btree->getLatestVersion());
+				ASSERT(v == version);
+			}
+
+			++version;
+			btree->setWriteVersion(version);
+
+			// Read back every key at every version set or cleared and verify the result.
+			while(i != iEnd) {
+				state std::string key = i->first.first;
+				state Version ver = i->first.second;
+				state Optional<std::string> val = i->second;
+
+				state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
+
+				debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
+				wait(cur->findEqual(key));
+
+				if(val.present()) {
+					if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
+						++errors;
+						if(!cur->isValid())
+							printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+						else if(cur->getKey() != key)
+							printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+						else if(cur->getValue() != val.get())
+							printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+					}
+				} else {
+					if(cur->isValid() && cur->getKey() == key) {
+						++errors;
+						printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+					}
+				}
+				++i;
+			}
+
+			// For one random version read a random range and verify results
+			int e = wait(verifyRandomRange(btree, g_random->randomInt(lastVer, version), &written));
 			errors += e;
-			++iVersion;
+
+			printf("%d sets, %d errors\n", (int)written.size(), errors);
+
+			if(errors != 0)
+				throw internal_error();
+
+			startTime = timer();
 		}
-
-		printf("%d sets, %d errors\n", (int)written.size(), errors);
-
-		if(errors != 0)
-			throw internal_error();
-		printf("Inserted %lld bytes (%lld key, %lld value) in %f seconds.\n", keyBytesInserted + ValueBytesInserted, keyBytesInserted, ValueBytesInserted, insertTime);
 
 	}
-	printf("Inserted %lld bytes (%lld key, %lld value) in %f seconds.\n", keyBytesInserted + ValueBytesInserted, keyBytesInserted, ValueBytesInserted, insertTime);
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
