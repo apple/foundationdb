@@ -1297,7 +1297,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().push_back(std::make_pair<Version,int>(0,0));
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
-	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
+	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<int8_t>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.

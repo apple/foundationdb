@@ -624,6 +624,9 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
+	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality ) = 0;
+		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
+
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
 		// The popping of any given message may be arbitrarily delayed.

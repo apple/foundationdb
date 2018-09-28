@@ -35,7 +35,17 @@ public:
 			}
 
 			if(!self->cursor->hasMessage()) {
-				Void _ = wait( self->cursor->getMore() );
+				loop {
+					choose {
+						when(Void _ = wait( self->cursor->getMore() )) {
+							break;
+						}
+						when(Void _ = wait( self->localityChanged )) {
+							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get() : tagLocalityInvalid );
+							self->localityChanged = self->peekLocality->onChange();
+						}
+					}
+				}
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;
@@ -144,6 +154,6 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag ) {
-	return new LogSystemDiskQueueAdapter( logSystem, tag );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<int8_t>> peekLocality ) {
+	return new LogSystemDiskQueueAdapter( logSystem, tag, peekLocality );
 }

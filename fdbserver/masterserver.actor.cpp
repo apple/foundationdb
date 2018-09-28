@@ -585,7 +585,16 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	return Void();
 }
 
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<int8_t>> locality) {
+	loop {
+		locality->set( oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId) );
+		Void _ = wait( oldLogSystem->onLogSystemConfigChange() );
+	}
+}
+
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
+	state Reference<AsyncVar<int8_t>> myLocality = Reference<AsyncVar<int8_t>>( new AsyncVar<int8_t>() );
+	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
 	// For now, we also obtain the recovery metadata that the log system obtained during the end_epoch process for comparison
@@ -595,7 +604,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag, myLocality );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version

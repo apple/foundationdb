@@ -593,13 +593,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), tLogs[0]->locality == tagLocalityUpgraded) );
 	}
 
-	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end ) {
-		ASSERT(tag.locality >= 0 || tag.locality == tagLocalityUpgraded);
+	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end, bool useMergePeekCursors, int8_t peekLocality = tagLocalityInvalid ) {
+		if(tag.locality >= 0) {
+			peekLocality = tag.locality;
+		}
+		ASSERT(peekLocality >= 0 || peekLocality == tagLocalityUpgraded);
 
 		int bestSet = -1;
 		bool foundSpecial = false;
 		for(int t = 0; t < tLogs.size(); t++) {
-			if(tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || tLogs[t]->locality == tag.locality || tag.locality == tagLocalityUpgraded)) {
+			if(tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
 				if( tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded ) {
 					foundSpecial = true;
 				}
@@ -609,31 +612,48 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		if(bestSet == -1) {
 			TraceEvent("TLogPeekLocalNoBestSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end);
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			if(useMergePeekCursors) {
+				throw worker_removed();
+			} else {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			}
 		}
 
 		if(begin >= tLogs[bestSet]->startVersion) {
 			TraceEvent("TLogPeekLocalBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestSet", bestSet).detail("BestSetStart", tLogs[bestSet]->startVersion).detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, begin, end, false, false ) );
+			if(useMergePeekCursors) {
+				return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor( tag ), tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag,
+							begin, end, true, tLogs[bestSet]->tLogLocalities, tLogs[bestSet]->tLogPolicy, tLogs[bestSet]->tLogReplicationFactor) );
+			} else {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, begin, end, false, false ) );
+			}
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
 
 			if(tLogs[bestSet]->startVersion < end) {
 				TraceEvent("TLogPeekLocalAddingBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestSet", bestSet).detail("BestSetStart", tLogs[bestSet]->startVersion).detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
-				cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, tLogs[bestSet]->startVersion, end, false, false ) ) );
+				if(useMergePeekCursors) {
+					cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor( tag ), tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag,
+								tLogs[bestSet]->startVersion, end, true, tLogs[bestSet]->tLogLocalities, tLogs[bestSet]->tLogPolicy, tLogs[bestSet]->tLogReplicationFactor) ) );
+				} else {
+					cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, tLogs[bestSet]->startVersion, end, false, false ) ) );
+				}
 			}
 			Version lastBegin = tLogs[bestSet]->startVersion;
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
+					if(tag == txsTag && cursors.size()) {
+						break;
+					}
 					TraceEvent("TLogPeekLocalDead", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size());
 					throw worker_removed();
 				}
 
 				int bestOldSet = -1;
 				for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-					if(oldLogData[i].tLogs[t]->logServers.size() && (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalityUpgraded)) {
+					if(oldLogData[i].tLogs[t]->logServers.size() && (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || oldLogData[i].tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
 						if( oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded ) {
 							foundSpecial = true;
 						}
@@ -644,7 +664,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				if(foundSpecial) {
 					TraceEvent("TLogPeekLocalFoundSpecial", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end);
-					cursors.push_back(peekAll(dbgid, begin, std::min(lastBegin, end), tag, false, true));
+					cursors.push_back(peekAll(dbgid, begin, std::min(lastBegin, end), tag, useMergePeekCursors, !useMergePeekCursors));
 					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 					break;
 				}
@@ -664,7 +684,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						TraceEvent("TLogPeekLocalAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end)
 							.detail("LogServers", oldLogData[i].tLogs[bestOldSet]->logServerString()).detail("ThisBegin", thisBegin).detail("LastBegin", lastBegin);
 						cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( oldLogData[i].tLogs[bestOldSet]->logServers, oldLogData[i].tLogs[bestOldSet]->bestLocationFor( tag ), oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 - oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor, tag,
-							thisBegin, std::min(lastBegin, end), false, oldLogData[i].tLogs[bestOldSet]->tLogLocalities, oldLogData[i].tLogs[bestOldSet]->tLogPolicy, oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor)));
+							thisBegin, std::min(lastBegin, end), useMergePeekCursors, oldLogData[i].tLogs[bestOldSet]->tLogLocalities, oldLogData[i].tLogs[bestOldSet]->tLogPolicy, oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor)));
 						epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 					}
 					lastBegin = thisBegin;
@@ -676,21 +696,63 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality ) {
+		Version localEnd = invalidVersion;
+		Version end = getEnd();
+		if(peekLocality >= 0) {
+			for(auto& it : lockResults) {
+				if(it.logSet->locality == peekLocality) {
+					auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+					if(versions.present()) {
+						localEnd = versions.get().first;
+					}
+					break;
+				}
+			}
+		}
+
+		TraceEvent("TLogPeekSpecial", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
+		if(localEnd == invalidVersion) {
+			return peekAll(dbgid, begin, end, tag, true, false);
+		}
+
+		try {
+			if(localEnd >= end) {
+				return peekLocal(dbgid, tag, begin, end, true, peekLocality);
+			}
+
+			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
+			std::vector< LogMessageVersion > epochEnds;
+
+			cursors.resize(2);
+			cursors[1] = peekLocal(dbgid, tag, begin, localEnd, true, peekLocality);
+			cursors[0] = peekAll(dbgid, localEnd, end, tag, true, false);
+			epochEnds.push_back(LogMessageVersion(localEnd));
+
+			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+		} catch( Error& e ) {
+			if(e.code() == error_code_worker_removed) {
+				return peekAll(dbgid, begin, end, tag, true, false);
+			}
+			throw;
+		}
+	}
+
 	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, vector<pair<Version,Tag>> history ) {
 		while(history.size() && begin >= history.back().first) {
 			history.pop_back();
 		}
 
 		if(history.size() == 0) {
-			return peekLocal(dbgid, tag, begin, getPeekEnd());
+			return peekLocal(dbgid, tag, begin, getPeekEnd(), false);
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
 
-			cursors.push_back( peekLocal(dbgid, tag, history[0].first, getPeekEnd()) );
+			cursors.push_back( peekLocal(dbgid, tag, history[0].first, getPeekEnd(), false) );
 
 			for(int i = 0; i < history.size(); i++) {
-				cursors.push_back( peekLocal(dbgid, history[i].second, i+1 == history.size() ? begin : std::max(history[i+1].first, begin), history[i].first) );
+				cursors.push_back( peekLocal(dbgid, history[i].second, i+1 == history.size() ? begin : std::max(history[i+1].first, begin), history[i].first, false) );
 				epochEnds.push_back(LogMessageVersion(history[i].first));
 			}
 

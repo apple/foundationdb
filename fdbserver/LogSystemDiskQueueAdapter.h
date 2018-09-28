@@ -40,9 +40,11 @@ public:
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, bool recover=true ) : logSystem(logSystem), tag(tag), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0) {
-		if (enableRecovery)
-			cursor = logSystem->peek( UID(), 0, tag, true );
+	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<int8_t>> peekLocality, bool recover=true ) : logSystem(logSystem), tag(tag), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0) {
+		if (enableRecovery) {
+			localityChanged = peekLocality ? peekLocality->onChange() : Never();
+			cursor = logSystem->peekSpecial( UID(), 1, tag, peekLocality ? peekLocality->get() : tagLocalityInvalid );
+		}
 	}
 
 	struct CommitMessage {
@@ -74,6 +76,8 @@ public:
 	virtual int getCommitOverhead() { return 0; } //SOMEDAY: could this be more accurate?
 
 private:
+	Reference<AsyncVar<int8_t>> peekLocality;
+	Future<Void> localityChanged;
 	Reference<ILogSystem::IPeekCursor> cursor;
 	Tag tag;
 
@@ -93,6 +97,6 @@ private:
 	friend class LogSystemDiskQueueAdapterImpl;
 };
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<int8_t>> peekLocality );
 
 #endif
