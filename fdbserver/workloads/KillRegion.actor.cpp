@@ -79,25 +79,33 @@ struct KillRegionWorkload : TestWorkload {
 		g_simulator.killDataCenter( LiteralStringRef("2"), ISimulator::RebootAndDelete, true );
 		g_simulator.killDataCenter( LiteralStringRef("4"), ISimulator::RebootAndDelete, true );
 
+		state bool first = true;
 		loop {
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.addWriteConflictRange(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\x00")));
+					choose {
+						when( Void _ = wait(tr.commit()) ) {
+							TraceEvent("ForceRecovery_Complete");
+							g_simulator.killDataCenter( LiteralStringRef("1"), ISimulator::Reboot );
+							g_simulator.killDataCenter( LiteralStringRef("3"), ISimulator::Reboot );
+							g_simulator.killDataCenter( LiteralStringRef("5"), ISimulator::Reboot );
+							return Void();
+						}
+						when( Void _ = wait(delay(first ? 5.0 : 120.0)) ) {
+							break;
+						}
+					}
+				} catch( Error &e ) {
+					Void _ = wait( tr.onError(e) );
+				}
+			}
 			TraceEvent("ForceRecovery_Begin");
 			Void _ = wait( forceRecovery(cx->cluster->getConnectionFile()) );
+			first = false;
 			TraceEvent("ForceRecovery_Attempted");
-			state Transaction tr(cx);
-			try {
-				choose {
-					when( Version _ = wait(tr.getReadVersion()) ) {
-						TraceEvent("ForceRecovery_Complete");
-						break;
-					}
-					when( Void _ = wait(delay(120.0)) ) {}
-				}
-			} catch( Error &e ) {
-				Void _ = wait( tr.onError(e) );
-			}
 		}
-
-		return Void();
 	}
 };
 
