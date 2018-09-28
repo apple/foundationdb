@@ -2098,6 +2098,67 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	return errors;
 }
 
+ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
+	// Read back every key at every version set or cleared and verify the result.
+	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
+	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
+	state int errors = 0;
+
+	while(i != iEnd) {
+		state std::string key = i->first.first;
+		state Version ver = i->first.second;
+		if(ver <= maxCommittedVersion) {
+			state Optional<std::string> val = i->second;
+
+			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
+
+			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
+			wait(cur->findEqual(key));
+
+			if(val.present()) {
+				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
+					++errors;
+					if(!cur->isValid())
+						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+					else if(cur->getKey() != key)
+						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+					else if(cur->getValue() != val.get())
+						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+				}
+			} else {
+				if(cur->isValid() && cur->getKey() == key) {
+					++errors;
+					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+				}
+			}
+		}
+		++i;
+	}
+	return errors;
+}
+
+ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, std::map<std::pair<std::string, Version>, Optional<std::string>> *written, int *pErrorCount) {
+	try {
+		loop {
+			Version v = waitNext(vStream);
+
+			state Future<int> vall = verifyAll(btree, v, written);
+			state Future<int> vrange = verifyRandomRange(btree, g_random->randomInt(0, v + 1), written);
+			wait(success(vall) && success(vrange));
+
+			*pErrorCount += (vall.get() + vrange.get());
+
+			if(*pErrorCount != 0)
+				break;
+		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream) {
+			throw;
+		}
+	}
+	return Void();
+}
+
 static void nullWaitHandler( const boost::system::error_code& ) {}
 
 TEST_CASE("/redwood/correctness") {
@@ -2136,12 +2197,13 @@ TEST_CASE("/redwood/correctness") {
 	state int mutationBytes = 0;
 
 	btree->setWriteVersion(version);
-	
-	state double mutateTime = 0;
+
 	state int64_t keyBytesInserted = 0;
 	state int64_t ValueBytesInserted = 0;
+	state int errorCount;
 
-	state double startTime = timer();
+	state PromiseStream<Version> committedVersions;
+	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
 
 	while(mutationBytes < mutationBytesTarget) {
 		// Sometimes advance the version
@@ -2221,17 +2283,13 @@ TEST_CASE("/redwood/correctness") {
 		// Sometimes (and at end) commit then check all results
 		if(mutationBytes >= std::min(mutationBytesTarget, (int)20e6) || g_random->random01() < .002) {
 			wait(btree->commit());
-			mutateTime += timer() - startTime;
-
-			// Check that all writes can be read at their written versions
-			state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written.cbegin();
-			state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written.cend();
-			state int errors = 0;
-
-			printf("Cumulative: %d total mutation bytes (kv bytes inserted %lld %lld) in %f seconds.\n", mutationBytes, keyBytesInserted, ValueBytesInserted, mutateTime);
-			printf("Checking all changes committed thus far.\n");
+			printf("Cumulative: %d total mutation bytes, %lu key changes, %lld key bytes, %lld value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
 
 			if(useDisk && g_random->random01() < .1) {
+				// Stop and wait for the verifier task
+				committedVersions.sendError(end_of_stream());
+				wait(verifyTask);
+
 				printf("Reopening disk btree\n");
 				delete btree;
 				Future<Void> closedFuture = pager->onClosed();
@@ -2245,54 +2303,27 @@ TEST_CASE("/redwood/correctness") {
 
 				Version v = wait(btree->getLatestVersion());
 				ASSERT(v == version);
+
+				// Create new promise stream and start the verifier again
+				committedVersions = PromiseStream<Version>();
+				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
 			}
+
+			// Notify the background verifier that version is committed and therefore readable
+			committedVersions.send(version);
+
+			// Check for errors
+			if(errorCount != 0)
+				throw internal_error();
 
 			++version;
 			btree->setWriteVersion(version);
-
-			// Read back every key at every version set or cleared and verify the result.
-			while(i != iEnd) {
-				state std::string key = i->first.first;
-				state Version ver = i->first.second;
-				state Optional<std::string> val = i->second;
-
-				state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
-
-				debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
-				wait(cur->findEqual(key));
-
-				if(val.present()) {
-					if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
-						++errors;
-						if(!cur->isValid())
-							printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
-						else if(cur->getKey() != key)
-							printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
-						else if(cur->getValue() != val.get())
-							printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
-					}
-				} else {
-					if(cur->isValid() && cur->getKey() == key) {
-						++errors;
-						printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
-					}
-				}
-				++i;
-			}
-
-			// For one random version read a random range and verify results
-			int e = wait(verifyRandomRange(btree, g_random->randomInt(lastVer, version), &written));
-			errors += e;
-
-			printf("%d sets, %d errors\n", (int)written.size(), errors);
-
-			if(errors != 0)
-				throw internal_error();
-
-			startTime = timer();
 		}
 
 	}
+
+	committedVersions.sendError(end_of_stream());
+	wait(verifyTask);
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
