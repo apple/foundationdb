@@ -2356,7 +2356,11 @@ ACTOR Future<Void> dataDistribution(
 				if(initData->shards[shard].hasDest) {
 					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
 					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
-					output.send( RelocateShard( keys, PRIORITY_RECOVER_MOVE ) );
+					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
+					if(!unhealthy && configuration.usableRegions > 1) {
+						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
+					}
+					output.send( RelocateShard( keys, unhealthy ? PRIORITY_TEAM_UNHEALTHY : PRIORITY_RECOVER_MOVE ) );
 				}
 				Void _ = wait( yield(TaskDataDistribution) );
 			}
