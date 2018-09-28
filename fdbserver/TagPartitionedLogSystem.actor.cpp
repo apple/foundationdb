@@ -1317,6 +1317,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						}
 					}
 					prevState = modifiedState;
+				} else {
+					forceRecovery = false;
 				}
 			}
 			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
@@ -1423,6 +1425,53 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 					lockResults.push_back(lockResult);
 				}
+			}
+		}
+
+		if(forceRecovery) {
+			state std::vector<LogLockInfo> allLockResults;
+			ASSERT( lockResults.size() == 1 );
+			allLockResults.push_back(lockResults[0]);
+			for( auto& old : oldLogData ) {
+				ASSERT( old.tLogs.size() == 1 );
+				LogLockInfo lockResult;
+				lockResult.epochEnd = old.epochEnd;
+				lockResult.logSet = old.tLogs[0];
+				for(int t=0; t<old.tLogs[0]->logServers.size(); t++) {
+					lockResult.replies.push_back( lockTLog( dbgid, old.tLogs[0]->logServers[t]) );
+				}
+				allLockResults.push_back(lockResult);
+			}
+
+			state int lockNum = 0;
+			state Version maxRecoveryVersion = 0;
+			state int maxRecoveryIndex = 0;
+			while(lockNum < allLockResults.size()) {
+				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, allLockResults[lockNum]);
+				if(versions.present()) {
+					if(versions.get().second > maxRecoveryVersion) {
+						TraceEvent("HigherRecoveryVersion", dbgid).detail("Idx", lockNum).detail("Ver", versions.get().second);
+						maxRecoveryVersion = versions.get().second;
+						maxRecoveryIndex = lockNum;
+					}
+					lockNum++;
+				} else {
+					Void _ = wait( TagPartitionedLogSystem::getDurableVersionChanged(allLockResults[lockNum]) );
+				}
+			}
+			if(maxRecoveryIndex > 0) {
+				logServers = oldLogData[maxRecoveryIndex-1].tLogs;
+				lockResults[0] = allLockResults[maxRecoveryIndex];
+				lockResults[0].isCurrent = true;
+
+				std::vector<Reference<AsyncVar<bool>>> failed;
+				for(auto& log : logServers[0]->logServers) {
+					failed.push_back( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) );
+					failureTrackers.push_back( monitorLog(log, failed.back() ) );
+				}
+				ASSERT(logFailed.size() == 1);
+				logFailed[0] = failed;
+				oldLogData.erase(oldLogData.begin(), oldLogData.begin() + maxRecoveryIndex);
 			}
 		}
 
