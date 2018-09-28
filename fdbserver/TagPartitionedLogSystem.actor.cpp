@@ -1280,16 +1280,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						if(coreSet.locality != primaryLocality && coreSet.locality >= tagLocalitySpecial) {
 							foundRemote = true;
 							remoteLocality = coreSet.locality;
-							if(coreSet.isLocal) {
-								modifiedState.tLogs = modifiedState.oldTLogData[0].tLogs;
-								modifiedState.logRouterTags = modifiedState.oldTLogData[0].logRouterTags;
-							} else {
-								modifiedState.tLogs.clear();
-								modifiedState.tLogs.push_back(coreSet);
-								modifiedState.tLogs[0].isLocal = true;
-								modifiedState.logRouterTags = 0;
-								modifiedLogSets++;
-							}
+							modifiedState.tLogs.clear();
+							modifiedState.tLogs.push_back(coreSet);
+							modifiedState.tLogs[0].isLocal = true;
+							modifiedState.logRouterTags = 0;
+							modifiedLogSets++;
 							break;
 						}
 					}
