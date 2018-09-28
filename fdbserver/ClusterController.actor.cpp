@@ -2222,7 +2222,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			req.reply.send(workers);
 		}
 		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
-			if(self.db.masterRegistrationCount == 0) {
+			if(self.db.masterRegistrationCount == 0 || self.db.serverInfo->get().recoveryState <= RecoveryState::RECRUITING) {
 				if (!self.db.forceMasterFailure.isSet()) {
 					self.db.forceRecovery = true;
 					self.db.forceMasterFailure.send( Void() );
