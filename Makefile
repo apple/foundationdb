@@ -78,7 +78,9 @@ ACTORCOMPILER := bin/actorcompiler.exe
 # UNSTRIPPED := 1
 
 # Normal optimization level
-CFLAGS += -O2
+# ipa-cp-clone causes incorrect generated code for serializing LocalityData.
+# See https://github.com/apple/foundationdb/issues/657
+CFLAGS += -O3 -fno-ipa-cp-clone
 
 # Or turn off optimization entirely
 # CFLAGS += -O0
