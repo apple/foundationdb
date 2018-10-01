@@ -386,7 +386,13 @@ void IndirectShadowPager::freeLogicalPage(LogicalPageID pageID, Version version)
 	PageVersionMap &pageVersionMap = pageTable[pageID];
 	ASSERT(!pageVersionMap.empty());
 
+	// 0 will mean delete as of latest version, similar to write at latest version
+	if(version == 0) {
+		version = pageVersionMap.back().first;
+	}
+
 	auto itr = pageVersionMapLowerBound(pageVersionMap, version);
+	// TODO:  Is this correct, that versions from the past *forward* can be deleted?
 	for(auto i = itr; i != pageVersionMap.end(); ++i) {
 		freePhysicalPageID(i->second);
 	}
@@ -584,6 +590,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 
 	auto itr = IndirectShadowPager::pageVersionMapUpperBound(pageVersionMap, version);
 	if(itr == pageVersionMap.begin()) {
+		debug_printf("Page version map empty! op=error id=%u @%lld\n", logicalPageID, version);
 		ASSERT(false);
 	}
 
@@ -636,7 +643,10 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 }
 
 Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID pageID, Version version) {
-	ASSERT(recovery.isReady());
+	if(!recovery.isReady()) {
+		debug_printf("getPage failure, recovery not ready - op=error id=%u @%lld\n", pageID, version);
+		ASSERT(false);
+	}
 
 	Future<Reference<const IPage>> f = getPageImpl(this, snapshot, pageID, version);
 	operations.add(success(f));
