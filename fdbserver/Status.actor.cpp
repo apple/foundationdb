@@ -417,7 +417,7 @@ struct RolesInfo {
 			obj["total_queries"] = StatusCounter(metrics.getValue("AllQueries")).getStatus();
 			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
-			obj["keys_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
+			obj["keys_queried"] = StatusCounter(metrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
 
