@@ -90,7 +90,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "seconds":5.0,
                      "versions":12341234
                   },
-                  "durable_lag": {
+                  "durability_lag": {
                      "seconds":5.0,
                      "versions":12341234
                   },

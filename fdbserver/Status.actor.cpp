@@ -442,12 +442,12 @@ struct RolesInfo {
 			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 			dataLag["seconds"] = dataLagSeconds;
 
-			JsonBuilderObject durableLag;
-			durableLag["versions"] = version - durableVersion;
-			durableLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+			JsonBuilderObject durabilityLag;
+			durabilityLag["versions"] = version - durableVersion;
+			durabilityLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 
 			obj["data_lag"] = dataLag;
-			obj["durable_lag"] = durableLag;
+			obj["durability_lag"] = durabilityLag;
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
