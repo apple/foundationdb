@@ -559,3 +559,8 @@ const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
+
+const KeyRangeRef monitorConfKeys(
+	LiteralStringRef("\xff\x02/monitorConf/"),
+	LiteralStringRef("\xff\x02/monitorConf0")
+);

@@ -252,4 +252,7 @@ extern const KeyRef maxUIDKey;
 extern const KeyRef databaseLockedKey;
 extern const KeyRef mustContainSystemMutationsKey;
 
+// Key range reserved for storing changes to monitor conf files
+extern const KeyRangeRef monitorConfKeys;
+
 #endif
