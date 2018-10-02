@@ -1097,7 +1097,7 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr) {}
+ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {}
 
 ACTOR Future<Void> timebomb(double totalSeconds, Promise<Void> resetPromise) {
 	if(totalSeconds == 0.0) {

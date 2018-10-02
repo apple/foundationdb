@@ -51,11 +51,6 @@ class _ErrorPredicates(object):
         self._parent = parent
 
 
-class _ClusterOptions(object):
-    def __init__(self, cluster):
-        self._parent = weakref.proxy(cluster)
-
-
 class _DatabaseOptions(object):
     def __init__(self, db):
         self._parent = weakref.proxy(db)
@@ -158,7 +153,7 @@ def fill_operations():
         add_operation("bit_" + fname, v)
 
 
-for scope in ['ClusterOption', 'DatabaseOption', 'TransactionOption', 'NetworkOption']:
+for scope in ['DatabaseOption', 'TransactionOption', 'NetworkOption']:
     fill_options(scope)
 
 fill_options('ErrorPredicate', True)
@@ -600,11 +595,6 @@ class Future(_FDBBase):
     def block_until_ready(self):
         self.capi.fdb_future_block_until_ready(self.fpointer)
 
-    # Depending on the event_model, block_until_ready may be remapped to do something asynchronous or
-    # just fail.  really_block_until_ready() is always fdb_future_block_until_ready() and is used e.g.
-    # for database and cluster futures that should always be available very quickly
-    really_block_until_ready = block_until_ready
-
     def on_ready(self, callback):
         def cb_and_delref(ignore):
             _unpin_callback(cbfunc[0])
@@ -878,7 +868,7 @@ class FormerFuture(_FDBBase):
                 pass
 
 
-class Database(FormerFuture):
+class Database(_FDBBase):
     def __init__(self, dpointer):
         self.dpointer = dpointer
         self.options = _DatabaseOptions(self)
@@ -1097,33 +1087,27 @@ class Database(FormerFuture):
 fill_operations()
 
 
-class Cluster(FormerFuture):
-    def __init__(self, cpointer):
-        self.cpointer = cpointer
-        self.options = _ClusterOptions(self)
-
-    def __del__(self):
-        # print('Destroying cluster 0x%x' % self.cpointer)
-        self.capi.fdb_cluster_destroy(self.cpointer)
+class Cluster(_FDBBase):
+    def __init__(self, cluster_file):
+        self.cluster_file = cluster_file
 
     def open_database(self, name):
-        name = paramToBytes(name)
-        f = Future(self.capi.fdb_cluster_create_database(self.cpointer, name, len(name)))
-        f.really_block_until_ready()
-        dpointer = ctypes.c_void_p()
-        self.capi.fdb_future_get_database(f.fpointer, ctypes.byref(dpointer))
-        return Database(dpointer)
+        if name != b'DB':
+            raise FDBError(2013) # invalid_database_name
+
+        return create_database(self.cluster_file)
 
     def _set_option(self, option, param, length):
-        self.capi.fdb_cluster_set_option(self.cpointer, option, param, length)
+        pass
 
+
+def create_database(cluster_file=None):
+    pointer = ctypes.c_void_p()
+    _FDBBase.capi.fdb_create_database(optionalParamToBytes(cluster_file)[0], ctypes.byref(pointer))
+    return Database(pointer)
 
 def create_cluster(cluster_file=None):
-    f = Future(_FDBBase.capi.fdb_create_cluster(optionalParamToBytes(cluster_file)[0]))
-    cpointer = ctypes.c_void_p()
-    f.really_block_until_ready()
-    _FDBBase.capi.fdb_future_get_cluster(f.fpointer, ctypes.byref(cpointer))
-    return Cluster(cpointer)
+    return Cluster(cluster_file)
 
 
 class KeySelector(object):
@@ -1363,14 +1347,6 @@ _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POIN
 _capi.fdb_future_get_key.restype = ctypes.c_int
 _capi.fdb_future_get_key.errcheck = check_error_code
 
-_capi.fdb_future_get_cluster.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-_capi.fdb_future_get_cluster.restype = ctypes.c_int
-_capi.fdb_future_get_cluster.errcheck = check_error_code
-
-_capi.fdb_future_get_database.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-_capi.fdb_future_get_database.restype = ctypes.c_int
-_capi.fdb_future_get_database.errcheck = check_error_code
-
 _capi.fdb_future_get_value.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
                                        ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)), ctypes.POINTER(ctypes.c_int)]
 _capi.fdb_future_get_value.restype = ctypes.c_int
@@ -1385,18 +1361,9 @@ _capi.fdb_future_get_string_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(ct
 _capi.fdb_future_get_string_array.restype = int
 _capi.fdb_future_get_string_array.errcheck = check_error_code
 
-_capi.fdb_create_cluster.argtypes = [ctypes.c_char_p]
-_capi.fdb_create_cluster.restype = ctypes.c_void_p
-
-_capi.fdb_cluster_destroy.argtypes = [ctypes.c_void_p]
-_capi.fdb_cluster_destroy.restype = None
-
-_capi.fdb_cluster_create_database.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_cluster_create_database.restype = ctypes.c_void_p
-
-_capi.fdb_cluster_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_cluster_set_option.restype = ctypes.c_int
-_capi.fdb_cluster_set_option.errcheck = check_error_code
+_capi.fdb_create_database.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
+_capi.fdb_create_database.restype = ctypes.c_int
+_capi.fdb_create_database.errcheck = check_error_code
 
 _capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
 _capi.fdb_database_destroy.restype = None
@@ -1655,13 +1622,12 @@ def init_v13(local_address, event_model=None):
     return init(event_model)
 
 
-open_clusters = {}
 open_databases = {}
 
 cacheLock = threading.Lock()
 
 
-def open(cluster_file=None, database_name=b'DB', event_model=None):
+def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated
     by the fdb.cluster file in a platform-specific location, if no cluster_file
     or database_name is provided).  Initializes the FDB interface as required."""
@@ -1671,17 +1637,21 @@ def open(cluster_file=None, database_name=b'DB', event_model=None):
             init(event_model=event_model)
 
     with cacheLock:
-        if cluster_file not in open_clusters:
-            open_clusters[cluster_file] = create_cluster(cluster_file)
+        if cluster_file not in open_databases:
+            open_databases[cluster_file] = create_database(cluster_file)
 
-        if (cluster_file, database_name) not in open_databases:
-            open_databases[(cluster_file, database_name)] = open_clusters[cluster_file].open_database(database_name)
+        return open_databases[(cluster_file)]
+    
 
-        return open_databases[(cluster_file, database_name)]
+def open_v609(cluster_file=None, database_name=b'DB', event_model=None):
+    if database_name != b'DB':
+        raise FDBError(2013) # invalid_database_name
+
+    return open(cluster_file, event_model)
 
 
 def open_v13(cluster_id_path, database_name, local_address=None, event_model=None):
-    return open(cluster_id_path, database_name, event_model)
+    return open_v609(cluster_id_path, database_name, event_model)
 
 
 import atexit

@@ -266,6 +266,11 @@ extern "C" {
 
     DLLEXPORT void fdb_cluster_destroy( FDBCluster* c );
 
+    typedef enum {
+        // This option is only a placeholder for C compatibility and should not be used
+        FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE=-1
+    } FDBClusterOption;
+
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_cluster_set_option( FDBCluster* c, FDBClusterOption option,
                             uint8_t const* value, int value_length );

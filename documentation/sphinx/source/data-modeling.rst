@@ -12,7 +12,6 @@
 .. |get-key-func| replace:: get_key()
 .. |get-range-func| replace:: get_range()
 .. |commit-func| replace:: FIXME
-.. |init-func| replace:: FIXME
 .. |open-func| replace:: FIXME
 .. |set-cluster-file-func| replace:: FIXME
 .. |set-local-address-func| replace:: FIXME

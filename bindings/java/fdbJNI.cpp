@@ -480,38 +480,6 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureCluster_FutureCluster_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	FDBCluster *cluster;
-	fdb_error_t err = fdb_future_get_cluster(f, &cluster);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return 0;
-	}
-	return (jlong)cluster;
-}
-
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureDatabase_FutureDatabase_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	FDBDatabase *database;
-	fdb_error_t err = fdb_future_get_database(f, &database);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return 0;
-	}
-	return (jlong)database;
-}
-
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv *jenv, jobject, jlong dbPtr) {
 	if( !dbPtr ) {
 		throwParamNotNull(jenv);
@@ -564,69 +532,28 @@ JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIE
 	return (jboolean)fdb_error_predicate(predicate, code);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Cluster_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
 	const char* fileName = 0;
 	if(clusterFileName != 0) {
 		fileName = jenv->GetStringUTFChars(clusterFileName, 0);
-		if( jenv->ExceptionOccurred() )
+		if(jenv->ExceptionOccurred()) {
 			return 0;
-	}
-	FDBFuture *cluster = fdb_create_cluster( fileName );
-	if(clusterFileName != 0)
-		jenv->ReleaseStringUTFChars( clusterFileName, fileName );
-	return (jlong)cluster;
-}
-
-JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1setOption(JNIEnv *jenv, jobject, jlong cPtr, jint code, jbyteArray value) {
-	if( !cPtr ) {
-		throwParamNotNull(jenv);
-		return;
-	}
-	FDBCluster *c = (FDBCluster *)cPtr;
-	uint8_t *barr = NULL;
-	int size = 0;
-
-	if(value != 0) {
-		barr = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
-		if (!barr) {
-			throwRuntimeEx( jenv, "Error getting handle to native resources" );
-			return;
 		}
-		size = jenv->GetArrayLength( value );
 	}
-	fdb_error_t err = fdb_cluster_set_option( c, (FDBClusterOption)code, barr, size );
-	if(value != 0)
-		jenv->ReleaseByteArrayElements( value, (jbyte *)barr, JNI_ABORT );
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-	}
-}
 
-JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1dispose(JNIEnv *jenv, jobject, jlong cPtr) {
-	if( !cPtr ) {
-		throwParamNotNull(jenv);
-		return;
-	}
-	fdb_cluster_destroy( (FDBCluster *)cPtr );
-}
+	FDBDatabase *db;
+	fdb_error_t err = fdb_create_database(fileName, &db);
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1createDatabase(JNIEnv *jenv, jobject, jlong cPtr, jbyteArray dbNameBytes) {
-	if( !cPtr || !dbNameBytes ) {
-		throwParamNotNull(jenv);
-		return 0;
+	if(clusterFileName != 0) {
+		jenv->ReleaseStringUTFChars(clusterFileName, fileName);
 	}
-	FDBCluster *cluster = (FDBCluster *)cPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( dbNameBytes, NULL );
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
+	if(err) {
+		safeThrow(jenv, getThrowable(jenv, err));
 		return 0;
 	}
 
-	int size = jenv->GetArrayLength( dbNameBytes );
-	FDBFuture * f = fdb_cluster_create_database( cluster, barr, size );
-	jenv->ReleaseByteArrayElements( dbNameBytes, (jbyte *)barr, JNI_ABORT );
-	return (jlong)f;
+	return (jlong)db;
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv *jenv, jobject, jlong tPtr, jlong version) {

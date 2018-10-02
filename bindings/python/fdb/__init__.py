@@ -85,13 +85,10 @@ def api_version(ver):
         'FDBError',
         'predicates',
         'Future',
-        'Cluster',
         'Database',
         'Transaction',
         'KeyValue',
         'KeySelector',
-        'init',
-        'create_cluster',
         'open',
         'transactional',
         'options',
@@ -99,6 +96,12 @@ def api_version(ver):
     )
 
     _add_symbols(fdb.impl, list)
+
+    if ver < 610:
+        globals()["init"] = getattr(fdb.impl, "init")
+        globals()["open"] = getattr(fdb.impl, "open_v609")
+        globals()["create_cluster"] = getattr(fdb.impl, "create_cluster")
+        globals()["Cluster"] = getattr(fdb.impl, "Cluster")
 
     if ver > 22:
         import fdb.locality

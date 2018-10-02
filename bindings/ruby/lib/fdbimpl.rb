@@ -83,17 +83,12 @@ module FDB
     attach_function :fdb_future_get_error, [ :pointer ], :fdb_error
     attach_function :fdb_future_get_version, [ :pointer, :pointer ], :fdb_error
     attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_cluster, [ :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_database, [ :pointer, :pointer ], :fdb_error
     attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
     attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
     attach_function :fdb_future_get_string_array, [ :pointer, :pointer, :pointer ], :fdb_error
 
-    attach_function :fdb_create_cluster, [ :string ], :pointer
-    attach_function :fdb_cluster_destroy, [ :pointer ], :void
-    attach_function :fdb_cluster_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
+    attach_function :fdb_create_database, [ :string, :pointer ], :fdb_error
 
-    attach_function :fdb_cluster_create_database, [ :pointer, :pointer, :int ], :pointer
     attach_function :fdb_database_destroy, [ :pointer ], :void
     attach_function :fdb_database_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
 
@@ -156,7 +151,7 @@ module FDB
     @@ffi_callbacks
   end
 
-  [ "Network", "Cluster", "Database", "Transaction" ].each do |scope|
+  [ "Network", "Database", "Transaction" ].each do |scope|
     klass = FDB.const_set("#{scope}Options", Class.new)
     klass.class_eval do
       define_method(:initialize) do |setfunc|
@@ -242,6 +237,10 @@ module FDB
     nil
   end
 
+  class << self
+    private :init
+  end
+
   def self.stop()
     FDBC.check_error FDBC.fdb_stop_network
   end
@@ -254,11 +253,10 @@ module FDB
     end
   end
 
-  @@open_clusters = {}
   @@open_databases = {}
   @@cache_lock = Mutex.new
 
-  def self.open( cluster_file = nil, database_name = "DB" )
+  def self.open( cluster_file = nil )
     @@network_thread_monitor.synchronize do
       if ! @@network_thread
         init
@@ -266,15 +264,13 @@ module FDB
     end
 
     @@cache_lock.synchronize do
-      if ! @@open_clusters.has_key? cluster_file
-        @@open_clusters[cluster_file] = create_cluster( cluster_file )
+      if ! @@open_databases.has_key? [cluster_file]
+        dpointer = FFI::MemoryPointer.new :pointer
+        FDBC.check_error FDBC.fdb_create_database(cluster_file, dpointer)
+        @@open_databases[cluster_file] = Database.new dpointer.get_pointer(0)
       end
 
-      if ! @@open_databases.has_key? [cluster_file, database_name]
-        @@open_databases[[cluster_file, database_name]] = @@open_clusters[cluster_file].open_database(database_name)
-      end
-
-      @@open_databases[[cluster_file, database_name]]
+      @@open_databases[cluster_file]
     end
   end
 
@@ -500,41 +496,6 @@ module FDB
         rescue Exception
         end
       end
-    end
-  end
-
-  def self.create_cluster(cluster=nil)
-    f = FDBC.fdb_create_cluster(cluster)
-    cpointer = FFI::MemoryPointer.new :pointer
-    FDBC.check_error FDBC.fdb_future_block_until_ready(f)
-    FDBC.check_error FDBC.fdb_future_get_cluster(f, cpointer)
-    Cluster.new cpointer.get_pointer(0)
-  end
-
-  class Cluster < FormerFuture
-    attr_reader :options
-
-    def self.finalize(ptr)
-      proc do
-        # puts "Destroying cluster #{ptr}"
-        FDBC.fdb_cluster_destroy(ptr)
-      end
-    end
-
-    def initialize(cpointer)
-      @cpointer = cpointer
-      @options = ClusterOptions.new lambda { |code, param|
-        FDBC.check_error FDBC.fdb_cluster_set_option(cpointer, code, param, param.nil? ? 0 : param.bytesize)
-      }
-      ObjectSpace.define_finalizer(self, self.class.finalize(@cpointer))
-    end
-
-    def open_database(name="DB")
-      f = FDBC.fdb_cluster_create_database(@cpointer, name, name.bytesize)
-      dpointer = FFI::MemoryPointer.new :pointer
-      FDBC.check_error FDBC.fdb_future_block_until_ready(f)
-      FDBC.check_error FDBC.fdb_future_get_database(f, dpointer)
-      Database.new dpointer.get_pointer(0)
     end
   end
 

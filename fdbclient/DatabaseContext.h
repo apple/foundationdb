@@ -78,8 +78,12 @@ public:
 	Error deferredError;
 	bool lockAware;
 
+	bool isError() {
+		return deferredError.code() != invalid_error_code;	
+	}
+
 	void checkDeferredError() {
-		if( deferredError.code() != invalid_error_code ) {
+		if(isError()) {
 			throw deferredError;
 		}
 	}
@@ -93,6 +97,8 @@ public:
 	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
 		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
+
+	explicit DatabaseContext( const Error &err );
 
 	// Key DB-specific information
 	AsyncTrigger masterProxiesChangeTrigger;

@@ -58,9 +58,18 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	db = NULL; // All accesses to db happen on the main thread, so this pointer will be set by the time anybody uses it
 
-	onMainThreadVoid([this, connFilename, apiVersion](){ 
-		Database db = Database::createDatabase(connFilename, apiVersion);
-		this->db = db.extractPtr();
+	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
+	onMainThreadVoid([this, connFile, apiVersion](){ 
+		try {
+			Database db = Database::createDatabase(connFile, apiVersion);
+			this->db = db.extractPtr();
+		}
+		catch(Error &e) {
+			this->db = new DatabaseContext(e);
+		}
+		catch(...) {
+			this->db = new DatabaseContext(unknown_error());
+		}
 	}, NULL);
 }
 
