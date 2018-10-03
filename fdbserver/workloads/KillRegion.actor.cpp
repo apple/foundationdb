@@ -93,7 +93,7 @@ struct KillRegionWorkload : TestWorkload {
 							g_simulator.killDataCenter( LiteralStringRef("5"), ISimulator::Reboot );
 							return Void();
 						}
-						when( Void _ = wait(delay(first ? 5.0 : 120.0)) ) {
+						when( Void _ = wait(delay(first ? 30.0 : 300.0)) ) {
 							break;
 						}
 					}
