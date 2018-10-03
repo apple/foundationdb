@@ -594,7 +594,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end, bool useMergePeekCursors, int8_t peekLocality = tagLocalityInvalid ) {
-		if(tag.locality >= 0) {
+		if(tag.locality >= 0 || tag.locality == tagLocalityUpgraded) {
 			peekLocality = tag.locality;
 		}
 		ASSERT(peekLocality >= 0 || peekLocality == tagLocalityUpgraded);
