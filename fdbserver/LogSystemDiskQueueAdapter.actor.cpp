@@ -44,6 +44,16 @@ public:
 							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().first : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().second : invalidVersion );
 							self->localityChanged = self->peekLocality->onChange();
 						}
+						when(Void _ = wait( delay(self->peekTypeSwitches==0 ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME))) {
+							self->peekTypeSwitches++;
+							if(self->peekTypeSwitches%2==1) {
+								self->cursor = self->logSystem->peek( UID(), self->recoveryLoc, self->tag, true );
+								self->localityChanged = Never();
+							} else {
+								self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().first : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().second : invalidVersion );
+								self->localityChanged = self->peekLocality->onChange();
+							}
+						}
 					}
 				}
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 

@@ -65,6 +65,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
 	init( VERSIONS_PER_BATCH,                 VERSIONS_PER_SECOND/20 ); if( randomize && BUGGIFY ) VERSIONS_PER_BATCH = std::max<int64_t>(1,VERSIONS_PER_SECOND/1000);
 	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
+	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
+	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
