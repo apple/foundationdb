@@ -1387,12 +1387,31 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
-	loop{
-		choose {
-			when( wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().forceRecovery.getReply( ForceRecoveryRequest() ) ) : Never() ) ) {
+	while(!clusterInterface->get().present()) {
+		wait(clusterInterface->onChange());
+	}
+
+	ErrorOr<Void> _ = wait(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() ));
+	return Void();
+}
+
+ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
+	state ReadYourWritesTransaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res = wait( tr.get(primaryDatacenterKey) );
+			if(res.present() && res.get() == dcId) {
 				return Void();
 			}
-			when( wait(clusterInterface->onChange()) ) {}
+
+			state Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
+			wait(tr.commit());
+			wait(watchFuture);
+			tr.reset();
+		} catch (Error& e) {
+			wait( tr.onError(e) );
 		}
 	}
 }

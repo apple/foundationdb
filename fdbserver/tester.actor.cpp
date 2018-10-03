@@ -954,6 +954,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "minimumRegions" ) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		} else if( attrib == "buggify" ) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {

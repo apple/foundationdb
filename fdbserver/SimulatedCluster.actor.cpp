@@ -671,7 +671,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 }
 
 struct SimulationConfig {
-	explicit SimulationConfig(int extraDB, int minimumReplication);
+	explicit SimulationConfig(int extraDB, int minimumReplication, int minimumRegions);
 	int extraDB;
 
 	DatabaseConfiguration db;
@@ -684,11 +684,11 @@ struct SimulationConfig {
 	int processes_per_machine;
 	int coordinators;
 private:
-	void generateNormalConfig(int minimumReplication);
+	void generateNormalConfig(int minimumReplication, int minimumRegions);
 };
 
-SimulationConfig::SimulationConfig(int extraDB, int minimumReplication) : extraDB(extraDB) {
-	generateNormalConfig(minimumReplication);
+SimulationConfig::SimulationConfig(int extraDB, int minimumReplication, int minimumRegions) : extraDB(extraDB) {
+	generateNormalConfig(minimumReplication, minimumRegions);
 }
 
 void SimulationConfig::set_config(std::string config) {
@@ -703,9 +703,9 @@ StringRef StringRefOf(const char* s) {
   return StringRef((uint8_t*)s, strlen(s));
 }
 
-void SimulationConfig::generateNormalConfig(int minimumReplication) {
+void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
-	bool generateFearless = g_random->random01() < 0.5;
+	bool generateFearless = minimumRegions > 1 || g_random->random01() < 0.5;
 	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -759,6 +759,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
+		//The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
 		StatusObject primaryObj;
 		StatusObject primaryDcObj;
 		primaryDcObj["id"] = "0";
@@ -866,7 +867,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			}
 
 			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
-			if (g_random->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND) {
+			if (minimumRegions <= 1 && (g_random->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
 				TEST( true );  // Simulated cluster using one region
 				needsRemote = false;
 			} else {
@@ -920,6 +921,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 
 		if(needsRemote) {
+			g_simulator.originalRegions = "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+
 			StatusArray disablePrimary = regionArr;
 			disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
 			g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary), json_spirit::Output_options::none);
@@ -944,7 +947,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 
 	//because we protect a majority of coordinators from being killed, it is better to run with low numbers of coordinators to prevent too many processes from being protected
-	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : 1;
+	coordinators = ( minimumRegions <= 1 && BUGGIFY ) ? g_random->randomInt(1, machine_count+1) : 1;
 
 	if(minimumReplication > 1 && datacenters == 3) {
 		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
@@ -961,10 +964,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseFolder,
                            int* pTesterCount, Optional<ClusterConnectionString> *pConnString,
-                           Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication, Reference<TLSOptions> tlsOptions)
+                           Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication, int minimumRegions, Reference<TLSOptions> tlsOptions)
 {
 	// SOMEDAY: this does not test multi-interface configurations
-	SimulationConfig simconfig(extraDB, minimumReplication);
+	SimulationConfig simconfig(extraDB, minimumReplication, minimumRegions);
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
 	for( auto kv : startingConfigJSON) {
@@ -1038,14 +1041,26 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	TEST( !sslEnabled ); // SSL disabled
 
 	vector<NetworkAddress> coordinatorAddresses;
-	for( int dc = 0; dc < dataCenters; dc++ ) {
-		int machines = machineCount / dataCenters + (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
-		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
+	if(minimumRegions > 1) {
+		//do not put coordinators in the primary region so that we can kill that region safely
+		int nonPrimaryDcs = dataCenters/2;
+		for( int dc = 1; dc < dataCenters; dc+=2 ) {
+			int dcCoordinators = coordinatorCount / nonPrimaryDcs + ((dc-1)/2 < coordinatorCount%nonPrimaryDcs);
+			for(int m = 0; m < dcCoordinators; m++) {
+				uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
+				coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
+				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
+			}
+		}
+	} else {
+		for( int dc = 0; dc < dataCenters; dc++ ) {
+			int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 
-		for(int m = 0; m < dcCoordinators; m++) {
-			uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
-			coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
-			TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
+			for(int m = 0; m < dcCoordinators; m++) {
+				uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
+				coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
+				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
+			}
 		}
 	}
 
@@ -1184,7 +1199,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		.detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
-void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
+void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication, int &minimumRegions) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1212,6 +1227,10 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
 		if (attrib == "minimumReplication") {
 			sscanf( value.c_str(), "%d", &minimumReplication );
 		}
+
+		if (attrib == "minimumRegions") {
+			sscanf( value.c_str(), "%d", &minimumRegions );
+		}
 	}
 
 	ifs.close();
@@ -1224,7 +1243,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int testerCount = 1;
 	state int extraDB = 0;
 	state int minimumReplication = 0;
-	checkExtraDB(testFile, extraDB, minimumReplication);
+	state int minimumRegions = 0;
+	checkExtraDB(testFile, extraDB, minimumReplication, minimumRegions);
 
 	wait( g_simulator.onProcess( g_simulator.newProcess(
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
@@ -1243,7 +1263,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		}
 		else {
 			g_expect_full_pointermap = 1;
-			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication, tlsOptions );
+			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication, minimumRegions, tlsOptions );
 			wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, g_random->randomUniqueID().toString() );

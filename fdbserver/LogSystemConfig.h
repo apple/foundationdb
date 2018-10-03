@@ -190,6 +190,62 @@ struct LogSystemConfig {
 		return results;
 	}
 
+	int8_t getLocalityForDcId(Optional<Key> dcId) const {
+		std::map<int8_t, int> matchingLocalities;
+		std::map<int8_t, int> allLocalities;
+		for( auto& tLogSet : tLogs ) {
+			for( auto& tLog : tLogSet.tLogs ) {
+				if( tLog.present() && tLogSet.locality >= 0 ) {
+					if( tLog.interf().locality.dcId() == dcId ) {
+						matchingLocalities[tLogSet.locality]++;
+					} else {
+						allLocalities[tLogSet.locality]++;
+					}
+				}
+			}
+		}
+
+		for(auto& oldLog : oldTLogs) {
+			for( auto& tLogSet : oldLog.tLogs ) {
+				for( auto& tLog : tLogSet.tLogs ) {
+					if( tLog.present() && tLogSet.locality >= 0 ) {
+						if( tLog.interf().locality.dcId() == dcId ) {
+							matchingLocalities[tLogSet.locality]++;
+						} else {
+							allLocalities[tLogSet.locality]++;
+						}
+					}
+				}
+			}
+		}
+
+		if(!matchingLocalities.empty()) {
+			int8_t bestLocality = -1;
+			int bestLocalityCount = -1;
+			for(auto& it : matchingLocalities) {
+				if(it.second > bestLocalityCount) {
+					bestLocality = it.first;
+					bestLocalityCount = it.second;
+				}
+			}
+			return bestLocality;
+		}
+
+		if(!allLocalities.empty()) {
+			int8_t bestLocality = -1;
+			int bestLocalityCount = -1;
+			for(auto& it : allLocalities) {
+				if(it.second > bestLocalityCount) {
+					bestLocality = it.first;
+					bestLocalityCount = it.second;
+				}
+			}
+			return bestLocality;
+		}
+
+		return tagLocalityInvalid;
+	}
+
 	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
 		typedef std::pair<UID, NetworkAddress> IdAddrPair;
 		std::vector<IdAddrPair> results;
