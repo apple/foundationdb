@@ -585,15 +585,21 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	return Void();
 }
 
-ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<int8_t>> locality) {
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<std::pair<int8_t,Version>>> locality) {
 	loop {
-		locality->set( oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId) );
-		Void _ = wait( oldLogSystem->onLogSystemConfigChange() );
+		int8_t loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
+		Version ver = locality->get().second;
+		if(ver == invalidVersion || loc != locality->get().first) {
+			ver = oldLogSystem->getKnownCommittedVersion(loc);
+		}
+		locality->set( std::make_pair(loc,ver) );
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality", loc).detail("Version", ver);
+		Void _ = wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange(loc) );
 	}
 }
 
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
-	state Reference<AsyncVar<int8_t>> myLocality = Reference<AsyncVar<int8_t>>( new AsyncVar<int8_t>() );
+	state Reference<AsyncVar<std::pair<int8_t,Version>>> myLocality = Reference<AsyncVar<std::pair<int8_t,Version>>>( new AsyncVar<std::pair<int8_t,Version>>(std::make_pair(tagLocalityInvalid, invalidVersion) ) );
 	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 

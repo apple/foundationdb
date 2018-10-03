@@ -41,7 +41,7 @@ public:
 							break;
 						}
 						when(Void _ = wait( self->localityChanged )) {
-							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get() : tagLocalityInvalid );
+							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().first : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().second : invalidVersion );
 							self->localityChanged = self->peekLocality->onChange();
 						}
 					}
@@ -154,6 +154,6 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<int8_t>> peekLocality ) {
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality ) {
 	return new LogSystemDiskQueueAdapter( logSystem, tag, peekLocality );
 }

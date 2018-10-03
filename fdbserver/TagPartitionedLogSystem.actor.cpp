@@ -696,21 +696,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality ) {
-		Version localEnd = invalidVersion;
+	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) {
 		Version end = getEnd();
-		if(peekLocality >= 0) {
-			for(auto& it : lockResults) {
-				if(it.logSet->locality == peekLocality) {
-					auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
-					if(versions.present()) {
-						localEnd = versions.get().first;
-					}
-					break;
-				}
-			}
-		}
-
 		TraceEvent("TLogPeekSpecial", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
 		if(localEnd == invalidVersion) {
 			return peekAll(dbgid, begin, end, tag, true, false);
@@ -833,6 +820,28 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			firstOld = false;
 		}
 		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+	}
+
+	virtual Version getKnownCommittedVersion(int8_t loc) {
+		for(auto& it : lockResults) {
+			if(it.logSet->locality == loc) {
+				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+				if(versions.present()) {
+					return versions.get().first;
+				}
+				return invalidVersion;
+			}
+		}
+		return invalidVersion;
+	}
+
+	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) {
+		for(auto& it : lockResults) {
+			if(it.logSet->locality == loc) {
+				return TagPartitionedLogSystem::getDurableVersionChanged(it);
+			}
+		}
+		return Never();
 	}
 
 	void popLogRouter( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) { //FIXME: do not need to pop all generations of old logs
