@@ -203,6 +203,8 @@ struct ProxyCommitData {
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	std::map<Tag, Version> tag_popped;
+	Deque<std::pair<Version, Version>> txsPopVersions;
+	Version lastTxsPop;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -231,7 +233,7 @@ struct ProxyCommitData {
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), firstProxy(firstProxy),
 			cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)), singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")),
-			commitBatchesMemBytesCount(0)
+			commitBatchesMemBytesCount(0), lastTxsPop(0)
 	{}
 };
 
@@ -837,6 +839,14 @@ ACTOR Future<Void> commitBatch(
 	}
 	Void _ = wait(yield());
 
+	if(!self->txsPopVersions.size() || msg.popTo > self->txsPopVersions.back().second) {
+		if(self->txsPopVersions.size() > SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
+			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
+			self->txsPopVersions.pop_front();
+		}
+
+		self->txsPopVersions.push_back(std::make_pair(commitVersion, msg.popTo));
+	}
 	self->logSystem->pop(msg.popTo, txsTag);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
@@ -1188,6 +1198,62 @@ ACTOR static Future<Void> readRequestServer(
 	}
 }
 
+ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<AsyncVar<ServerDBInfo>> db) {
+	loop {
+		Void _ = wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
+		state Optional<std::vector<OptionalInterface<TLogInterface>>> remoteLogs;
+		if(db->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
+			for(auto& logSet : db->get().logSystemConfig.tLogs) {
+				if(!logSet.isLocal) {
+					remoteLogs = logSet.tLogs;
+					for(auto& tLog : logSet.tLogs) {
+						if(!tLog.present()) {
+							remoteLogs = Optional<std::vector<OptionalInterface<TLogInterface>>>();
+							break;
+						}
+					}
+					break;
+				}
+			}
+		}
+
+		if(!remoteLogs.present()) {
+			Void _ = wait(db->onChange());
+			continue;
+		}
+
+		state Future<Void> onChange = db->onChange();
+		loop {
+			state std::vector<Future<TLogQueuingMetricsReply>> replies;
+			for(auto &it : remoteLogs.get()) {
+				replies.push_back(brokenPromiseToNever( it.interf().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() ) ));
+			}
+			Void _ = wait( waitForAll(replies) );
+
+			if(onChange.isReady()) {
+				break;
+			}
+
+			//FIXME: use the configuration to calculate a more precise minimum recovery version.
+			Version minVersion = std::numeric_limits<Version>::max();
+			for(auto& it : replies) {
+				minVersion = std::min(minVersion, it.get().v);
+			}
+
+			while(self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {
+				self->lastTxsPop = self->txsPopVersions.front().second;
+				self->logSystem->pop(self->txsPopVersions.front().second, txsTag, 0, tagLocalityRemoteLog);
+				self->txsPopVersions.pop_front();
+			}
+
+			Void _ = wait( delay(SERVER_KNOBS->UPDATE_REMOTE_LOG_VERSION_INTERVAL) || onChange );
+			if(onChange.isReady()) {
+				break;
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -1231,7 +1297,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().push_back(std::make_pair<Version,int>(0,0));
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
-	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
+	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<std::pair<int8_t,Version>>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
@@ -1239,6 +1305,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state int64_t commitBatchesMemoryLimit = std::min(SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT, static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
+	addActor.send(monitorRemoteCommitted(&commitData, db));
 	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, &commitData));
 
@@ -1258,6 +1325,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
+				commitData.logSystem->pop(commitData.lastTxsPop, txsTag, 0, tagLocalityRemoteLog);
 			}
 		}
 		when(Void _ = wait(onError)) {}

@@ -348,6 +348,7 @@ public:
 	NotifiedVersion oldestVersion;           // See also storageVersion()
 	NotifiedVersion durableVersion; 	     // At least this version will be readable from storage after a power failure
 
+	Deque<std::pair<Version,Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage server
 
 	uint64_t logProtocol;
@@ -2266,7 +2267,7 @@ bool containsRollback( VersionUpdateRef const& changes, Version& rollbackVersion
 
 class StorageUpdater {
 public:
-	StorageUpdater(Version fromVersion, Version newOldestVersion, Version restoredVersion) : fromVersion(fromVersion), newOldestVersion(newOldestVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
+	StorageUpdater(Version fromVersion, Version restoredVersion) : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
@@ -2292,7 +2293,6 @@ public:
 		if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 	}
 
-	Version newOldestVersion;
 	Version currentVersion;
 private:
 	Version fromVersion;
@@ -2333,7 +2333,7 @@ private:
 			BinaryReader br(m.param2, Unversioned());
 			br >> rollbackVersion;
 
-			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion) {
+			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion ) {
 				TEST( true );  // ShardApplyPrivateData shard rollback
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 					.detail("FromVersion", fromVersion)
@@ -2344,9 +2344,10 @@ private:
 			}
 			// Don't let oldestVersion (and thus storageVersion) go into the rolled back range of versions
 			// Since we currently don't read from uncommitted log systems, seeing the lastEpochEnd implies that currentVersion is fully committed, so we can safely make it durable
-			newOldestVersion = currentVersion;
-			if ( rollbackVersion < fromVersion )
+			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion )
 				rollback( data, rollbackVersion, currentVersion );
+
+			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
 			if( (m.type == MutationRef::SetValue && !matchesThisServer) || (m.type == MutationRef::ClearRange && matchesThisServer) )
@@ -2473,7 +2474,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), data->restoredVersion);
+		StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
@@ -2571,17 +2572,26 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
+			Version maxVersionInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			for(int i = 0; i < data->recoveryVersionSkips.size(); i++) {
+				maxVersionInMemory += data->recoveryVersionSkips[i].second;
+			}
+
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxReadTransactionLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+			//	.detail("MaxVersionInMemory", maxVersionInMemory);
 
 			// Trigger updateStorage if necessary
-			ASSERT(updater.newOldestVersion <= data->version.get());
-			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - maxVersionInMemory;
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get()-1);
-			proposedOldestVersion = std::max(proposedOldestVersion, updater.newOldestVersion);
+			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+
+			while(!data->recoveryVersionSkips.empty() && proposedOldestVersion > data->recoveryVersionSkips.front().first) {
+				data->recoveryVersionSkips.pop_front();
+			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
+
 		}
 
 		validate(data);

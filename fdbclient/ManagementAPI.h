@@ -165,6 +165,8 @@ Future<int> setDDMode( Database const& cx, int const& mode );
 
 Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
 
+Future<Void> waitForPrimaryDC( Database const& cx, StringRef const& dcId );
+
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
 

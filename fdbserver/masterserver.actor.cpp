@@ -585,7 +585,22 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	return Void();
 }
 
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<std::pair<int8_t,Version>>> locality) {
+	loop {
+		int8_t loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
+		Version ver = locality->get().second;
+		if(ver == invalidVersion || loc != locality->get().first) {
+			ver = oldLogSystem->getKnownCommittedVersion(loc);
+		}
+		locality->set( std::make_pair(loc,ver) );
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality", loc).detail("Version", ver);
+		Void _ = wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange(loc) );
+	}
+}
+
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
+	state Reference<AsyncVar<std::pair<int8_t,Version>>> myLocality = Reference<AsyncVar<std::pair<int8_t,Version>>>( new AsyncVar<std::pair<int8_t,Version>>(std::make_pair(tagLocalityInvalid, invalidVersion) ) );
+	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
 	// For now, we also obtain the recovery metadata that the log system obtained during the end_epoch process for comparison
@@ -595,7 +610,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag, myLocality );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -643,8 +658,19 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(txsTag);
 	}
-	for(auto& kv : rawTags) {
-		self->allTags.push_back(decodeServerTagValue( kv.value ));
+
+	if(self->forceRecovery) {
+		int8_t usableLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
+		for(auto& kv : rawTags) {
+			Tag tag = decodeServerTagValue( kv.value );
+			if(tag.locality == usableLocality) {
+				self->allTags.push_back(tag);
+			}
+		}
+	} else {
+		for(auto& kv : rawTags) {
+			self->allTags.push_back(decodeServerTagValue( kv.value ));
+		}
 	}
 
 	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
@@ -1282,8 +1308,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	Void _ = wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
-	if( debugResult )
-		TraceEvent(SevError, "DBRecoveryDurabilityError");
+	if( debugResult ) {
+		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError");
+	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid).detail("TLogs", self->logSystem->describe()).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 

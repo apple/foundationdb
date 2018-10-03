@@ -27,6 +27,9 @@
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\KillRegion.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
