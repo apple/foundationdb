@@ -258,12 +258,12 @@ struct TLogData : NonCopyable {
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 
-	struct peekTrackerData {
+	struct PeekTrackerData {
 		std::map<int, Promise<Version>> sequence_version;
 		double lastUpdate;
 	};
 
-	std::map<UID, peekTrackerData> peekTracker;
+	std::map<UID, PeekTrackerData> peekTracker;
 	WorkerCache<TLogInterface> tlogCache;
 
 	PromiseStream<Future<Void>> sharedActors;
@@ -940,6 +940,19 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			sequence = req.sequence.get().second;
 			if(sequence > 0) {
 				auto& trackerData = self->peekTracker[peekId];
+				auto seqBegin = trackerData.sequence_version.begin();
+				while(trackerData.sequence_version.size() && seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
+					if(seqBegin->second.canBeSet()) {
+						seqBegin->second.sendError(timed_out());
+					}
+					trackerData.sequence_version.erase(seqBegin);
+					seqBegin = trackerData.sequence_version.begin();
+				}
+
+				if(trackerData.sequence_version.size() && sequence < seqBegin->first) {
+					throw timed_out();
+				}
+
 				trackerData.lastUpdate = now();
 				Version ver = wait(trackerData.sequence_version[sequence].getFuture());
 				req.begin = ver;
@@ -984,6 +997,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(req.sequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
 			trackerData.lastUpdate = now();
+			if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
+				req.reply.sendError(timed_out());
+				return Void();
+			}
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get() != rep.end) {
@@ -1046,6 +1063,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	if(req.sequence.present()) {
 		auto& trackerData = self->peekTracker[peekId];
 		trackerData.lastUpdate = now();
+		if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
+			req.reply.sendError(timed_out());
+			return Void();
+		}
 		auto& sequenceData = trackerData.sequence_version[sequence+1];
 		if(sequenceData.isSet()) {
 			if(sequenceData.getFuture().get() != reply.end) {

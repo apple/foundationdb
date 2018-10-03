@@ -290,12 +290,12 @@ namespace oldTLog {
 
 		Version prevVersion;
 
-		struct peekTrackerData {
+		struct PeekTrackerData {
 			std::map<int, Promise<Version>> sequence_version;
 			double lastUpdate;
 		};
 
-		std::map<UID, peekTrackerData> peekTracker;
+		std::map<UID, PeekTrackerData> peekTracker;
 		WorkerCache<TLogInterface> tlogCache;
 
 		Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
