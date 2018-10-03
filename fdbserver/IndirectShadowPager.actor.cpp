@@ -114,7 +114,8 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 		// TODO: this can be done synchronously with the log recovery
 		int64_t flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK;
-		if(!fileExists(pager->pageFileName)) {
+		state bool exists = fileExists(pager->pageFileName);
+		if(!exists) {
 			flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
 		}
 
@@ -123,13 +124,16 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 		TraceEvent("PagerOpenedDataFile").detail("Filename", pager->pageFileName);
 
-		wait(pager->dataFile->sync());
+		if(!exists) {
+			wait(pager->dataFile->sync());
+		}
+		TraceEvent("PagerSyncdDataFile").detail("Filename", pager->pageFileName);
 
 		state int64_t fileSize = wait(pager->dataFile->size());
-		TraceEvent("PagerGotFileSize").detail("Size", fileSize);
+		TraceEvent("PagerGotFileSize").detail("Size", fileSize).detail("Filename", pager->pageFileName);
 
 		if(fileSize > 0) {
-			TraceEvent("PagerRecoveringFromLogs");
+			TraceEvent("PagerRecoveringFromLogs").detail("Filename", pager->pageFileName);
 			Optional<Value> pagesAllocatedValue = wait(pager->pageTableLog->readValue(IndirectShadowPager::PAGES_ALLOCATED_KEY));
 			if(pagesAllocatedValue.present()) {
 				BinaryReader pr(pagesAllocatedValue.get(), Unversioned());
@@ -242,11 +246,11 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 		pager->pagerFile.startVacuuming();
 
 		debug_printf("%s: Finished recovery at v%lld\n", pager->pageFileName.c_str(), pager->latestVersion);
-		TraceEvent("PagerFinishedRecovery").detail("LatestVersion", pager->latestVersion).detail("OldestVersion", pager->oldestVersion);
+		TraceEvent("PagerFinishedRecovery").detail("LatestVersion", pager->latestVersion).detail("OldestVersion", pager->oldestVersion).detail("Filename", pager->pageFileName);
 	}
 	catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled) {
-			TraceEvent(SevError, "PagerRecoveryFailed").error(e, true);
+			TraceEvent(SevError, "PagerRecoveryFailed").error(e, true).detail("Filename", pager->pageFileName);
 		}
 		throw;
 	}
