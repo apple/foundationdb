@@ -658,8 +658,19 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(txsTag);
 	}
-	for(auto& kv : rawTags) {
-		self->allTags.push_back(decodeServerTagValue( kv.value ));
+
+	if(self->forceRecovery) {
+		int8_t usableLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
+		for(auto& kv : rawTags) {
+			Tag tag = decodeServerTagValue( kv.value );
+			if(tag.locality == usableLocality) {
+				self->allTags.push_back(tag);
+			}
+		}
+	} else {
+		for(auto& kv : rawTags) {
+			self->allTags.push_back(decodeServerTagValue( kv.value ));
+		}
 	}
 
 	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
