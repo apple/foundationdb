@@ -1400,7 +1400,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		lockResults.resize(logServers.size());
 		std::set<int8_t> lockedLocalities;
-		bool foundSpecial = prevState.logRouterTags == 0;
+		bool foundSpecial = false;
 		for( int i=0; i < logServers.size(); i++ ) {
 			if(logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
 				foundSpecial = true;
@@ -1414,7 +1414,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for( auto& old : oldLogData ) {
-			if(foundSpecial || old.logRouterTags == 0) {
+			if(foundSpecial) {
 				break;
 			}
 			for( auto& log : old.tLogs ) {
