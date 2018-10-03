@@ -2813,7 +2813,7 @@ namespace fileBackup {
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
 			if(!addingToExistingBatch && beginVersion > 0) {
-				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
+				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion + 1));
 			}
 
 			// The applyLag must be retrieved AFTER potentially updating the apply end version.
