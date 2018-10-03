@@ -109,7 +109,7 @@ T bigEndian(T val) {
 
 ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 	try {
-		TraceEvent("PagerRecovering").detail("Basename", pager->basename);
+		TraceEvent("PagerRecovering").detail("Filename", pager->pageFileName);
 		pager->pageTableLog = keyValueStoreMemory(pager->basename, UID(), 1e9, "pagerlog");
 
 		// TODO: this can be done synchronously with the log recovery
@@ -470,7 +470,8 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	debug_printf("%s: Writing logical %d v%lld physical %d\n", pageFileName.c_str(), pageID, updateVersion, physicalPageID);
 
 	if(updateExisting) {
-		freePhysicalPageID(pageVersionMap.back().second);
+		// TODO:  Physical page cannot be freed now, it must be done after the page mapping change above is committed
+		//freePhysicalPageID(pageVersionMap.back().second);
 		pageVersionMap.back().second = physicalPageID;
 	}
 	else {
