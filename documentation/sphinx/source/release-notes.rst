@@ -51,7 +51,7 @@ Fixes
 * Sometimes a minority of coordinators would fail to converge after a new leader was elected. [6.0.6] `(PR #700) <https://github.com/apple/foundationdb/pull/700>`_
 * Calling status too many times in a 5 second interval caused the cluster controller to pause for a few seconds. [6.0.7] `(PR #711) <https://github.com/apple/foundationdb/pull/711>`_
 * TLS certificate reloading could cause TLS connections to drop until process restart. [6.0.9] `(PR #717) <https://github.com/apple/foundationdb/pull/717>`_
-* Configuring from usable_regions=2 to usable_regions=1 on a cluster with a large number of processes would prevent data distribution from completing. [6.0.10] `(PR #721) <https://github.com/apple/foundationdb/pull/721>`_ `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_
+* Configuring from usable_regions=2 to usable_regions=1 on a cluster with a large number of processes would prevent data distribution from completing. [6.0.12] `(PR #721) <https://github.com/apple/foundationdb/pull/721>`_ `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_ `(PR #780) <https://github.com/apple/foundationdb/pull/780>`_
 * Watches polled the server much more frequently than intended. [6.0.10] `(PR #728) <https://github.com/apple/foundationdb/pull/728>`_
 * Backup and DR didn't allow setting certain knobs. [6.0.10] `(Issue #715) <https://github.com/apple/foundationdb/issues/715>`_
 * The failure monitor will become much less reactive after multiple successive failed recoveries. [6.0.10] `(PR #739) <https://github.com/apple/foundationdb/pull/739>`_
@@ -60,6 +60,10 @@ Fixes
 * The cluster controller did not do locality aware reads when measuring status latencies. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * Storage recruitment would spin too quickly when the storage server responded with an error. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * The transaction logs would leak memory when serving peek requests to log routers. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
+* Restoring to the exact version a snapshot ends did not apply mutations done at the final version. [6.0.12] `(PR #787) <https://github.com/apple/foundationdb/pull/787>`_
+* The transaction logs were spilling data unnecessarily. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
+* Excluding a process that was both the cluster controller and something else will caused two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
+* Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
 
 Status
 ------
