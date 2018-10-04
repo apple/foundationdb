@@ -13,7 +13,7 @@ Features
 Fixes
 -----
 
-* Blob backups didn't retry 429 errors. 429 errors do now count against the retry limit.
+* Blob backups didn't retry 429 errors. 429 errors do not count against the retry limit.
 * Status was not correctly populating all configuration fields.
 
 5.0.7
