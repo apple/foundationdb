@@ -2562,7 +2562,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			ver = updater.currentVersion;
 		}
 
-		if(ver != invalidVersion) {
+		if(ver != invalidVersion && ver > data->version.get()) {
 			debugKeyRange("SSUpdate", ver, allKeys);
 
 			data->mutableData().createNewVersion(ver);

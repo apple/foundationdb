@@ -699,7 +699,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) {
 		Version end = getEnd();
 		TraceEvent("TLogPeekSpecial", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
-		if(localEnd == invalidVersion) {
+		if(localEnd == invalidVersion || localEnd <= begin) {
 			return peekAll(dbgid, begin, end, tag, true, false);
 		}
 
