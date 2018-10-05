@@ -96,8 +96,15 @@ int IndirectShadowPage::size() const {
 const int IndirectShadowPage::PAGE_BYTES = 4096;
 const int IndirectShadowPage::PAGE_OVERHEAD_BYTES = sizeof(SumType);
 
+IndirectShadowPagerSnapshot::IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version)
+	: pager(pager), version(version), pagerError(pager->getError())
+{
+}
+
 Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(LogicalPageID pageID) {
-	return pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version);
+	if(pagerError.isError())
+		throw pagerError.getError();
+	return waitOrError(pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version), pagerError);
 }
 
 template <class T>
@@ -557,8 +564,9 @@ Future<Void> IndirectShadowPager::onClosed() {
 }
 
 ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
-	pager->recovery = Never(); // TODO: this is a hacky way to prevent users from performing operations after calling shutdown. Implement a better mechanism 
 
+	if(pager->errorPromise.canBeSet())
+		pager->errorPromise.sendError(shutdown_in_progress());
 	wait(pager->writeActors.signal());
 	wait(pager->operations.signal());
 	wait(pager->committing);

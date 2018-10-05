@@ -1937,7 +1937,7 @@ int randomSize(int max) {
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	int kLen = randomSize(1 + keySize);
-	int vLen = randomSize(valueSize);
+	int vLen = valueSize > 0 ? randomSize(valueSize) : 0;
 	KeyValue kv;
 	kv.key = makeString(kLen, kv.arena());
 	kv.value = makeString(vLen, kv.arena());
@@ -2143,7 +2143,24 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 	return Void();
 }
 
-static void nullWaitHandler( const boost::system::error_code& ) {}
+// Does a random range read, doesn't trap/report errors
+ACTOR Future<Void> randomReader(VersionedBTree *btree) {
+	state Reference<IStoreCursor> cur;
+	loop {
+		wait(yield());
+		if(!cur || g_random->random01() > .1) {
+			Version v = g_random->randomInt(1, btree->getLastCommittedVersion() + 1);
+			cur = btree->readAtVersion(v);
+		}
+
+		wait(cur->findFirstEqualOrGreater(randomKV(10, 0).key, true, 0));
+		state int c = g_random->randomInt(0, 100);
+		while(cur->isValid() && c-- > 0) {
+			wait(success(cur->next(true)));
+			wait(yield());
+		}
+	}
+}
 
 TEST_CASE("/redwood/correctness") {
 	state bool useDisk = true;  // MemoryPager is not being maintained currently.
@@ -2188,6 +2205,7 @@ TEST_CASE("/redwood/correctness") {
 
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
+	state Future<Void> randomTask = randomReader(btree);
 
 	state Future<Void> commit = Void();
 
@@ -2297,7 +2315,7 @@ TEST_CASE("/redwood/correctness") {
 				pager->close();
 				wait(closedFuture);
 
-				debug_printf_always("Opening btree\n");
+				debug_printf_always("Reopening btree\n");
 				pager = new IndirectShadowPager(pagerFile);
 				btree = new VersionedBTree(pager, pagerFile, pageSize);
 				wait(btree->init());
@@ -2309,6 +2327,7 @@ TEST_CASE("/redwood/correctness") {
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
+				randomTask = randomReader(btree);
 			}
 
 			// Check for errors

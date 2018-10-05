@@ -68,7 +68,7 @@ private:
 
 class IndirectShadowPagerSnapshot : public IPagerSnapshot, ReferenceCounted<IndirectShadowPagerSnapshot> {
 public:
-	IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version) : pager(pager), version(version) {}
+	IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version);
 
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
 
@@ -90,6 +90,7 @@ public:
 private:
 	IndirectShadowPager *pager;
 	Version version;
+	Future<Void> pagerError;
 };
 
 class PagerFile {
