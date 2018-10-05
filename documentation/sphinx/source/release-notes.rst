@@ -26,7 +26,6 @@ Performance
 * Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 * Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
 * Significantly improved the CPU efficiency of generating status on the cluster controller. [6.0.11] `(PR #758) <https://github.com/apple/foundationdb/pull/758>`_
-* The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 
 Fixes
 -----
@@ -68,6 +67,7 @@ Fixes only impacting 6.0.0+
 * Fixed a variety of problems with ``force_recovery_with_data_loss``. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * The transaction logs would leak memory when serving peek requests to log routers. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
+* The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 
 Status
 ------
