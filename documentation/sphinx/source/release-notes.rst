@@ -26,6 +26,7 @@ Performance
 * Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 * Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
 * Significantly improved the CPU efficiency of generating status on the cluster controller. [6.0.11] `(PR #758) <https://github.com/apple/foundationdb/pull/758>`_
+* Reduced CPU cost of truncating files that are being cached. [6.0.12] `(PR #816) <https://github.com/apple/foundationdb/pull/816>`_
 
 Fixes
 -----
