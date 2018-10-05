@@ -493,7 +493,7 @@ struct KeyValueStoreType {
 		switch( type ) {
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
-			case SSD_REDWOOD_V1: return "ssd-redwood-1";
+			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
 			default: return "unknown";
 		}

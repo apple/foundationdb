@@ -710,12 +710,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
-	set_config("ssd-redwood");
-	/*if (g_random->random01() < 0.5) {
+	if (g_random->random01() < 0.5) {
 		set_config("ssd");
 	} else {
 		set_config("memory");
-	}*/
+	}
 
 	int replication_type = std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3));
 	switch (replication_type) {

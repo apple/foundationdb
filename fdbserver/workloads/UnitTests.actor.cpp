@@ -65,7 +65,8 @@ struct UnitTestWorkload : TestWorkload {
 		state int allTestCount = 0;
 
 		for (auto t = g_unittests.tests; t != NULL; t = t->next) {
-			if (StringRef(t->name).startsWith(self->testPattern)) {
+			StringRef name(t->name);
+			if (!name.startsWith(LiteralStringRef("#")) && name.startsWith(self->testPattern)) {
 				++self->testsAvailable;
 				tests.push_back(t);
 			}

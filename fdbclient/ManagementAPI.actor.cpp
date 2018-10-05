@@ -86,7 +86,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		storeType= KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood" || mode == "ssd-redwood-1") {
+	} else if (mode == "ssd-redwood-experimental") {
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "memory") {
 		storeType= KeyValueStoreType::MEMORY;

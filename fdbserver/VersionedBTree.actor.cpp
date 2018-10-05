@@ -2162,7 +2162,7 @@ ACTOR Future<Void> randomReader(VersionedBTree *btree) {
 	}
 }
 
-TEST_CASE("/redwood/correctness") {
+TEST_CASE("#/redwood/correctness") {
 	state bool useDisk = true;  // MemoryPager is not being maintained currently.
 
 	state std::string pagerFile = "unittest_pageFile";
@@ -2353,7 +2353,7 @@ TEST_CASE("/redwood/correctness") {
 	return Void();
 }
 
-TEST_CASE("/redwood/performance/set") {
+TEST_CASE("#/redwood/performance/set") {
 	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
 	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
 	wait(btree->init());

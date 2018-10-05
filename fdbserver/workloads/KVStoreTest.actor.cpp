@@ -221,7 +221,7 @@ struct KVStoreTestWorkload : TestWorkload {
 		doCount = getOption( options, LiteralStringRef("count"), false );
 		filename = getOption( options, LiteralStringRef("filename"), Value() ).toString();
 		saturation = getOption( options, LiteralStringRef("saturation"), false );
-		storeType = getOption( options, LiteralStringRef("storeType"), LiteralStringRef("ssd-redwood-1") ).toString();
+		storeType = getOption( options, LiteralStringRef("storeType"), LiteralStringRef("ssd") ).toString();
 	}
 	virtual std::string description() { return "KVStoreTest"; }
 	virtual Future<Void> setup( Database const& cx ) { return Void(); }
@@ -379,7 +379,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_BTREE_V1);
 	else if (workload->storeType == "ssd-2")
 		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
-	else if (workload->storeType == "ssd-redwood-1")
+	else if (workload->storeType == "ssd-redwood-experimental")
 		test.store = keyValueStoreRedwoodV1( fn, id );
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory( fn, id, 500e6 );
