@@ -284,7 +284,7 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 }
 
 ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
-	if(g_network->isSimulated()) {
+	if(g_network->isSimulated() && g_simulator.usableRegions > 1) {
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
