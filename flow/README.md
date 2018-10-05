@@ -214,7 +214,7 @@ ACTOR Future<int> asyncAddition(Future<int> f, int offset ) {
 
 ACTOR Future<int> asyncDivision(Future<int> f, int divisor ) {
     int value = wait( f );
-    return value / offset;
+    return value / divisor;
 }
 
 ACTOR Future<int> asyncCalculation( Future<int> f ) {
@@ -257,7 +257,7 @@ int value = wait( finalCount.getFuture() );
 ```
 
 There is even a utility function to take the place of the last three lines: [TODO: And is necessary
-2when sending requests over a real network to ensure delivery]
+when sending requests over a real network to ensure delivery]
 
 ```c++
 CountingServerInterface csi = ...; // comes from somewhere
