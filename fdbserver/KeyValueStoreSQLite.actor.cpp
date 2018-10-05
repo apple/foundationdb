@@ -269,7 +269,7 @@ struct SQLiteDB : NonCopyable {
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
 		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
 		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
-			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("Filename", filename).detail("ErrorTotal", errors);
+			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheckResults").detail("Filename", filename).detail("ErrorTotal", errors);
 			if(e != nullptr) {
 				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
 				char *lineStart = e;
@@ -1973,9 +1973,10 @@ void createTemplateDatabase() {
 	db2.createFromScratch();
 }
 
-ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
-	if(!fileExists(filename))
+void GenerateIOLogChecksumFile(std::string filename) {
+	if(!fileExists(filename)) {
 		throw file_not_found();
+	}
 
 	FILE *f = fopen(filename.c_str(), "r");
 	FILE *fout = fopen((filename + ".checksums").c_str(), "w");
@@ -1985,8 +1986,6 @@ ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
 		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
 	fclose(f);
 	fclose(fout);
-
-	return Void();
 }
 
 // If integrity is true, a full btree integrity check is done.

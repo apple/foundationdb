@@ -100,7 +100,7 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 	UNREACHABLE(); // FIXME: is this right?
 }
 
-Future<Void> GenerateIOLogChecksumFile(std::string const & filename);
+void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const & filename, bool const &integrity);
 
 #endif

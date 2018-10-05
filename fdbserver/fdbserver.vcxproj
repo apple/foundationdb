@@ -66,6 +66,7 @@
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
+    <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp" />
     <ClCompile Include="sqlite\btree.c">
       <ExcludedFromBuild>true</ExcludedFromBuild>
