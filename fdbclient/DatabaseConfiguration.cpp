@@ -60,7 +60,7 @@ void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 			RegionInfo info;
 			json_spirit::mArray datacenters;
 			dc.get("datacenters", datacenters);
-			bool nonSatelliteDatacenters = 0;
+			int nonSatelliteDatacenters = 0;
 			for (StatusObjectReader s : datacenters) {
 				std::string idStr;
 				if (s.has("satellite") && s.last().get_int() == 1) {
