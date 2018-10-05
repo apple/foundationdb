@@ -60,9 +60,9 @@ Fixes
 * The cluster controller did not do locality aware reads when measuring status latencies. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * Storage recruitment would spin too quickly when the storage server responded with an error. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * The transaction logs would leak memory when serving peek requests to log routers. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* Restoring to the exact version a snapshot ends did not apply mutations done at the final version. [6.0.12] `(PR #787) <https://github.com/apple/foundationdb/pull/787>`_
-* The transaction logs were spilling data unnecessarily. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
-* Excluding a process that was both the cluster controller and something else will caused two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
+* Restoring a backup to the exact version a snapshot ends did not apply mutations done at the final version. [6.0.12] `(PR #787) <https://github.com/apple/foundationdb/pull/787>`_
+* The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
+* Excluding a process that was both the cluster controller and something else would cause two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
 
 Status
