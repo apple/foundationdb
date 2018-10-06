@@ -438,7 +438,7 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 }
 
 /*
-TEST_CASE("fdbserver/memorypager/simple") {
+TEST_CASE("/fdbserver/memorypager/simple") {
 	state IPager *pager = new MemoryPager();
 
 	wait(simplePagerTest(pager));

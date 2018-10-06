@@ -65,8 +65,7 @@ struct UnitTestWorkload : TestWorkload {
 		state int allTestCount = 0;
 
 		for (auto t = g_unittests.tests; t != NULL; t = t->next) {
-			StringRef name(t->name);
-			if (!name.startsWith(LiteralStringRef("#")) && name.startsWith(self->testPattern)) {
+			if (StringRef(t->name).startsWith(self->testPattern)) {
 				++self->testsAvailable;
 				tests.push_back(t);
 			}
@@ -114,7 +113,7 @@ struct UnitTestWorkload : TestWorkload {
 
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
-TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
+TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));
 	return Void();
 }

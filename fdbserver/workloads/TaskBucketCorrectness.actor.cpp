@@ -297,7 +297,7 @@ void print_subspace_key(const Subspace& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
 }
 
-TEST_CASE("fdbclient/TaskBucket/Subspace") {
+TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	Subspace subspace_test;
 	print_subspace_key(subspace_test, 0);
 	ASSERT(subspace_test.key().toString() == "");

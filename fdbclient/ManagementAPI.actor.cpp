@@ -1553,7 +1553,7 @@ bool schemaMatch( StatusObject const schema, StatusObject const result, std::str
 	}
 }
 
-TEST_CASE("ManagementAPI/AutoQuorumChange/checkLocality") {
+TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	wait(Future<Void>(Void()));
 
 	std::vector<ProcessData> workers;

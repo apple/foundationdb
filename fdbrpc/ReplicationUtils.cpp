@@ -832,7 +832,7 @@ void filterLocalityDataForPolicy(IRepPolicyRef policy, std::vector<LocalityData>
 	}
 }
 
-TEST_CASE("fdbrpc/Replication/test") {
+TEST_CASE("/fdbrpc/Replication/test") {
 	printf("Running replication test\n");
 
 	platform::setEnvironmentVar("REPLICATION_STOPONERROR", "1", 0);

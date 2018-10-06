@@ -1448,7 +1448,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	return Void();
 }
 
-TEST_CASE("backup/containers/localdir") {
+TEST_CASE("/backup/containers/localdir") {
 	if(g_network->isSimulated())
 		wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
 	else
@@ -1456,7 +1456,7 @@ TEST_CASE("backup/containers/localdir") {
 	return Void();
 };
 
-TEST_CASE("backup/containers/url") {
+TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
@@ -1465,7 +1465,7 @@ TEST_CASE("backup/containers/url") {
 	return Void();
 };
 
-TEST_CASE("backup/containers_list") {
+TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
 		state const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);

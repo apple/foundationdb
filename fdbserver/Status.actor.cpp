@@ -1977,7 +1977,7 @@ bool checkJson(const JsonBuilder &j, const char *expected) {
 	return js == expected;
 }
 
-TEST_CASE("status/json/builder") {
+TEST_CASE("/status/json/builder") {
 	JsonBuilder json;
 	ASSERT(checkJson(json, "null"));
 
@@ -2133,7 +2133,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &l
 	return r;
 }
 
-TEST_CASE("status/json/builderPerf") {
+TEST_CASE("/status/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");
@@ -2186,7 +2186,7 @@ TEST_CASE("status/json/builderPerf") {
 	return Void();
 }
 
-TEST_CASE("status/json/merging") {
+TEST_CASE("/status/json/merging") {
 	StatusObject objA, objB, objC;
 	JSONDoc a(objA), b(objB), c(objC);
 

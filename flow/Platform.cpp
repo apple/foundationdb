@@ -2672,7 +2672,7 @@ wchar_basic_istream& __attribute__((weak)) wchar_basic_istream::ignore(streamsiz
 
 // UnitTest for getMemoryInfo
 #ifdef __linux__
-TEST_CASE("flow/Platform/getMemoryInfo") {
+TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	printf("UnitTest flow/Platform/getMemoryInfo 1\n");
 	std::string memString =
