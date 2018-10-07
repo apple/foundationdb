@@ -355,8 +355,8 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		TraceEvent("StorageServerRequestedReboot", id);
 
-		// for memory servers, explicitly reboot the process if we are asked to rollback.
-		if (SERVER_KNOBS -> REUSE_MEMORY_STORE_ON_ROLLBACK > 0 && storeType == KeyValueStoreType::MEMORY) {
+		// for memory servers, we won't reload from disk if REUSE_MEMORY_STORE_ON_ROLLBACK is active.
+		if (SERVER_KNOBS -> REUSE_MEMORY_STORE_ON_ROLLBACK && storeType == KeyValueStoreType::MEMORY) {
 		    store->reset();
             StorageServerInterface ssi;
             ssi.uniqueID = id;
