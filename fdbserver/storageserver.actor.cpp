@@ -3146,10 +3146,13 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	self.shards.insert( allKeys, Reference<ShardInfo>() );
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
-	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed)
+	if (persistentData->getType() == KeyValueStoreType::MEMORY && SERVER_KNOBS->REUSE_MEMORY_STORE_ON_ROLLBACK) {
+		// do nothing.
+	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
-	else
+	} else {
 		persistentData->close();
+	}
 
 	if ( e.code() == error_code_worker_removed ||
 		 e.code() == error_code_recruitment_failed ||
