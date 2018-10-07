@@ -18,7 +18,11 @@ def _increment_counter(tr):
 
 @app.route("/counter", methods=['GET'])
 def get_counter():
-    return str(fdb.tuple.unpack(db[COUNTER_KEY])[0])
+    counter_value = db[COUNTER_KEY]
+    if counter_value == None:
+        return '0'
+    else:
+        return str(fdb.tuple.unpack(counter_value)[0])
 
 @app.route("/counter/increment", methods=['POST'])
 def increment_counter():

@@ -21,8 +21,10 @@ FROM ubuntu:18.04
 
 # Install dependencies
 
-RUN apt-get update; apt-get install -y wget=1.19.4-1ubuntu2 \
-	dnsutils=1:9.11.3+dfsg-1ubuntu1.1
+RUN apt-get update && \
+	apt-get install -y wget=1.19.4-1ubuntu2 \
+	dnsutils=1:9.11.3+dfsg-1ubuntu1.2 && \
+	rm -r /var/lib/apt/lists/*  
 
 # Install FoundationDB Binaries
 
@@ -66,3 +68,5 @@ ENV FDB_PORT 4500
 ENV FDB_CLUSTER_FILE /var/fdb/fdb.cluster
 ENV FDB_NETWORKING_MODE container
 ENV FDB_COORDINATOR ""
+ENV FDB_CLUSTER_FILE_CONTENTS ""
+ENV FDB_PROCESS_CLASS unset
