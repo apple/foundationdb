@@ -364,7 +364,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
             ssi.initEndpoints();
 
             prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
-			prevStorageServer = handleIOErrors(prevStorageServer, store, id, kv->onClosed(), true);
+			prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed(), true);
         } else {
             //if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
             // We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
