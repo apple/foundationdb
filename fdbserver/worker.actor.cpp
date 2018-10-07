@@ -110,7 +110,7 @@ ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 	}
 }
 
-ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void(), boolean ignoreReboots = false) {
+ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void(), bool ignoreReboots = false) {
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
 			if (ignoreReboots && e.isError() && e.getError().code() == error_code_please_reboot) {
@@ -364,8 +364,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
             ssi.initEndpoints();
 
             prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
-			// need to setup handlers for IO errors
-			prevStorageServer = handleIOErrors(prevStorageServer, store, id);
+			prevStorageServer = handleIOErrors(prevStorageServer, store, id, kv->onClosed(), true);
         } else {
             //if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
             // We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
@@ -375,7 +374,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
             ssi.locality = locality;
             ssi.initEndpoints();
             auto *kv = openKVStore(storeType, filename, ssi.uniqueID, memoryLimit);
-            Future < Void > kvClosed = kv->onClosed();
+            Future<Void> kvClosed = kv->onClosed();
             filesClosed->add(kvClosed);
             prevStorageServer = storageServer(kv, ssi, db, folder, Promise<Void>());
             prevStorageServer = handleIOErrors(prevStorageServer, kv, id, kvClosed);
