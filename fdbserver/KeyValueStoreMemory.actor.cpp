@@ -191,6 +191,10 @@ public:
 		return c;
 	}
 
+	virtual void reset() {
+		log_op( OpRollback, StringRef(), StringRef() );
+	}
+
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) {
 		if(recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadValue(this, key);

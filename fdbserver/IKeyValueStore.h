@@ -56,6 +56,8 @@ public:
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	virtual void reset() {}
 	/*
 	Concurrency contract
 		Causal consistency:
