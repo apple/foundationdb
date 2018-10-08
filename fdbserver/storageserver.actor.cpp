@@ -2341,11 +2341,8 @@ private:
 					.detail("AtVersion", currentVersion)
 					.detail("StorageVersion", data->storageVersion());
 				ASSERT( rollbackVersion >= data->storageVersion() );
-			}
-			// Don't let oldestVersion (and thus storageVersion) go into the rolled back range of versions
-			// Since we currently don't read from uncommitted log systems, seeing the lastEpochEnd implies that currentVersion is fully committed, so we can safely make it durable
-			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion )
 				rollback( data, rollbackVersion, currentVersion );
+			}
 
 			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
@@ -2572,17 +2569,17 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
-			Version maxVersionInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 			for(int i = 0; i < data->recoveryVersionSkips.size(); i++) {
-				maxVersionInMemory += data->recoveryVersionSkips[i].second;
+				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxVersionInMemory", maxVersionInMemory);
+			//	.detail("MaxVersionInMemory", maxVersionsInMemory);
 
 			// Trigger updateStorage if necessary
-			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - maxVersionInMemory;
+			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - maxVersionsInMemory;
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get()-1);
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
