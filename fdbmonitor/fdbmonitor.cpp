@@ -1376,7 +1376,7 @@ int main(int argc, char** argv) {
 					else {
 						/* Otherwise kill each process individually but don't wait on them yet */
 						for(auto i : id_pid) {
-							kill_process(i->first, false);
+							kill_process(i.first, false);
 						}
 					}
 
