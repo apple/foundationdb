@@ -2,8 +2,16 @@
 Release Notes
 #############
 
+6.0.13
+======
+
+Fixes
+-----
+
+* Python bindings didn't work with Python 3.7 because of new `async` keyword. `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
+
 6.0.12
-=====
+======
 
 Features
 --------
