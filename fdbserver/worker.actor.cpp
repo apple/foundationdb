@@ -110,27 +110,35 @@ ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 	}
 }
 
-ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void(), bool ignoreReboots = false) {
-	choose {
-		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
-			if (ignoreReboots && e.isError() && e.getError().code() == error_code_please_reboot) {
-				// no need to wait.
-			} else {
-				Void _ = wait(onClosed);
-			}
-			if (e.isError()) throw e.getError(); else return e.get();
-		}
-		when (ErrorOr<Void> e = wait( actor.isReady() ? Never() : errorOr( store->getError() ) )) {
-			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
-			actor.cancel();
-			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported SevError.
-			if (e.getError().code() == error_code_file_not_found) {
-				TEST(true); // Worker terminated with file_not_found error
-				return Void();
-			}
-			throw e.getError();
-		}
-	}
+ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable *store, UID id,
+                                  Future<Void> onClosed = Void(),
+                                  bool ignoreReboots = false) {
+  choose {
+    when(state ErrorOr<Void> e = wait(errorOr(actor))) {
+      if (ignoreReboots && e.isError() &&
+          e.getError().code() == error_code_please_reboot) {
+        // no need to wait.
+      } else {
+        Void _ = wait(onClosed);
+      }
+      if (e.isError())
+        throw e.getError();
+      else
+        return e.get();
+    }
+    when(ErrorOr<Void> e =
+             wait(actor.isReady() ? Never() : errorOr(store->getError()))) {
+      TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
+      actor.cancel();
+      // file_not_found can occur due to attempting to open a partially deleted
+      // DiskQueue, which should not be reported SevError.
+      if (e.getError().code() == error_code_file_not_found) {
+        TEST(true); // Worker terminated with file_not_found error
+        return Void();
+      }
+      throw e.getError();
+    }
+  }
 }
 
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
@@ -347,39 +355,51 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	}
 }
 
-ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit, IKeyValueStore* store ) {
-	loop {
-		ErrorOr<Void> e = wait( errorOr( prevStorageServer) );
-		if (!e.isError()) return Void();
-		else if (e.getError().code() != error_code_please_reboot) throw e.getError();
+ACTOR Future<Void> storageServerRollbackRebooter(
+    Future<Void> prevStorageServer, KeyValueStoreType storeType,
+    std::string filename, UID id, LocalityData locality,
+    Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
+    ActorCollection *filesClosed, int64_t memoryLimit, IKeyValueStore *store) {
+  loop {
+    ErrorOr<Void> e = wait(errorOr(prevStorageServer));
+    if (!e.isError())
+      return Void();
+    else if (e.getError().code() != error_code_please_reboot)
+      throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", id);
+    TraceEvent("StorageServerRequestedReboot", id);
 
-		// for memory servers, we won't reload from disk if REUSE_MEMORY_STORE_ON_ROLLBACK is active.
-		if (SERVER_KNOBS -> REUSE_MEMORY_STORE_ON_ROLLBACK && storeType == KeyValueStoreType::MEMORY) {
-		    store->reset();
-            StorageServerInterface ssi;
-            ssi.uniqueID = id;
-            ssi.locality = locality;
-            ssi.initEndpoints();
+    // for memory servers, we won't reload from disk if
+    // REUSE_MEMORY_STORE_ON_ROLLBACK is active.
+    if (SERVER_KNOBS->REUSE_MEMORY_STORE_ON_ROLLBACK &&
+        storeType == KeyValueStoreType::MEMORY) {
+      store->reset();
+      StorageServerInterface ssi;
+      ssi.uniqueID = id;
+      ssi.locality = locality;
+      ssi.initEndpoints();
 
-            prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
-			prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed(), true);
-        } else {
-            //if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
-            // We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
-            // the old one so the failure detector will know it is gone.
-            StorageServerInterface ssi;
-            ssi.uniqueID = id;
-            ssi.locality = locality;
-            ssi.initEndpoints();
-            auto *kv = openKVStore(storeType, filename, ssi.uniqueID, memoryLimit);
-            Future<Void> kvClosed = kv->onClosed();
-            filesClosed->add(kvClosed);
-            prevStorageServer = storageServer(kv, ssi, db, folder, Promise<Void>());
-            prevStorageServer = handleIOErrors(prevStorageServer, kv, id, kvClosed);
-        }
-	}
+      prevStorageServer =
+          storageServer(store, ssi, db, folder, Promise<Void>());
+      prevStorageServer =
+          handleIOErrors(prevStorageServer, store, id, store->onClosed(), true);
+    } else {
+      // if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as
+      // zombie()
+      // We need a new interface, since the new storageServer will do
+      // replaceInterface().  And we need to destroy the old one so the failure
+      // detector will know it is gone.
+      StorageServerInterface ssi;
+      ssi.uniqueID = id;
+      ssi.locality = locality;
+      ssi.initEndpoints();
+      auto *kv = openKVStore(storeType, filename, ssi.uniqueID, memoryLimit);
+      Future<Void> kvClosed = kv->onClosed();
+      filesClosed->add(kvClosed);
+      prevStorageServer = storageServer(kv, ssi, db, folder, Promise<Void>());
+      prevStorageServer = handleIOErrors(prevStorageServer, kv, id, kvClosed);
+    }
+  }
 }
 
 // FIXME:  This will not work correctly in simulation as all workers would share the same roles map
@@ -624,9 +644,17 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				Promise<Void> recovery;
 				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
 				recoveries.push_back(recovery.getFuture());
-				f = handleIOErrors( f, kv, s.storeID, kvClosed, kv->getType() == KeyValueStoreType::MEMORY && SERVER_KNOBS->REUSE_MEMORY_STORE_ON_ROLLBACK);
-				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
-				errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), f ) );
+                                f = handleIOErrors(
+                                    f, kv, s.storeID, kvClosed,
+                                    kv->getType() ==
+                                            KeyValueStoreType::MEMORY &&
+                                        SERVER_KNOBS
+                                            ->REUSE_MEMORY_STORE_ON_ROLLBACK);
+                                f = storageServerRollbackRebooter(
+                                    f, s.storeType, s.filename, recruited.id(),
+                                    recruited.locality, dbInfo, folder,
+                                    &filesClosed, memoryLimit, kv);
+                                errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
@@ -776,10 +804,19 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					ReplyPromise<StorageServerInterface> storageReady = req.reply;
 					storageCache.set( req.reqId, storageReady.getFuture() );
 					Future<Void> s = storageServer( data, recruited, req.seedTag, storageReady, dbInfo, folder );
-					s = handleIOErrors(s, data, recruited.id(), kvClosed, data->getType() == KeyValueStoreType::MEMORY && SERVER_KNOBS->REUSE_MEMORY_STORE_ON_ROLLBACK);
-					s = storageCache.removeOnReady( req.reqId, s );
-					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, data );
-					errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), s ) );
+                                        s = handleIOErrors(
+                                            s, data, recruited.id(), kvClosed,
+                                            data->getType() ==
+                                                    KeyValueStoreType::MEMORY &&
+                                                SERVER_KNOBS
+                                                    ->REUSE_MEMORY_STORE_ON_ROLLBACK);
+                                        s = storageCache.removeOnReady( req.reqId, s );
+                                        s = storageServerRollbackRebooter(
+                                            s, req.storeType, filename,
+                                            recruited.id(), recruited.locality,
+                                            dbInfo, folder, &filesClosed,
+                                            memoryLimit, data);
+                                        errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), s ) );
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
