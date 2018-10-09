@@ -357,28 +357,28 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		// for memory servers, we won't reload from disk if REUSE_MEMORY_STORE_ON_ROLLBACK is active.
 		if (SERVER_KNOBS -> REUSE_MEMORY_STORE_ON_ROLLBACK && storeType == KeyValueStoreType::MEMORY) {
-		    store->reset();
-            StorageServerInterface ssi;
-            ssi.uniqueID = id;
-            ssi.locality = locality;
-            ssi.initEndpoints();
+			store->reset();
+			StorageServerInterface ssi;
+			ssi.uniqueID = id;
+			ssi.locality = locality;
+			ssi.initEndpoints();
 
-            prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
+			prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
 			prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed(), true);
-        } else {
-            //if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
-            // We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
-            // the old one so the failure detector will know it is gone.
-            StorageServerInterface ssi;
-            ssi.uniqueID = id;
-            ssi.locality = locality;
-            ssi.initEndpoints();
-            auto *kv = openKVStore(storeType, filename, ssi.uniqueID, memoryLimit);
-            Future<Void> kvClosed = kv->onClosed();
-            filesClosed->add(kvClosed);
-            prevStorageServer = storageServer(kv, ssi, db, folder, Promise<Void>());
-            prevStorageServer = handleIOErrors(prevStorageServer, kv, id, kvClosed);
-        }
+		} else {
+			//if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
+			// We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
+			// the old one so the failure detector will know it is gone.
+			StorageServerInterface ssi;
+			ssi.uniqueID = id;
+			ssi.locality = locality;
+			ssi.initEndpoints();
+			auto *kv = openKVStore(storeType, filename, ssi.uniqueID, memoryLimit);
+			Future<Void> kvClosed = kv->onClosed();
+			filesClosed->add(kvClosed);
+			prevStorageServer = storageServer(kv, ssi, db, folder, Promise<Void>());
+			prevStorageServer = handleIOErrors(prevStorageServer, kv, id, kvClosed);
+		}
 	}
 }
 
