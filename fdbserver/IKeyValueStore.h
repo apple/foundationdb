@@ -57,8 +57,8 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual void reset() {}
-	/*
+        virtual void reset() {}
+        /*
 	Concurrency contract
 		Causal consistency:
 			A read which begins after a commit ends sees the effects of the commit.
