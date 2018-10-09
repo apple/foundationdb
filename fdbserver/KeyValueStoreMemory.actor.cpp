@@ -193,6 +193,7 @@ public:
 
 	virtual void reset() {
 		log_op( OpRollback, StringRef(), StringRef() );
+		semiCommit();
 	}
 
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) {
