@@ -26,6 +26,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/RestoreInterface.h"
 #include "CoordinationInterface.h"
 #include "WorkerInterface.h"
 #include "ClusterRecruitmentInterface.h"
@@ -568,7 +569,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	if( devhelp ) {
 		printf("  -r ROLE, --role ROLE\n"
 			   "                 Server role (valid options are fdbd, test, multitest,\n");
-		printf("                 simulation, networktestclient, networktestserver,\n");
+		printf("                 simulation, networktestclient, networktestserver, restore\n");
 		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
 #ifdef _WIN32
 		printf("  -n, --newconsole\n"
@@ -769,6 +770,7 @@ int main(int argc, char* argv[]) {
 			CreateTemplateDatabase,
 			NetworkTestClient,
 			NetworkTestServer,
+			Restore,
 			KVFileIntegrityCheck,
 			KVFileGenerateIOLogChecksums,
 			ConsistencyCheck
@@ -902,6 +904,7 @@ int main(int argc, char* argv[]) {
 					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
 					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
 					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
+					else if (!strcmp(sRole, "restore")) role = Restore;
 					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
 					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
 					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
@@ -1421,7 +1424,7 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer) {
+			if (role == FDBD || role == NetworkTestServer || role == Restore) {
 				try {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
 					if (listenError.isReady()) listenError.get();
@@ -1571,6 +1574,9 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
+			g_network->run();
+		} else if (role == Restore) {
+			f = stopAfter( restoreAgent(connectionFile, localities) );
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
 			f = stopAfter( KVFileCheck(kvFile, true) );
