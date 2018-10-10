@@ -69,7 +69,7 @@ Fixes only impacting 6.0.0+
 * The transaction logs would leak memory when serving peek requests to log routers. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
-* A bug in status collection led to various workload metrics being missing and the cluster reporting unhealthy. [6.0.13] `(PR #X) <>`_
+* A bug in status collection led to various workload metrics being missing and the cluster reporting unhealthy. [6.0.13] `(PR #834) <https://github.com/apple/foundationdb/pull/834>`_
 
 Status
 ------
