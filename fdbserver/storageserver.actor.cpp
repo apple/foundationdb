@@ -333,6 +333,7 @@ public:
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
+	Future<Void> durable = Void();
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
@@ -2475,10 +2476,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		return Void();  // update will get called again ASAP
-	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot)
+	} catch (Error& err) {
+		state Error e = err;
+		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
-		throw;
+		} else if (e.code() == error_code_please_reboot) {
+			Void _ = wait( data->durable );
+		}
+		throw e;
 	}
 }
 
@@ -2507,13 +2512,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->storage.makeVersionDurable( newOldestVersion );
 
 		debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
-		state Future<Void> durable = data->storage.commit();
+		data->durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0)
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL);
 
-		Void _ = wait( durable );
+		Void _ = wait( data->durable );
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
 
