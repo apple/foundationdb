@@ -1524,15 +1524,20 @@ def init(event_model=None):
                             pass
 
                         class ThreadEvent(object):
+                            has_async_ = hasattr(gevent.get_hub().loop, 'async_')
                             def __init__(self):
-                                self.async = gevent.get_hub().loop.async()
-                                self.async.start(nullf)
+                                if ThreadEvent.has_async_:
+                                    self.gevent_async = gevent.get_hub().loop.async_()
+                                else:
+                                    self.gevent_async = getattr(gevent.get_hub().loop, 'async')()
+
+                                self.gevent_async.start(nullf)
 
                             def set(self):
-                                self.async.send()
+                                self.gevent_async.send()
 
                             def wait(self):
-                                gevent.get_hub().wait(self.async)
+                                gevent.get_hub().wait(self.gevent_async)
                     else:
                         # gevent 0.x doesn't have async, so use a pipe.  This doesn't work on Windows.
                         if platform.system() == 'Windows':
