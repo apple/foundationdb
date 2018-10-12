@@ -180,7 +180,7 @@ public:
 
 			if(bytesWritten > 0 || committedWriteBytes > notifiedCommittedWriteBytes.get()) {
 				committedWriteBytes += bytesWritten + overheadWriteBytes + OP_DISK_OVERHEAD; //OP_DISK_OVERHEAD is for the following log_op(OpCommit)
-				notifiedCommittedWriteBytes.set(committedWriteBytes);
+				notifiedCommittedWriteBytes.set(committedWriteBytes); //This set will cause snapshot items to be written, so it must happen before the OpCommit
 				log_op(OpCommit, StringRef(), StringRef());
 				overheadWriteBytes = log->getCommitOverhead();
 			}
