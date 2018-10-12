@@ -414,7 +414,7 @@ struct RolesInfo {
 			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
 			obj.setKeyRawNumber("query_queue_max", metrics.getValue("QueryQueueMax"));
-			obj["total_queries"] = StatusCounter(metrics.getValue("AllQueries")).getStatus();
+			obj["total_queries"] = StatusCounter(metrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(metrics.getValue("RowsQueried")).getStatus();
@@ -1398,7 +1398,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter readBytes;
 
 		for(auto &ss : storageServers.get()) {
-			readRequests.updateValues( StatusCounter(ss.second.getValue("AllQueries")));
+			readRequests.updateValues( StatusCounter(ss.second.getValue("QueryQueue")));
 			reads.updateValues( StatusCounter(ss.second.getValue("FinishedQueries")));
 			readKeys.updateValues( StatusCounter(ss.second.getValue("RowsQueried")));
 			readBytes.updateValues( StatusCounter(ss.second.getValue("BytesQueried")));
