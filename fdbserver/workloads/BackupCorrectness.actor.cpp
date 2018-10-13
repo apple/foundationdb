@@ -215,7 +215,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								}
 								else {
 									// Update status code, break if no longer runnable
-									wait(store(statusCode, BackupConfig(logUid).stateEnum().getD(cx, false, EBackupState::STATE_ABORTED)));
+									wait(store(BackupConfig(logUid).stateEnum().getD(cx, false, EBackupState::STATE_ABORTED), statusCode));
 
 									if(!backupAgent->isRunnable(statusCode)) {
 										TEST(true);
