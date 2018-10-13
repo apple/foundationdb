@@ -1063,6 +1063,7 @@ namespace fileBackup {
 			// Find out if there is a shard boundary in(beginKey, endKey)
 			Standalone<VectorRef<KeyRef>> keys = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getBlockOfShards(tr, beginKey, endKey, 1); }));
 			if (keys.size() > 0) {
+				TEST(true);
 				Params.addBackupRangeTasks().set(task, true);
 				return Void();
 			}
@@ -3299,7 +3300,7 @@ namespace fileBackup {
 			if(firstVersion == invalidVersion) {
 				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
 				std::string tag = wait(restore.tag().getD(tr));
-				ERestoreState _ = wait(abortRestore(tr, StringRef(tag)));
+				wait(success(abortRestore(tr, StringRef(tag))));
 				return Void();
 			}
 
@@ -3361,7 +3362,7 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// This method will return the final status of the backup
-	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone) {
+	ACTOR static Future<EBackupState> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone) {
 		state std::string backTrace;
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
@@ -3981,7 +3982,7 @@ public:
 			}
 		}
 
-		int _ = wait( waitBackup(backupAgent, cx, tagName.toString(), true) );
+		wait( success( waitBackup(backupAgent, cx, tagName.toString(), true) ) );
 		TraceEvent("AS_BackupStopped");
 
 		ryw_tr->reset();
@@ -4061,7 +4062,7 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	tr->set(lastRestorable.pack(tagName), BinaryWriter::toValue<Version>(version, Unversioned()));
 }
 
-Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone) {
+Future<EBackupState> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone) {
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 

@@ -145,6 +145,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submittted) {
 
 		state UID	randomID = g_nondeterministic_random->randomUniqueID();
+		TraceEvent("BARW_DoBackupStart", randomID).detail("Tag", printable(tag)).detail("StartDelay", startDelay);
 
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		wait( delay( startDelay ));
@@ -189,10 +190,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
 					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
+					state EBackupState statusCode = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
 					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
 					state UID logUid = uidFlag.first;
-					state Reference<IBackupContainer> lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getD(cx));
+					state BackupConfig config(logUid);
+					state Reference<IBackupContainer> lastBackupContainer = wait(config.backupContainer().getD(cx));
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
@@ -200,26 +202,48 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						wait(desc.resolveVersionTimes(cx));
 						printf("BackupDescription:\n%s\n", desc.toString().c_str());
 						restorable = desc.maxRestorableVersion.present();
+
+						if(backupAgent->isRunnable(statusCode) && true) {
+							TraceEvent("BARW_WaitForMoreSnapshots", randomID).detail("Tag", printable(tag));
+							while(1) {
+								wait(delay(2));
+								BackupDescription desc = wait(lastBackupContainer->describeBackup());
+								TraceEvent("BARW_WaitForMoreSnapshots", randomID).detail("Tag", printable(tag)).detail("SnapshotsSoFar", desc.snapshots.size());
+								if(desc.snapshots.size() >= 3) {
+									TEST(true);
+									break;
+								}
+								else {
+									// Update status code, break if no longer runnable
+									wait(store(statusCode, BackupConfig(logUid).stateEnum().getD(cx, false, EBackupState::STATE_ABORTED)));
+
+									if(!backupAgent->isRunnable(statusCode)) {
+										TEST(true);
+										break;
+									}
+								}
+							}
+						}
 					}
 
 					TraceEvent("BARW_LastBackupContainer", randomID)
 						.detail("BackupTag", printable(tag))
 						.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-						.detail("LogUid", logUid).detail("WaitStatus", resultWait).detail("Restorable", restorable);
+						.detail("LogUid", logUid).detail("WaitStatus", statusCode).detail("Restorable", restorable);
 
 					// Do not check the backup, if aborted
-					if (resultWait == BackupAgentBase::STATE_ABORTED) {
+					if (statusCode == BackupAgentBase::STATE_ABORTED) {
 					}
 					// Ensure that a backup container was found
 					else if (!lastBackupContainer) {
-						TraceEvent("BARW_MissingBackupContainer", randomID).detail("LogUid", logUid).detail("BackupTag", printable(tag)).detail("WaitStatus", resultWait);
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n", printable(tag).c_str(), resultWait);
+						TraceEvent("BARW_MissingBackupContainer", randomID).detail("LogUid", logUid).detail("BackupTag", printable(tag)).detail("WaitStatus", statusCode);
+						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n", printable(tag).c_str(), statusCode);
 					}
 					// Check that backup is restorable
 					else {
 						if(!restorable) {
 							TraceEvent("BARW_NotRestorable", randomID).detail("LogUid", logUid).detail("BackupTag", printable(tag))
-								.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", resultWait);
+								.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", statusCode);
 							printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 						}
 					}
@@ -227,19 +251,19 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup by now
 					if (startDelay) {
 						TraceEvent("BARW_DoBackupAbortBackup2", randomID).detail("Tag", printable(tag))
-							.detail("WaitStatus", resultWait)
+							.detail("WaitStatus", statusCode)
 							.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
 							.detail("Restorable", restorable);
 						wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
-						TraceEvent("BARW_DoBackupDiscontinueBackup", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
+						TraceEvent("BARW_DoBackupDiscontinueBackup1", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
 						wait(backupAgent->discontinueBackup(cx, tag));
 					}
 				}
 
 				else {
-					TraceEvent("BARW_DoBackupDiscontinueBackup", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
+					TraceEvent("BARW_DoBackupDiscontinueBackup2", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
 					wait(backupAgent->discontinueBackup(cx, tag));
 				}
 			}
@@ -252,12 +276,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
-		state std::string statusText;
-
-		std::string _statusText = wait( backupAgent->getStatus(cx, 5, tag.toString()) );
-		statusText = _statusText;
+		state std::string statusText = wait( backupAgent->getStatus(cx, 5, tag.toString()) );
 		// Can we validate anything about status?
 
 		TraceEvent("BARW_DoBackupComplete", randomID).detail("Tag", printable(tag))
@@ -286,7 +307,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		// Try doing a restore without clearing the keys
 		if (rowCount > 0) {
 			try {
-				Version _ = wait(backupAgent->restore(cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked));
+				wait( success( backupAgent->restore(cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked) ) );
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID);
 				ASSERT(false);
 			}
@@ -324,12 +345,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			// backup
 			wait(delay(self->backupAfter));
 
-			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
+			TraceEvent("BARW_DoBackupLaunch", randomID).detail("Tag", printable(self->backupTag));
 			state Promise<Void> submitted;
 			state Future<Void> b = doBackup(self, 0, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter, submitted);
 
 			if (self->abortAndRestartAfter) {
-				TraceEvent("BARW_DoBackup2", randomID).detail("Tag", printable(self->backupTag)).detail("AbortWait", self->abortAndRestartAfter);
+				TraceEvent("BARW_DoBackupAbortAndRelaunch", randomID).detail("Tag", printable(self->backupTag)).detail("AbortWait", self->abortAndRestartAfter);
 				wait(submitted.getFuture());
 				b = b && doBackup(self, self->abortAndRestartAfter, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter, Promise<Void>());
 			}

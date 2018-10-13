@@ -1463,7 +1463,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
 				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-				int _ = wait(backupAgent.waitBackup(db, tagName));
+				wait(success(backupAgent.waitBackup(db, tagName)));
 			}
 			else {
 				// Check if a backup agent is running
@@ -1642,10 +1642,10 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 	{
 		state FileBackupAgent backupAgent;
 
-		int status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
+		EBackupState status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
 
 		printf("The backup on tag `%s' %s.\n", printable(StringRef(tagName)).c_str(),
-			BackupAgentBase::getStateText((BackupAgentBase::enumState) status));
+			BackupAgentBase::getStateText(status));
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -1667,7 +1667,7 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 		// Wait for the backup to complete, if requested
 		if (waitForCompletion) {
 			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-			int _ = wait(backupAgent.waitBackup(db, tagName));
+			wait(success(backupAgent.waitBackup(db, tagName)));
 		}
 		else {
 			printf("The backup on tag `%s' was successfully discontinued.\n", printable(StringRef(tagName)).c_str());

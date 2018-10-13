@@ -74,7 +74,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Wait");
-		int _ = wait( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) );
+		wait( success( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) ) );
 		TraceEvent("AtomicRestore_BackupStart");
 		wait( delay(self->restoreAfter * g_random->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");

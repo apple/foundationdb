@@ -191,6 +191,8 @@ protected:
 	static const std::string defaultTagName;
 };
 
+typedef BackupAgentBase::enumState EBackupState;
+
 class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
@@ -276,7 +278,7 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
+	Future<EBackupState> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
 	static const Key keyLastRestorable;
 
@@ -435,7 +437,6 @@ Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVers
 Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
 Future<Void> applyMutations(Database const& cx, Key const& uid, Key const& addPrefix, Key const& removePrefix, Version const& beginVersion, Version* const& endVersion, RequestStream<CommitTransactionRequest> const& commit, NotifiedVersion* const& committedVersion, Reference<KeyRangeMap<Version>> const& keyVersion);
 
-typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
 template<> inline EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }
 
