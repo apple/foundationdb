@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.13
+6.0.14
 ======
 
 Features
@@ -55,6 +55,7 @@ Fixes
 * Restoring a backup to the exact version a snapshot ends did not apply mutations done at the final version. [6.0.12] `(PR #787) <https://github.com/apple/foundationdb/pull/787>`_
 * Excluding a process that was both the cluster controller and something else would cause two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
+* Backup range tasks could sometimes but very rarely fail and be lost. [6.0.14] `(PR #837) <https://github.com/apple/foundationdb/pull/837>`_
 
 Fixes only impacting 6.0.0+
 ---------------------------
