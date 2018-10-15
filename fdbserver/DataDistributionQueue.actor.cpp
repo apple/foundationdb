@@ -881,7 +881,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 		ASSERT( rd.src.size() );
 		loop {
 			state int stuckCount = 0;
-			state int bestTeamStuckThreshold = 50;
+			//state int bestTeamStuckThreshold = 50;
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
@@ -925,6 +925,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					break;
 				}
 
+				//MXX: No need to print out so many information. Print out the tci and self->teamCollections.size(), we will know which data center got stuck.
+				/*
 				TraceEvent(SevWarn, "BestTeamStuckOnce").detail("BestTeamsSize",bestTeams.size())
 					.detail("FoundTeams", foundTeams).detail("AnyHealthy", anyHealthy).detail("WantsNewServers", rd.wantsNewServers)
 					.detail("StuckCount", stuckCount);
@@ -945,10 +947,12 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 							.detail("AnyWithSource", anyWithSource).detail("AllHealthy", allHealthy).detail("AnyHealthy", anyHealthy);
 					bestTeamStuckThreshold += 50; // Log each 50 bestTeamStuck
 				}
+				*/
 
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount);
+				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount)
+					.detail("TeamCollectionId", tciIndex).detail("NumOfTeamCollections", self->teamCollections.size());
 				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
@@ -985,15 +989,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				totalIds += destTeam.servers.size();
 			}
 			if ( totalIds != self->teamSize ) {
-				TraceEvent(SevWarn, "IncorrectDestTeamSize").detail("ExpectedTeamSize", self->teamSize)
-						.detail("DestTeamSize", totalIds).detail("Debug", "CheckDestTeamUID");
-				int i = 0;
-				for (auto &destTeam : destinationTeams) {
-					for ( auto &id : destTeam.servers ) {
-						TraceEvent(SevWarn, "IncorrectDestTeamSize\t").detail("TeamID", i).detail("UID", id);
-					}
-					++i;
-				}
+				TraceEvent(SevWarn, "IncorrectDestTeamSize").suppressFor(1.0).detail("ExpectedTeamSize", self->teamSize)
+						.detail("DestTeamSize", totalIds);
 			}
 
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);

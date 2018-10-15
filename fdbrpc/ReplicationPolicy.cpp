@@ -222,6 +222,7 @@ bool PolicyAcross::validate(
 			}
 		}
 		for (auto& itValid : validMap) {
+			//MXX: remove this question.
 			//MX: Q: why do we need to validate the itValid again? What is the logic behind this?
 			if (_policy->validate(itValid.second, fromServers)) { //itValid.second is the vector of LocalityEntries that belong to the same locality
 				if (g_replicationdebug > 4) {
@@ -259,7 +260,7 @@ bool PolicyAcross::validate(
 
 /*
  * Choose new servers from "least utilized" alsoServers and append the new servers to results
- * fromserverse are the servers that have already been chosen. fromServers is the set of servers that should be excluded from being selected as replicas.
+ * fromserverse are the servers that have already been chosen and that should be excluded from being selected as replicas.
  * FIXME: Simplify this function, such as removing unnecessary printf
  */
 bool PolicyAcross::selectReplicas(
