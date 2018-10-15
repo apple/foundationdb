@@ -333,7 +333,7 @@ public:
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
-	Future<Void> durable = Void();
+	Future<Void> durableInProgress;
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
@@ -416,7 +416,7 @@ public:
 		:	instanceID(g_random->randomUniqueID().first()),
 			storage(this, storage), db(db),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-			updateEagerReads(0),
+			durableInProgress(Void()), updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
@@ -2481,7 +2481,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
 		} else if (e.code() == error_code_please_reboot) {
-			Void _ = wait( data->durable );
+			Void _ = wait( data->durableInProgress );
 		}
 		throw e;
 	}
@@ -2492,6 +2492,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
 		Void _ = wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		Void _ = wait( delay(0, TaskUpdateStorage) );
+		
+		state Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version startOldestVersion = data->storageVersion();
 		state Version newOldestVersion = data->storageVersion();
@@ -2512,15 +2515,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->storage.makeVersionDurable( newOldestVersion );
 
 		debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
-		data->durable = data->storage.commit();
+		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0)
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL);
 
-		Void _ = wait( data->durable );
+		Void _ = wait( durable );
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+		
+		durableInProgress.send(Void());
+		Void _ = wait( delay(0, TaskUpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
 		// are applied after we change the durable version.
