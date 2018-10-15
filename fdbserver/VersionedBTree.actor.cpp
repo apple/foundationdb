@@ -444,10 +444,30 @@ public:
 	static Key beginKey;
 	static Key endKey;
 
-	virtual Future<Void> getError() NOT_IMPLEMENTED
-	virtual Future<Void> onClosed() NOT_IMPLEMENTED
-	virtual void dispose() NOT_IMPLEMENTED
-	virtual void close() NOT_IMPLEMENTED
+	virtual Future<Void> getError() {
+		return m_pager->getError();
+	}
+
+	virtual Future<Void> onClosed() {
+		return m_pager->onClosed();
+	}
+
+	virtual void dispose() {
+		return m_pager->dispose();
+	}
+
+	ACTOR void close_impl(VersionedBTree *btree) {
+		btree->m_init.cancel();
+		btree->m_latestCommit.cancel();
+		Future<Void> closed = btree->m_pager->onClosed();
+		btree->m_pager->close();
+		wait(closed);
+		delete btree;
+	}
+
+	virtual void close() {
+		return close_impl(this);
+	}
 
 	virtual KeyValueStoreType getType() NOT_IMPLEMENTED
 	virtual bool supportsMutation(int op) NOT_IMPLEMENTED
@@ -535,6 +555,9 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
+		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
+		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of 
+		// uncommitted writes so it should not be committed.
 		m_init.cancel();
 		m_latestCommit.cancel();
 	}
@@ -694,6 +717,17 @@ private:
 	 *   keyBefore(startKey), and if so that mutation buffer boundary key can be used instead
 	 *   without adding an additional key to the buffer.
 	*/
+
+	IPager *m_pager;
+	MutationBufferT *m_pBuffer;
+	std::map<Version, MutationBufferT> m_mutationBuffers;
+
+	Version m_writeVersion;
+	Version m_lastCommittedVersion;
+	Future<Void> m_latestCommit;
+	int m_usablePageSizeOverride;
+	Future<Void> m_init;
+	std::string m_name;
 
 	void printMutationBuffer(MutationBufferT::const_iterator begin, MutationBufferT::const_iterator end) const {
 #if REDWOOD_DEBUG
@@ -1294,17 +1328,6 @@ private:
 		return Void();
 	}
 
-	IPager *m_pager;
-	MutationBufferT *m_pBuffer;
-	std::map<Version, MutationBufferT> m_mutationBuffers;
-
-	Version m_writeVersion;
-	Version m_lastCommittedVersion;
-	Future<Void> m_latestCommit;
-	int m_usablePageSizeOverride;
-	Future<Void> m_init;
-	std::string m_name;
-
 	// InternalCursor is for seeking to and iterating over the internal / low level records in the Btree.
 	// This records are versioned and they can represent deletions or partial values so they must be
 	// post processed to obtain keys returnable to the user.
@@ -1796,7 +1819,7 @@ public:
 		wait(closedFuture);
 		self->m_closed.send(Void());
 		if(self->m_error.canBeSet()) {
-			self->m_error.send(Never());
+			self->m_error.sendError(shutdown_in_progress());
 		}
 		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		delete self;
@@ -2166,10 +2189,14 @@ TEST_CASE("!/redwood/correctness") {
 	state bool useDisk = true;  // MemoryPager is not being maintained currently.
 
 	state std::string pagerFile = "unittest_pageFile";
-	state IPager *pager;
+	IPager *pager;
 
-	if(useDisk)
+	if(useDisk) {
+		deleteFile(pagerFile);
+		deleteFile(pagerFile + "0.pagerlog");
+		deleteFile(pagerFile + "1.pagerlog");
 		pager = new IndirectShadowPager(pagerFile);
+	}
 	else
 		pager = createMemoryPager();
 
@@ -2205,7 +2232,7 @@ TEST_CASE("!/redwood/correctness") {
 
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
-	state Future<Void> randomTask = randomReader(btree);
+	state Future<Void> randomTask = randomReader(btree) || btree->getError();
 
 	state Future<Void> commit = Void();
 
@@ -2310,13 +2337,12 @@ TEST_CASE("!/redwood/correctness") {
 				debug_printf("Waiting for verification to complete.\n");
 				wait(verifyTask);
 
-				delete btree;
-				Future<Void> closedFuture = pager->onClosed();
-				pager->close();
+				Future<Void> closedFuture = btree->onClosed();
+				btree->close();
 				wait(closedFuture);
 
 				debug_printf_always("Reopening btree\n");
-				pager = new IndirectShadowPager(pagerFile);
+				IPager *pager = new IndirectShadowPager(pagerFile);
 				btree = new VersionedBTree(pager, pagerFile, pageSize);
 				wait(btree->init());
 
@@ -2327,7 +2353,7 @@ TEST_CASE("!/redwood/correctness") {
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
-				randomTask = randomReader(btree);
+				randomTask = randomReader(btree) || btree->getError();
 			}
 
 			// Check for errors
@@ -2346,15 +2372,19 @@ TEST_CASE("!/redwood/correctness") {
 	debug_printf("Waiting for verification to complete.\n");
 	wait(verifyTask);
 
-	Future<Void> closedFuture = pager->onClosed();
-	pager->close();
+	Future<Void> closedFuture = btree->onClosed();
+	btree->close();
 	wait(closedFuture);
 
 	return Void();
 }
 
 TEST_CASE("!/redwood/performance/set") {
-	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
+	state std::string pagerFile = "unittest_pageFile";
+	deleteFile(pagerFile);
+	deleteFile(pagerFile + "0.pagerlog");
+	deleteFile(pagerFile + "1.pagerlog");
+	IPager *pager = new IndirectShadowPager(pagerFile);
 	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
 	wait(btree->init());
 
@@ -2397,8 +2427,8 @@ TEST_CASE("!/redwood/performance/set") {
 
 	wait(btree->commit());
 
-	Future<Void> closedFuture = pager->onClosed();
-	pager->close();
+	Future<Void> closedFuture = btree->onClosed();
+	btree->close();
 	wait(closedFuture);
 
 	double elapsed = now() - startTime;
