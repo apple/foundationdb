@@ -26,9 +26,9 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "fdbclient/RestoreInterface.h"
 #include "CoordinationInterface.h"
 #include "WorkerInterface.h"
+#include "RestoreInterface.h"
 #include "ClusterRecruitmentInterface.h"
 #include "ServerDBInfo.h"
 #include "MoveKeys.h"
@@ -1576,7 +1576,7 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == Restore) {
-			f = stopAfter( restoreAgent(connectionFile, localities) );
+			f = stopAfter( restoreWorker(connectionFile, localities) );
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
 			f = stopAfter( KVFileCheck(kvFile, true) );

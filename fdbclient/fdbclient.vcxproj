@@ -96,8 +96,6 @@
     <ClCompile Include="Knobs.cpp" />
     <ActorCompiler Include="MonitorLeader.actor.cpp" />
     <ActorCompiler Include="ManagementAPI.actor.cpp" />
-    <ActorCompiler Include="Restore.actor.cpp" />
-    <ClCompile Include="RestoreInterface.h" />
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />

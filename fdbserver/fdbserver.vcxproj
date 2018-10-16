@@ -49,6 +49,8 @@
     <ActorCompiler Include="networktest.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="Restore.actor.cpp" />
+    <ClCompile Include="RestoreInterface.h" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />

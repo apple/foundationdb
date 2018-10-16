@@ -22,8 +22,10 @@
 #define FDBCLIENT_RestoreInterface_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "CoordinationInterface.h"
+#include "fdbrpc/Locality.h"
 
 struct RestoreInterface {
 	RequestStream< struct TestRequest > test;
@@ -68,6 +70,6 @@ struct TestReply {
 	}
 };
 
-Future<Void> restoreAgent(Reference<struct ClusterConnectionFile> const& ccf, struct LocalityData const& locality);
+Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
 
 #endif
