@@ -50,7 +50,6 @@
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="Restore.actor.cpp" />
-    <ClCompile Include="RestoreInterface.h" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
@@ -176,6 +175,7 @@
     <ClInclude Include="Ratekeeper.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
+    <ClInclude Include="RestoreInterface.h" />
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />
