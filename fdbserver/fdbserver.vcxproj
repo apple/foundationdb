@@ -302,6 +302,8 @@
   </ImportGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="MyPreCompileSteps" AfterTargets="CLCompile">
-    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).include.xml&quot; @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).compile.xml&quot; @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
   </Target>
 </Project>
