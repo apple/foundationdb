@@ -566,27 +566,14 @@ const KeyRangeRef monitorConfKeys(
 );
 
 const KeyRef restoreLeaderKey = LiteralStringRef("\xff\x02/restoreLeader");
-const KeyRangeRef restoreAgentsKeys(
-	LiteralStringRef("\xff\x02/restoreAgents/"),
-	LiteralStringRef("\xff\x02/restoreAgents0")
+const KeyRangeRef restoreWorkersKeys(
+	LiteralStringRef("\xff\x02/restoreWorkers/"),
+	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
 
-const Key restoreAgentKeyFor( UID const& agentID ) {
+const Key restoreWorkerKeyFor( UID const& agentID ) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreAgentsKeys.begin );
+	wr.serializeBytes( restoreWorkersKeys.begin );
 	wr << agentID;
 	return wr.toStringRef();
-}
-
-const Value restoreAgentValue( RestoreInterface const& server ) {
-	BinaryWriter wr(IncludeVersion());
-	wr << server;
-	return wr.toStringRef();
-}
-
-RestoreInterface decodeRestoreAgentValue( ValueRef const& value ) {
-	RestoreInterface s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
 }

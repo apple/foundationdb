@@ -19,11 +19,11 @@
  */
 
 #include "RestoreInterface.h"
-#include "NativeAPI.h"
-#include "SystemData.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> restoreAgent(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
 	Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
 	state Database cx = wait(cluster->createDatabase(locality));
 	state RestoreInterface interf;
@@ -35,10 +35,10 @@ ACTOR Future<Void> restoreAgent(Reference<ClusterConnectionFile> ccf, LocalityDa
 		try {
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
-				leaderInterf = decodeRestoreAgentValue(leader.get());
+				leaderInterf = BinaryReader::fromStringRef<RestoreInterface>(leader.get(), IncludeVersion());
 				break;
 			}
-			tr.set(restoreLeaderKey, restoreAgentValue(interf));
+			tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
 			wait(tr.commit());
 			break;
 		} catch( Error &e ) {
@@ -50,7 +50,7 @@ ACTOR Future<Void> restoreAgent(Reference<ClusterConnectionFile> ccf, LocalityDa
 	if(leaderInterf.present()) {
 		loop {
 			try {
-				tr.set(restoreAgentKeyFor(interf.id()), restoreAgentValue(interf));
+				tr.set(restoreWorkerKeyFor(interf.id()), BinaryWriter::toValue(interf, IncludeVersion()));
 				wait(tr.commit());
 				break;
 			} catch( Error &e ) {
@@ -74,11 +74,11 @@ ACTOR Future<Void> restoreAgent(Reference<ClusterConnectionFile> ccf, LocalityDa
 	state vector<RestoreInterface> agents;
 	loop {
 		try {
-			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreAgentsKeys, CLIENT_KNOBS->TOO_MANY));
+			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!agentValues.more);
 			if(agentValues.size()) {
 				for(auto& it : agentValues) {
-					agents.push_back(decodeRestoreAgentValue(it.value));
+					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
 				}
 				break;
 			}
