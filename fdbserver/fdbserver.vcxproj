@@ -58,6 +58,8 @@
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
     <ActorCompiler Include="workloads\Cycle.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\PubSubMultiples.actor.cpp" />
