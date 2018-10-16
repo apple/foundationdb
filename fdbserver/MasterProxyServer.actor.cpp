@@ -840,7 +840,7 @@ ACTOR Future<Void> commitBatch(
 	wait(yield());
 
 	if(!self->txsPopVersions.size() || msg.popTo > self->txsPopVersions.back().second) {
-		if(self->txsPopVersions.size() > SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
+		if(self->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
 			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
 			self->txsPopVersions.pop_front();
 		}
@@ -1228,7 +1228,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<Async
 			for(auto &it : remoteLogs.get()) {
 				replies.push_back(brokenPromiseToNever( it.interf().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() ) ));
 			}
-			wait( waitForAll(replies) );
+			wait( waitForAll(replies) || onChange );
 
 			if(onChange.isReady()) {
 				break;
