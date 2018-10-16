@@ -734,6 +734,11 @@ public:
 		else if(newTimeoutVersion <= version)  // Ensure that the time extension is to the future
 			newTimeoutVersion = version + 1;
 
+		// This can happen if extendTimeout is called shortly after task start and the task's timeout was jittered to be longer
+		if(newTimeoutVersion <= task->timeoutVersion) {
+			newTimeoutVersion = task->timeoutVersion + 1;
+		}
+
 		// This is where the task definition is being moved to
 		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeoutVersion).get(task->key);
 

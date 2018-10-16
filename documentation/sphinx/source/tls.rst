@@ -80,7 +80,7 @@ Default Values
 Certificate file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location:
+The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:
 
   * Linux: ``/etc/foundationdb/fdb.pem``
   * macOS: ``/usr/local/etc/foundationdb/fdb.pem``
@@ -96,11 +96,6 @@ Default Password
 
 There is no default password. If no password is specified, it is assumed that the private key is unencrypted.
 
-CA file default location
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If a value is not specified, the software searches for certs in the default openssl certs location.
-
 Parameters and client bindings
 ------------------------------
 
@@ -109,7 +104,7 @@ The default LibreSSL-based implementation
 
 FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.
 
-For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
+For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
 
 If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.
 

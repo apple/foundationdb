@@ -164,27 +164,26 @@ public:
 			fullSnapshot(data);
 			resetSnapshot = true;
 			committedWriteBytes = notifiedCommittedWriteBytes.get();
+			overheadWriteBytes = 0;
+
+			if(disableSnapshot) {
+				return Void();
+			}
+			log_op(OpCommit, StringRef(), StringRef());
 		}
 		else {
 			int64_t bytesWritten = commit_queue(queue, !disableSnapshot, sequential);
-			if(!disableSnapshot) {
-				committedWriteBytes += bytesWritten + OP_DISK_OVERHEAD; //OP_DISK_OVERHEAD is for the following log_op(OpCommit)
+
+			if(disableSnapshot) {
+				return Void();
 			}
 
-			//If there have been no mutations since the last commit, do nothing
-			if( notifiedCommittedWriteBytes.get() == committedWriteBytes )
-				return Void();
-
-			notifiedCommittedWriteBytes.set(committedWriteBytes);
-		}
-
-		if(disableSnapshot) {
-			return Void();
-		}
-
-		log_op(OpCommit, StringRef(), StringRef());
-		if(!transactionIsLarge) {
-			committedWriteBytes += log->getCommitOverhead();
+			if(bytesWritten > 0 || committedWriteBytes > notifiedCommittedWriteBytes.get()) {
+				committedWriteBytes += bytesWritten + overheadWriteBytes + OP_DISK_OVERHEAD; //OP_DISK_OVERHEAD is for the following log_op(OpCommit)
+				notifiedCommittedWriteBytes.set(committedWriteBytes); //This set will cause snapshot items to be written, so it must happen before the OpCommit
+				log_op(OpCommit, StringRef(), StringRef());
+				overheadWriteBytes = log->getCommitOverhead();
+			}
 		}
 
 		auto c = log->commit();
@@ -347,6 +346,7 @@ private:
 	IDiskQueue *log;
 	Future<Void> recovering, snapshotting;
 	int64_t committedWriteBytes;
+	int64_t overheadWriteBytes;
 	NotifiedVersion notifiedCommittedWriteBytes;
 	Key recoveredSnapshotKey; // After recovery, the next key in the currently uncompleted snapshot
 	IDiskQueue::location currentSnapshotEnd; //The end of the most recently completed snapshot (this snapshot cannot be discarded)
@@ -710,7 +710,7 @@ private:
 };
 
 KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery )
-	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0),
+	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0), overheadWriteBytes(0),
 	  committedDataSize(0), transactionSize(0), transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true)
 {
 	recovering = recover( this, exactRecovery );
