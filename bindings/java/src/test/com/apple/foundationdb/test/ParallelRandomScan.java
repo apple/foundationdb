@@ -43,7 +43,7 @@ public class ParallelRandomScan {
 	private static final int PARALLELISM_STEP = 5;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB api = FDB.selectAPIVersion(600);
+		FDB api = FDB.selectAPIVersion(610);
 		try(Database database = api.open(args[0])) {
 			for(int i = PARALLELISM_MIN; i <= PARALLELISM_MAX; i += PARALLELISM_STEP) {
 				runTest(database, i, ROWS, DURATION_MS);

@@ -219,7 +219,7 @@ func (doc Doc) GetDoc(trtr fdb.Transactor, doc_id int) interface{} {
 }
 
 func main() {
-	fdb.MustAPIVersion(600)
+	fdb.MustAPIVersion(610)
 
 	db := fdb.MustOpenDefault()
 

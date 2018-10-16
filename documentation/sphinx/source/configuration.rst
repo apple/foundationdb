@@ -369,7 +369,7 @@ In addition to the more commonly used modes listed above, this version of Founda
 ``three_datacenter`` mode
     *(for 5+ machines in 3 datacenters)*
 
-    FoundationDB attempts to replicate data across two datacenters and will stay up with only two available. Data is triple replicated.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.
+    FoundationDB attempts to replicate data across three datacenters and will stay up with only two available. Data is replicated 6 times.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.
 
 Changing redundancy mode
 ------------------------
