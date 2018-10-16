@@ -47,6 +47,7 @@
     <ClCompile Include="Knobs.cpp" />
     <ActorCompiler Include="QuietDatabase.actor.cpp" />
     <ActorCompiler Include="networktest.actor.cpp" />
+    <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="Restore.actor.cpp" />
@@ -57,6 +58,8 @@
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
     <ActorCompiler Include="workloads\Cycle.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\PubSubMultiples.actor.cpp" />
@@ -139,7 +142,6 @@
     <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp" />
     <ActorCompiler Include="workloads\TaskBucketCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp" />
-    <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\VersionStamp.actor.cpp" />
     <ActorCompiler Include="workloads\Serializability.actor.cpp" />
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
@@ -300,6 +302,8 @@
   </ImportGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="MyPreCompileSteps" AfterTargets="CLCompile">
-    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).include.xml&quot; @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).compile.xml&quot; @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
   </Target>
 </Project>
