@@ -1,0 +1,5 @@
+sh_binary(
+    name = "versions",
+    srcs = ["versions.sh"],
+    visibility = ["//visibility:public"],
+)

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/SystemData.h"
 
 DatabaseConfiguration::DatabaseConfiguration()

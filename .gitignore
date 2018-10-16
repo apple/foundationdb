@@ -82,3 +82,10 @@ compile_commands.json
 .envrc
 .DS_Store
 temp/
+
+# Bazel
+/bazel-bin
+/bazel-foundationdb
+/bazel-genfiles
+/bazel-out
+/bazel-testlogs

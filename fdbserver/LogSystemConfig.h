@@ -22,7 +22,7 @@
 #define FDBSERVER_LOGSYSTEMCONFIG_H
 #pragma once
 
-#include "TLogInterface.h"
+#include "fdbserver/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
 

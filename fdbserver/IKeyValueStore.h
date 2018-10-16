@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 
 class IClosable {
 public:

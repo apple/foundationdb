@@ -1,0 +1,11 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "rapidxml",
+    hdrs = [
+        "rapidxml.hpp",
+        "rapidxml_iterators.hpp",
+        "rapidxml_print.hpp",
+        "rapidxml_utils.hpp",
+    ],
+)

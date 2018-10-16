@@ -24,12 +24,12 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "FDBTypes.h"
-#include "MasterProxyInterface.h"
-#include "FDBOptions.g.h"
-#include "CoordinationInterface.h"
-#include "ClusterInterface.h"
-#include "ClientLogEvents.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/ClientLogEvents.h"
 
 // Incomplete types that are reference counted
 class DatabaseContext;

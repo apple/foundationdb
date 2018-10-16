@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"

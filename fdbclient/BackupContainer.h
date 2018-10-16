@@ -22,9 +22,9 @@
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);

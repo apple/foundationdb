@@ -24,7 +24,7 @@
 
 #include "flow/flow.h"
 #include "flow/IndexedSet.h"
-#include "FlowTransport.h" // Endpoint
+#include "fdbrpc/FlowTransport.h" // Endpoint
 
 using std::vector;
 

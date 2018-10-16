@@ -1,0 +1,18 @@
+load('//:fdb.bzl', 'fdb_binary')
+
+fdb_binary(
+    name = "fdbbackup",
+    srcs = [
+        "fdbcli.actor.cpp",
+        "FlowLineNoise.actor.cpp",
+        "FlowLineNoise.h",
+        "linenoise/linenoise.c",
+        "linenoise/linenoise.h",
+    ],
+    deps = [
+        "//flow:libflow",
+        "//fdbclient:headers",
+        "//fdbclient:libfdbclient",
+        "//fdbrpc:libfdbrpc",
+    ],
+)

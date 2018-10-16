@@ -1,0 +1,14 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "md5",
+    hdrs = [
+        "md5.h",
+    ],
+    srcs = [
+        "md5.c",
+    ],
+    deps = [
+        "//flow:libflow",
+    ],
+)

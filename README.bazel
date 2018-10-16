@@ -1,0 +1,96 @@
+FoundationDB with Bazel
+=======================
+
+This copy of FoundationDB has been made buildable with bazel.  If you're in a
+hurry, the quick things you need to know are that you can build FoundationDB
+with:
+
+    bazel build //...
+
+and you can test it with:
+
+    bazel test //...
+
+Together, these two commands should give you pretty good confidence that things
+are not horribly broken.
+
+Note that the bazel-based build system and associated tests are still a work in
+progress and will have gaps compared to the upstream build system.  As we close
+the gaps, the above workflow will remain the only two commands you'll need to
+know to get pretty decent coverage.  Of course, there's tons of bazel magic you
+can use to speed up the workflow for your particular use case(s).
+
+FoundationDB-specific Bazel Macros
+==================================
+
+The file fdb.bzl at the top level defines some macros that should be used for
+building FoundationDB.  Developers working on FoundationDB itself should use
+these macros instead of the Bazel-included macros as they are aware of the Flow
+conventions and will automatically compile actors.
+
+The macros are:
+
+fdb_utility_library:  This will build a library that can be statically linked
+    into FoundationDB binaries or used as part of an exported shared library.
+    See fdbrpc/BUILD.bazel for a canonical example that demonstrates this macro.
+
+fdb_binary:  Build an executable of FoundationDB.  See fdbserver/BUILD.bazel for
+    an example demonstrating this macro.
+
+fdb_test:  Run one text-based test using the fdbserver built-in simulation.  See
+    tests/BUILD.bazel for an example of all the tests.  Tests in the "slow/"
+    directory are automatically allowed a longer execution time.  Tests that
+    time out can have their size parameter set to allow a longer execution time.
+
+Changes for Bazel
+=================
+
+Bazel does require some changes to the FoundationDB source to be able to build
+it correctly.
+
+Chief among these changes is that all includes should specify the path relative
+to the root directory of the project.  Previously, a header like
+FailureMonitor.h in the fdbrpc/ directory would be included as
+"FailureMonitor.h" by code in the fdbrpc/ directory and as
+"fdbrpc/FailureMonitor.h" everywhere else.  All includes have been updated to
+conform to the latter convention.
+
+Testing Strategy
+================
+
+Every test that uses the simulation framework takes a random seed as input to
+the test.  By default, the Bazel tests will run each test with a constant value
+of 1, and a random seed.  As seeds known to tickle bugs come to light,
+additional instances of each test may be added with the known-meaningful seed.
+Over time, this will naturally bias testing towards seeds and tests that have
+beneficial outputs for the computation.
+
+Look for "RandomRead.txt" in tests/BUILD.bazel as an example of a test with
+random seed provided.
+
+Things not yet Done
+===================
+
+There's quite a bit left to do for tests.  This section captures the high level
+pieces, while grepping the code for TODO will probably yield the rest of the
+known pieces of work.
+
+ - maint/unbazeled:  This script gives a good hint as to pieces of the source
+   tree left without Bazel-build support.  Things like packaging and
+   documentation require discussion with upstream to gather their requirements.
+ - compiler warnings:  There are a ton of compiler warnings.  They should
+   probably be cleaned up to get less-noisy builds.
+ - actor-compiler output:  The actor compiler and vexilographer probably don't
+   need to output anything on success.  This will make bazel's output on build
+   quite clean and easy to filter (once warnings go away).
+ - test failures:  There are a few tests that fail.  Figure out the best way to
+   debug tests going forward by talking with upstream.
+ - known "good" seeds:  It would be great if the upstream project could share
+   details of the internal validation process so that we could roll this into
+   the Bazel tests.
+ - Debug and prod builds:  all binaries come from the same flags right now;
+   build a crosstool to use "sanctioned" compilers from upstream.
+ - bindings are not bazeled
+ - The release process for upstream has not been bazeled; it should be bazeled
+   in the future once requirements (e.g., packaging conventions, etc) are
+   discussed with upstream.

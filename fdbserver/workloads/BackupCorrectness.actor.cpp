@@ -21,8 +21,8 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 

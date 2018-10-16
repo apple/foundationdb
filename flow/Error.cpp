@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Error.h"
-#include "Trace.h"
-#include "Knobs.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
+#include "flow/Knobs.h"
 #include <iostream>
 using std::cout;
 using std::endl;
@@ -107,7 +107,7 @@ Error Error::asInjectedFault() const {
 
 ErrorCodeTable::ErrorCodeTable() {
 	#define ERROR(name, number, description) addCode(number, #name, description); enum { Duplicate_Error_Code_##number = 0 };
-	#include "error_definitions.h"
+	#include "flow/error_definitions.h"
 }
 
 void ErrorCodeTable::addCode(int code, const char *name, const char *description) {

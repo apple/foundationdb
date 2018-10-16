@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "CoordinatedState.h"
-#include "CoordinationInterface.h"
-#include "Knobs.h"
+#include "fdbserver/CoordinatedState.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
-#include "LeaderElection.h"
+#include "fdbserver/LeaderElection.h"
 
 ACTOR Future<GenerationRegReadReply> waitAndSendRead( RequestStream<GenerationRegReadRequest> to, GenerationRegReadRequest req ) {
 	if( SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY )

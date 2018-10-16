@@ -23,10 +23,10 @@
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h"
-#include "TesterInterface.h"
-#include "WorkerInterface.h"
-#include "ServerDBInfo.h"
-#include "Status.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

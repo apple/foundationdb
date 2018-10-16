@@ -22,10 +22,11 @@
 #define FDBSERVER_APIWORKLOAD_H
 #pragma once
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "MemoryKeyValueStore.h"
+
+#include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/actorcompiler.h"
 
 //an enumeration of apis being tested

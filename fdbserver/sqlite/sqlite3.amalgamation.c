@@ -39878,7 +39878,7 @@ SQLITE_PRIVATE void sqlite3BtreeEnterAll(sqlite3 *db){
 
 /************** End of btmutex.c *********************************************/
 
-#include "btree.c"
+#include "fdbserver/sqlite/btree.c"
 
 /************** Begin file backup.c ******************************************/
 /*

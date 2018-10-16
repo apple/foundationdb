@@ -2788,7 +2788,7 @@ public:
 #define SI_NoCase   SI_GenericNoCase
 
 #include <wchar.h>
-#include "ConvertUTF.h"
+#include "fdbmonitor/ConvertUTF.h"
 
 /**
  * Converts UTF-8 to a wchar_t (or equivalent) using the Unicode reference

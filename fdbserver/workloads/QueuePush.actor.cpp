@@ -21,7 +21,7 @@
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int keyBytes = 16;

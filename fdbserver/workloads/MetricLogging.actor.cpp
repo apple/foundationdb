@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {

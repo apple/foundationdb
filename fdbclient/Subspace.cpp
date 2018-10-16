@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Subspace.h"
+#include "fdbclient/Subspace.h"
 
 Subspace::Subspace(Tuple const& tuple, StringRef const& rawPrefix){
 	StringRef packed = tuple.pack();

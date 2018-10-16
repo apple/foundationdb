@@ -1,0 +1,28 @@
+filegroup(
+    name = "options",
+    srcs = [
+        "fdb.options",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "c.cs",
+        "cpp.cs",
+        "java.cs",
+        "python.cs",
+        "ruby.cs",
+        "vexillographer.cs",
+    ],
+)
+
+genrule(
+    name = "vexillographer",
+    srcs = [":sources"],
+    outs = ["vexillographer.exe"],
+    cmd = "mcs -r:System,System.Core,System.Data,System.Xml,System.Xml.Linq $(locations :sources) -target:exe -sdk:4 -out:\"$@\"",
+    executable = True,
+    visibility = ["//visibility:public"],
+)

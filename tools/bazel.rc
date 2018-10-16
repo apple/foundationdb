@@ -1,0 +1,1 @@
+build --stamp --workspace_status_command=./tools/stamp.sh

@@ -21,7 +21,7 @@
 #ifndef FDBCLIENT_STATUS_H
 #define FDBCLIENT_STATUS_H
 
-#include "../fdbrpc/JSONDoc.h"
+#include "fdbrpc/JSONDoc.h"
 
 // Reads the entire string s as a JSON value
 // Throws if no value can be parsed or if s contains data after the first JSON value

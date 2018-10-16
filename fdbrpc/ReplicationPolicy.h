@@ -23,7 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "ReplicationTypes.h"
+#include "fdbrpc/ReplicationTypes.h"
 
 template <class Ar>
 void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy);

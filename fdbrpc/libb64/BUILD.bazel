@@ -1,0 +1,13 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "libb64",
+    srcs = [
+        "cdecode.h",
+        "cencode.h",
+        "decode.h",
+        "encode.h",
+        "cdecode.c",
+        "cencode.c",
+    ],
+)

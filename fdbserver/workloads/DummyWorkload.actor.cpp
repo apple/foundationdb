@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence

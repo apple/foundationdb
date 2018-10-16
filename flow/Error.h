@@ -27,8 +27,8 @@
 #include <boost/preprocessor/assert_msg.hpp>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
-#include "Platform.h"
-#include "Knobs.h"
+#include "flow/Platform.h"
+#include "flow/Knobs.h"
 
 enum { invalid_error_code = 0xffff };
 
@@ -70,7 +70,7 @@ private:
 
 #undef ERROR
 #define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
-#include "error_definitions.h"
+#include "flow/error_definitions.h"
 
 //actor_cancelled has been renamed
 inline Error actor_cancelled() { return Error( error_code_operation_cancelled ); }

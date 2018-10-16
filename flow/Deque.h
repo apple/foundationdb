@@ -22,7 +22,7 @@
 #define FLOW_DEQUE_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdexcept>
 
 template <class T>
@@ -65,7 +65,7 @@ public:
 		// FIXME: Specialization for POD types using memcpy?
 	}
 
-	Deque(Deque&& r) noexcept(true) : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
+	Deque(Deque&& r) noexcept(true) : arr(r.arr), begin(r.begin), end(r.end), mask(r.mask) {
 		r.arr = 0;
 		r.begin = r.end = 0;
 		r.mask = -1;

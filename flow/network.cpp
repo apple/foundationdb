@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "network.h"
-#include "flow.h"
+#include "flow/network.h"
+#include "flow/flow.h"
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
 	bool isTLS = false;

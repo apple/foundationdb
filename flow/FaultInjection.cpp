@@ -18,6 +18,6 @@
  * limitations under the License.
  */
 
-#include "FaultInjection.h"
+#include "flow/FaultInjection.h"
 
 bool (*should_inject_fault)( const char* context, const char* file, int line, int error_code ) = 0;

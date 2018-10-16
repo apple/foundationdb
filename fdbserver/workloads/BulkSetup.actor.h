@@ -24,13 +24,13 @@
 // version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULK_SETUP_ACTOR_G_H)
 		#define FDBSERVER_BULK_SETUP_ACTOR_G_H
-		#include "BulkSetup.actor.g.h"
+		#include "fdbserver/workloads/BulkSetup.actor.g.h"
 #elif !defined(FDBSERVER_BULK_SETUP_ACTOR_H)
 		#define FDBSERVER_BULK_SETUP_ACTOR_H
 
 #include <string>
 #include "fdbclient/NativeAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"

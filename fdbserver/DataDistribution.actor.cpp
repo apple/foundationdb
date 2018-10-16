@@ -19,15 +19,15 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "DataDistribution.h"
+#include "fdbserver/DataDistribution.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
 #include <set>
-#include "WaitFailure.h"
-#include "ServerDBInfo.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
@@ -1372,8 +1372,18 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 	state bool lastHealthy = team->isHealthy();
 	state bool lastOptimal = team->isOptimal() && lastHealthy;
 	state bool lastWrongConfiguration = team->isWrongConfiguration();
+
+	if(lastHealthy) {
+		self->healthyTeamCount++;
+		self->zeroHealthyTeams->set(false);
+	}
+
+	if(lastOptimal) {
+		self->optimalTeamCount++;
+		self->zeroOptimalTeams.set(false);
+	}
+
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
-	state bool firstCheck = true;
 
 	wait( yield() );
 	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
@@ -1409,22 +1419,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 			change.push_back( self->zeroHealthyTeams->onChange() );
 
 			bool healthy = self->satisfiesPolicy(team->servers) && !anyUndesired && team->getServerIDs().size() == self->configuration.storageTeamSize && serversLeft == self->configuration.storageTeamSize;
-			bool optimal = team->isOptimal() && healthy;
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()));
 			lastReady = self->initialFailureReactionDelay.isReady();
 			lastZeroHealthy = self->zeroHealthyTeams->get();
-
-			if (firstCheck) {
-				if (healthy) {
-					self->healthyTeamCount++;
-					self->zeroHealthyTeams->set(false);
-				}
-
-				if (optimal) {
-					self->optimalTeamCount++;
-					self->zeroOptimalTeams.set(false);
-				}
-			}
 
 			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
 				TraceEvent("TeamHealthChanged", self->masterId)
@@ -1435,15 +1432,17 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 				team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 				team->setWrongConfiguration( anyWrongConfiguration );
 
-				if( !firstCheck && optimal != lastOptimal ) {
+				bool optimal = team->isOptimal() && healthy;
+				if( optimal != lastOptimal ) {
+					lastOptimal = optimal;
 					self->optimalTeamCount += optimal ? 1 : -1;
 
 					ASSERT( self->optimalTeamCount >= 0 );
 					self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 				}
-				lastOptimal = optimal;
 
-				if( !firstCheck && lastHealthy != healthy ) {
+				if( lastHealthy != healthy ) {
+					lastHealthy = healthy;
 					self->healthyTeamCount += healthy ? 1 : -1;
 
 					ASSERT( self->healthyTeamCount >= 0 );
@@ -1459,7 +1458,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 						.detail("Optimal", optimal)
 						.detail("OptimalTeamCount", self->optimalTeamCount);
 				}
-				lastHealthy = healthy;
 
 				lastServersLeft = serversLeft;
 				lastAnyUndesired = anyUndesired;
@@ -1544,7 +1542,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 				}
 			}
 
-			firstCheck = false;
 			// Wait for any of the machines to change status
 			wait( quorum( change, 1 ) );
 			wait( yield() );

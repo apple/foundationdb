@@ -22,14 +22,14 @@
 #define DatabaseContext_h
 #pragma once
 
-#include "NativeAPI.h"
-#include "KeyRangeMap.h"
-#include "MasterProxyInterface.h"
-#include "ClientDBInfo.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/ClientDBInfo.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "EventTypes.actor.h"
+#include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 
 class LocationInfo : public MultiInterface<StorageServerInterface> {

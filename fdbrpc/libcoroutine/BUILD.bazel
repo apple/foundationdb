@@ -1,0 +1,18 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "libcoroutine",
+    hdrs = [
+        "Base.h",
+        "Common.h",
+        "Coro.h",
+    ],
+    srcs = [
+        "Common.c",
+        "Coro.c",
+        "taskimpl.h"
+    ],
+    deps = [
+        "//flow:libflow",
+    ],
+)

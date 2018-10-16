@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "RYWIterator.h"
-#include "KeyRangeMap.h"
+#include "fdbclient/RYWIterator.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "flow/UnitTest.h"
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = { 

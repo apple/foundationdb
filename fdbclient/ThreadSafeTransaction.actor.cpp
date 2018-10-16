@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "ThreadSafeTransaction.h"
-#include "ReadYourWrites.h"
-#include "DatabaseContext.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseContext.h"
 #include <new>
 
 #ifndef WIN32

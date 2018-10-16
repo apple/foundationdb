@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
-#include "BackupContainer.h"
-#include "DatabaseContext.h"
-#include "ManagementAPI.h"
-#include "Status.h"
-#include "KeyBackedTypes.h"
+#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 #include <ctime>
 #include <climits>

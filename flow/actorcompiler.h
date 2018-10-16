@@ -39,6 +39,7 @@ template <class T> T waitNext( const FutureStream<T>& );
 
 #endif
 
+#include "flow/flow.h"
 #define loop while(true)
 
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list

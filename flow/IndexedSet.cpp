@@ -21,15 +21,15 @@
 // At the moment, this file just contains tests.  IndexedSet<> is a template
 // and so all the important implementation is in the header file
 
-#include "IndexedSet.h"
-#include "IRandom.h"
-#include "ThreadPrimitives.h"
+#include "flow/IndexedSet.h"
+#include "flow/IRandom.h"
+#include "flow/ThreadPrimitives.h"
 #include <algorithm>
 #include <set>
 #include <string>
 #include <cstring>
 #include <deque>
-#include "UnitTest.h"
+#include "flow/UnitTest.h"
 
 template <class Node>
 int ISGetHeight(Node* n){

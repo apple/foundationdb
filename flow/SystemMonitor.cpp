@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow.h"
-#include "Platform.h"
-#include "TDMetric.actor.h"
-#include "SystemMonitor.h"
+#include "flow/flow.h"
+#include "flow/Platform.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/SystemMonitor.h"
 
 #if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
 #include <cxxabi.h>

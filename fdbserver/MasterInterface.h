@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "TLogInterface.h"
+#include "fdbserver/TLogInterface.h"
 
 typedef uint64_t DBRecoveryCount;
 

@@ -1,0 +1,16 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "headers",
+    hdrs = [
+        ":versions.h",
+    ],
+)
+
+genrule(
+    name = "versions",
+    srcs = ["versions.target"],
+    outs = ["versions.h"],
+    cmd = "$(location //maint:versions) $< > $@",
+    tools = ["//maint:versions"],
+)

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupContainer.h"
+#include "fdbclient/BackupContainer.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"

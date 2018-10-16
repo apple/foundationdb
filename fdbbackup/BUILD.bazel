@@ -1,0 +1,17 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+
+fdb_utility_library(
+    name = "fdbbackup",
+    srcs = [
+        "backup.actor.cpp",
+    ],
+    deps = [
+        "//flow:libflow",
+        "//fdbclient:headers",
+        "//fdbclient:libfdbclient",
+        "//fdbrpc:libfdbrpc",
+    ],
+)
+
+# TODO(rescriva): symlink each of these to fdbbackup
+#BACKUP_ALIASES = fdbrestore fdbdr dr_agent backup_agent

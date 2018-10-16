@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "LogSystem.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/ReplicationUtils.h"
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )

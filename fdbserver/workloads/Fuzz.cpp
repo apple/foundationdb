@@ -20,7 +20,7 @@
 
 #include "fdbrpc/ActorFuzz.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 
 struct ActorFuzzWorkload : TestWorkload {
 	bool enabled;

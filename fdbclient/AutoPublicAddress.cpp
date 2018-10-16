@@ -26,7 +26,7 @@
 #define BOOST_REGEX_NO_LIB
 #include "boost/asio.hpp"
 
-#include "CoordinationInterface.h"
+#include "fdbclient/CoordinationInterface.h"
 
 uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs ) {
 	try {

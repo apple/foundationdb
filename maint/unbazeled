@@ -1,0 +1,90 @@
+#!/usr/bin/env python2
+
+import fnmatch
+import os
+import os.path
+import subprocess
+
+# Most configuration should be doable up here
+
+IGNORED_TOPLEVEL_DIRS = [
+    '.git',
+    '.deps',
+    '.objs',
+    # Old build scripts not used for bazel
+    'build',
+    # The layers are unused extensions
+    'layers',
+    # Design docs are built by humans :-)
+    'design',
+    # Maintenance scripts are not from upstream, so no need to track bazelization
+    'maint',
+    # As far as I can tell, this is a dead directory
+    'fdbservice',
+    # TODO(rescriva): Stop ignoring these.
+    # They are ignored right now to cut the search space while the rest of the
+    # system gets bazelized.
+    'bindings',
+    'documentation',
+    'packaging',
+    'recipes',
+    'tests',
+]
+
+IGNORED_BASENAME_PATTERNS = [
+    'local.mk',
+    'generated.mk',
+    '*.vcxproj',
+    '*.vcxproj.filters',
+    '*.csproj',
+    '.gitignore',
+    '*.bazel',
+    '*.bzl',
+]
+
+IGNORED_FILES = [
+    'ACKNOWLEDGEMENTS',
+    '.clang-format',
+    'CODE_OF_CONDUCT.md',
+    'CONTRIBUTING.md',
+    'foundationdb.sln',
+    'LICENSE',
+    'Makefile',
+    'README.md',
+    'WORKSPACE',
+]
+
+# End of the "most configuration" section
+
+IGNORED_FILES = set(IGNORED_FILES)
+
+def unbazeled(repo):
+    for root, dirs, files in os.walk(repo):
+        dirs.sort()
+        files.sort()
+        if root == repo:
+            for d in IGNORED_TOPLEVEL_DIRS:
+                if d in dirs:
+                    dirs.remove(d)
+        for f in files:
+            if f in IGNORED_FILES:
+                continue
+            if any(fnmatch.fnmatch(f, p) for p in IGNORED_BASENAME_PATTERNS):
+                continue
+            f = os.path.relpath(os.path.join(root, f), repo)
+            if subprocess.call(('git', 'check-ignore', '-q', f)) == 0:
+                continue
+            st = subprocess.check_output(('git', 'status', '--porcelain', f),)
+            if st and st[0] == '?':
+                continue
+            try:
+                subprocess.check_output(('bazel', 'query', f),
+                        stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError:
+                yield f
+
+if __name__ == '__main__':
+    maint = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(maint)
+    for p in unbazeled(repo):
+        print p

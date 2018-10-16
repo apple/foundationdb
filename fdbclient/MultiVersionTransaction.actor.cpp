@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "MultiVersionTransaction.h"
-#include "MultiVersionAssignmentVars.h"
-#include "ThreadSafeTransaction.h"
+#include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/MultiVersionAssignmentVars.h"
+#include "fdbclient/ThreadSafeTransaction.h"
 
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"

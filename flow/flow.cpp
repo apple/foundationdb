@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow.h"
+#include "flow/flow.h"
 #include <stdarg.h>
 
 INetwork *g_network = 0;

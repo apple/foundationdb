@@ -1,0 +1,22 @@
+load('//:fdb.bzl', 'fdb_utility_library')
+load('//:fdb.bzl', 'fdb_binary')
+
+fdb_utility_library(
+    name = "headers",
+    hdrs = [
+        "ConvertUTF.h",
+        "SimpleIni.h"
+    ],
+)
+
+fdb_binary(
+    name = "fdbmonitor",
+    srcs = [
+        "fdbmonitor.cpp",
+    ],
+    deps = [
+        ":headers",
+        "//:headers",
+        "//flow:libflow",
+    ],
+)

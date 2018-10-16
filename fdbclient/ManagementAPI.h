@@ -31,11 +31,11 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
-#include "NativeAPI.h"
-#include "Status.h"
-#include "ReadYourWrites.h"
-#include "DatabaseConfiguration.h"
-#include "MonitorLeader.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MonitorLeader.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.

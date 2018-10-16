@@ -19,9 +19,9 @@
  */
 
 
-#include "FileTraceLogWriter.h"
-#include "flow.h"
-#include "ThreadHelper.actor.h"
+#include "flow/FileTraceLogWriter.h"
+#include "flow/flow.h"
+#include "flow/ThreadHelper.actor.h"
 
 #if defined(__unixish__)
 #define __open ::open

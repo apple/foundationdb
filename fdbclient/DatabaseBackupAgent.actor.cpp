@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
+#include "fdbclient/BackupAgent.h"
 #include <ctime>
 #include <climits>
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
-#include "ManagementAPI.h"
-#include "KeyBackedTypes.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 const Key DatabaseBackupAgent::keyAddPrefix = LiteralStringRef("add_prefix");
 const Key DatabaseBackupAgent::keyRemovePrefix = LiteralStringRef("remove_prefix");

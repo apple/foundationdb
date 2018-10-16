@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "IKeyValueStore.h"
-#include "IDiskQueue.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/IDiskQueue.h"
 #include "flow/IndexedSet.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"

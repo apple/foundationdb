@@ -43,7 +43,7 @@
  * See the `UnitTestWorkload` class.
 */
 
-#include "flow.h"
+#include "flow/flow.h"
 
 struct UnitTest {
 	typedef Future<Void>(*TestFunction)();

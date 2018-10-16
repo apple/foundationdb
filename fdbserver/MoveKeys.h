@@ -25,7 +25,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "MasterInterface.h"
+#include "fdbserver/MasterInterface.h"
 
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;

@@ -22,8 +22,8 @@
 #define FDBSERVER_RATEKEEPER_H
 #pragma once
 
-#include "MasterInterface.h"
-#include "TLogInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/TLogInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 
 Future<Void> rateKeeper(

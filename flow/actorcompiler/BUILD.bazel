@@ -1,0 +1,19 @@
+filegroup(
+    name = "sources",
+    srcs = [
+        "ActorCompiler.cs",
+        "ActorParser.cs",
+        "ParseTree.cs",
+        "Program.cs",
+        "Properties/AssemblyInfo.cs",
+    ]
+)
+
+genrule(
+    name = "actorcompiler",
+    srcs = [":sources"],
+    outs = ["actorcompiler.exe"],
+    cmd = "mcs -r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml $(locations :sources) -target:exe -sdk:4 -out:\"$@\"",
+    executable = True,
+    visibility = ["//visibility:public"],
+)

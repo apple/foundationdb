@@ -168,12 +168,17 @@ void Coro_setStackSize_(Coro *self, size_t sizeInBytes)
 uint8_t *Coro_CurrentStackPointer(void) __attribute__ ((noinline));
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreturn-local-addr"
+
 uint8_t *Coro_CurrentStackPointer(void)
 {
 	uint8_t a;
 	uint8_t *b = &a; // to avoid compiler warning about unused variables
 	return b;
 }
+
+#pragma GCC diagnostic pop
 
 size_t Coro_bytesLeftOnStack(Coro *self)
 {

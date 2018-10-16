@@ -22,10 +22,10 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
-#include "ClusterRecruitmentInterface.h"
-#include "MasterInterface.h"
-#include "LogSystemConfig.h"
-#include "RecoveryState.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/RecoveryState.h"
 
 struct ServerDBInfo {
 	// This structure contains transient information which is broadcast to all workers for a database,
