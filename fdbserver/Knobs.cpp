@@ -42,6 +42,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL,               30 );
 	init( UNFLUSHED_DATA_RATIO,                                 0.05 ); if( randomize && BUGGIFY ) UNFLUSHED_DATA_RATIO = 0.0;
 	init( DESIRED_TOTAL_BYTES,                                150000 ); if( randomize && BUGGIFY ) DESIRED_TOTAL_BYTES = 10000;
+	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
+	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( RECOVERY_DATA_BYTE_LIMIT,                           100000 );
