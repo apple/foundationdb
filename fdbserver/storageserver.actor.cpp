@@ -1487,17 +1487,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 		// Expand the clear
 		const auto& d = data.atLatest();
 
-		// Up through 2.0.3, when a clear of a single key is
-		// translated to a single key range, if the key exceeded the
-		// key size limit the begin and end of the range will be
-		// equal. We need to be able to recover from a database that
-		// was left in this state as long as we're supporting upgrades
-		// from 2.0.3 or earlier.
-		if ( (m.param1.size() == CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) && (m.param2 == m.param1) ) {
-			return false;
-		}
-		ASSERT( m.param2 > m.param1 );
-
 		// If another clear overlaps the beginning of this one, engulf it
 		auto i = d.lastLess(m.param1);
 		if (i && i->isClearTo() && i->getEndKey() >= m.param1)
@@ -1519,7 +1508,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 			else
 				m.param2 = i.key();
 		}
-		ASSERT( m.param2 > m.param1 );
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
