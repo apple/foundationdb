@@ -580,7 +580,7 @@ ACTOR Future<Void> commitBatch(
 			state int mutationNum = 0;
 			state VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 			for (; mutationNum < pMutations->size(); mutationNum++) {
-				if(yieldBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					yieldBytes = 0;
 					Void _ = wait(yield());
 				}
