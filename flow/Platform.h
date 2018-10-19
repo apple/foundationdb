@@ -565,4 +565,10 @@ EXTERNC void setProfilingEnabled(int enabled);
 #error Clean builds must define NDEBUG, and not define various debug macros
 #endif
 
+#ifdef _WIN32
+int ctzll( uint64_t value );
+#else
+#define ctzll __builtin_ctzll
+#endif
+
 #endif /* FLOW_PLATFORM_H */

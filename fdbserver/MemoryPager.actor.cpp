@@ -23,6 +23,7 @@
 
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h"
 
 typedef uint8_t* PhysicalPageID;
 typedef std::vector<std::pair<Version, PhysicalPageID>> PageVersionMap;

@@ -34,6 +34,7 @@
 #include "PrefixTree.h"
 #include <string.h>
 #include <boost/asio.hpp>
+#include "flow/actorcompiler.h"
 
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
 template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
@@ -44,11 +45,13 @@ template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const 
 struct BTreePage {
 	enum EPageFlags { IS_LEAF = 1};
 
+#pragma pack(push,4)
 	uint8_t flags;
 	uint16_t count;
 	uint32_t kvBytes;
 	uint8_t extensionPageCount;
 	LogicalPageID extensionPages[0];
+#pragma pack(pop)
 
 	PrefixTree & tree() {
 		return *(PrefixTree *)(extensionPages + extensionPageCount);
@@ -106,7 +109,7 @@ struct BTreePage {
 
 		return r;
 	}
-} __attribute__((packed, aligned(4)));
+};
 
 static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize) {
 	BTreePage *btpage = (BTreePage *)page->begin();
