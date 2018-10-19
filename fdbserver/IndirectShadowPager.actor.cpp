@@ -22,6 +22,7 @@
 #include "Knobs.h"
 
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h"
 
 struct SumType {
 	bool operator==(const SumType &rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }

@@ -35,7 +35,7 @@ static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int c
 		register Word a = *(Word *)ap;
 		register Word b = *(Word *)bp;
 		if(a != b) {
-			return i + __builtin_ctzll(a ^ b) / 8;
+			return i + ctzll(a ^ b) / 8;
 		}
 		ap += sizeof(Word);
 		bp += sizeof(Word);
@@ -62,6 +62,7 @@ static int lessOrEqualPowerOfTwo(int n) {
 	return p;
 }
 
+/*
 static int _lessOrEqualPowerOfTwo(uint32_t n) {
 	if(n == 0)
 		return n;
@@ -77,6 +78,7 @@ static int __lessOrEqualPowerOfTwo(unsigned int n) {
 	for(; p <= n; p <<= 1);
 	return p >> 1;
 }
+*/
 
 static int perfectSubtreeSplitPoint(int subtree_size) {
 	// return the inorder index of the root node in a subtree of the given size
@@ -320,11 +322,12 @@ struct PrefixTree {
 		inline int getKeySize() const {
 			return Parser(this).keyLen();
 		}
+	};
 
-	} __attribute__((packed, aligned(1)));
-
+#pragma pack(push,1)
 	uint16_t size;   // size in bytes
 	Node root;
+#pragma pack(pop)
 
 	static inline int GetHeaderSize() {
 		return sizeof(PrefixTree) - sizeof(root);
@@ -595,7 +598,7 @@ public:
 			while(1) {
 				const PathEntry &p = pathBack();
 				const Node *right = p.parser.rightChild();
-				_mm_prefetch(right, _MM_HINT_T0);
+				_mm_prefetch((const char*)right, _MM_HINT_T0);
 
 				int cmp = p.compareToKey(s);
 				if(cmp == 0)
@@ -1043,5 +1046,4 @@ printf("parser: headerLen %d prefixLen %d leftPos %d rightPos %d split %s suffix
 */
 		return p8 - (uint8_t *)&root;
 	}
-
-} __attribute__((packed, aligned(1)));
+};
