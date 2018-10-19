@@ -154,14 +154,6 @@ using std::endl;
 __int64 FiletimeAsInt64 (FILETIME &t){
 	return *(__int64*)&t;
 }
-
-int ctzll( uint64_t value ) {
-    unsigned long count = 0;
-    if( _BitScanForward64( &count, value ) ) {
-        return count;
-    }
-    return 64;
-}
 #endif
 
 #ifdef _WIN32
