@@ -718,9 +718,9 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 	commitActors = actorCollection( addActor.getFuture() );
 }
 
-IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit ) {
+IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
-	IDiskQueue *log = openDiskQueue( basename, logID );
+	IDiskQueue *log = openDiskQueue( basename, ext, logID);
 	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
 }
 

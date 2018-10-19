@@ -157,6 +157,7 @@ struct StorageServerDisk {
 	void writeKeyValue( KeyValueRef kv );
 	void clearRange( KeyRangeRef keys );
 
+	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
@@ -3325,6 +3326,9 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
+		wait( self.storage.init() );
+		wait( self.storage.commit() );
+
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;

@@ -165,6 +165,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MOVEKEYS_LOCK_POLLING_DELAY,                           5.0 );
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
 
+	// Redwood Storage Engine
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                     0 );
+
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
 	init( READ_VALUE_TIME_ESTIMATE,                           .00005 );
@@ -394,6 +398,14 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
+
+	// IPager
+	init( PAGER_RESERVED_PAGES,                                    1 );
+
+	// IndirectShadowPager
+	init( FREE_PAGE_VACUUM_THRESHOLD,                              1 );
+	init( VACUUM_QUEUE_SIZE,                                  100000 );
+	init( VACUUM_BYTES_PER_SECOND,                               1e6 );
 
 	// Timekeeper
 	init( TIME_KEEPER_DELAY,                                      10 );

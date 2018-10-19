@@ -78,7 +78,7 @@ struct StorageMetricSample {
 	}
 };
 
-TEST_CASE("fdbserver/StorageMetricSample/simple") {
+TEST_CASE("/fdbserver/StorageMetricSample/simple") {
 	StorageMetricSample s( 1000 );
 	s.sample.insert(LiteralStringRef("Apple"), 1000);
 	s.sample.insert(LiteralStringRef("Banana"), 2000);

@@ -86,7 +86,7 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 	}
 }
 
-TEST_CASE("flow/compressed_ints") {
+TEST_CASE("/flow/compressed_ints") {
 	testCompressedInt<int>(-2, LiteralStringRef("\x7e"));
 	testCompressedInt<int>(-1, LiteralStringRef("\x7f"));
 	testCompressedInt<int>(0, LiteralStringRef("\x80"));

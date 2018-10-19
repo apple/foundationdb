@@ -398,7 +398,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 	return Void();
 }
 
-TEST_CASE("fdbserver/metrics/TraceEvents") {
+TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	auto getenv2 = [](const char *s) -> const char * {s = getenv(s); return s ? s : ""; };
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");

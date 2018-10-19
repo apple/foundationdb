@@ -170,9 +170,7 @@ uint8_t *Coro_CurrentStackPointer(void) __attribute__ ((noinline));
 
 uint8_t *Coro_CurrentStackPointer(void)
 {
-	uint8_t a;
-	uint8_t *b = &a; // to avoid compiler warning about unused variables
-	return b;
+	return __builtin_frame_address(0);
 }
 
 size_t Coro_bytesLeftOnStack(Coro *self)

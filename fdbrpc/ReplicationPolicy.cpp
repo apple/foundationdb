@@ -451,7 +451,7 @@ void testReplicationPolicy(int nTests) {
 	testPolicySerialization(policy);
 }
 
-TEST_CASE("ReplicationPolicy/Serialization") {
+TEST_CASE("/ReplicationPolicy/Serialization") {
 	testReplicationPolicy(1);
 	return Void();
 }

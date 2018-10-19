@@ -86,6 +86,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		storeType= KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
+	} else if (mode == "ssd-redwood-experimental") {
+		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "memory") {
 		storeType= KeyValueStoreType::MEMORY;
 	}
@@ -1551,7 +1553,7 @@ bool schemaMatch( StatusObject const schema, StatusObject const result, std::str
 	}
 }
 
-TEST_CASE("ManagementAPI/AutoQuorumChange/checkLocality") {
+TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	wait(Future<Void>(Void()));
 
 	std::vector<ProcessData> workers;

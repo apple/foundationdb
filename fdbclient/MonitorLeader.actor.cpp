@@ -186,7 +186,7 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 		throw connection_string_invalid();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 	std::string input;
 
 	{
@@ -215,7 +215,7 @@ TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/fuzz") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	// For a static connection string, add in fuzzed comments and whitespace
 	// SOMEDAY: create a series of random connection strings, rather than the one we started with
 	std::string connectionString = "0xxdeadbeef:100100100@1.1.1.1:34534,5.1.5.3:23443";

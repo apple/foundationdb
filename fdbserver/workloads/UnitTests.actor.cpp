@@ -113,7 +113,7 @@ struct UnitTestWorkload : TestWorkload {
 
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
-TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
+TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));
 	return Void();
 }

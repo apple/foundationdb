@@ -2455,7 +2455,7 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 	return collection;
 }
 
-TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
+TEST_CASE("/DataDistribution/AddAllTeams/isExhaustive") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
 
@@ -2488,7 +2488,7 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	return Void();
 }
 
-TEST_CASE("DataDistribution/AddAllTeams/withLimit") {
+TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
 
@@ -2519,7 +2519,7 @@ TEST_CASE("DataDistribution/AddAllTeams/withLimit") {
 	return Void();
 }
 
-TEST_CASE("DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
+TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	wait(Future<Void>(Void()));
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
@@ -2542,7 +2542,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	return Void();
 }
 
-TEST_CASE("DataDistribution/AddTeamsBestOf/NotEnoughServers") {
+TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	wait(Future<Void>(Void()));
 
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
