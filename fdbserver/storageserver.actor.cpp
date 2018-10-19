@@ -1488,17 +1488,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 		// Expand the clear
 		const auto& d = data.atLatest();
 
-		// Up through 2.0.3, when a clear of a single key is
-		// translated to a single key range, if the key exceeded the
-		// key size limit the begin and end of the range will be
-		// equal. We need to be able to recover from a database that
-		// was left in this state as long as we're supporting upgrades
-		// from 2.0.3 or earlier.
-		if ( (m.param1.size() == CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) && (m.param2 == m.param1) ) {
-			return false;
-		}
-		ASSERT( m.param2 > m.param1 );
-
 		// If another clear overlaps the beginning of this one, engulf it
 		auto i = d.lastLess(m.param1);
 		if (i && i->isClearTo() && i->getEndKey() >= m.param1)
@@ -1520,7 +1509,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 			else
 				m.param2 = i.key();
 		}
-		ASSERT( m.param2 > m.param1 );
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
@@ -1825,10 +1813,17 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		++data->counters.fetchWaitingCount;
 		data->counters.fetchWaitingMS += 1000*(executeStart - startt);
 
-		wait(delay(0));
+		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated until all mutations for a version
+		// have been processed. We need to take the durableVersionLock to ensure data->version is greater than the version of the mutation which caused
+		// the fetch to be initiated.
+		wait( data->durableVersionLock.take() );
 
 		shard->phase = AddingShard::Fetching;
 		state Version fetchVersion = data->version.get();
+
+		data->durableVersionLock.release();
+
+		wait(delay(0));
 
 		TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID).detail("FKID", interval.pairID).detail("Version", fetchVersion);
 
@@ -2268,6 +2263,7 @@ bool containsRollback( VersionUpdateRef const& changes, Version& rollbackVersion
 
 class StorageUpdater {
 public:
+	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false) {}
 	StorageUpdater(Version fromVersion, Version restoredVersion) : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
@@ -2472,26 +2468,43 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
+		state StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
 
 		state bool injectedChanges = false;
-		for(auto& c : fii.changes) {
-			for(auto& m : c.mutations) {
-				updater.applyMutation(data, m, c.version);
+		state int changeNum = 0;
+		state int mutationBytes = 0;
+		for(; changeNum < fii.changes.size(); changeNum++) {
+			state int mutationNum = 0;
+			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
+			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
+				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
+				if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+					mutationBytes = 0;
+					wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+				}
 			}
 		}
 
-		Version ver = invalidVersion;
+		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		//TraceEvent("SSUpdatePeeked", data->thisServerID).detail("FromEpoch", data->updateEpoch).detail("FromSeq", data->updateSequence).detail("ToEpoch", results.end_epoch).detail("ToSeq", results.end_seq).detail("MsgSize", results.messages.size());
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			auto &rd = *cloneCursor2->reader();
+			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+				mutationBytes = 0;
+				//Instead of just yielding, leave time for the storage server to respond to reads
+				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+			}
 
-			if (cloneCursor2->version().version > ver) ASSERT(cloneCursor2->version().version > data->version.get());
+			if (cloneCursor2->version().version > ver) {
+				ASSERT(cloneCursor2->version().version > data->version.get());
+			}
+
+			auto &rd = *cloneCursor2->reader();
 
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
@@ -2515,7 +2528,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 						TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
 
 					updater.applyMutation(data, msg, ver);
-
+					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
 					++data->counters.mutations;
 					switch(msg.type) {
@@ -2646,17 +2659,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
-		// are applied after we change the durable version.
+		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
+		// because otherwise the latest version of mutableData might be partially loaded.
 		wait( data->durableVersionLock.take() );
-		data->durableVersionLock.release();
-
-		wait( delay(0, TaskUpdateStorage) );
-
 		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
-			wait( yield(TaskUpdateStorage) );
+			if(g_network->check_yield(TaskUpdateStorage)) {
+				data->durableVersionLock.release();
+				wait(delay(0, TaskUpdateStorage));
+				wait( data->durableVersionLock.take() );
+			}
 		}
+
+		data->durableVersionLock.release();
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
