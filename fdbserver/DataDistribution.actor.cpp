@@ -1382,12 +1382,13 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 	state bool firstCheck = true;
 
 	wait( yield() );
-	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
+	if(!wrongSize) {
+		TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
+	}
 	self->priority_teams[team->getPriority()]++;
 
 	try {
 		loop {
-			TraceEvent("TeamHealthChangeDetected", self->masterId).detail("IsReady", self->initialFailureReactionDelay.isReady() );
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
 			auto servers = team->getServerIDs();
@@ -1436,11 +1437,13 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 				lastOptimal = optimal;
 			}
 
-			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
-				TraceEvent("TeamHealthChanged", self->masterId)
-					.detail("Team", team->getDesc()).detail("ServersLeft", serversLeft)
-					.detail("LastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
-					.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
+			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || recheck ) {
+				if(!wrongSize) {
+					TraceEvent("TeamHealthChanged", self->masterId)
+						.detail("Team", team->getDesc()).detail("ServersLeft", serversLeft)
+						.detail("LastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
+						.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
+				}
 
 				team->setWrongConfiguration( anyWrongConfiguration );
 
@@ -1473,7 +1476,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 				lastServersLeft = serversLeft;
 				lastAnyUndesired = anyUndesired;
 				lastWrongConfiguration = anyWrongConfiguration;
-				wrongSize = false;
 
 				state int lastPriority = team->getPriority();
 				if( serversLeft < self->configuration.storageTeamSize ) {
@@ -1498,7 +1500,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 					self->priority_teams[team->getPriority()]++;
 				}
 
-				TraceEvent("TeamPriorityChange", self->masterId).detail("Priority", team->getPriority());
+				if(!wrongSize) {
+					TraceEvent("TeamPriorityChange", self->masterId).detail("Priority", team->getPriority());
+				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
 				if( self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get() ) {
@@ -1549,7 +1553,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> te
 						}
 					}
 				} else {
-					TraceEvent("TeamHealthNotReady", self->masterId).detail("HealthyTeamCount", self->healthyTeamCount);
+					if(!wrongSize) {
+						TraceEvent("TeamHealthNotReady", self->masterId).detail("HealthyTeamCount", self->healthyTeamCount);
+					}
 				}
 			}
 
