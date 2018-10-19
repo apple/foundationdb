@@ -27,8 +27,8 @@
 #include <boost/preprocessor/assert_msg.hpp>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
-#include "Platform.h"
-#include "Knobs.h"
+#include "flow/Platform.h"
+#include "flow/Knobs.h"
 
 enum { invalid_error_code = 0xffff };
 

@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "ManagementAPI.h"
+#include "fdbclient/ManagementAPI.h"
 
-#include "SystemData.h"
-#include "NativeAPI.h"
-#include "CoordinationInterface.h"
-#include "DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
-#include "StatusClient.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"

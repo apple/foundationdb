@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "IDiskQueue.h"
-#include "LogSystem.h"
-#include "LogSystemDiskQueueAdapter.h"
-#include "Knobs.h"
+#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/Knobs.h"
 
 class LogSystemDiskQueueAdapterImpl {
 public:

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/Locality.h"
 
 ServerKnobs const* SERVER_KNOBS = new ServerKnobs();

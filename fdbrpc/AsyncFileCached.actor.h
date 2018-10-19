@@ -23,12 +23,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILECACHED_ACTOR_G_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_G_H
-	#include "AsyncFileCached.actor.g.h"
+	#include "fdbrpc/AsyncFileCached.actor.g.h"
 #elif !defined(FLOW_ASYNCFILECACHED_ACTOR_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
 #include "flow/flow.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"

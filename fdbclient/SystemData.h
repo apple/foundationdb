@@ -24,8 +24,8 @@
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
-#include "FDBTypes.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]

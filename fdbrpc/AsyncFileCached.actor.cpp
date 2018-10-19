@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 
 //Page caches used in non-simulated environments
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;

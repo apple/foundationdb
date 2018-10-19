@@ -24,7 +24,7 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct StorageMetricSample {

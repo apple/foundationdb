@@ -23,8 +23,8 @@
 #define FLOW_FILE_TRACE_LOG_WRITER_H
 #pragma once
 
-#include "FastRef.h"
-#include "Trace.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 
 #include <functional>
 

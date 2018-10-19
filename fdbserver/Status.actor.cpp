@@ -18,19 +18,19 @@
  * limitations under the License.
  */
 
-#include "Status.h"
+#include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
 #include <time.h>
-#include "CoordinationInterface.h"
-#include "DataDistribution.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/DataDistribution.h"
 #include "flow/UnitTest.h"
-#include "QuietDatabase.h"
-#include "RecoveryState.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

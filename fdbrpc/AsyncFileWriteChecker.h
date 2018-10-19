@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 
 #if VALGRIND
 #include <memcheck.h>

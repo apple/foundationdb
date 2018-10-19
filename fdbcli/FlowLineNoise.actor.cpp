@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "FlowLineNoise.h"
+#include "fdbcli/FlowLineNoise.h"
 #include "flow/IThreadPool.h"
 
 #define BOOST_SYSTEM_NO_LIB
@@ -30,7 +30,7 @@
 
 #if __unixish__
     #define HAVE_LINENOISE 1
-    #include "linenoise/linenoise.h"
+    #include "fdbcli/linenoise/linenoise.h"
 #else
     #define HAVE_LINENOISE 0
 #endif

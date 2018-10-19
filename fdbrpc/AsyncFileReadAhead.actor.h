@@ -23,12 +23,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_ASYNCFILEREADAHEAD_ACTOR_G_H)
 	#define FDBRPC_ASYNCFILEREADAHEAD_ACTOR_G_H
-	#include "AsyncFileReadAhead.actor.g.h"
+	#include "fdbrpc/AsyncFileReadAhead.actor.g.h"
 #elif !defined(FDBRPC_ASYNCFILEREADAHEAD_ACTOR_H)
 	#define FDBRPC_ASYNCFILEREADAHEAD_ACTOR_H
 
 #include "flow/flow.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range requested

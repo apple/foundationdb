@@ -20,9 +20,9 @@
 
 #include "fdbserver/QuietDatabase.h"
 
-#include "workloads.h"
-#include "ApiWorkload.h"
-#include "MemoryKeyValueStore.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/ApiWorkload.h"
+#include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enum of API operation types used in the random test

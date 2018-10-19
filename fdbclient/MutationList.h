@@ -22,8 +22,8 @@
 #define FLOW_FDBCLIENT_MUTATIONLIST_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/CommitTransaction.h"
 
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and

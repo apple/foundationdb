@@ -22,8 +22,8 @@
 #define FDBSERVER_INDIRECTSHADOWPAGER_H
 #pragma once
 
-#include "IKeyValueStore.h"
-#include "IPager.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/IPager.h"
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"

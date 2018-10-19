@@ -22,8 +22,8 @@
 #define FLOW_SYSTEM_MONITOR_H
 #pragma once
 
-#include "Platform.h"
-#include "TDMetric.actor.h"
+#include "flow/Platform.h"
+#include "flow/TDMetric.actor.h"
 
 struct SystemMonitorMachineState {
 	Optional<std::string> folder;

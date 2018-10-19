@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "HTTP.h"
-#include "md5/md5.h"
-#include "libb64/encode.h"
+#include "fdbrpc/HTTP.h"
+#include "fdbrpc/md5/md5.h"
+#include "fdbrpc/libb64/encode.h"
 #include <cctype>
-#include "xml2json.hpp"
+#include "fdbrpc/xml2json.hpp"
 
 namespace HTTP {
 

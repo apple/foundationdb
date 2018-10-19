@@ -26,11 +26,11 @@
 #include "flow/IDispatched.h"
 #include "flow/genericactors.actor.h"
 
-#include "FDBTypes.h"
-#include "NativeAPI.h"
-#include "RunTransaction.actor.h"
-#include "Subspace.h"
-#include "KeyBackedTypes.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/Subspace.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 class FutureBucket;
 class TaskFuture;

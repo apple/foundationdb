@@ -23,7 +23,7 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ORDERER_ACTOR_G_H)
 	#define FDBSERVER_ORDERER_ACTOR_G_H
-	#include "Orderer.actor.g.h"
+	#include "fdbserver/Orderer.actor.g.h"
 #elif !defined(FDBSERVER_ORDERER_ACTOR_H)
 	#define FDBSERVER_ORDERER_ACTOR_H
 

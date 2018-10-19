@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 
 class IDiskQueue : public IClosable {
 public:

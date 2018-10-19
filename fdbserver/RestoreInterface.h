@@ -24,7 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
-#include "CoordinationInterface.h"
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 
 struct RestoreInterface {

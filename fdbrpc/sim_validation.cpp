@@ -19,7 +19,7 @@
  */
 
 #include "sim_validation.h"
-#include "TraceFileIO.h"
+#include "fdbrpc/TraceFileIO.h"
 #include "flow/network.h"
 #include "fdbrpc/simulator.h"
 

@@ -23,18 +23,18 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
 	#define FLOW_LOADBALANCE_ACTOR_G_H
-	#include "LoadBalance.actor.g.h"
+	#include "fdbrpc/LoadBalance.actor.g.h"
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 	#define FLOW_LOADBALANCE_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
-#include "FailureMonitor.h"
-#include "fdbrpc.h"
-#include "Locality.h"
-#include "QueueModel.h"
-#include "MultiInterface.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/QueueModel.h"
+#include "fdbrpc/MultiInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;

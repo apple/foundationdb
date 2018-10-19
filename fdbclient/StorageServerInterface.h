@@ -22,7 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"

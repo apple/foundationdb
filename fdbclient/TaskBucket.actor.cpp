@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "TaskBucket.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/TaskBucket.h"
+#include "fdbclient/ReadYourWrites.h"
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "ReplicationTypes.h"
+#include "fdbrpc/ReplicationTypes.h"
 
 // Map of attribute hash to name
 const std::vector<LocalityEntry>		emptyEntryArray;

@@ -23,12 +23,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_G_H)
 	#define FDBCLIENT_RUNTRANSACTION_ACTOR_G_H
-	#include "RunTransaction.actor.g.h"
+	#include "fdbclient/RunTransaction.actor.g.h"
 #elif !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_H)
 	#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
 
 #include "flow/flow.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template < class Function >

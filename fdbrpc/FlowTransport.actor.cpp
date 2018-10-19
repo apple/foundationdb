@@ -19,15 +19,15 @@
  */
 
 #include "flow/flow.h"
-#include "FlowTransport.h"
-#include "genericactors.actor.h"
-#include "fdbrpc.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/fdbrpc.h"
 #include "flow/Net2Packet.h"
 #include "flow/ActorCollection.h"
 #include "flow/TDMetric.actor.h"
-#include "FailureMonitor.h"
-#include "crc32c.h"
-#include "simulator.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/crc32c.h"
+#include "fdbrpc/simulator.h"
 
 #if VALGRIND
 #include <memcheck.h>

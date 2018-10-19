@@ -38,7 +38,7 @@
 
 #include "flow/SimpleOpt.h"
 
-#include "FlowLineNoise.h"
+#include "fdbcli/FlowLineNoise.h"
 
 #include <signal.h>
 

@@ -25,7 +25,7 @@
 
 #include "flow/Platform.h"
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 
 struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	Reference<IConnection> conn;
