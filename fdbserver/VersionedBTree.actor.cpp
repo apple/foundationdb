@@ -33,7 +33,6 @@
 #include "IKeyValueStore.h"
 #include "PrefixTree.h"
 #include <string.h>
-#include <boost/asio.hpp>
 #include "flow/actorcompiler.h"
 
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
