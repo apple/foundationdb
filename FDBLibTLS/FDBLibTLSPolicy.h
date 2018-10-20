@@ -23,11 +23,11 @@
 
 #pragma once
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSVerify.h"
+#include "FDBLibTLS/FDBLibTLSPlugin.h"
+#include "FDBLibTLS/FDBLibTLSVerify.h"
 
 #include <string>
 #include <vector>
