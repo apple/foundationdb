@@ -151,7 +151,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
 
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
+#endif
 
 	SO_END_OF_OPTIONS
 };
@@ -538,7 +540,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError,"dumpDatabaseError").error(e).detail("Filename", outputFilename);
+		TraceEvent(SevError,"DumpDatabaseError").error(e).detail("Filename", outputFilename);
 		throw;
 	}
 }
@@ -624,9 +626,12 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
-		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
+		   "                 Machine class (valid options are storage, transaction,\n"
+		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
+		   "                 and cluster_controller).\n");
+#ifndef TLS_DISABLED
 	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
 	if( devhelp ) {
@@ -812,7 +817,7 @@ int main(int argc, char* argv[]) {
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-		
+
 		std::string commandLine;
 		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
@@ -848,7 +853,7 @@ int main(int argc, char* argv[]) {
 		std::string testServersStr;
 		NetworkAddress publicAddress, listenAddress;
 		const char *targetKey = NULL;
-		uint64_t memLimit = 8LL << 30;
+		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
 		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
@@ -1190,14 +1195,9 @@ int main(int argc, char* argv[]) {
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
 					break;
+#ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
-					try {
-						tlsOptions->set_plugin_name_or_path( args.OptionArg() );
-					} catch (Error& e) {
-						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
+					args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
@@ -1214,6 +1214,7 @@ int main(int argc, char* argv[]) {
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers.push_back(args.OptionArg());
 					break;
+#endif
 			}
 		}
 
@@ -1388,7 +1389,9 @@ int main(int argc, char* argv[]) {
 		CLIENT_KNOBS = clientKnobs;
 
 		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
-
+		if (role != Simulation) {
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+		}
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
@@ -1406,6 +1409,7 @@ int main(int argc, char* argv[]) {
 				throw;
 			}
 		}
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1458,7 +1462,7 @@ int main(int argc, char* argv[]) {
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		TraceEvent::setNetworkThread();
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
@@ -1470,6 +1474,7 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
+#ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
 				tlsOptions->set_cert_file( tlsCertPath );
 			if (tlsCAPath.size())
@@ -1484,14 +1489,14 @@ int main(int argc, char* argv[]) {
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
 			tlsOptions->register_network();
-
+#endif
 			if (role == FDBD || role == NetworkTestServer) {
 				try {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
 					if (listenError.isReady()) listenError.get();
 				} catch (Error& e) {
 					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s\n", publicAddress.toString().c_str(), listenAddress.toString().c_str());
+					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1597,7 +1602,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1637,11 +1642,19 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter( KVFileCheck(kvFile, true) );
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
-			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
-			g_network->run();
+			Optional<Void> result;
+			try {
+				GenerateIOLogChecksumFile(kvFile);
+				result = Void();
+			}
+			catch(Error &e) {
+				fprintf(stderr, "Fatal Error: %s\n", e.what());
+			}
+
+			f = result;
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
@@ -1773,7 +1786,7 @@ int main(int argc, char* argv[]) {
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}

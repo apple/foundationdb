@@ -31,8 +31,48 @@ typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
-typedef int16_t Tag;
 typedef int64_t Generation;
+
+enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
+
+#pragma pack(push, 1)
+struct Tag {
+	int8_t locality;
+	uint16_t id;
+
+	Tag() : locality(tagLocalitySpecial), id(0) {}
+	Tag(int8_t locality, uint16_t id) : locality(locality), id(id) {}
+
+	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
+	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
+	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	std::string toString() const {
+		return format("%d:%d", locality, id);
+	}
+
+	template <class Ar>
+	force_inline void serialize_unversioned(Ar& ar) { 
+		ar & locality & id;
+	}
+};
+#pragma pack(pop)
+
+template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
+
+static const Tag invalidTag {tagLocalitySpecial, 0};
+static const Tag txsTag {tagLocalitySpecial, 1};
+
+enum { txsTagOld = -1, invalidTagOld = -100 };
+
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+
+	TagsAndMessage() {}
+	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+};
 
 struct KeyRangeRef;
 struct KeyValueRef;
@@ -44,6 +84,10 @@ void uniquify( Collection& c ) {
 }
 
 static std::string describe( const Tag item ) {
+	return format("%d:%d", item.locality, item.id);
+}
+
+static std::string describe( const int item ) {
 	return format("%d", item);
 }
 
@@ -51,6 +95,7 @@ template <class T>
 static std::string describe( T const& item ) {
 	return item.toString();
 }
+
 template <class K, class V>
 static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
@@ -212,10 +257,9 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+typedef Standalone<struct KeySelectorRef> KeySelector; 
 
 enum { invalidVersion = -1, latestVersion = -2 };
-enum { invalidTag = -100, txsTag = -1 };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))
@@ -554,5 +598,42 @@ struct AddressExclusion {
 static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
+
+struct ClusterControllerPriorityInfo {
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+		if(!dcPriority.size()) {
+			return FitnessUnknown;
+		} else if(dcPriority.size() == 1) {
+			if(dcId == dcPriority[0]) {
+				return FitnessPreferred;
+			} else {
+				return FitnessUnknown;
+			}
+		} else {
+			if(dcId == dcPriority[0]) {
+				return FitnessPrimary;
+			} else if(dcId == dcPriority[1]) {
+				return FitnessRemote;
+			} else {
+				return FitnessBad;
+			}
+		}
+	}
+
+	uint8_t processClassFitness;
+	bool isExcluded;
+	uint8_t dcFitness;
+
+	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+
+	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & processClassFitness & isExcluded & dcFitness;
+	}
+};
 
 #endif

@@ -53,7 +53,6 @@ struct MoveKeysWorkload : TestWorkload {
 		if( self->enabled ) {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
-			state Future<Void> disabler = disableConnectionFailuresAfter(300, "moveKeys");
 			loop {
 				try {
 					Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, 1000) );
@@ -68,7 +67,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 			state int oldMode = wait( setDDMode( cx, 0 ) );
 			TraceEvent("RMKStartModeSetting");
-			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "moveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
+			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
 			int _ = wait( setDDMode( cx, oldMode ) );
@@ -135,9 +134,7 @@ struct MoveKeysWorkload : TestWorkload {
 			
 		try {
 			state Promise<Void> signal;
-			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, lock, 
-										self->configuration.durableStorageQuorum, 
-										signal, &fl1, &fl2, relocateShardInterval.pairID ) );
+			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, invalidVersion, false, relocateShardInterval.pairID ) );
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {
@@ -163,7 +160,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure( Database cx, MoveKeysWorkload *self ) {
 		ASSERT( g_network->isSimulated() );
 		loop {
-			if( g_simulator.killMachine( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, false, true ) )
+			if( g_simulator.killMachine( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
 				return Void();
 			Void _ = wait( delay(1.0) );
 		}
@@ -175,6 +172,10 @@ struct MoveKeysWorkload : TestWorkload {
 		state double lastTime = now();
 
 		ASSERT( self->configuration.storageTeamSize > 0 );
+
+		if(self->configuration.usableRegions > 1) { //FIXME: add support for generating random teams across DCs
+			return Void();
+		}
 
 		loop { 
 			try {

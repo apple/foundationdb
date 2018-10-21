@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 520
+ #define FDB_API_VERSION 600
  #include <foundationdb/fdb_c.h>
  #include <stdlib.h>
 */
@@ -109,7 +109,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
 //
-// Currently, this package supports API versions 200 through 520.
+// Currently, this package supports API versions 200 through 600.
 //
 // Warning: When using the multi-version client API, setting an API version that
 // is not supported by a particular client library will prevent that client from
@@ -117,7 +117,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 520
+	headerVersion := 600
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -129,7 +129,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 520 {
+	if version < 200 || version > 600 {
 		return errAPIVersionNotSupported
 	}
 
@@ -165,9 +165,8 @@ func IsAPIVersionSelected() bool {
 func GetAPIVersion() (int, error) {
 	if IsAPIVersionSelected() {
 		return apiVersion, nil
-	} else {
-		return 0, errAPIVersionUnset
 	}
+	return 0, errAPIVersionUnset
 }
 
 // MustAPIVersion is like APIVersion but panics if the API version is not
@@ -193,12 +192,17 @@ var apiVersion int
 var networkStarted bool
 var networkMutex sync.Mutex
 
+type DatabaseId struct {
+	clusterFile string
+	dbName      string
+}
+
 var openClusters map[string]Cluster
-var openDatabases map[string]Database
+var openDatabases map[DatabaseId]Database
 
 func init() {
 	openClusters = make(map[string]Cluster)
-	openDatabases = make(map[string]Database)
+	openDatabases = make(map[DatabaseId]Database)
 }
 
 func startNetwork() error {
@@ -288,13 +292,13 @@ func Open(clusterFile string, dbName []byte) (Database, error) {
 		openClusters[clusterFile] = cluster
 	}
 
-	db, ok := openDatabases[string(dbName)]
+	db, ok := openDatabases[DatabaseId{clusterFile, string(dbName)}]
 	if !ok {
 		db, e = cluster.OpenDatabase(dbName)
 		if e != nil {
 			return Database{}, e
 		}
-		openDatabases[string(dbName)] = db
+		openDatabases[DatabaseId{clusterFile, string(dbName)}] = db
 	}
 
 	return db, nil

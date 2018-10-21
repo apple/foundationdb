@@ -49,7 +49,7 @@ Future<bool> checkRangeSimpleValueSize( Database cx, T* workload, uint64_t begin
 			Void _ = wait( success( first ) && success( last ) );
 			return first.get().present() && last.get().present();
 		} catch (Error& e) {
-			TraceEvent("CheckRangeError").detail("Begin", begin).detail("End", end).error(e);
+			TraceEvent("CheckRangeError").error(e).detail("Begin", begin).detail("End", end);
 			Void _ = wait( tr.onError(e) );
 		}
 	}
@@ -206,7 +206,6 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		int keySaveIncrement = 0, double keyCheckInterval = 0.1 ) {
 
 	state vector<pair<uint64_t,uint64_t>> jobs;
-	state Future<Void> disabler = disableConnectionFailuresAfter(300, "BulkSetup");
 	state uint64_t startNode = (nodeCount * workload->clientId) / workload->clientCount;
 	state uint64_t endNode = (nodeCount * (workload->clientId+1)) / workload->clientCount;
 
@@ -314,7 +313,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 			Void _ = wait( delay( 5.0 ) );  // Wait for the data distribution in a small test to start
 			loop {
 				int64_t inFlight = wait( getDataInFlight( cx, workload->dbInfo ) );
-				TraceEvent("DynamicWarming").detail("inFlight", inFlight);
+				TraceEvent("DynamicWarming").detail("InFlight", inFlight);
 				if( inFlight > 1e6 ) {  // Wait for just 1 MB to be in flight
 					Void _ = wait( delay( 1.0 ) );
 				} else {

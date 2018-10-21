@@ -82,13 +82,13 @@ struct LockDatabaseWorkload : TestWorkload {
 				Void _ = wait( unlockDatabase(&tr, lockID) );
 				state Standalone<RangeResultRef> data2 = wait( tr.getRange(normalKeys, 50000) );
 				if(data.size() != data2.size()) {
-					TraceEvent(SevError, "DataChangedWhileLocked").detail("beforeSize", data.size()).detail("afterSize", data2.size());
+					TraceEvent(SevError, "DataChangedWhileLocked").detail("BeforeSize", data.size()).detail("AfterSize", data2.size());
 					self->ok = false;
 				} else if(data != data2) {
-					TraceEvent(SevError, "DataChangedWhileLocked").detail("size", data.size());
+					TraceEvent(SevError, "DataChangedWhileLocked").detail("Size", data.size());
 					for(int i = 0; i < data.size(); i++) {
 						if( data[i] != data2[i] ) {
-							TraceEvent(SevError, "DataChangedWhileLocked").detail("i", i).detail("before", printable(data[i])).detail("after", printable(data2[i]));
+							TraceEvent(SevError, "DataChangedWhileLocked").detail("I", i).detail("Before", printable(data[i])).detail("After", printable(data2[i]));
 						}
 					}
 					self->ok = false;
@@ -116,7 +116,6 @@ struct LockDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> lockWorker( Database cx, LockDatabaseWorkload* self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "lockDb");
 		state UID lockID = g_random->randomUniqueID();
 		Void _ = wait(delay(self->lockAfter));
 		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self, lockID));

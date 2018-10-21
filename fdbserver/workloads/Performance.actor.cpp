@@ -95,7 +95,7 @@ struct PerformanceWorkload : TestWorkload {
 		TraceEvent start("PerformaceSetupStarting");
 		for(int i = 0; i < options.size(); i++) {
 			for(int j = 0; j < options[i].size(); j++) {
-				start.detail(format("option-%d-%d", i, j).c_str(), 
+				start.detail(format("Option-%d-%d", i, j).c_str(), 
 					printable( options[i][j].key ) + "=" + printable( options[i][j].value ) );
 			}
 		}
@@ -157,7 +157,7 @@ struct PerformanceWorkload : TestWorkload {
 			start.detail("RateTarget", tps);
 			for(int i = 0; i < options.size(); i++) {
 				for(int j = 0; j < options[i].size(); j++) {
-					start.detail(format("option-%d-%d", i, j).c_str(), 
+					start.detail(format("Option-%d-%d", i, j).c_str(), 
 						printable( options[i][j].key ) + "=" + printable( options[i][j].value ) );
 				}
 			}
@@ -169,7 +169,7 @@ struct PerformanceWorkload : TestWorkload {
 				DistributedTestResults r = wait( runWorkload( cx, self->testers, self->dbName, spec ) );
 				results = r;
 			} catch(Error& e) {
-				TraceEvent("PerformanceRunError").detail("Workload", printable(self->probeWorkload)).error(e, true);
+				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));
 				break;
 			}
 			PerfMetric tpsMetric = self->getNamedMetric( "Transactions/sec", results.metrics );

@@ -182,7 +182,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
-		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url).suppressFor(60, true);
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").suppressFor(60).detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
 		throw backup_invalid_url();
 	}
 }
@@ -341,11 +341,11 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		if(json.type() == json_spirit::obj_type)
 			return json.get_obj();
 		else
-			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
+			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").suppressFor(60).detail("File", path);
 
 	} catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, errorEventType).detail("File", path).error(e).suppressFor(60, true);
+			TraceEvent(SevWarn, errorEventType).error(e).suppressFor(60).detail("File", path);
 	}
 
 	return Optional<json_spirit::mObject>();
@@ -408,10 +408,9 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 
 		// If the connection expires in the future then return it
 		if(rconn.expirationTime > now()) {
-		TraceEvent("BlobStoreEndpointReusingConnected")
+		TraceEvent("BlobStoreEndpointReusingConnected").suppressFor(60)
 			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			.detail("ExpiresIn", rconn.expirationTime - now())
-			.suppressFor(60, true);
+			.detail("ExpiresIn", rconn.expirationTime - now());
 			return rconn;
 		}
 	}
@@ -420,10 +419,9 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
 
-	TraceEvent("BlobStoreEndpointNewConnection")
+	TraceEvent("BlobStoreEndpointNewConnection").suppressFor(60)
 		.detail("RemoteEndpoint", conn->getPeerAddress())
-		.detail("ExpiresIn", b->knobs.max_connection_life)
-		.suppressFor(60, true);
+		.detail("ExpiresIn", b->knobs.max_connection_life);
 
 	if(b->lookupSecret)
 		Void _ = wait(b->updateSecret());
@@ -460,6 +458,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	loop {
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
+		state bool connectionEstablished = false;
 
 		try {
 			// Start connecting
@@ -481,6 +480,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Finish connecting, do request
 			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			connectionEstablished = true;
 
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
@@ -520,6 +520,17 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		TraceEvent event(SevWarn, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
 
+		// Attach err to trace event if present, otherwise extract some stuff from the response
+		if(err.present()) {
+			event.error(err.get());
+		}
+		event.suppressFor(60);
+		if(!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
+		event.detail("ConnectionEstablished", connectionEstablished);
+
 		if(remoteAddress.present())
 			event.detail("RemoteEndpoint", remoteAddress.get());
 		else
@@ -527,8 +538,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		event.detail("Verb", verb)
 			 .detail("Resource", resource)
-			 .detail("ThisTry", thisTry)
-			 .suppressFor(60, true);
+			 .detail("ThisTry", thisTry);
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt limit.
 		if(!r || r->code != 429)
@@ -538,13 +548,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		double delay = nextRetryDelay;
 		// Double but limit the *next* nextRetryDelay.
 		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
-
-		// Attach err to trace event if present, otherwise extract some stuff from the response
-		if(err.present())
-			event.error(err.get());
-		else {
-			event.detail("ResponseCode", r->code);
-		}
 
 		if(retryable) {
 			// If r is valid then obey the Retry-After response header if present.
@@ -574,6 +577,21 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			if(r && r->code == 401)
 				throw http_auth_failed();
+
+			// Recognize and throw specific errors
+			if(err.present()) {
+				int code = err.get().code();
+
+				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed despite the fact that
+				// there was technically never a 'connection' to begin with.  It differentiates between an active connection
+				// timing out vs a connection timing out, though not between an active connection failing vs connection attempt failing.
+				// TODO:  Add more error types?
+				if(code == error_code_timed_out && !connectionEstablished)
+					throw connection_failed();
+
+				if(code == error_code_timed_out || code == error_code_connection_failed || code == error_code_lookup_failed)
+					throw err.get();
+			}
 
 			throw http_request_failed();
 		}
@@ -684,13 +702,13 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					lastFile = result.commonPrefixes.back();
 
 				if(lastFile.empty()) {
-					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").detail("Resource", fullResource).suppressFor(60, true);
+					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").suppressFor(60).detail("Resource", fullResource);
 					throw backup_error();
 				}
 			}
 		} catch(Error &e) {
 			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
+				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").error(e).suppressFor(60).detail("Resource", fullResource);
 			throw http_bad_response();
 		}
 	}

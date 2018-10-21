@@ -34,10 +34,15 @@ struct FlowReceiver : private NetworkMessageReceiver {
 	bool m_isLocalEndpoint;
 
 	FlowReceiver() : m_isLocalEndpoint(false) {}
-	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {}
+	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
+		FlowTransport::transport().addPeerReference(endpoint, this);
+	}
 	~FlowReceiver() {
-		if (m_isLocalEndpoint)
+		if (m_isLocalEndpoint) {
 			FlowTransport::transport().removeEndpoint(endpoint, this);
+		} else {
+			FlowTransport::transport().removePeerReference(endpoint, this);
+		}
 	}
 
 	bool isLocalEndpoint() { return m_isLocalEndpoint; }
@@ -234,10 +239,10 @@ public:
 	template <class X>
 	Future< REPLY_TYPE(X) > getReply(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
-			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()));
+			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()), getEndpoint());
 		}
 		send(value);
-		return getReplyPromise(value).getFuture();
+		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
 	}
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, int taskID) const {

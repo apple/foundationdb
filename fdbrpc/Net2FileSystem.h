@@ -26,11 +26,14 @@
 
 class Net2FileSystem : public IAsyncFileSystem {
 public:
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 	// Opens a file for asynchronous I/O
+	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+
+	// Returns the time of the last modification of the file.
+	virtual Future< std::time_t > lastWriteTime( std::string filename );
 
 	//void init();
 

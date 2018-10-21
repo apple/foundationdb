@@ -1080,8 +1080,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			backupTagUids.push_back(config.getUid());
 
 			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
 			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
@@ -1159,7 +1159,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			if (backupVersion[i].get().present()) {
 				double seconds_behind = ((double)readVer - BinaryReader::fromStringRef<Version>(backupVersion[i].get().get(), Unversioned())) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 				tagRoot.create("seconds_behind") = seconds_behind;
-				//TraceEvent("BackupMetrics").detail("secondsBehind", seconds_behind);
+				//TraceEvent("BackupMetrics").detail("SecondsBehind", seconds_behind);
 			}
 
 			tagRoot.create("backup_state") = BackupAgentBase::getStateText(status);
@@ -2620,13 +2620,19 @@ int main(int argc, char* argv[]) {
 			commandLine += argv[a];
 		}
 
+		delete FLOW_KNOBS;
+		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FLOW_KNOBS = flowKnobs;
+
 		delete CLIENT_KNOBS;
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
-				if (!clientKnobs->setKnob( k->first, k->second )) {
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second )) 
+				{
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -2999,7 +3005,7 @@ int main(int argc, char* argv[]) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
 	} catch (std::exception& e) {
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;
 	}
 

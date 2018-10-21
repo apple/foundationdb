@@ -47,7 +47,7 @@ struct RollbackWorkload : TestWorkload {
 	virtual Future<Void> start( Database const& cx ) {
 		if (&g_simulator == g_network && enabled)
 			return timeout( 
-				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "rollbackFailureWorkerError" ), 
+				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "RollbackFailureWorkerError" ), 
 				testDuration, Void() );
 		return Void();
 	}

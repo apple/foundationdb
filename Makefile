@@ -15,7 +15,11 @@ ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-MCS := $(shell which dmcs)
+DMCS := $(shell which dmcs)
+MCS := $(shell which mcs)
+ifneq ($(DMCS),)
+  MCS := $(DMCS)
+endif
 ifeq ($(MCS),)
   MCS := /usr/bin/dmcs
 endif
@@ -37,6 +41,7 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++0x
 
   BOOSTDIR ?= /opt/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -52,6 +57,7 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
@@ -82,6 +88,16 @@ CFLAGS += -O2
 CFLAGS += -g
 
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
+
+# Define the TLS compilation and link variables
+ifdef TLS_DISABLED
+CFLAGS += -DTLS_DISABLED
+FDB_TLS_LIB :=
+TLS_LIBS :=
+else
+FDB_TLS_LIB := lib/libFDBLibTLS.a
+TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
+endif
 
 CXXFLAGS += -Wno-deprecated
 LDFLAGS :=
@@ -127,7 +143,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester fdb_c_tests
 
 Makefiles: $(MK_GENERATED)
 
@@ -150,6 +166,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
+	@find . -name "*.g.cpp" -exec rm -f {} \; -or -name "*.g.h" -exec rm -f {} \;
 
 targets:
 	@echo "Available targets:"
@@ -175,13 +192,16 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@rm -r .libstdc++
 
 docpreview: javadoc
-	TARGETS= $(MAKE) -C documentation docpreview
+	@echo "Generating     docpreview"
+	@TARGETS= $(MAKE) -C documentation docpreview
 
 docpreview_clean:
-	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
+	@echo "Cleaning       docpreview"
+	@CLEAN_TARGETS= $(MAKE) -C documentation -s --no-print-directory docpreview_clean
 
 packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc
-	TARGETS= $(MAKE) -C documentation docpackage
+	@echo "Packaging      documentation"
+	@TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
 	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
 	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION).tar.gz

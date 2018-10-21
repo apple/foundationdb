@@ -1739,7 +1739,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(520);
+		API *fdb = FDB::API::selectAPIVersion(600);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1816,7 +1816,7 @@ int main( int argc, char** argv ) {
 	}
 	catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 }

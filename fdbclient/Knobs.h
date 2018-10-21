@@ -38,6 +38,8 @@ public:
 	double FAILURE_MIN_DELAY;
 	double FAILURE_TIMEOUT_DELAY;
 	double CLIENT_FAILURE_TIMEOUT_DELAY;
+	double FAILURE_EMERGENCY_DELAY;
+	double FAILURE_MAX_GENERATIONS;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -46,6 +48,7 @@ public:
 	double DEFAULT_BACKOFF;
 	double DEFAULT_MAX_BACKOFF;
 	double BACKOFF_GROWTH_RATE;
+	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
 
 	int64_t TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
@@ -73,6 +76,9 @@ public:
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
 	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
+	double NO_RECENT_UPDATES_DURATION;
+	double FAST_WATCH_TIMEOUT;
+	double WATCH_TIMEOUT;
 
 	double IS_ACCEPTABLE_DELAY;
 

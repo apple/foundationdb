@@ -35,10 +35,12 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 
-	init( FAILURE_MAX_DELAY,                      10.0 ); if( randomize && BUGGIFY ) FAILURE_MAX_DELAY = 5.0;
-	init( FAILURE_MIN_DELAY,                       5.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 2.0;
+	init( FAILURE_MAX_DELAY,                       5.0 );
+	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
+	init( FAILURE_EMERGENCY_DELAY,                30.0 );
+	init( FAILURE_MAX_GENERATIONS,                  10 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -48,6 +50,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = g_random->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
+	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -74,6 +77,9 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( DEFAULT_MAX_OUTSTANDING_WATCHES,         1e4 );
 	init( ABSOLUTE_MAX_WATCHES,                    1e6 );
 	init( WATCH_POLLING_TIME,                      1.0 ); if( randomize && BUGGIFY ) WATCH_POLLING_TIME = 5.0;
+	init( NO_RECENT_UPDATES_DURATION,             20.0 ); if( randomize && BUGGIFY ) NO_RECENT_UPDATES_DURATION = 0.1;
+	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
+	init( WATCH_TIMEOUT,                         900.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
@@ -119,7 +125,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
-	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
+	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
@@ -164,7 +170,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 
-	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,        25 );
+	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,       200 );
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );

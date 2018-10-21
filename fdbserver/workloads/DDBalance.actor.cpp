@@ -127,7 +127,6 @@ struct DDBalanceWorkload : TestWorkload {
 	ACTOR Future<Void> ddbalanceSetup( Database cx, DDBalanceWorkload* self ) {
 		state int i;
 		state vector<int> order;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "DDBalance");
 
 		for(int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++) order.push_back(o*10);
 
@@ -203,7 +202,7 @@ struct DDBalanceWorkload : TestWorkload {
 		}
 
 		if(maxMovedAmount < end-begin) {
-				TraceEvent(SevError, "LostKeys").detail("maxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
+				TraceEvent(SevError, "LostKeys").detail("MaxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
 								.detail("CurrentBin", sourceBin).detail("NextBin", destinationBin);
 				ASSERT( false );
 		}

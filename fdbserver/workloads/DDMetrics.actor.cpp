@@ -40,17 +40,17 @@ struct DDMetricsWorkload : TestWorkload {
 	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
-		TraceEvent("getHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
-		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData" ) ) ), 1.0 ) );
 		int relocations;
-		sscanf(extractAttribute(md.toString(), "HighPriorityRelocations").c_str(), "%d", &relocations);
+		sscanf(md.getValue("HighPriorityRelocations").c_str(), "%d", &relocations);
 		return relocations;
 	}
 
 	ACTOR Future<Void> work( Database cx, DDMetricsWorkload *self ) {
 		try {
-			TraceEvent("DDMetricsWaiting").detail("startDelay", self->startDelay);
+			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
 			Void _ = wait( delay( self->startDelay ) );
 			TraceEvent("DDMetricsStarting");
 			state double startTime = now();

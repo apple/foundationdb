@@ -114,9 +114,9 @@ struct CoordinatedStateImpl {
 		UniqueGeneration wgen = wait( self->replicatedWrite( self, GenerationRegWriteRequest( KeyValueRef(self->coordinators.clusterKey, v), self->gen ) ) );
 		self->stage = 6;
 
-		TraceEvent("CoordinatedStateSet").detail("gen", self->gen.generation).detail("wgen", wgen.generation)
-			.detail("genu", self->gen.uid).detail("wgenu", wgen.uid)
-			.detail("cgen", self->conflictGen);
+		TraceEvent("CoordinatedStateSet").detail("Gen", self->gen.generation).detail("Wgen", wgen.generation)
+			.detail("Genu", self->gen.uid).detail("Wgenu", wgen.uid)
+			.detail("Cgen", self->conflictGen);
 
 		if (wgen == self->gen)
 			return Void();
@@ -300,8 +300,19 @@ struct MovableCoordinatedStateImpl {
 	}
 };
 
+void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) { 
+	if(impl) {
+		delete impl;
+	}
+	impl = av.impl; 
+	av.impl = 0; 
+}
 MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
-MovableCoordinatedState::~MovableCoordinatedState() { delete impl; }
+MovableCoordinatedState::~MovableCoordinatedState() { 
+	if(impl) {
+		delete impl; 
+	}
+}
 Future<Value> MovableCoordinatedState::read() { return MovableCoordinatedStateImpl::read(impl); }
 Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
 Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }

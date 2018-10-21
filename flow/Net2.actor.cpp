@@ -51,7 +51,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A552000001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A570010001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -240,7 +240,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value());
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -403,8 +403,7 @@ private:
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
-		boost::asio::socket_base::non_blocking_io nbio(true);
-		socket.io_control(nbio);
+		socket.non_blocking(true);
 		socket.set_option(boost::asio::ip::tcp::no_delay(true));
 	}
 
@@ -412,15 +411,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
+			TraceEvent(SevWarn, "N2_CloseError", id).suppressFor(1.0).detail("Message", error.value());
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 };
@@ -550,7 +549,7 @@ void Net2::run() {
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "timeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError");
 #endif
 
 	timeOffsetLogger = logTimeOffset();
@@ -818,6 +817,7 @@ void Net2::onMainThread(Promise<Void>&& signal, int taskID) {
 
 	if ( thread_network == this )
 	{
+		processThreadReady();
 		this->ready.push( OrderedTask( priority-(++tasksIssued), taskID, p ) );
 	} else {
 		if (threadReady.push( OrderedTask( priority, taskID, p ) ))
@@ -844,7 +844,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		}
 
 		std::vector<NetworkAddress> addrs;
-
+		
 		tcp::resolver::iterator end;
 		while(iter != end) {
 			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
@@ -900,11 +900,11 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 			x = invalid_local_address();
 		else
 			x = bind_failed();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (std::exception const& e) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (...) {
 		Error x = unknown_error();

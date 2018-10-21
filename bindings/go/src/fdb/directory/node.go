@@ -67,5 +67,9 @@ func (n *node) getPartitionSubpath() []string {
 }
 
 func (n *node) getContents(dl directoryLayer, tr *fdb.Transaction) (DirectorySubspace, error) {
-	return dl.contentsOfNode(n.subspace, n.path, n._layer.MustGet())
+	l, err := n._layer.Get()
+	if err != nil {
+		return nil, err
+	}
+	return dl.contentsOfNode(n.subspace, n.path, l)
 }

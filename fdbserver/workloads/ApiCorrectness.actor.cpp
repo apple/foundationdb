@@ -153,9 +153,9 @@ public:
 		Void _scripted = wait(timeout(self->runScriptedTest(self, data), 600, Void()));
 
 		if(!self->hasFailed()) {
-			//Return database to original state (for a maximum of 1200 seconds)
+			//Return database to original state (for a maximum of 1800 seconds)
 			try {
-				Void _ = wait(disableConnectionFailuresAfter(timeoutError(::success(self->runSet(data, self)), 1200), 600, "ApiCorrectnessReset"));
+				Void _ = wait(timeoutError(::success(self->runSet(data, self)), 1800));
 			}
 			catch(Error &e) {
 				if(e.code() == error_code_timed_out) {

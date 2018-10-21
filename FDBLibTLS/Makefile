@@ -5,7 +5,7 @@ CFLAGS ?= -O2 -g
 
 CXXFLAGS ?= -std=c++0x
 
-CFLAGS += -I/usr/local/include
+CFLAGS += -I/usr/local/include -I../flow -I../fdbrpc
 LDFLAGS += -L/usr/local/lib
 
 LIBS += -ltls -lssl -lcrypto

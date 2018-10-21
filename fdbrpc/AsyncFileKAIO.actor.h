@@ -112,8 +112,8 @@ public:
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below
 			TraceEvent ev("AsyncFileKAIOOpenFailed");
-			ev.detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("mode", "0%o", mode).error(e).GetLastError();
+			ev.error(e).detail("Filename", filename).detailf("Flags", "%x", flags)
+			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
 			if(ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
@@ -121,8 +121,8 @@ public:
 			TraceEvent("AsyncFileKAIOOpen")
 				.detail("Filename", filename)
 				.detail("Flags", flags)
-				.detail("mode", mode)
-				.detail("fd", fd);
+				.detail("Mode", mode)
+				.detail("Fd", fd);
 		}
 
 		Reference<AsyncFileKAIO> r(new AsyncFileKAIO( fd, flags, filename ));
@@ -136,14 +136,14 @@ public:
 			lockDesc.l_len = 0;  // "Specifying 0 for l_len has the special meaning: lock all bytes starting at the location specified by l_whence and l_start through to the end of file, no matter how large the file grows."
 			lockDesc.l_pid = 0;
 			if (fcntl(fd, F_SETLK, &lockDesc) == -1) {
-				TraceEvent(SevError, "UnableToLockFile").detail("filename", filename).GetLastError();
+				TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
 				return io_error();
 			}
 		}
 
 		struct stat buf;
 		if (fstat( fd, &buf )) {
-			TraceEvent("AsyncFileKAIOFStatError").detail("fd",fd).detail("filename", filename).GetLastError();
+			TraceEvent("AsyncFileKAIOFStatError").detail("Fd",fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
 
@@ -262,7 +262,7 @@ public:
 			result = fallocate( fd, 0, 0, size);
 			if (result != 0) {
 				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError").detail("fd",fd).detail("filename", filename).GetLastError();
+				TraceEvent("AsyncFileKAIOAllocateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
 				if ( fallocateErrCode == EOPNOTSUPP ) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
@@ -280,7 +280,7 @@ public:
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if(result != 0) {
-			TraceEvent("AsyncFileKAIOTruncateError").detail("fd",fd).detail("filename", filename).GetLastError();
+			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd",fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
 
@@ -409,7 +409,7 @@ public:
 			double elapsed = timer_monotonic() - begin;
 			g_network->networkMetrics.secSquaredSubmit += elapsed*elapsed/2;	
 
-			//TraceEvent("Launched").detail("n", rc).detail("queued", ctx.queue.size()).detail("ms", elapsed*1e3).detail("oustanding", ctx.outstanding+rc);
+			//TraceEvent("Launched").detail("N", rc).detail("Queued", ctx.queue.size()).detail("Elapsed", elapsed).detail("Outstanding", ctx.outstanding+rc);
 			//printf("launched: %d/%d in %f us (%d outstanding; lowest prio %d)\n", rc, ctx.queue.size(), elapsed*1e6, ctx.outstanding + rc, toStart[n-1]->getTask());
 			if (rc<0) {
 				if (errno == EAGAIN) {
@@ -478,16 +478,16 @@ private:
 				fstat( aio_fildes, &fst );
 
 				errno = -r;
-				TraceEvent("AsyncFileKAIOIOError").GetLastError().detail("fd", aio_fildes).detail("op", aio_lio_opcode).detail("nbytes", nbytes).detail("offset", offset).detail("ptr", int64_t(buf))
-					.detail("Size", fst.st_size).detail("filename", owner->filename);
+				TraceEvent("AsyncFileKAIOIOError").GetLastError().detail("Fd", aio_fildes).detail("Op", aio_lio_opcode).detail("Nbytes", nbytes).detail("Offset", offset).detail("Ptr", int64_t(buf))
+					.detail("Size", fst.st_size).detail("Filename", owner->filename);
 			}
 			deliver( result, owner->failed, r, getTask() );
 			delete this;
 		}
 
 		void timeout(bool warnOnly) {
-			TraceEvent(SevWarnAlways, "AsyncFileKAIOTimeout").detail("fd", aio_fildes).detail("op", aio_lio_opcode).detail("nbytes", nbytes).detail("offset", offset).detail("ptr", int64_t(buf))
-				.detail("filename", owner->filename);
+			TraceEvent(SevWarnAlways, "AsyncFileKAIOTimeout").detail("Fd", aio_fildes).detail("Op", aio_lio_opcode).detail("Nbytes", nbytes).detail("Offset", offset).detail("Ptr", int64_t(buf))
+				.detail("Filename", owner->filename);
 			g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
 
 			if(!warnOnly)

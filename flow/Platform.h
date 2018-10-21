@@ -296,7 +296,7 @@ bool deleteFile( std::string const& filename );
 void renameFile( std::string const& fromPath, std::string const& toPath );
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace( std::string const& path, std::string const& content );
+void atomicReplace( std::string const& path, std::string const& content, bool textmode = true );
 
 // Read a file into memory
 std::string readFileBytes( std::string const& filename, int maxSize );
@@ -528,6 +528,17 @@ void* loadFunction(void* lib, const char* func_name);
 #else
 #define EXTERNC
 #endif // __cplusplus
+
+/*
+ * Multiply Defined Symbol (support for weak function declaration).
+ */
+#ifndef MULTIPLY_DEFINED_SYMBOL
+#if defined(_MSC_VER)
+#define MULTIPLY_DEFINED_SYMBOL
+#else
+#define MULTIPLY_DEFINED_SYMBOL __attribute__((weak))
+#endif
+#endif
 
 // Logs a critical error message and exits the program
 EXTERNC void criticalError(int exitCode, const char *type, const char *message);

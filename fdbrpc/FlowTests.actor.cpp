@@ -1098,11 +1098,11 @@ TEST_CASE("flow/flow/YieldedAsyncMap/basic")
 	//yam.triggerRange(0, 4);
 
 	state Future<Void> y2 = yam.onChange(1);
-	Void _ = wait(reportErrors(y0, "y0"));
-	Void _ = wait(reportErrors(y1, "y1"));
-	Void _ = wait(reportErrors(y1a, "y1a"));
-	Void _ = wait(reportErrors(y1b, "y1b"));
-	Void _ = wait(reportErrors(timeout(y2, 5, Void()), "y2"));
+	Void _ = wait(reportErrors(y0, "Y0"));
+	Void _ = wait(reportErrors(y1, "Y1"));
+	Void _ = wait(reportErrors(y1a, "Y1a"));
+	Void _ = wait(reportErrors(y1b, "Y1b"));
+	Void _ = wait(reportErrors(timeout(y2, 5, Void()), "Y2"));
 
 	return Void();
 }

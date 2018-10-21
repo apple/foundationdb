@@ -34,9 +34,10 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : killedMachines(0), killableMachines(0), machinesNeededForProgress(3), neededDatacenters(1), killableDatacenters(0), killedDatacenters(0), maxCoordinatorsInDatacenter(0), desiredCoordinators(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true) {}
+
 	// Order matters!
-	enum KillType { None, KillInstantly, InjectFaults, RebootAndDelete, Reboot, RebootProcessAndDelete, RebootProcess };
+	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
 	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
@@ -76,8 +77,8 @@ public:
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
-		bool isExcluded() const { return !excluded; }
-		bool isCleared() const { return !cleared; }
+		bool isExcluded() const { return excluded; }
+		bool isCleared() const { return cleared; }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -91,6 +92,7 @@ public:
 				case ProcessClass::TesterClass: return false;
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
+				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
 				default: return false;
 			}
@@ -100,8 +102,8 @@ public:
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d cleared: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded, cleared); }
+			return format("name: %s address: %d.%d.%d.%d:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -147,16 +149,17 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
-		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("Roles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
+		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
 	}
 
 	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
@@ -166,16 +169,16 @@ public:
 			if (rolesIt != addressIt->second.end()) {
 				if (rolesIt->second > 1) {
 					rolesIt->second --;
-					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
+					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
 				}
 				else {
 					addressIt->second.erase(rolesIt);
 					if (addressIt->second.size()) {
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
 					}
 					else {
 						roleAddresses.erase(addressIt);
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", 0).detail("Value", 0).detail("Result", "Removed Address");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", 0).detail("Value", 0).detail("Result", "Removed Address");
 					}
 				}
 			}
@@ -268,24 +271,30 @@ public:
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& zoneId ) = 0;
 
-	// These are here for reasoning about whether it is possible to kill machines (or delete their data)
-	//  and maintain the durability of the database.
-	int killedMachines;
-	int killableMachines;
-	int machinesNeededForProgress;
 	int desiredCoordinators;
-	int neededDatacenters;
-	int killedDatacenters;
-	int killableDatacenters;
 	int physicalDatacenters;
-	int maxCoordinatorsInDatacenter;
 	int processesPerMachine;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	class ClusterConnectionString* extraDB;
 	IRepPolicyRef storagePolicy;
-	IRepPolicyRef	tLogPolicy;
-	int						tLogWriteAntiQuorum;
+	IRepPolicyRef tLogPolicy;
+	int32_t tLogWriteAntiQuorum;
+	Optional<Standalone<StringRef>> primaryDcId;
+	IRepPolicyRef remoteTLogPolicy;
+	int32_t usableRegions;
+	std::string disablePrimary;
+	std::string disableRemote;
+	std::string originalRegions;
+	bool allowLogSetKills;
+	Optional<Standalone<StringRef>> remoteDcId;
+	bool hasSatelliteReplication;
+	IRepPolicyRef satelliteTLogPolicy;
+	IRepPolicyRef satelliteTLogPolicyFallback;
+	int32_t satelliteTLogWriteAntiQuorum;
+	int32_t satelliteTLogWriteAntiQuorumFallback;
+	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
+	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
 	//Used by workloads that perform reconfigurations
 	int testerCount;
@@ -334,11 +343,13 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 	// Opens a file for asynchronous I/O
+	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
 
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+
+	virtual Future< std::time_t > lastWriteTime( std::string filename );
 
 	Sim2FileSystem() {}
 

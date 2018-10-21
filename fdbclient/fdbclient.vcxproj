@@ -33,6 +33,7 @@
     <ClInclude Include="ClusterInterface.h" />
     <ClInclude Include="CommitTransaction.h" />
     <ClInclude Include="CoordinationInterface.h" />
+    <ClInclude Include="DatabaseConfiguration.h" />
     <ActorCompiler Include="DatabaseContext.h" />
     <ActorCompiler Include="EventTypes.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
@@ -64,6 +65,7 @@
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
+    <ClInclude Include="Schemas.h" />
     <ClInclude Include="SnapshotCache.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
@@ -79,6 +81,7 @@
     <ClInclude Include="WriteMap.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="Tuple.h" />
+    <ClInclude Include="JsonBuilder.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
@@ -86,6 +89,7 @@
     <ActorCompiler Include="BackupAgentBase.actor.cpp" />
     <ActorCompiler Include="BackupContainer.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
+    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ClCompile Include="AutoPublicAddress.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
@@ -95,11 +99,13 @@
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
+    <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
+    <ClCompile Include="JsonBuilder.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>
@@ -153,7 +159,7 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
@@ -176,7 +182,7 @@
       <Optimization>Full</Optimization>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <EnablePREfast>false</EnablePREfast>

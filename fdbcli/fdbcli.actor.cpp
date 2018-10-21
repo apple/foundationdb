@@ -27,6 +27,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 
@@ -72,7 +73,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
+#endif
 
 	SO_END_OF_OPTIONS
 };
@@ -400,7 +403,9 @@ static void printProgramUsage(const char* name) {
 		   "                 and then exits.\n"
 		   "  --no-status    Disables the initial status check done when starting\n"
 		   "                 the CLI.\n"
+#ifndef TLS_DISABLED
 		   TLS_HELP
+#endif
 		   "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 		   "  -h, --help     Display this help and exit.\n");
 }
@@ -439,8 +444,12 @@ void initHelp() {
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
 		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
-		"change database configuration",
+		"change the database configuration",
 		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	helpMap["fileconfigure"] = CommandHelp(
+		"fileconfigure [new] <FILENAME>",
+		"change the database configuration from a file",
+		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. Load a JSON document from the provided file, and change the database configuration to match the contents of the JSON document. The format should be the same as the value of the \"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\".");
 	helpMap["coordinators"] = CommandHelp(
 		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
 		"change cluster coordinators or description",
@@ -511,6 +520,7 @@ void initHelp() {
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
+	hiddenCommands.insert("force_recovery_with_data_loss");
 }
 
 void printVersion() {
@@ -730,7 +740,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						std::string description;
 						if (recoveryState.get("name", name) &&
 							recoveryState.get("description", description) &&
-							name != "fully_recovered")
+							name != "accepting_commits" && name != "all_logs_recruited" && name != "storage_recovered" && name != "fully_recovered")
 						{
 							fatalRecoveryState = true;
 
@@ -854,7 +864,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Redundancy mode        - ";
 				std::string strVal;
 
-				if (statusObjConfig.get("redundancy.factor", strVal)){
+				if (statusObjConfig.get("redundancy_mode", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -884,6 +894,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("logs", intVal))
 					outputString += format("\n  Desired Logs           - %d", intVal);
+
+				if (statusObjConfig.get("remote_logs", intVal))
+					outputString += format("\n  Desired Remote Logs    - %d", intVal);
+
+				if (statusObjConfig.get("log_routers", intVal))
+					outputString += format("\n  Desired Log Routers    - %d", intVal);
 			}
 			catch (std::runtime_error& e) {
 				outputString = outputStringCache;
@@ -1218,7 +1234,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				}
 				if(drSecondaryTags.size() > 0) {
 					outputString += format("%d as secondary", drSecondaryTags.size());
-				}		
+				}
 			}
 
 			// status details
@@ -1562,9 +1578,96 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
 		printUsage(tokens[0]);
-		ret = true;
+		ret=true;
 		break;
+	case ConfigurationResult::INVALID_CONFIGURATION:
+		printf("ERROR: These changes would make the configuration invalid\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DATABASE_ALREADY_CREATED:
+		printf("ERROR: Database already exists! To change configuration, don't say `new'\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DATABASE_CREATED:
+		printf("Database created\n");
+		ret=false;
+		break;
+	case ConfigurationResult::SUCCESS:
+		printf("Configuration changed\n");
+		ret=false;
+		break;
+	default:
+		ASSERT(false);
+		ret=true;
+	};
+	return ret;
+}
 
+ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase) {
+	std::string contents(readFileBytes(filePath, 100000));
+	json_spirit::mValue config;
+	if(!json_spirit::read_string( contents, config )) {
+		printf("ERROR: Invalid JSON\n");
+		return true;
+	}
+	StatusObject configJSON = config.get_obj();
+
+	json_spirit::mValue schema;
+	if(!json_spirit::read_string( JSONSchemas::configurationSchema.toString(), schema )) {
+		ASSERT(false);
+	}
+
+	std::string errorStr;
+	if( !schemaMatch(schema.get_obj(), configJSON, errorStr) ) {
+		printf("%s", errorStr.c_str());
+		return true;
+	}
+
+	std::string configString;
+	if(isNewDatabase) {
+		configString = "new";
+	}
+
+	for(auto kv : configJSON) {
+		if(!configString.empty()) {
+			configString += " ";
+		}
+		if( kv.second.type() == json_spirit::int_type ) {
+			configString += kv.first + ":=" + format("%d", kv.second.get_int());
+		} else if( kv.second.type() == json_spirit::str_type ) {
+			configString += kv.second.get_str();
+		} else if( kv.second.type() == json_spirit::array_type ) {
+			configString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
+		} else {
+			printUsage(LiteralStringRef("fileconfigure"));
+			return true;
+		}
+	}
+	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString) ) );
+	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
+	// there are various results specific to changeConfig() that we need to report:
+	bool ret;
+	switch(result) {
+	case ConfigurationResult::NO_OPTIONS_PROVIDED:
+		printf("ERROR: No options provided\n");
+		ret=true;
+		break;
+	case ConfigurationResult::CONFLICTING_OPTIONS:
+		printf("ERROR: Conflicting options\n");
+		ret=true;
+		break;
+	case ConfigurationResult::UNKNOWN_OPTION:
+		printf("ERROR: Unknown option\n"); //This should not be possible because of schema match
+		ret=true;
+		break;
+	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
+		printf("ERROR: Must specify both a replication level and a storage engine when creating a new database\n");
+		ret=true;
+		break;
+	case ConfigurationResult::INVALID_CONFIGURATION:
+		printf("ERROR: These changes would make the configuration invalid\n");
+		ret=true;
+		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
 		printf("ERROR: Database already exists! To change configuration, don't say `new'\n");
 		ret=true;
@@ -2060,7 +2163,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
 }
 
 struct CLIOptions {
@@ -2141,14 +2244,10 @@ struct CLIOptions {
 				initialStatusCheck = false;
 				break;
 
+#ifndef TLS_DISABLED
 			// TLS Options
 			case TLSOptions::OPT_TLS_PLUGIN:
-				try {
-					setNetworkOption(FDBNetworkOptions::TLS_PLUGIN, std::string(args.OptionArg()));
-				} catch( Error& e ) {
-					fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
-					return 1;
-				}
+				args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_CERTIFICATES:
 				tlsCertPath = args.OptionArg();
@@ -2165,6 +2264,7 @@ struct CLIOptions {
 			case TLSOptions::OPT_TLS_VERIFY_PEERS:
 				tlsVerifyPeers = args.OptionArg();
 				break;
+#endif
 			case OPT_HELP:
 				printProgramUsage(program_name.c_str());
 				return 0;
@@ -2305,7 +2405,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line)));
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line)));
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
@@ -2446,6 +2546,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "configure")) {
 					bool err = wait( configure( db, tokens, ccf, &linenoise, warn ) );
 					if (err) is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "fileconfigure")) {
+					if (tokens.size() == 2 || (tokens.size() == 3 && tokens[1] == LiteralStringRef("new"))) {
+						bool err = wait( fileConfigure( db, tokens.back().toString(), tokens.size() == 3 ) );
+						if (err) is_error = true;
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
 					continue;
 				}
 
@@ -2623,6 +2734,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
+					if(tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					Void _ = wait( makeInterruptable( forceRecovery( ccf ) ) );
 					continue;
 				}
 
@@ -3070,7 +3190,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						catch(Error &e) {
 							//options->setOption() prints error message
-							TraceEvent(SevWarn, "CLISetOptionError").detail("Option", printable(tokens[2])).error(e);
+							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", printable(tokens[2]));
 							is_error = true;
 						}
 					}
@@ -3082,7 +3202,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("is_error", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)
@@ -3121,7 +3241,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		linenoise.historyLoad(historyFilename);
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory").detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename).error(e).GetLastError();
+		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory").error(e).detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename).GetLastError();
 	}
 
 	state int result = wait(cli(opt, &linenoise));
@@ -3131,7 +3251,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			linenoise.historySave(historyFilename);
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory").detail("Filename", historyFilename).error(e).GetLastError();
+			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory").error(e).detail("Filename", historyFilename).GetLastError();
 		}
 	}
 
@@ -3188,6 +3308,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
+
 	if (opt.tlsCAPath.size()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);

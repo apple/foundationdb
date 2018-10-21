@@ -90,7 +90,8 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 
 struct ServerCacheInfo {
 	std::vector<Tag> tags;
-	std::vector<Reference<StorageInfo>> info;
+	std::vector<Reference<StorageInfo>> src_info;
+	std::vector<Reference<StorageInfo>> dest_info;
 };
 
 struct GetValueReply : public LoadBalancedReply {
@@ -200,7 +201,7 @@ struct GetShardStateRequest {
 	
 	KeyRange keys;
 	int32_t mode;
-	ReplyPromise< Version > reply;
+	ReplyPromise< std::pair<Version,Version> > reply;
 	GetShardStateRequest() {}
 	GetShardStateRequest( KeyRange const& keys, waitMode mode ) : keys(keys), mode(mode) {}
 

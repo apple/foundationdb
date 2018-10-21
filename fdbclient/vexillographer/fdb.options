@@ -46,14 +46,14 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="max total size of trace files"
             description="Sets the maximum size of all the trace output files put together. This value should be in the range ``[0, INT64_MAX]``. If the value is set to 0, there is no limit on the total size of the files. The default is a maximum size of 104,857,600 bytes. If the default roll size is used, this means that a maximum of 10 trace files will be written at a time."/>
     <Option name="trace_log_group" code="33"
-            paramType="String" paramDescription="value of the logGroup attribute"
-            description="Sets the 'logGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
+            paramType="String" paramDescription="value of the LogGroup attribute"
+            description="Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
     <Option name="TLS_plugin" code="41"
             paramType="String" paramDescription="file path or linker-resolved name"
-            description="Set the TLS plugin to load. This option, if used, must be set before any other TLS options" />
+            description="Deprecated" />
     <Option name="TLS_cert_bytes" code="42"
             paramType="Bytes" paramDescription="certificates"
             description="Set the certificate chain" />
@@ -187,6 +187,9 @@ description is not currently required but encouraged.
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
     <Option name="read_lock_aware" code="702"
             description="The transaction can read from locked databases."/>
+    <Option name="first_in_batch" code="710"
+            description="No other transactions will be applied before this transaction within the same commit version."
+            hidden="true" />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

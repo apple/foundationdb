@@ -66,6 +66,7 @@ trace.*.xml
 .project
 .pydevproject
 .vscode
+.vs/
 FoundationDB.xcodeproj
 foundationdb.VC.db
 foundationdb.VC.VC.opendb

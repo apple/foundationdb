@@ -64,11 +64,10 @@ struct client_server_test {
 };
 
 struct FDBLibTLSPluginTest {
-	FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf);
+	FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin);
 	~FDBLibTLSPluginTest();
 
 	Reference<ITLSPlugin> plugin;
-	ITLSLogFunc logf;
 
 	boost::circular_buffer<uint8_t> client_buffer;
 	boost::circular_buffer<uint8_t> server_buffer;
@@ -91,8 +90,8 @@ struct FDBLibTLSPluginTest {
 	int set_cert_data_test(void);
 };
 
-FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf) :
-	plugin(plugin), logf(logf)
+FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin) :
+	plugin(plugin)
 {
 	circular_reset();
 	circular_self_test();
@@ -202,7 +201,7 @@ void FDBLibTLSPluginTest::circular_self_test()
 
 Reference<ITLSPolicy> FDBLibTLSPluginTest::create_policy(void)
 {
-	return Reference<ITLSPolicy>(plugin->create_policy((ITLSLogFunc)logf));
+	return Reference<ITLSPolicy>(plugin->create_policy());
 }
 
 static int client_send_func(void* ctx, const uint8_t* buf, int len) {
@@ -489,7 +488,7 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 	return 0;
 }
 
-static void logf(const char* event, void* uid, int is_error, ...) {
+static void logf(const char* event, void* uid, bool is_error, ...) {
 	va_list args;
 
 	std::string log_type ("INFO");
@@ -1049,6 +1048,94 @@ const struct client_server_test client_server_tests[] = {
 		.server_password = NULL,
 		.server_verify = {""},
 	},
+
+	// Prefix and Suffix Matching
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O>=Apple Inc.,OU>=FDB"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O<=Limited,OU<=Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O<=Apple Inc.,OU<=FDB"},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O>=Limited,OU>=Team"},
+	},
+
+	// Subject Alternative Name
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName=DNS:test.foundationdb.org"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName>=DNS:test."},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=DNS:.org"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=DNS:.com"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"S.subjectAltName<=EMAIL:.com"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"Check.Valid=0"},
+	},
 };
 
 int main(int argc, char **argv)
@@ -1076,7 +1163,7 @@ int main(int argc, char **argv)
 
 	Reference<ITLSPlugin> plugin = Reference<ITLSPlugin>((ITLSPlugin *)getPlugin(ITLSPlugin::get_plugin_type_name_and_version()));
 
-	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin, (ITLSLogFunc)logf);
+	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin);
 
 	int test_num = 1;
 	for (auto &cst: client_server_tests) {

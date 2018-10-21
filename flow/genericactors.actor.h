@@ -41,7 +41,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		TraceEvent(type).detail(key, value);
 		return val;
 	} catch( Error &e ) {
-		if(traceErrors) TraceEvent(type).detail(key, value).error(e,true);
+		if(traceErrors) TraceEvent(type).error(e,true).detail(key, value);
 		throw;
 	}
 }
@@ -132,6 +132,18 @@ Future<T> transformErrors( Future<T> f, Error err ) {
 	}
 }
 
+ACTOR template <class T>
+Future<T> transformError( Future<T> f, Error inErr, Error outErr ) {
+	try {
+		T t = wait( f );
+		return t;
+	} catch( Error &e ) {
+		if( e.code() == inErr.code() )
+			throw outErr;
+		throw e;
+	}
+}
+
 // Note that the RequestStream<T> version of forwardPromise doesn't exist, because what to do with errors?
 
 ACTOR template <class T>
@@ -196,14 +208,14 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 }
 
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0 ) {
+Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
 	try {
 		state T t = wait( what );
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		return t;
 	} catch( Error &e ) {
 		state Error err = e;
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		throw err;
 	}
 }
@@ -651,10 +663,15 @@ public:
 			setUnconditional(v);
 	}
 	void setUnconditional( V const& v ) {
-		Promise<Void> trigger;
-		this->nextChange.swap(trigger);
+		Promise<Void> t;
+		this->nextChange.swap(t);
 		this->value = v;
-		trigger.send(Void());
+		t.send(Void());
+	}
+	void trigger() {
+		Promise<Void> t;
+		this->nextChange.swap(t);
+		t.send(Void());
 	}
 
 private:
@@ -671,7 +688,7 @@ public:
 		return v.onChange();
 	}
 	void trigger() {
-		v.setUnconditional(Void());
+		v.trigger();
 	}
 private:
 	AsyncVar<Void> v;
@@ -725,7 +742,29 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
+ACTOR template <class T> 
+Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+	try {
+		loop {
+			Void _ = wait( delay( time ) );
+			out->set( in->get() );
+			Void _ = wait( in->onChange() );
+		}
+	} catch (Error& e) {
+		out->set( in->get() );
+		throw;
+	}
+}
+
+ACTOR template <class T> 
+Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+	Void _ = wait( delay( time ) );
+	var->set( val );
+	return Void();
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
+Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
 Future<Void> timeoutWarningCollector( FutureStream<Void> const& input, double const& logDelay, const char* const& context, UID const& id );
 Future<bool> quorumEqualsTrue( std::vector<Future<bool>> const& futures, int const& required );
@@ -848,6 +887,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 
 ACTOR template <class T>
 Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
+	if (results.empty() && required == 0) return Void();
 	Void _ = wait(quorum(results, required));
 	choose {
 		when (Void _ = wait(quorum(results, (int)results.size()))) {return Void();}

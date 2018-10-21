@@ -61,9 +61,12 @@ struct ChangeConfigWorkload : TestWorkload {
 			state Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
 
 			Void _ = wait(delay(5*g_random->random01()));
-			if (self->configMode.size())
+			if (self->configMode.size()) {
 				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
-			if (self->networkAddresses.size()) {
+				TraceEvent("WaitForReplicasExtra");
+				Void _ = wait( waitForFullReplication( extraDB ) );
+				TraceEvent("WaitForReplicasExtraEnd");
+			} if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
 					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, autoQuorumChange()));
 				else
@@ -75,7 +78,6 @@ struct ChangeConfigWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "ChangeConfig");
 		Void _ = wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
 
 		state bool extraConfigureBefore = g_random->random01() < 0.5;
@@ -84,8 +86,12 @@ struct ChangeConfigWorkload : TestWorkload {
 			Void _ = wait( self->extraDatabaseConfigure(self) );
 		}
 
-		if( self->configMode.size() )
+		if( self->configMode.size() ) {
 			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			TraceEvent("WaitForReplicas");
+			Void _ = wait( waitForFullReplication( cx ) );
+			TraceEvent("WaitForReplicasEnd");
+		}
 		if( self->networkAddresses.size() ) {
 			if (self->networkAddresses == "auto")
 				CoordinatorsResult::Type _ = wait( changeQuorum( cx, autoQuorumChange() ) );

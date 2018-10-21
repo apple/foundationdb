@@ -354,9 +354,9 @@ public:
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 
-	// List log files which contain data at any version >= beginVersion and < endVersion
+	// List log files which contain data at any version >= beginVersion and <= targetVersion
 	// Lists files in sorted order by begin version. Does not check that results are non overlapping or contiguous.
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version targetVersion = std::numeric_limits<Version>::max()) {
 		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
@@ -364,7 +364,7 @@ public:
 		std::string firstPath = cleanFolderString(logVersionFolderString(
 			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
 		));
-		std::string lastPath =  cleanFolderString(logVersionFolderString(endVersion));
+		std::string lastPath =  cleanFolderString(logVersionFolderString(targetVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
@@ -378,7 +378,7 @@ public:
 			std::vector<LogFile> results;
 			LogFile lf;
 			for(auto &f : files) {
-				if(pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion && lf.beginVersion < endVersion)
+				if(pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
 					results.push_back(lf);
 			}
 			std::sort(results.begin(), results.end());
@@ -517,7 +517,7 @@ public:
 			if(s.beginVersion != s.endVersion) {
 				if(!desc.minLogBegin.present() || desc.minLogBegin.get() > s.beginVersion)
 					s.restorable = false;
-				if(!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() < s.endVersion)
+				if(!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() <= s.endVersion)
 					s.restorable = false;
 			}
 
@@ -534,12 +534,12 @@ public:
 			}
 
 			// If the snapshot is covered by the contiguous log chain then update min/max restorable.
-			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion <= desc.contiguousLogEnd.get()) {
+			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion < desc.contiguousLogEnd.get()) {
 				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
 					desc.minRestorableVersion = s.endVersion;
 
-				if(!desc.maxRestorableVersion.present() || desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get())
-					desc.maxRestorableVersion = desc.contiguousLogEnd;
+				if(!desc.maxRestorableVersion.present() || (desc.contiguousLogEnd.get() - 1) > desc.maxRestorableVersion.get())
+					desc.maxRestorableVersion = desc.contiguousLogEnd.get() - 1;
 			}
 		}
 
@@ -588,9 +588,9 @@ public:
 		}
 
 		// Get log files that contain any data at or before expireEndVersion
-		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion));
+		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion - 1));
 		// Get range files up to and including expireEndVersion
-		state std::vector<RangeFile> ranges = wait(bc->listRangeFiles(scanBegin, expireEndVersion));
+		state std::vector<RangeFile> ranges = wait(bc->listRangeFiles(scanBegin, expireEndVersion - 1));
 
 		// The new logBeginVersion will be taken from the last log file, if there is one
 		state Optional<Version> newLogBeginVersion;
@@ -622,9 +622,8 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for(auto const &f : ranges) {
-			// Must recheck version because list returns data up to and including the given endVersion
-			if(f.version < expireEndVersion)
-				toDelete.push_back(std::move(f.fileName));
+			ASSERT(f.version < expireEndVersion);
+			toDelete.push_back(std::move(f.fileName));
 		}
 		ranges.clear();
 
@@ -732,7 +731,7 @@ public:
 
 				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 				while(++i != logs.end()) {
-					if(i->beginVersion > end || i->beginVersion >= targetVersion)
+					if(i->beginVersion > end || i->beginVersion > targetVersion)
 						break;
 					// If the next link in the log chain is found, update the end
 					if(i->beginVersion == end) {
@@ -793,8 +792,7 @@ public:
 			Void _ = wait(f->finish());
 			return Void();
 		} catch(Error &e) {
-			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BackupContainerWritePropertyFailed").detail("Path", path).error(e);
+			TraceEvent(SevWarn, "BackupContainerWritePropertyFailed").error(e).detail("Path", path);
 			throw;
 		}
 	}
@@ -816,8 +814,7 @@ public:
 		} catch(Error &e) {
 			if(e.code() == error_code_file_not_found)
 				return Optional<Version>();
-			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BackupContainerReadPropertyFailed").detail("Path", path).error(e);
+			TraceEvent(SevWarn, "BackupContainerReadPropertyFailed").error(e).detail("Path", path);
 			throw;
 		}
 	}
@@ -1184,7 +1181,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 		m.detail("Description", "Invalid container specification.  See help.").detail("URL", url);
 
 		if(e.code() == error_code_backup_invalid_url)
-			m.detail("lastOpenError", lastOpenError);
+			m.detail("LastOpenError", lastOpenError);
 		throw;
 	}
 }
@@ -1222,7 +1219,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		m.detail("Description", "Invalid backup container URL prefix.  See help.").detail("URL", baseURL);
 
 		if(e.code() == error_code_backup_invalid_url)
-			m.detail("lastOpenError", IBackupContainer::lastOpenError);
+			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 		throw;
 	}
 }
@@ -1253,6 +1250,7 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, time, 1, false, true) );
 			if (results.size() != 1) {
 				// No key less than time was found in the database

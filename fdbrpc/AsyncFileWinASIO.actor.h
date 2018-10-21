@@ -76,6 +76,14 @@ public:
 		// SOMEDAY: What is necessary to implement mustBeDurable on Windows?  Does DeleteFile take care of it?  DeleteFileTransacted?
 		return Void();
 	}
+	static Future<std::time_t> lastWriteTime( std::string filename ) {
+		// TODO(alexmiller): I have no idea about windows
+		struct _stat buf;
+		if (_stat( filename.c_str(), &buf ) != 0) {
+			throw io_error();
+		}
+		return buf.st_mtime;
+	}
 
 	virtual void addref() { ReferenceCounted<AsyncFileWinASIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileWinASIO>::delref(); }
@@ -85,7 +93,7 @@ public:
 	static void onReadReady( Promise<int> onReady, const boost::system::error_code& error, size_t bytesRead ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncReadError").GetLastError().error(e)
+			TraceEvent("AsyncReadError").error(e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);
@@ -96,7 +104,7 @@ public:
 	static void onWriteReady( Promise<Void> onReady, size_t bytesExpected, const boost::system::error_code& error, size_t bytesWritten ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncWriteError").GetLastError().error(e)
+			TraceEvent("AsyncWriteError").error(e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);

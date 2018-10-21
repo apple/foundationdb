@@ -56,7 +56,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicSwitchover");
 		try {
 			TraceEvent("AS_Submit1");
 			Void _ = wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
@@ -101,13 +100,13 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
 							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
 							if (src->key != bkpKey && src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchKeyAndValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchKeyAndValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							else if (src->key != bkpKey) {
-								TraceEvent(SevError, "MismatchKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							else if (src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							begin = std::min(src->key, bkpKey);
 							if (src->key == bkpKey) {
@@ -122,12 +121,12 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 							}
 						}
 						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
-							TraceEvent(SevError, "MissingBkpKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value));
+							TraceEvent(SevError, "MissingBkpKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value));
 							begin = src->key;
 							++src;
 						}
 						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
-							TraceEvent(SevError, "MissingSrcKey").detail("bkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("bkpVal", printable(bkp->value));
+							TraceEvent(SevError, "MissingSrcKey").detail("BkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("BkpVal", printable(bkp->value));
 							begin = bkp->key;
 							++bkp;
 						}
@@ -153,7 +152,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicSwitchover");
 
 		TraceEvent("AS_Wait1");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );

@@ -70,7 +70,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(600, "ConfigureDatabaseSetup");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "single" ) );
 		return Void();
 	}
@@ -145,10 +144,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);
 			}
 			else if( randomChoice == 3 ) {
-				//TraceEvent("ConfigureTestConfigureBegin").detail("newConfig", newConfig);
+				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int redundancy = g_random->randomInt( 0, sizeof(redundancies)/sizeof(redundancies[0]));
 				std::string config = redundancies[redundancy];
-				if(config == "triple" && g_simulator.physicalDatacenters > 2) {
+				if(config == "triple" && g_simulator.physicalDatacenters > 4) {
+					config = "double";
+				}
+				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
 					config = "three_data_hall";
 				}
 
@@ -157,15 +159,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				ConfigurationResult::Type _ = wait( changeConfig( cx, config ) );
-				//TraceEvent("ConfigureTestConfigureEnd").detail("newConfig", newConfig);
+				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			}
 			else if( randomChoice == 4 ) {
-				//TraceEvent("ConfigureTestQuorumBegin").detail("newQuorum", s);
+				//TraceEvent("ConfigureTestQuorumBegin").detail("NewQuorum", s);
 				auto ch = autoQuorumChange();
 				if (g_random->randomInt(0,2))
 					ch = nameQuorumChange( format("NewName%d", g_random->randomInt(0,100)), ch );
 				CoordinatorsResult::Type _ = wait( changeQuorum( cx, ch ) );
-				//TraceEvent("ConfigureTestConfigureEnd").detail("newQuorum", s);
+				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			}
 			else if ( randomChoice == 5) {
 				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))] ) );

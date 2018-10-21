@@ -72,7 +72,7 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarnAlways, "CannotSplitLastSampleKey").detail("range", printable(range)).detail("offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
@@ -349,10 +349,10 @@ struct StorageServerMetrics {
 
 		if (sb.free < 1e9 && g_random->random01() < 0.1)
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
-				.detail("free", sb.free)
-				.detail("total", sb.total)
-				.detail("available", sb.available)
-				.detail("load", rep.load.bytes);
+				.detail("Free", sb.free)
+				.detail("Total", sb.total)
+				.detail("Available", sb.available)
+				.detail("Load", rep.load.bytes);
 
 		rep.free.bytes = sb.free;
 		rep.free.iosPerKSecond = 10e6;

@@ -39,6 +39,7 @@ struct is_binary_serializable { enum { value = 0 }; };
 
 #define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
 
+BINARY_SERIALIZABLE( int8_t );
 BINARY_SERIALIZABLE( uint8_t );
 BINARY_SERIALIZABLE( int16_t );
 BINARY_SERIALIZABLE( uint16_t );
@@ -203,7 +204,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (v < minValidProtocolVersion) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
@@ -211,7 +212,7 @@ struct _IncludeVersion {
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		ar.setProtocolVersion(v);
@@ -463,7 +464,7 @@ public:
 	}
 
 	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena) {
+	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
 		begin = (const char*)input.begin();
 		end = begin + input.size();
 		vo.read(*this);
@@ -476,8 +477,18 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != NULL);
+		begin = check;
+		check = NULL;
+	}
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };

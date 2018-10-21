@@ -200,7 +200,7 @@ public:
 		state int currentTaskID = g_network->getCurrentTask();
 		state Future<Void> shutdown = success(currentProcess->shutdownSignal.getFuture());
 
-		//TraceEvent("AsyncFileNonDurableOpenBegin").detail("Filename", filename).detail("addr", g_simulator.getCurrentProcess()->address);
+		//TraceEvent("AsyncFileNonDurableOpenBegin").detail("Filename", filename).detail("Addr", g_simulator.getCurrentProcess()->address);
 		Void _ = wait( g_simulator.onMachine( currentProcess ) );
 		try {
 			Void _ = wait(success(wrappedFile) || shutdown);
@@ -238,7 +238,7 @@ public:
 			state Error err = e;
 			std::string currentFilename = ( wrappedFile.isReady() && !wrappedFile.isError() ) ? wrappedFile.get()->getFilename() : actualFilename;
 			currentProcess->machine->openFiles.erase( currentFilename );
-			//TraceEvent("AsyncFileNonDurableOpenError").detail("Filename", filename).detail("address", currentProcess->address).error(e, true).detail("addr", g_simulator.getCurrentProcess()->address);
+			//TraceEvent("AsyncFileNonDurableOpenError").error(e, true).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
 			Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
 			throw err;
 		}

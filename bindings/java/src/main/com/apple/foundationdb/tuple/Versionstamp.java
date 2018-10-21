@@ -107,7 +107,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 * @return the unpacked user version included in the array
 	 */
 	public static int unpackUserVersion(byte[] bytes, int pos) {
-		return ((int)bytes[pos] & 0xff << 8) | ((int)bytes[pos + 1] & 0xff);
+		return (((int)bytes[pos] & 0xff) << 8) | ((int)bytes[pos + 1] & 0xff);
 	}
 
 	/**
