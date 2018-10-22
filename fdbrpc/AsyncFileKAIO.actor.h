@@ -107,7 +107,18 @@ public:
 			open_filename = filename + ".part";
 		}
 
-		int fd = ::open( open_filename.c_str(), openFlags(flags) | O_DIRECT, mode );
+		int open_flags = openFlags(flags);
+		if (FLOW_KNOBS->USE_O_DIRECT) {
+			// In the vast majority of cases, we wish to use O_DIRECT. Most Linux
+			// filesystems don’t properly support kernel async I/O without O_DIRECT.
+			// For example, when a read can be satisfied from the page cache, it will
+			// block in io_submit() while copying the data.  This prevents keeping
+			// multiple I/O requests outstanding and absolutely kills performance.
+			// However, there exist some filesystems which don't support O_DIRECT,
+			// and thus it needs to be disabled in order for FDB to run at all.
+			open_flags |= O_DIRECT;
+		}
+		int fd = ::open( open_filename.c_str(), open_flags, mode );
 		if (fd<0) {
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below

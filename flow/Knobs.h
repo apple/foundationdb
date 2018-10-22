@@ -96,6 +96,7 @@ public:
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
+	int USE_O_DIRECT;
 
 	int PAGE_WRITE_CHECKSUM_HISTORY;
 
