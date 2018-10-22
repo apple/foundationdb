@@ -365,6 +365,7 @@ public:
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
+	Future<Void> durableInProgress;
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
@@ -464,6 +465,7 @@ public:
 		:	instanceID(g_random->randomUniqueID().first()),
 			storage(this, storage), db(db),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+			durableInProgress(Void()),
 			versionLag(0),
 			updateEagerReads(0),
 			shardChangeCounter(0),
@@ -2615,10 +2617,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		return Void();  // update will get called again ASAP
-	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot)
+	} catch (Error& err) {
+		state Error e = err;
+		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
-		throw;
+		} else if (e.code() == error_code_please_reboot) {
+			Void _ = wait( data->durableInProgress );
+		}
+		throw e;
 	}
 }
 
@@ -2627,6 +2633,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
 		Void _ = wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		Void _ = wait( delay(0, TaskUpdateStorage) );
+		
+		state Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version startOldestVersion = data->storageVersion();
 		state Version newOldestVersion = data->storageVersion();
@@ -2656,6 +2665,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		Void _ = wait( durable );
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+		
+		durableInProgress.send(Void());
+		Void _ = wait( delay(0, TaskUpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
 		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
@@ -3300,10 +3312,13 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	self.shards.insert( allKeys, Reference<ShardInfo>() );
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
-	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed)
+	if (e.code() == error_code_please_reboot) {
+		// do nothing.
+	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
-	else
+	} else {
 		persistentData->close();
+	}
 
 	if ( e.code() == error_code_worker_removed ||
 		 e.code() == error_code_recruitment_failed ||
