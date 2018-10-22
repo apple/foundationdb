@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "SystemData.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");

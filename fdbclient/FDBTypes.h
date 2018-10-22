@@ -22,7 +22,7 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include "flow/flow.h"
-#include "Knobs.h"
+#include "fdbclient/Knobs.h"
 
 using std::vector;
 using std::pair;

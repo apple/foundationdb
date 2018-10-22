@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "BlobStore.h"
+#include "fdbrpc/BlobStore.h"
 
-#include "md5/md5.h"
-#include "libb64/encode.h"
-#include "sha1/SHA1.h"
-#include "time.h"
+#include "fdbrpc/md5/md5.h"
+#include "fdbrpc/libb64/encode.h"
+#include "fdbrpc/sha1/SHA1.h"
+#include <time.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 
 json_spirit::mObject BlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;

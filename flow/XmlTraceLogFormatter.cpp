@@ -20,8 +20,8 @@
 
 
 #include "flow/flow.h"
-#include "XmlTraceLogFormatter.h"
-#include "actorcompiler.h"
+#include "flow/XmlTraceLogFormatter.h"
+#include "flow/actorcompiler.h"
 
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();

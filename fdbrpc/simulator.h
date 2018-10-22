@@ -23,9 +23,9 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FailureMonitor.h"
-#include "Locality.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include <random>
 #include "fdbrpc/ReplicationPolicy.h"

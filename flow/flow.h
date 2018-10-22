@@ -37,13 +37,13 @@
 #include <utility>
 #include <algorithm>
 
-#include "Platform.h"
-#include "FastAlloc.h"
-#include "IRandom.h"
-#include "serialize.h"
-#include "Deque.h"
-#include "ThreadPrimitives.h"
-#include "network.h"
+#include "flow/Platform.h"
+#include "flow/FastAlloc.h"
+#include "flow/IRandom.h"
+#include "flow/serialize.h"
+#include "flow/Deque.h"
+#include "flow/ThreadPrimitives.h"
+#include "flow/network.h"
 
 using namespace std::rel_ops;
 
@@ -953,5 +953,5 @@ inline Future<Void> delayUntil(double time, int taskID = TaskDefaultDelay) { ret
 inline Future<Void> delayJittered(double seconds, int taskID = TaskDefaultDelay) { return g_network->delay(seconds*(FLOW_KNOBS->DELAY_JITTER_OFFSET + FLOW_KNOBS->DELAY_JITTER_RANGE*g_random->random01()), taskID); }
 inline Future<Void> yield(int taskID = TaskDefaultYield) { return g_network->yield(taskID); }
 inline bool check_yield(int taskID = TaskDefaultYield) { return g_network->check_yield(taskID); }
-#include "genericactors.actor.h"
+#include "flow/genericactors.actor.h"
 #endif

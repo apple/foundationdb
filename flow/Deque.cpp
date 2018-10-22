@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "UnitTest.h"
-#include "Deque.h"
+#include "flow/UnitTest.h"
+#include "flow/Deque.h"
 
 TEST_CASE("/flow/Deque/12345") {
 	Deque<int> q;

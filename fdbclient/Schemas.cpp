@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Schemas.h"
+#include "fdbclient/Schemas.h"
 
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {

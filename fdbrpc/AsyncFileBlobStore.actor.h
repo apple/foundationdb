@@ -23,20 +23,20 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_G_H)
 	#define FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_G_H
-	#include "AsyncFileBlobStore.actor.g.h"
+	#include "fdbrpc/AsyncFileBlobStore.actor.g.h"
 #elif !defined(FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_H)
 	#define FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_H
 
 #include <sstream>
 #include <time.h>
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/serialize.h"
 #include "flow/Net2Packet.h"
-#include "IRateControl.h"
-#include "BlobStore.h"
-#include "md5/md5.h"
-#include "libb64/encode.h"
+#include "fdbrpc/IRateControl.h"
+#include "fdbrpc/BlobStore.h"
+#include "fdbrpc/md5/md5.h"
+#include "fdbrpc/libb64/encode.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template<typename T> static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {

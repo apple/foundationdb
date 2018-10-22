@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "UnitTest.h"
-#include "CompressedInt.h"
+#include "flow/UnitTest.h"
+#include "flow/CompressedInt.h"
 
 void printBitsLittle(size_t const size, void const * const ptr)
 {

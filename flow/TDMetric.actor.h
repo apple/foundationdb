@@ -23,16 +23,16 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
         #define FLOW_TDMETRIC_ACTOR_G_H
-        #include "TDMetric.actor.g.h"
+        #include "flow/TDMetric.actor.g.h"
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
         #define FLOW_TDMETRIC_ACTOR_H
 
-#include "flow.h"
-#include "IndexedSet.h"
-#include "network.h"
-#include "Knobs.h"
-#include "genericactors.actor.h"
-#include "CompressedInt.h"
+#include "flow/flow.h"
+#include "flow/IndexedSet.h"
+#include "flow/network.h"
+#include "flow/Knobs.h"
+#include "flow/genericactors.actor.h"
+#include "flow/CompressedInt.h"
 #include <algorithm>
 #include <functional>
 #include "flow/actorcompiler.h"  // This must be the last #include.

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "MonitorLeader.h"
-#include "CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"

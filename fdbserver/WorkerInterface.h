@@ -22,13 +22,13 @@
 #define FDBSERVER_WORKERINTERFACE_H
 #pragma once
 
-#include "MasterInterface.h"
-#include "TLogInterface.h"
-#include "ResolverInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "TesterInterface.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "LogSystemConfig.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 

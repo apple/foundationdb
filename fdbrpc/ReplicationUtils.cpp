@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "ReplicationUtils.h"
+#include "fdbrpc/ReplicationUtils.h"
 #include "flow/Hash3.h"
 #include "flow/UnitTest.h"
 #include "flow/Platform.h"
-#include "ReplicationPolicy.h"
-#include "Replication.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/Replication.h"
 
 
 double ratePolicy(

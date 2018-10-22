@@ -22,9 +22,9 @@
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #pragma once
 
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
-#include "IClientApi.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
 
 #include "flow/ThreadHelper.actor.h"
 

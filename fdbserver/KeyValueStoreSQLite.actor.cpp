@@ -20,17 +20,17 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "IKeyValueStore.h"
-#include "CoroFlow.h"
-#include "Knobs.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/CoroFlow.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
 
 extern "C" {
-#include "sqlite/sqliteInt.h"
+#include "fdbserver/sqlite/sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
-#include "template_fdb.h"
+#include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

@@ -23,6 +23,6 @@
 FDBLibTLS_BUILD_SOURCES +=
 
 
-FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR) -Iflow -Ifdbrpc -DUSE_UCONTEXT
+FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR) -I. -DUSE_UCONTEXT
 
 lib/libFDBLibTLS.a: bin/coverage.FDBLibTLS.xml

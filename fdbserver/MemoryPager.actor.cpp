@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "MemoryPager.h"
-#include "Knobs.h"
+#include "fdbserver/MemoryPager.h"
+#include "fdbserver/Knobs.h"
 
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"

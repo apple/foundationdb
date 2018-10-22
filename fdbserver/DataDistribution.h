@@ -19,9 +19,9 @@
  */
 
 #include "fdbclient/NativeAPI.h"
-#include "ClusterRecruitmentInterface.h"
-#include "MoveKeys.h"
-#include "LogSystem.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/LogSystem.h"
 
 struct RelocateShard {
 	KeyRange keys;

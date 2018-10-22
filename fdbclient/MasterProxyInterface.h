@@ -22,9 +22,9 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "StorageServerInterface.h"
-#include "CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/CommitTransaction.h"
 
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };

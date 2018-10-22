@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "QueueModel.h"
-#include "LoadBalance.h"
+#include "fdbrpc/QueueModel.h"
+#include "fdbrpc/LoadBalance.h"
 
 void QueueModel::endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion ) {
 	auto& d = data[id];

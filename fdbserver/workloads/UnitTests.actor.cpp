@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/UnitTest.h"
 
 void forceLinkIndexedSetTests();

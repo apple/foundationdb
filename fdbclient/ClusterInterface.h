@@ -22,11 +22,11 @@
 #define FDBCLIENT_ClusterInterface_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Status.h"
-#include "ClientDBInfo.h"
-#include "ClientWorkerInterface.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
 	RequestStream< struct OpenDatabaseRequest > openDatabase;

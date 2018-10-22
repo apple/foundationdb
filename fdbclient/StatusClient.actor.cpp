@@ -19,14 +19,14 @@
  */
 
 #include "flow/flow.h"
-#include "CoordinationInterface.h"
-#include "MonitorLeader.h"
-#include "FailureMonitorClient.h"
-#include "ClusterInterface.h"
-#include "StatusClient.h"
-#include "Status.h"
-#include "json_spirit/json_spirit_writer_template.h"
-#include "json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/StatusClient.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {

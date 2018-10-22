@@ -19,15 +19,15 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "DataDistribution.h"
+#include "fdbserver/DataDistribution.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
 #include <set>
-#include "WaitFailure.h"
-#include "ServerDBInfo.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"

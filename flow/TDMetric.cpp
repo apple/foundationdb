@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "TDMetric.actor.h"
-#include "flow.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/flow.h"
 
 const StringRef BaseEventMetric::metricType = LiteralStringRef("Event");
 template<> const StringRef Int64Metric::metricType = LiteralStringRef("Int64");

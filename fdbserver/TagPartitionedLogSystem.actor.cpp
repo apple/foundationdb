@@ -19,15 +19,15 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "LogSystem.h"
-#include "ServerDBInfo.h"
-#include "DBCoreState.h"
-#include "WaitFailure.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/DBCoreState.h"
+#include "fdbserver/WaitFailure.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "RecoveryState.h"
+#include "fdbserver/RecoveryState.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Version>> replies) {

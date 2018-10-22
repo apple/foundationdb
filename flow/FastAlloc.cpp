@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "FastAlloc.h"
+#include "flow/FastAlloc.h"
 
-#include "ThreadPrimitives.h"
-#include "Trace.h"
-#include "Error.h"
+#include "flow/ThreadPrimitives.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
 #include <cstdint>
 #include <unordered_map>

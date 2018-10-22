@@ -22,7 +22,7 @@
 #define FDBSERVER_MEMORYPAGER_H
 #pragma once
 
-#include "IPager.h"
+#include "fdbserver/IPager.h"
 
 IPager * createMemoryPager();
 

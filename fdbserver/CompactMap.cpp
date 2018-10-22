@@ -21,7 +21,7 @@
 
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
-#include "PrefixTree.h"
+#include "fdbserver/PrefixTree.h"
 #include <stdio.h>
 
 static int nextPowerOfTwo(int n) {

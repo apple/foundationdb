@@ -23,7 +23,7 @@
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include <string.h>
 
 typedef uint64_t Word;

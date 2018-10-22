@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "IndirectShadowPager.h"
-#include "Knobs.h"
+#include "fdbserver/IndirectShadowPager.h"
+#include "fdbserver/Knobs.h"
 
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"

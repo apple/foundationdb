@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "ReplicationPolicy.h"
-#include "Replication.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
 
 

@@ -22,7 +22,7 @@
 #define FDBSERVER_IVERSIONEDSTORE_H
 #pragma once
 
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"

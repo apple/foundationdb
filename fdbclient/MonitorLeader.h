@@ -22,8 +22,8 @@
 #define FDBCLIENT_MONITORLEADER_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "CoordinationInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/CoordinationInterface.h"
 
 #define CLUSTER_FILE_ENV_VAR_NAME "FDB_CLUSTER_FILE"
 
