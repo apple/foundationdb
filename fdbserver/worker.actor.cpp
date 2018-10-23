@@ -113,17 +113,12 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr( store->getError() );
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
-<<<<<<< HEAD
-			Void _ = wait(onClosed);
-			if(storeError.isReady()) throw storeError.get().getError();
-=======
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
 				Void _ = wait(onClosed);
 			}
-			if(storeError.isReady()) throw storeError.getError();
->>>>>>> 890fb3f228295e981d34ca8027a945600a124136
+			if(storeError.isReady()) throw storeError.get().getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
 		when (ErrorOr<Void> e = wait( storeError )) {
