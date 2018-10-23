@@ -74,7 +74,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 	setConn = true;
 }
 
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() {
+ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
 	return cs;
 }
 

@@ -36,6 +36,7 @@
 #include "fdbserver/DataDistribution.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/IKeyValueStore.h"
+#include <algorithm>
 #include <stdarg.h>
 #include <stdio.h>
 #include <fstream>
@@ -733,6 +734,80 @@ Optional<bool> checkBuggifyOverride(const char *testFile) {
 	return Optional<bool>();
 }
 
+// Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress objects.
+std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
+																		const vector<std::string>& publicAddressStrs,
+																		const vector<std::string>& listenAddressStrs) {
+	ASSERT(publicAddressStrs.size() == listenAddressStrs.size());
+	NetworkAddressList publicNetworkAddresses;
+	NetworkAddressList listenNetworkAddresses;
+
+	const NetworkAddressList& coordinators = connectionFile.getConnectionString().coordinators();
+	bool clusterIsTLS = std::any_of(coordinators.begin(), coordinators.end(), [](const NetworkAddress& address) {
+																				  return address.isTLS();
+																			  });
+
+	// If a cluster has a coordinator with TLS enabled, at-least one of the given public addresses
+	// must be TLS enabled.
+	bool hasTLSAddress = false;
+
+	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
+		const std::string& publicAddressStr = publicAddressStrs[ii];
+		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
+
+		if (autoPublicAddress) {
+			try {
+				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
+				uint32_t publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				publicNetworkAddresses.emplace_back(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
+			} catch (Error& e) {
+				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
+				throw;
+			}
+		} else {
+			try {
+				publicNetworkAddresses.push_back(NetworkAddress::parse(publicAddressStr));
+			} catch (Error&) {
+				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", publicAddressStr.c_str());
+				throw;
+			}
+		}
+
+		if (!publicNetworkAddresses.back().isValid()) {
+			fprintf(stderr, "ERROR: %s is not valid a public ip address\n");
+			throw;
+		}
+
+		const std::string& listenAddressStr = listenAddressStrs[ii];
+		if (listenAddressStr == "public") {
+			listenNetworkAddresses.push_back(publicNetworkAddresses.back());
+		} else {
+			try {
+				listenNetworkAddresses.push_back(NetworkAddress::parse(listenAddressStr));
+			} catch (Error&) {
+				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
+				throw;
+			}
+		}
+
+		//TODO: This is awkward. Need to be more clear on this, when we actually deal with TLS.
+		if (clusterIsTLS && !hasTLSAddress && publicNetworkAddresses.back().isTLS()) {
+			hasTLSAddress |= std::any_of(coordinators.begin(), coordinators.end(),
+										 [&](const NetworkAddress& address) {
+											 return address.toString() == publicAddressStr;
+										 });
+		}
+	}
+
+	// If any  the coordinators has TLS enabled, then some address from coordinator list must have TLS enabled.
+	if (hasTLSAddress != clusterIsTLS) {
+		fprintf(stderr, "ERROR: public address must not specify TLS if coordinators are non-TLS\n");
+		throw;
+	}
+
+	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -782,9 +857,8 @@ int main(int argc, char* argv[]) {
 
 		const char *testFile = "tests/default.txt";
 		std::string kvFile;
-		std::string publicAddressStr, listenAddressStr = "public";
 		std::string testServersStr;
-		NetworkAddress publicAddress, listenAddress;
+		std::vector<std::string> publicAddressStrs, listenAddressStrs;
 		const char *targetKey = NULL;
 		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
@@ -915,10 +989,11 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				case OPT_PUBLICADDR:
-					publicAddressStr = args.OptionArg();
+					publicAddressStrs.push_back(args.OptionArg());
+					listenAddressStrs.push_back("public");
 					break;
 				case OPT_LISTEN:
-					listenAddressStr = args.OptionArg();
+					listenAddressStrs[publicAddressStrs.size() - 1] = args.OptionArg();
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
@@ -1172,8 +1247,10 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
-
+		bool autoPublicAddress = std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
+											 [](const std::string& addr) {
+												 return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+											 });
 		Reference<ClusterConnectionFile> connectionFile;
 		if ( (role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck && role != KVFileGenerateIOLogChecksums) || autoPublicAddress ) {
 
@@ -1213,76 +1290,30 @@ int main(int argc, char* argv[]) {
 			// failmon?
 		}
 
-		if (publicAddressStr != "") {
-			if (autoPublicAddress) {
-				try {
-					NetworkAddress parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-					auto publicIP = determinePublicIPAutomatically( connectionFile->getConnectionString() );
-					publicAddress = NetworkAddress( publicIP, parsedAddress.port, true, parsedAddress.isTLS() );
-				} catch (Error& e) {
-					fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
-					throw;
-				}
-			} else {
-				try {
-					publicAddress = NetworkAddress::parse(publicAddressStr);
-				} catch (Error&) {
-					fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", publicAddressStr.c_str());
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
-				}
+		NetworkAddressList publicAddresses, listenAddresses;
+		try {
+			if (!publicAddressStrs.empty()) {
+				std::tie(publicAddresses, listenAddresses) = buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
 			}
-
-			bool clusterIsTLS = connectionFile->getConnectionString().coordinators()[0].isTLS();
-
-			// Decide whether or not to use TLS based on if we see any of the coordinators have TLS enabled.
-			//  Note that we are not supporting mixed clusters, but are defaulting to using TLS based on
-			//  the contents of the cluster file. Note that we look at all the servers in the cluster file
-			//  and if ANY of them are TLS, we turn TLS on.
-			if( !StringRef(publicAddressStr).endsWith(LiteralStringRef(":tls")) ) {
-				publicAddress = NetworkAddress( publicAddress.ip, publicAddress.port, true, clusterIsTLS );
-			} else if( publicAddress.isTLS() != clusterIsTLS ) {
-				fprintf(stderr, "ERROR: public address must not specify TLS if coordinators are non-TLS\n");
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
+		} catch (Error&) {
+			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if( role == FDBD && publicAddress.ip == 0 ) {
-			if (publicAddressStr == "")
-				fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
-			else
-				fprintf(stderr, "ERROR: cannot use 0.0.0.0 as a public ip address\n");
+		if( role == FDBD && publicAddresses.empty()) {
+			fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if(role == ConsistencyCheck) {
-			if(publicAddressStr != "") {
+			if(!publicAddresses.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddress = NetworkAddress(publicIP, ::getpid());
-		}
-
-		if (listenAddressStr == "public")
-			listenAddress = publicAddress;
-		else {
-			try {
-				listenAddress = NetworkAddress::parse(listenAddressStr);
-			} catch (Error&) {
-				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-		}
-
-		if (role == FDBD && !publicAddress.isValid()) {
-			fprintf(stderr, "ERROR: Public address not specified\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
+			publicAddresses.push_back(NetworkAddress(publicIP, ::getpid()));
 		}
 
 		if (role==Simulation)
@@ -1372,8 +1403,6 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		Future<Void> listenError;
-
 		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code path
 		if (maxLogsSet) {
 			if (maxLogsSizeSet) {
@@ -1398,6 +1427,8 @@ int main(int argc, char* argv[]) {
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
 
+		std::vector<Future<Void>> listenErrors;
+
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
 			startNewSimulator();
@@ -1406,7 +1437,8 @@ int main(int argc, char* argv[]) {
 			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(1);
 
-			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);
+			//TODO: (Vishesh) Figure out what the publicAddress field should be.
+			openTraceFile(publicAddresses[0], rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
 #ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
@@ -1426,11 +1458,11 @@ int main(int argc, char* argv[]) {
 #endif
 			if (role == FDBD || role == NetworkTestServer || role == Restore) {
 				try {
-					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
-					if (listenError.isReady()) listenError.get();
+					listenErrors.push_back(FlowTransport::transport().bind(publicAddresses[0], listenAddresses[0]));
+					if (listenErrors[0].isReady()) listenErrors[0].get();
 				} catch (Error& e) {
 					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
+					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddresses[0].toString().c_str(), listenAddresses[0].toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1544,11 +1576,9 @@ int main(int argc, char* argv[]) {
 			setupSlowTaskProfiler();
 
 			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddress.port);  // SOMEDAY: Better default
+				dataFolder = format("fdb/%d/", publicAddresses[0].port);  // SOMEDAY: Better default
 
-			vector<Future<Void>> actors;
-			actors.push_back( listenError );
-
+			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 

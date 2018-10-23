@@ -105,6 +105,8 @@ struct NetworkAddress {
 	}
 };
 
+typedef std::vector<NetworkAddress> NetworkAddressList;
+
 std::string toIPString(uint32_t ip);
 std::string toIPVectorString(std::vector<uint32_t> ips);
 

@@ -77,7 +77,7 @@ public:
 	// get a human readable error message describing the error returned from the constructor
 	static std::string getErrorString( std::pair<std::string, bool> const& resolvedFile, Error const& e );
 
-	ClusterConnectionString const& getConnectionString();
+	ClusterConnectionString const& getConnectionString() const;
 	bool writeFile();
 	void setConnectionString( ClusterConnectionString const& );
 	std::string const& getFilename() const { ASSERT( filename.size() ); return filename; }
