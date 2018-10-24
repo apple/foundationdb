@@ -210,7 +210,7 @@ func (doc Doc) GetDoc(trtr fdb.Transactor, doc_id int) interface{} {
 			if err != nil {
 				panic(err)
 			}
-			tuples = append(tuples, append(tup[1:len(tup)], _unpack(v.Value)))
+			tuples = append(tuples, append(tup[1:len(tup)], _unpack(v.Value)...))
 		}
 		return nil, nil
 	})
