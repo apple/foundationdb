@@ -32,7 +32,7 @@
 #include <string.h>
 
 #ifdef WIN32
-#include "fdbserver/Windows.h"
+#include <Windows.h>
 #endif
 
 #ifdef __unixish__
