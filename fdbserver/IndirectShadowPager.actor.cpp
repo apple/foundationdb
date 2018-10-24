@@ -103,9 +103,9 @@ IndirectShadowPagerSnapshot::IndirectShadowPagerSnapshot(IndirectShadowPager *pa
 }
 
 Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(LogicalPageID pageID) {
-	if(pagerError.isError())
-		throw pagerError.getError();
-	return waitOrError(pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version), pagerError);
+	if(pagerError.isReady())
+		pagerError.get();
+	return pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version);
 }
 
 template <class T>
@@ -328,7 +328,7 @@ ACTOR Future<Void> forwardError(Future<Void> f, Promise<Void> target) {
 		wait(f);
 	}
 	catch(Error &e) {
-		if(target.canBeSet()) {
+		if(e.code() != error_code_actor_cancelled && target.canBeSet()) {
 			target.sendError(e);
 		}
 
@@ -567,7 +567,7 @@ Future<Void> IndirectShadowPager::onClosed() {
 ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
 
 	if(pager->errorPromise.canBeSet())
-		pager->errorPromise.sendError(shutdown_in_progress());
+		pager->errorPromise.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
 	wait(pager->writeActors.signal());
 	wait(pager->operations.signal());
 	wait(pager->committing);
@@ -663,7 +663,7 @@ Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectSh
 	}
 
 	Future<Reference<const IPage>> f = getPageImpl(this, snapshot, pageID, version);
-	operations.add(success(f));
+	operations.add(forwardError(success(f), errorPromise));
 	return f;
 }
 

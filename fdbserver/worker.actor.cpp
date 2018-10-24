@@ -114,7 +114,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
 			wait(onClosed);
-			if(storeError.isReady()) throw storeError.getError();
+			if(storeError.isReady()) throw storeError.get().getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
 		when (ErrorOr<Void> e = wait( storeError )) {
