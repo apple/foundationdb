@@ -29,6 +29,7 @@ Performance
 * Reduced CPU cost of truncating files that are being cached. [6.0.12] `(PR #816) <https://github.com/apple/foundationdb/pull/816>`_
 * Significantly reduced master recovery times for clusters with large amounts of data. [6.0.14] `(PR #836) <https://github.com/apple/foundationdb/pull/836>`_
 * Reduced read and commit latencies for clusters which are processing transactions larger than 1MB. [6.0.14] `(PR #851) <https://github.com/apple/foundationdb/pull/851>`_
+* Significantly reduced recovery times when executing rollbacks on the memory storage engine. [6.0.14] `(PR #821) <https://github.com/apple/foundationdb/pull/821>`_
 
 Fixes
 -----
