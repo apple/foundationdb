@@ -983,8 +983,8 @@ In the FoundationDB Ruby API, a tuple is an :class:`Enumerable` of elements of t
 | Unicode string       | Any value ``v`` where ``v.kind_of? String == true`` and ``v.encoding`` is   | ``String`` with encoding ``Encoding::UTF_8``                                 |
 |                      | ``Encoding::UTF_8``                                                         |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
-| 64-bit signed integer| Any value ``v`` where ``v.kind_of? Integer == true`` and ``-2**64+1 <= v <= | ``Fixnum`` or ``Bignum`` (depending on the magnitude of the value)           |
-|                      | 2**64-1``                                                                   |                                                                              |
+| Integer              | Any value ``v`` where ``v.kind_of? Integer == true`` and                    | ``Integer``                                                                  |
+|                      | ``-2**2040+1 <= v <= 2**2040-1``                                            |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
 | Floating point number| Any value ``v`` where ``v.kind_of? FDB::Tuple::SingleFloat`` where          | :class:`FDB::Tuple::SingleFloat`                                             |
 | (single-precision)   | ``v.value.kind_of? Float`` and ``v.value`` fits inside an IEEE 754 32-bit   |                                                                              |
