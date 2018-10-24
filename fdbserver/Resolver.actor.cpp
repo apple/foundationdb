@@ -75,7 +75,7 @@ ACTOR Future<Void> resolveBatch(
 	state Optional<UID> debugID;
 
 	// The first request (prevVersion < 0) comes from the master
-	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().address : NetworkAddress();
+	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().address[0] : NetworkAddress();
 	state ProxyRequestsInfo &proxyInfo = self->proxyInfoMap[proxyAddress];
 
 	if(req.debugID.present()) {

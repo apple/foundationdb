@@ -22,6 +22,7 @@
 #define FLOW_TRANSPORT_H
 #pragma once
 
+#include <algorithm>
 #include "flow/network.h"
 
 #pragma pack(push, 4)
@@ -30,25 +31,44 @@ public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
 	typedef UID Token;
-	NetworkAddress address;
+	NetworkAddressList address;
 	Token token;
 
-	Endpoint() : address(0,0) {}
-	Endpoint( NetworkAddress const& address, Token token ) : address(address), token(token) {}
+	Endpoint() {}
+	Endpoint(const NetworkAddressList& addresses, Token token) : address(addresses), token(token) {}
+
 	bool isValid() const { return token.isValid(); }
 	bool isLocal() const;
 
-	bool operator == (Endpoint const& r) const { return address == r.address && token == r.token; }
-	bool operator != (Endpoint const& r) const { return address != r.address || token != r.token; }
-	bool operator < (Endpoint const& r) const { if (address != r.address) return address < r.address; else return token < r.token; }
+	bool operator == (Endpoint const& r) const {
+		return address == r.address && token == r.token;
+	}
+	bool operator != (Endpoint const& r) const {
+		return !(*this == r);
+	}
+
+	//TODO: (Vishesh) Figure out what to do for vector of addresses this.
+	bool operator < (Endpoint const& r) const {
+		const NetworkAddress& left = address.empty() ? NetworkAddress() : address[0];
+		const NetworkAddress& right = r.address.empty() ? NetworkAddress() : r.address[0];
+		if (left != right)
+			return left < right;
+		else
+			return token < r.token;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020002LL) {
+			address.emplace_back();
+			ar & address[0] & token;
+		} else {
+			ar & address & token;
+		}
 	}
 };
 #pragma pack(pop)
-BINARY_SERIALIZABLE( Endpoint );
+
 
 
 class NetworkMessageReceiver {
@@ -131,7 +151,7 @@ private:
 };
 
 inline bool Endpoint::isLocal() const { 
-	return address == FlowTransport::transport().getLocalAddress(); 
+	return address[0] == FlowTransport::transport().getLocalAddress();
 }
 
 #endif

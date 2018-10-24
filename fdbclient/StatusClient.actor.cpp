@@ -300,7 +300,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().address.toString();
+			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().address[0].toString();
 			
 			if (leaderServers[i].isReady()){
 				coordStatus["reachable"] = true;

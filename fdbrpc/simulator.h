@@ -139,7 +139,7 @@ public:
 		return m;
 	}
 
-	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.address); }
+	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.address[0]); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;

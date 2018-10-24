@@ -151,7 +151,7 @@ template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
-	ASSERT(!ep.address.isValid() || ep.address.isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
+	ASSERT(!ep.address[0].isValid() || ep.address[0].isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
 }
 
 template <class Ar, class T>
@@ -357,7 +357,7 @@ template <class Ar, class T>
 void save(Ar& ar, const RequestStream<T>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
-	UNSTOPPABLE_ASSERT(ep.address.isValid());  // No serializing PromiseStreams on a client with no public address
+	UNSTOPPABLE_ASSERT(ep.address[0].isValid());  // No serializing PromiseStreams on a client with no public address
 }
 
 template <class Ar, class T>

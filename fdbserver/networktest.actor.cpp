@@ -24,7 +24,7 @@
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 
 NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
-	: test( Endpoint(remote, WLTOKEN_NETWORKTEST) )
+	: test( Endpoint({remote}, WLTOKEN_NETWORKTEST) )
 {
 }
 

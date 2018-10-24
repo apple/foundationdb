@@ -55,7 +55,7 @@ struct WorkerInterface {
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
-	NetworkAddress address() const { return tLog.getEndpoint().address; }
+	NetworkAddress address() const { return tLog.getEndpoint().address[0]; }
 
 	WorkerInterface() {}
 	WorkerInterface( LocalityData locality ) : locality( locality ) {}

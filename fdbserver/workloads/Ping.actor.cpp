@@ -150,7 +150,7 @@ struct PingWorkload : TestWorkload {
 		loop {
 			wait( poisson( &lastTime, self->actorCount / self->operationsPerSecond ) );
 			auto& peer = g_random->randomChoice(peers);
-			state NetworkAddress addr = peer.getEndpoint().address;
+			state NetworkAddress addr = peer.getEndpoint().address[0];
 			state double before = now();
 
 			LoadedPingRequest req;
@@ -251,7 +251,7 @@ struct PingWorkload : TestWorkload {
 				req.payload = self->payloadOut;
 				req.loadReply = true;
 				replies.push_back( success( peers[i].getReply( req ) ) );
-				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().address, pingId ) );
+				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().address[0], pingId ) );
 				// peers[i].payloadPing.send( req );
 				// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 			}

@@ -65,8 +65,8 @@ struct TargetedKillWorkload : TestWorkload {
 
 		int killed = 0;
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.master.getEndpoint().address == address ||
-				( self->killAllMachineProcesses && workers[i].first.master.getEndpoint().address.ip == address.ip && workers[i].second != ProcessClass::TesterClass ) ) {
+			if( workers[i].first.master.getEndpoint().address[0] == address ||
+				( self->killAllMachineProcesses && workers[i].first.master.getEndpoint().address[0].ip == address.ip && workers[i].second != ProcessClass::TesterClass ) ) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].first.id());
 				workers[i].first.clientInterface.reboot.send( RebootRequest() );
 			}
@@ -94,7 +94,7 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address[0])
 					break;
 				o = ++o%proxies->size();
 			}
@@ -105,7 +105,7 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address[0])
 					break;
 				o = ++o%tlogs.size();
 			}
@@ -115,13 +115,13 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address[0])
 					break;
 				o = ++o%storageServers.size();
 			}
 		}
 		else if( self->machineToKill == "clustercontroller" || self->machineToKill == "cc" ) {
-			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address;
+			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address[0];
 		}
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);

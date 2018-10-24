@@ -1156,7 +1156,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 	ReplyPromise<ServerDBInfo> reply)
 {
 	state UID issueID;
-	addIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->workersWithIssues, reply.getEndpoint().address[0], issues, issueID );
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
@@ -1168,7 +1168,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 		}
 	}
 
-	removeIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	removeIssue( db->workersWithIssues, reply.getEndpoint().address[0], issues, issueID );
 
 	reply.send( db->serverInfo->get() );
 	return Void();
@@ -1184,13 +1184,13 @@ ACTOR Future<Void> clusterOpenDatabase(
 {
 	// NOTE: The client no longer expects this function to return errors
 	state UID issueID;
-	addIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->clientsWithIssues, reply.getEndpoint().address[0], issues, issueID );
 
 	if(supportedVersions.size() > 0) {
-		db->clientVersionMap[reply.getEndpoint().address] = supportedVersions;
+		db->clientVersionMap[reply.getEndpoint().address[0]] = supportedVersions;
 	}
 
-	db->traceLogGroupMap[reply.getEndpoint().address] = traceLogGroup.toString();
+	db->traceLogGroupMap[reply.getEndpoint().address[0]] = traceLogGroup.toString();
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1199,9 +1199,9 @@ ACTOR Future<Void> clusterOpenDatabase(
 		}
 	}
 
-	removeIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
-	db->clientVersionMap.erase(reply.getEndpoint().address);
-	db->traceLogGroupMap.erase(reply.getEndpoint().address);
+	removeIssue( db->clientsWithIssues, reply.getEndpoint().address[0], issues, issueID );
+	db->clientVersionMap.erase(reply.getEndpoint().address[0]);
+	db->traceLogGroupMap.erase(reply.getEndpoint().address[0]);
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1371,7 +1371,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
-				auto& address = req.reply.getEndpoint().address;
+				auto& address = req.reply.getEndpoint().address[0];
 				auto& stat = currentStatus[ address ];
 				auto& newStat = req.senderStatus.get();
 

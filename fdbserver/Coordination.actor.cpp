@@ -45,8 +45,8 @@ UID WLTOKEN_GENERATIONREG_READ( -1, 6 );
 UID WLTOKEN_GENERATIONREG_WRITE( -1, 7 );
 
 GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
-	: read( Endpoint(remote, WLTOKEN_GENERATIONREG_READ) ),
-		write( Endpoint(remote, WLTOKEN_GENERATIONREG_WRITE) )
+	: read( Endpoint({remote}, WLTOKEN_GENERATIONREG_READ) ),
+	  write( Endpoint({remote}, WLTOKEN_GENERATIONREG_WRITE) )
 {
 }
 
@@ -58,9 +58,9 @@ GenerationRegInterface::GenerationRegInterface( INetwork* local )
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
 	: ClientLeaderRegInterface(remote),
-	  candidacy( Endpoint(remote, WLTOKEN_LEADERELECTIONREG_CANDIDACY) ),
-	  leaderHeartbeat( Endpoint(remote, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT) ),
-	  forward( Endpoint(remote, WLTOKEN_LEADERELECTIONREG_FORWARD) )
+	  candidacy( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_CANDIDACY) ),
+	  leaderHeartbeat( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT) ),
+	  forward( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_FORWARD) )
 {
 }
 
@@ -128,7 +128,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 	// SOMEDAY: concurrent access to different keys?
 	loop choose {
 		when ( GenerationRegReadRequest _req = waitNext( interf.read.getFuture() ) ) {
-			TraceEvent("GenerationRegReadRequest").detail("From", _req.reply.getEndpoint().address).detail("K", printable(_req.key));
+			TraceEvent("GenerationRegReadRequest").detail("From", _req.reply.getEndpoint().address[0]).detail("K", printable(_req.key));
 			state GenerationRegReadRequest req = _req;
 			Optional<Value> rawV = wait( store->readValue( req.key ) );
 			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>( rawV.get(), IncludeVersion() ) : GenerationRegVal();
@@ -149,11 +149,11 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 				v.val = wrq.kv.value;
 				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
 				wait(store->commit());
-				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
+				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().address[0]).detail("Key", printable(wrq.kv.key))
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
 				wrq.reply.send( v.writeGen );
 			} else {
-				TraceEvent("GenerationRegWriteFail").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
+				TraceEvent("GenerationRegWriteFail").detail("From", wrq.reply.getEndpoint().address[0]).detail("Key", printable(wrq.kv.key))
 					.detail("ReqGen", wrq.gen.generation).detail("ReadGen", v.readGen.generation).detail("WriteGen", v.writeGen.generation);
 				wrq.reply.send( std::max( v.readGen, v.writeGen ) );
 			}
@@ -449,7 +449,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state GenerationRegInterface myInterface( g_network );
 	state OnDemandStore store( dataFolder, myID );
 
-	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().address).detail("Folder", dataFolder);
+	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().address[0]).detail("Folder", dataFolder);
 
 	try {
 		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );

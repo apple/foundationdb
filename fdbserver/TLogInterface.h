@@ -53,7 +53,7 @@ struct TLogInterface {
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
-	NetworkAddress address() const { return peekMessages.getEndpoint().address; }
+	NetworkAddress address() const { return peekMessages.getEndpoint().address[0]; }
 	void initEndpoints() {
 		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
 		popMessages.getEndpoint( TaskTLogPop );
