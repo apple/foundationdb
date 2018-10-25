@@ -385,7 +385,7 @@ LogicalPageID IndirectShadowPager::allocateLogicalPage() {
 	}
 
 	ASSERT(allocatedPage >= SERVER_KNOBS->PAGER_RESERVED_PAGES);
-	debug_printf("op=allocate id=%u\n", allocatedPage);
+	debug_printf("%s: op=allocate id=%u\n", pageFileName.c_str(), allocatedPage);
 	return allocatedPage;
 }
 
@@ -565,19 +565,19 @@ Future<Void> IndirectShadowPager::onClosed() {
 }
 
 ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
-
 	if(pager->errorPromise.canBeSet())
 		pager->errorPromise.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
-	wait(pager->writeActors.signal());
-	wait(pager->operations.signal());
-	wait(pager->committing);
+
+	wait(ready(pager->writeActors.signal()));
+	wait(ready(pager->operations.signal()));
+	wait(ready(pager->committing));
 
 	pager->housekeeping.cancel();
 	pager->pagerFile.shutdown();
 
 	state Future<Void> pageTableClosed = pager->pageTableLog->onClosed();
 	if(dispose) {
-		wait(IAsyncFileSystem::filesystem()->deleteFile(pager->pageFileName, true));
+		wait(ready(IAsyncFileSystem::filesystem()->deleteFile(pager->pageFileName, true)));
 		pager->pageTableLog->dispose();
 	}
 	else {
@@ -604,7 +604,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 
 	auto itr = IndirectShadowPager::pageVersionMapUpperBound(pageVersionMap, version);
 	if(itr == pageVersionMap.begin()) {
-		debug_printf("Page version map empty! op=error id=%u @%lld\n", logicalPageID, version);
+		debug_printf("%s: Page version map empty! op=error id=%u @%lld\n", pager->pageFileName.c_str(), logicalPageID, version);
 		ASSERT(false);
 	}
 
@@ -658,7 +658,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 
 Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID pageID, Version version) {
 	if(!recovery.isReady()) {
-		debug_printf("getPage failure, recovery not ready - op=error id=%u @%lld\n", pageID, version);
+		debug_printf("%s: getPage failure, recovery not ready - op=error id=%u @%lld\n", pageFileName.c_str(), pageID, version);
 		ASSERT(false);
 	}
 
