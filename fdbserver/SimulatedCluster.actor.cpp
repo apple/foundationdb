@@ -705,8 +705,9 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
-	bool generateFearless = minimumRegions > 1 || g_random->random01() < 0.5;
-	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
+	const bool simple = false;  // Set true to simplify simulation configs for easier debugging
+	bool generateFearless = simple ? false : (minimumRegions > 1 || g_random->random01() < 0.5);
+	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 ) );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -715,8 +716,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else {
 		set_config("memory");
 	}
+	set_config("ssd-redwood-experimental");
+	if(simple) {
+		db.desiredTLogCount = 1;
+		db.masterProxyCount = 1;
+		db.resolverCount = 1;
+	}
 
-	int replication_type = std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3));
+	int replication_type = simple ? 1 : ( std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3)) );
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
