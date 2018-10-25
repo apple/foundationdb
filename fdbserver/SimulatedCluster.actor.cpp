@@ -716,7 +716,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else {
 		set_config("memory");
 	}
-	set_config("ssd-redwood-experimental");
 	if(simple) {
 		db.desiredTLogCount = 1;
 		db.masterProxyCount = 1;
