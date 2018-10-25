@@ -61,6 +61,7 @@ inline bool canReplyWith(Error e) {
 		case error_code_transaction_too_old:
 		case error_code_future_version:
 		case error_code_wrong_shard_server:
+		case error_code_process_behind:
 		//case error_code_all_alternatives_failed:
 			return true;
 		default:
