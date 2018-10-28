@@ -25,7 +25,7 @@ These limitations come from fundamental design decisions and are unlikely to cha
 Large transactions
 ------------------
 
-Transaction size cannot exceed 10,000,000 bytes of affected data. Keys, values, and ranges that you read or write are all included as affected data. Likewise, conflict ranges that you :ref:`add <api-python-conflict-ranges>` or remove (using a :ref:`snapshot read <api-python-snapshot-reads>` or a :ref:`transaction option <api-python-no-write-conflict-range>`) are also added or removed from the scope of affected data.
+Transaction size cannot exceed 10,000,000 bytes of affected data. Keys, values, and ranges that you write are included as affected data. Keys and ranges that you read are also included as affected data, but values that you read are not. Likewise, conflict ranges that you :ref:`add <api-python-conflict-ranges>` or remove (using a :ref:`snapshot read <api-python-snapshot-reads>` or a :ref:`transaction option <api-python-no-write-conflict-range>`) are also added or removed from the scope of affected data.
 
 If any single transaction exceeds one megabyte of affected data, you should modify your design. In the current version, these large transactions can cause performance issues and database availability can (briefly) be impacted.
 
