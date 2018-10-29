@@ -286,8 +286,8 @@ func (ri *RangeIterator) MustGet() KeyValue {
 	return kv
 }
 
-// Computes the first key that would sort outside the range prefixed by prefix.
-// Strinc returns an error if prefix is empty or contains only 0xFF bytes.
+// Strinc returns the first key that would sort outside the range prefixed by
+// prefix, or an error if prefix is empty or contains only 0xFF bytes.
 func Strinc(prefix []byte) ([]byte, error) {
 	for i := len(prefix) - 1; i >= 0; i-- {
 		if prefix[i] != 0xFF {
