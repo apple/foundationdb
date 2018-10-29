@@ -109,7 +109,7 @@ public class KeySelector {
 	 * @return a newly created {@code KeySelector}
 	 */
 	public static KeySelector firstGreaterThan(byte[] key) {
-		return new KeySelector(key, true, +1);
+		return new KeySelector(key, false, +1);
 	}
 
 	/**
@@ -120,7 +120,7 @@ public class KeySelector {
 	 * @return a newly created {@code KeySelector}
 	 */
 	public static KeySelector firstGreaterOrEqual(byte[] key) {
-		return new KeySelector(key, false, +1);
+		return new KeySelector(key, true, +1);
 	}
 
 	/**
