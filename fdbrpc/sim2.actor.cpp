@@ -1515,7 +1515,7 @@ public:
 	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo( "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), NetworkAddress(), this, "", "" );
-		g_network = net2 = newNet2(NetworkAddress(), false, true);
+		g_network = net2 = newNet2(false, true);
 		Net2FileSystem::newFileSystem();
 		check_yield(0);
 	}

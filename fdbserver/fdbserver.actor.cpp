@@ -1403,7 +1403,7 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(NetworkAddress(), useThreadPool, true);
+			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(1);
 
 			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);

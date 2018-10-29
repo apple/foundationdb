@@ -187,7 +187,7 @@ typedef NetworkAddress (*NetworkAddressFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:

@@ -87,7 +87,7 @@ void fdb_flow_test() {
 	g_nondeterministic_random = new DeterministicRandom(platform::getRandomSeed());
 	g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
-	g_network = newNet2( NetworkAddress(), false );
+	g_network = newNet2( false );
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
 	systemMonitor();
