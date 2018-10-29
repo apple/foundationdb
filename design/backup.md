@@ -54,7 +54,7 @@ Instead looking at restore on key space, we can replay events on version space, 
 mutation log only once. At each version vx,
 * Wait for all the KV ranges recorded before vx to restore first.
 * Replay (a-z, vx), but ignore mutations for the keys that are not yet restored by KV ranges.
-  Because the keys that has not been restored by KV ranges will eventually be restored at a later version,
+  Because the keys that are not yet restored by KV ranges will eventually be restored at a later version,
   the mutations on those keys can be safely ignored. 
 
 For the above example, it would look like
