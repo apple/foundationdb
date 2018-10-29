@@ -313,7 +313,7 @@ func PrefixRange(prefix []byte) (KeyRange, error) {
 	copy(begin, prefix)
 	end, e := Strinc(begin)
 	if e != nil {
-		return KeyRange{}, nil
+		return KeyRange{}, e
 	}
 	return KeyRange{Key(begin), Key(end)}, nil
 }
