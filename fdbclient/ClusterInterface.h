@@ -39,7 +39,7 @@ struct ClusterInterface {
 	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
 	UID id() const { return openDatabase.getEndpoint().token; }
-	NetworkAddress address() const { return openDatabase.getEndpoint().address[0]; }
+	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
 		openDatabase.getEndpoint( TaskClusterController );

@@ -1814,7 +1814,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		allServers.push_back( newServer.id() );
 
-		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().address[0]);
+		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().getPrimaryAddress());
 		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, processClass, includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(), storageServerSet ) );
 
 		// Establish the relation between server and machine
@@ -2606,7 +2606,7 @@ ACTOR Future<Void> storageServerTracker(
 					return Void();
 				}
 				when( std::pair<StorageServerInterface, ProcessClass> newInterface = wait( interfaceChanged ) ) {
-					bool restartRecruiting =  newInterface.first.waitFailure.getEndpoint().address[0] != server->lastKnownInterface.waitFailure.getEndpoint().address[0];
+					bool restartRecruiting =  newInterface.first.waitFailure.getEndpoint().getPrimaryAddress() != server->lastKnownInterface.waitFailure.getEndpoint().getPrimaryAddress();
 					bool localityChanged = server->lastKnownInterface.locality != newInterface.first.locality;
 					bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
 					                              newInterface.first.locality.zoneId().get();

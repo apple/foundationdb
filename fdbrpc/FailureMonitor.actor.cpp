@@ -92,7 +92,7 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
-	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.address[0]).detail("Token", endpoint.token);
+	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }
 
@@ -103,9 +103,9 @@ void SimpleFailureMonitor::notifyDisconnect( NetworkAddress const& address ) {
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure( Endpoint const& endpoint ) {
 	// If the endpoint or address is already failed, return right away
-	auto i = addressStatus.find(endpoint.address[0]);
+	auto i = addressStatus.find(endpoint.getPrimaryAddress());
 	if (i == addressStatus.end() || i->value.isFailed() || endpointKnownFailed.get(endpoint)) {
-		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.address[0]).detail("Tok", endpoint.token);
+		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
 	}
 
@@ -131,17 +131,17 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 	if (endpointKnownFailed.get(endpoint))
 		return FailureStatus(true);
 	else {
-		auto a = addressStatus.find(endpoint.address[0]);
+		auto a = addressStatus.find(endpoint.getPrimaryAddress());
 		if (a == addressStatus.end()) return FailureStatus();
 		else return a->value;
-		//printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.address[0].toString(), a.failed ? "FAILED" : "OK", this);
+		//printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.getPrimaryAddress().toString(), a.failed ? "FAILED" : "OK", this);
 	}
 }
 
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
 	if(!endpointKnownFailed.get(endpoint))
 		return false;
-	auto a = addressStatus.find(endpoint.address[0]);
+	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end()) return true;
 	else return !a->value.failed;
 }

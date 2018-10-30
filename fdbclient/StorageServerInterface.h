@@ -61,7 +61,7 @@ struct StorageServerInterface {
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
-	NetworkAddress address() const { return getVersion.getEndpoint().address[0]; }
+	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar> 

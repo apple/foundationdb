@@ -31,17 +31,29 @@ public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
 	typedef UID Token;
-	NetworkAddressList address;
+	NetworkAddressList addresses;
 	Token token;
 
-	Endpoint() {}
-	Endpoint(const NetworkAddressList& addresses, Token token) : address(addresses), token(token) {}
+	Endpoint() : addresses({NetworkAddress()}) {}
+	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
+		ASSERT(addresses.size() > 0);
+	}
 
 	bool isValid() const { return token.isValid(); }
 	bool isLocal() const;
 
+	// Return the primary network address, which is the first network address among
+	// all addresses this endpoint listens to.
+	const NetworkAddress& getPrimaryAddress() const {
+		return addresses[0];
+	}
+
+	const NetworkAddress& getRandomAddress() const {
+		return addresses[g_random->randomChoice(addresses)];
+	}
+
 	bool operator == (Endpoint const& r) const {
-		return address == r.address && token == r.token;
+		return addresses == r.addresses && token == r.token;
 	}
 	bool operator != (Endpoint const& r) const {
 		return !(*this == r);
@@ -49,8 +61,8 @@ public:
 
 	//TODO: (Vishesh) Figure out what to do for vector of addresses this.
 	bool operator < (Endpoint const& r) const {
-		const NetworkAddress& left = address.empty() ? NetworkAddress() : address[0];
-		const NetworkAddress& right = r.address.empty() ? NetworkAddress() : r.address[0];
+		const NetworkAddress& left = addresses[0];
+		const NetworkAddress& right = r.addresses[0];
 		if (left != right)
 			return left < right;
 		else
@@ -60,10 +72,9 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020002LL) {
-			address.emplace_back();
-			ar & address[0] & token;
+			ar & addresses[0] & token;
 		} else {
-			ar & address & token;
+			ar & addresses & token;
 		}
 	}
 };
@@ -97,8 +108,8 @@ public:
 	// Starts a server listening on the given listenAddress, and sets publicAddress to be the public
 	// address of this server.  Returns only errors.
 
-	NetworkAddress getLocalAddress();
-	// Returns the NetworkAddress that would be assigned by addEndpoint (the public address)
+	NetworkAddress getLocalAddress() const;
+	// Returns first local NetworkAddress.
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
@@ -151,7 +162,7 @@ private:
 };
 
 inline bool Endpoint::isLocal() const { 
-	return address[0] == FlowTransport::transport().getLocalAddress();
+	return addresses[0] == FlowTransport::transport().getLocalAddress();
 }
 
 #endif

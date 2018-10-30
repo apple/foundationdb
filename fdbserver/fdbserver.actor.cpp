@@ -1456,15 +1456,21 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer || role == Restore) {
-				try {
-					listenErrors.push_back(FlowTransport::transport().bind(publicAddresses[0], listenAddresses[0]));
-					if (listenErrors[0].isReady()) listenErrors[0].get();
-				} catch (Error& e) {
-					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddresses[0].toString().c_str(), listenAddresses[0].toString().c_str(), e.what());
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
+			if (role == FDBD || role == NetworkTestServer) {
+				for (int ii = 0; ii < publicAddresses.size(); ++ii) {
+					const NetworkAddress& publicAddress = publicAddresses[ii];
+					const NetworkAddress& listenAddress = listenAddresses[ii];
+					try {
+						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
+						listenErrors.push_back(errorF);
+						if (errorF.isReady()) errorF.get();
+					} catch (Error& e) {
+						TraceEvent("BindError").error(e);
+						fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n",
+								publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
 				}
 			}
 

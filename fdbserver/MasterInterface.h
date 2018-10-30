@@ -37,7 +37,7 @@ struct MasterInterface {
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
 
-	NetworkAddress address() const { return changeCoordinators.getEndpoint().address[0]; }
+	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>

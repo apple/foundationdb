@@ -33,7 +33,7 @@ struct RestoreInterface {
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
 	UID id() const { return test.getEndpoint().token; }
-	NetworkAddress address() const { return test.getEndpoint().address[0]; }
+	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
 		test.getEndpoint( TaskClusterController );

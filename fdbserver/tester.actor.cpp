@@ -704,7 +704,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 				TraceEvent(SevError, "TestFailure")
 					.error(metricTasks[i].getError())
 					.detail("Reason", "Metrics not retrieved")
-					.detail("From", workloads[i].metrics.getEndpoint().address[0]);
+					.detail("From", workloads[i].metrics.getEndpoint().getPrimaryAddress());
 		}
 	}
 
