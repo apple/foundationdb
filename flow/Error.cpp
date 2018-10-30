@@ -46,7 +46,7 @@ Error Error::fromUnvalidatedCode(int code) {
 		return Error::fromCode(code);
 }
 
-Error internal_error_impl(const char* file, int line) {
+Error internal_error_impl(const char* file, int line, const char* call_site) {
 	fprintf(stderr, "Internal Error @ %s %d:\n  %s\n", file, line, platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
@@ -55,10 +55,10 @@ Error internal_error_impl(const char* file, int line) {
 	    .detail("Line", line)
 	    .backtrace();
 	flushTraceFileVoid();
-	return Error(error_code_internal_error);
+	return Error(error_code_internal_error, call_site);
 }
 
-Error::Error(int error_code) : error_code(error_code), flags(0) {
+Error::Error(int error_code, const char* call_site) : error_code(error_code), flags(0), call_site(call_site) {
 	if (TRACE_SAMPLE()) TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
 	// std::cout << "Error: " << error_code << std::endl;
 	if (error_code >= 3000 && error_code < 6000) {
@@ -100,13 +100,6 @@ Error Error::asInjectedFault() const {
 	Error e = *this;
 	e.flags |= FLAG_INJECTED_FAULT;
 	return e;
-}
-
-ErrorCodeTable::ErrorCodeTable() {
-#define ERROR(name, number, description)                                                                               \
-	addCode(number, #name, description);                                                                               \
-	enum { Duplicate_Error_Code_##number = 0 };
-#include "error_definitions.h"
 }
 
 void ErrorCodeTable::addCode(int code, const char* name, const char* description) {

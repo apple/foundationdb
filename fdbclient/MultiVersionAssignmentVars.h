@@ -187,7 +187,7 @@ public:
 		FdbCApi::fdb_error_t error = addFutureRef() ? api->futureGetError(f) : error_code_operation_cancelled;
 		if (error != 0) {
 			delFutureRef();
-			ThreadSingleAssignmentVar<T>::sendError(Error(error));
+			ThreadSingleAssignmentVar<T>::sendError(Error(error, nullptr));
 		} else {
 			T val = extractValue(f, api.getPtr());
 			delFutureRef();

@@ -678,6 +678,9 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 				detail("Error", error.name());
 				detail("ErrorDescription", error.what());
 				detail("ErrorCode", error.code());
+				if (error.callSite() != nullptr) {
+					detail("ErrorConstructedAt", error.callSite());
+				}
 			}
 		} else {
 			if (initialized) {

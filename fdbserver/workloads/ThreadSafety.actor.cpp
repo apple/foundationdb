@@ -184,7 +184,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 	THREAD_FUNC threadStart(void* arg) {
 		ThreadInfo* info = (ThreadInfo*)arg;
 
-		Error error(error_code_success);
+		Error error = ::success();
 		try {
 			info->self->runTest(info);
 		} catch (Error& e) {
