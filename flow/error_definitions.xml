@@ -1,0 +1,199 @@
+<!--
+    - error_definitions.h
+    -
+    - This source file is part of the FoundationDB open source project
+    -
+    - Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+    -
+    - Licensed under the Apache License, Version 2.0 (the "License");
+    - you may not use this file except in compliance with the License.
+    - You may obtain a copy of the License at
+    -
+    -     http://www.apache.org/licenses/LICENSE-2.0
+    -
+    - Unless required by applicable law or agreed to in writing, software
+    - distributed under the License is distributed on an "AS IS" BASIS,
+    - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    - See the License for the specific language governing permissions and
+    - limitations under the License.
+-->
+
+<Categories>
+  <Category name="Normal">
+    <Error name="success" code="0" description="Success" no-impl="True"/>
+    <Error name="end_of_stream" code="1" description="End of stream"/>
+    <Error name="operation_failed" code="1000" description="Operation failed"/>
+    <Error name="wrong_shard_server" code="1001" description="Shard is not available from this server"/>
+    <Error name="timed_out" code="1004" description="Operation timed out"/>
+    <Error name="coordinated_state_conflict" code="1005" description="Conflict occurred while changing coordination information"/>
+    <Error name="all_alternatives_failed" code="1006" description="All alternatives failed"/>
+    <Error name="transaction_too_old" code="1007" description="Transaction is too old to perform reads or be committed"/>
+    <Error name="no_more_servers" code="1008" description="Not enough physical servers available"/>
+    <Error name="future_version" code="1009" description="Request for future version"/>
+    <Error name="movekeys_conflict" code="1010" description="Conflicting attempts to change data distribution"/>
+    <Error name="tlog_stopped" code="1011" description="TLog stopped"/>
+    <Error name="server_request_queue_full" code="1012" description="Server request queue is full"/>
+    <Error name="not_committed" code="1020" description="Transaction not committed due to conflict with another transaction"/>
+    <Error name="commit_unknown_result" code="1021" description="Transaction may or may not have committed"/>
+    <Error name="transaction_cancelled" code="1025" description="Operation aborted because the transaction was cancelled"/>
+    <Error name="connection_failed" code="1026" description="Network connection failed"/>
+    <Error name="coordinators_changed" code="1027" description="Coordination servers have changed"/>
+    <Error name="new_coordinators_timed_out" code="1028" description="New coordination servers did not respond in a timely way"/>
+    <Error name="watch_cancelled" code="1029" description="Watch cancelled because storage server watch limit exceeded"/>
+    <Error name="request_maybe_delivered" code="1030" description="Request may or may not have been delivered"/>
+    <Error name="transaction_timed_out" code="1031" description="Operation aborted because the transaction timed out"/>
+    <Error name="too_many_watches" code="1032" description="Too many watches currently set"/>
+    <Error name="locality_information_unavailable" code="1033" description="Locality information not available"/>
+    <Error name="watches_disabled" code="1034" description="Watches cannot be set if read your writes is disabled"/>
+    <Error name="default_error_or" code="1035" description="Default error for an ErrorOr object"/>
+    <Error name="accessed_unreadable" code="1036" description="Read or wrote an unreadable key"/>
+    <Error name="process_behind" code="1037" description="Storage process does not have recent mutations"/>
+    <Error name="database_locked" code="1038" description="Database is locked"/>
+    <Error name="cluster_version_changed" code="1039" description="The protocol version of the cluster has changed"/>
+    <Error name="external_client_already_loaded" code="1040" description="External client has already been loaded"/>
+    <Error name="lookup_failed" code="1041" description="DNS lookup failed"/>
+    <Error name="proxy_memory_limit_exceeded" code="1042" description="Proxy commit memory limit exceeded"/>
+
+    <Error name="broken_promise" code="1100" description="Broken promise"/>
+    <Error name="operation_cancelled" code="1101" description="Asynchronous operation cancelled"/>
+    <Error name="future_released" code="1102" description="Future has been released"/>
+    <Error name="connection_leaked" code="1103" description="Connection object leaked"/>
+
+    <Error name="recruitment_failed" code="1200" description="Recruitment of a server failed"
+           comment="Be careful, catching this will delete the data of a storage server or tlog permanently"/>
+    <Error name="move_to_removed_server" code="1201" description="Attempt to move keys to a storage server that was removed"/>
+    <Error name="worker_removed" code="1202" description="Normal worker shut down"
+           comment="Be careful, catching this will delete the data of a storage server or tlog permanently"/>
+    <Error name="master_recovery_failed" code="1203" description="Master recovery failed"/>
+    <Error name="master_max_versions_in_flight" code="1204" description="Master hit maximum number of versions in flight"/>
+    <Error name="master_tlog_failed" code="1205" description="Master terminating because a TLog failed"
+           comment="similar to tlog_stopped, but the tlog has actually die"/>
+    <Error name="worker_recovery_failed" code="1206" description="Recovery of a worker process failed"/>
+    <Error name="please_reboot" code="1207" description="Reboot of server process requested"/>
+    <Error name="please_reboot_delete" code="1208" description="Reboot of server process requested, with deletion of state"/>
+    <Error name="master_proxy_failed" code="1209" description="Master terminating because a Proxy failed"/>
+    <Error name="master_resolver_failed" code="1210" description="Master terminating because a Resolver failed"/>
+  </Category>
+
+  <Category name="Platform">
+    <Error name="platform_error" code="1500" description="Platform error"/>
+    <Error name="large_alloc_failed" code="1501" description="Large block allocation failed"/>
+    <Error name="performance_counter_error" code="1502" description="QueryPerformanceCounter error"/>
+
+    <Error name="io_error" code="1510" description="Disk i/o operation failed"/>
+    <Error name="file_not_found" code="1511" description="File not found"/>
+    <Error name="bind_failed" code="1512" description="Unable to bind to network"/>
+    <Error name="file_not_readable" code="1513" description="File could not be read"/>
+    <Error name="file_not_writable" code="1514" description="File could not be written"/>
+    <Error name="no_cluster_file_found" code="1515" description="No cluster file found in current directory or default location"/>
+    <Error name="file_too_large" code="1516" description="File too large to be read"/>
+    <Error name="non_sequential_op" code="1517" description="Non sequential file operation not allowed"/>
+    <Error name="http_bad_response" code="1518" description="HTTP response was badly formed"/>
+    <Error name="http_not_accepted" code="1519" description="HTTP request not accepted"/>
+    <Error name="checksum_failed" code="1520" description="A data checksum failed"/>
+    <Error name="io_timeout" code="1521" description="A disk IO operation failed to complete in a timely manner"/>
+    <Error name="file_corrupt" code="1522" description="A structurally corrupt data file was detected"/>
+    <Error name="http_request_failed" code="1523" description="HTTP response code not received or indicated failure"/>
+    <Error name="http_auth_failed" code="1524" description="HTTP request failed due to bad credentials"/>
+  </Category>
+
+  <!--
+      2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to be internally caused, it should be 41xx
+  -->
+  <Category name="Client">
+    <Error name="client_invalid_operation" code="2000" description="Invalid API call"/>
+    <Error name="commit_read_incomplete" code="2002" description="Commit with incomplete read"/>
+    <Error name="test_specification_invalid" code="2003" description="Invalid test specification"/>
+    <Error name="key_outside_legal_range" code="2004" description="Key outside legal range"/>
+    <Error name="inverted_range" code="2005" description="Range begin key larger than end key"/>
+    <Error name="invalid_option_value" code="2006" description="Option set with an invalid value"/>
+    <Error name="invalid_option" code="2007" description="Option not valid in this context"/>
+    <Error name="network_not_setup" code="2008" description="Action not possible before the network is configured"/>
+    <Error name="network_already_setup" code="2009" description="Network can be configured only once"/>
+    <Error name="read_version_already_set" code="2010" description="Transaction already has a read version set"/>
+    <Error name="version_invalid" code="2011" description="Version not valid"/>
+    <Error name="range_limits_invalid" code="2012" description="Range limits not valid"/>
+    <Error name="invalid_database_name" code="2013" description="Database name must be 'DB'"/>
+    <Error name="attribute_not_found" code="2014" description="Attribute not found"/>
+    <Error name="future_not_set" code="2015" description="Future not ready"/>
+    <Error name="future_not_error" code="2016" description="Future not an error"/>
+    <Error name="used_during_commit" code="2017" description="Operation issued while a commit was outstanding"/>
+    <Error name="invalid_mutation_type" code="2018" description="Unrecognized atomic mutation type"/>
+    <Error name="attribute_too_large" code="2019" description="Attribute too large for type int"/>
+    <Error name="transaction_invalid_version" code="2020" description="Transaction does not have a valid commit version"/>
+    <Error name="no_commit_version" code="2021" description="Transaction is read-only and therefore does not have a commit version"/>
+    <Error name="environment_variable_network_option_failed" code="2022" description="Environment variable network option could not be set"/>
+    <Error name="transaction_read_only" code="2023" description="Attempted to commit a transaction specified as read-only"/>
+
+    <Error name="incompatible_protocol_version" code="2100" description="Incompatible protocol version"/>
+    <Error name="transaction_too_large" code="2101" description="Transaction exceeds byte limit"/>
+    <Error name="key_too_large" code="2102" description="Key length exceeds limit"/>
+    <Error name="value_too_large" code="2103" description="Value length exceeds limit"/>
+    <Error name="connection_string_invalid" code="2104" description="Connection string invalid"/>
+    <Error name="address_in_use" code="2105" description="Local address in use"/>
+    <Error name="invalid_local_address" code="2106" description="Invalid local address"/>
+    <Error name="tls_error" code="2107" description="TLS error"/>
+    <Error name="unsupported_operation" code="2108" description="Operation is not supported"/>
+  </Category>
+
+  <Category name="Bindings">
+    <Error name="api_version_unset" code="2200" description="API version is not set"/>
+    <Error name="api_version_already_set" code="2201" description="API version may be set only once"/>
+    <Error name="api_version_invalid" code="2202" description="API version not valid"/>
+    <Error name="api_version_not_supported" code="2203" description="API version not supported"/>
+    <Error name="exact_mode_without_limits" code="2210" description="EXACT streaming mode requires limits, but none were given"/>
+
+    <Error name="invalid_tuple_data_type" code="2250" description="Unrecognized data type in packed tuple"/>
+    <Error name="invalid_tuple_index" code="2251" description="Tuple does not have element at specified index"/>
+    <Error name="key_not_in_subspace" code="2252" description="Cannot unpack key that is not in subspace"/>
+    <Error name="manual_prefixes_not_enabled" code="2253" description="Cannot specify a prefix unless manual prefixes are enabled"/>
+    <Error name="prefix_in_partition" code="2254" description="Cannot specify a prefix in a partition"/>
+    <Error name="cannot_open_root_directory" code="2255" description="Root directory cannot be opened"/>
+    <Error name="directory_already_exists" code="2256" description="Directory already exists"/>
+    <Error name="directory_does_not_exist" code="2257" description="Directory does not exist"/>
+    <Error name="parent_directory_does_not_exist" code="2258" description="Directory's parent does not exist"/>
+    <Error name="mismatched_layer" code="2259" description="Directory has already been created with a different layer string"/>
+    <Error name="invalid_directory_layer_metadata" code="2260" description="Invalid directory layer metadata"/>
+    <Error name="cannot_move_directory_between_partitions" code="2261" description="Directory cannot be moved between partitions"/>
+    <Error name="cannot_use_partition_as_subspace" code="2262" description="Directory partition cannot be used as subspace"/>
+    <Error name="incompatible_directory_version" code="2263" description="Directory layer was created with an incompatible version"/>
+    <Error name="directory_prefix_not_empty" code="2264" description="Database has keys stored at the prefix chosen by the automatic prefix allocator"/>
+    <Error name="directory_prefix_in_use" code="2265" description="Directory layer already has a conflicting prefix"/>
+    <Error name="invalid_destination_directory" code="2266" description="Target directory is invalid"/>
+    <Error name="cannot_modify_root_directory" code="2267" description="Root directory cannot be modified"/>
+    <Error name="invalid_uuid_size" code="2268" description="UUID is not sixteen bytes"/>
+  </Category>
+
+  <Category name="Backup">
+    <Error name="backup_error" code="2300" description="Backup error"/>
+    <Error name="restore_error" code="2301" description="Restore error"/>
+    <Error name="backup_duplicate" code="2311" description="Backup duplicate request"/>
+    <Error name="backup_unneeded" code="2312" description="Backup unneeded request"/>
+    <Error name="backup_bad_block_size" code="2313" description="Backup file block size too small"/>
+    <Error name="backup_invalid_url" code="2314" description="Backup Container URL invalid"/>
+    <Error name="backup_invalid_info" code="2315" description="Backup Container URL invalid"/>
+    <Error name="backup_cannot_expire" code="2316" description="Cannot expire requested data from backup without violating minimum restorability"/>
+    <Error name="backup_auth_missing" code="2317" description="Cannot find authentication details (such as a password or secret key) for the specified Backup Container URL"/>
+    <Error name="backup_auth_unreadable" code="2318" description="Cannot read or parse one or more sources of authentication information for Backup Container URLs"/>
+    <Error name="restore_invalid_version" code="2361" description="Invalid restore version"/>
+    <Error name="restore_corrupted_data" code="2362" description="Corrupted backup data"/>
+    <Error name="restore_missing_data" code="2363" description="Missing backup data"/>
+    <Error name="restore_duplicate_tag" code="2364" description="Restore duplicate request"/>
+    <Error name="restore_unknown_tag" code="2365" description="Restore tag does not exist"/>
+    <Error name="restore_unknown_file_type" code="2366" description="Unknown backup/restore file type"/>
+    <Error name="restore_unsupported_file_version" code="2367" description="Unsupported backup file version"/>
+    <Error name="restore_bad_read" code="2368" description="Unexpected number of bytes read"/>
+    <Error name="restore_corrupted_data_padding" code="2369" description="Backup file has unexpected padding bytes"/>
+    <Error name="restore_destination_not_empty" code="2370" description="Attempted to restore into a non-empty destination database"/>
+    <Error name="restore_duplicate_uid" code="2371" description="Attempted to restore using a UID that had been used for an aborted restore"/>
+    <Error name="task_invalid_version" code="2381" description="Invalid task version"/>
+    <Error name="task_interrupted" code="2382" description="Task execution stopped due to timeout, abort, or completion by another worker"/>
+
+    <Error name="key_not_found" code="2400" description="Expected key is missing"/>
+  </Category>
+
+  <Category name="Internal">
+    <Error name="unknown_error" code="4000" description="An unknown error occurred"/>
+    <Error name="internal_error" code="4100" description="An internal error occurred" no-impl="True"/>
+  </Category>
+</Categories>

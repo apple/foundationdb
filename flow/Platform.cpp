@@ -697,10 +697,10 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
 			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks",
-			//rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
-			//wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
-			//aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
-			//reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
+			// rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
+			// wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
+			// aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
+			// reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
 			//  .detail("ReadSectors", readSectors);
 			return;
 		} else
@@ -1438,12 +1438,12 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #ifdef _WIN32
 	if (localtime_s(result, timep) != 0) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #elif defined(__unixish__)
 	if (localtime_r(timep, result) == NULL) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #else
 #error Port me!

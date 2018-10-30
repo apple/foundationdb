@@ -53,15 +53,16 @@ public:
 		ar& error_code;
 	}
 
-	Error() : error_code(invalid_error_code), flags(0) {}
-	explicit Error(int error_code);
+	Error() : error_code(invalid_error_code), flags(0), call_site(nullptr) {}
+	explicit Error(int error_code, const char* call_site);
 
 	static void init();
 	static std::map<int, int>& errorCounts();
 	static ErrorCodeTable& errorCodeTable();
-	static Error fromCode(int error_code) {
+	static Error fromCode(int error_code, const char* call_site = nullptr) {
 		Error e;
 		e.error_code = error_code;
+		e.call_site = call_site;
 		return e;
 	} // Doesn't change errorCounts
 	static Error fromUnvalidatedCode(
@@ -69,27 +70,37 @@ public:
 	                     // error codes) to unknown_error()
 
 	Error asInjectedFault() const; // Returns an error with the same code() as this but isInjectedFault() is true
+	const char* callSite() const { return call_site; }
+
 private:
 	uint16_t error_code;
 	uint16_t flags;
+	const char* call_site;
 
 	enum Flags { FLAG_INJECTED_FAULT = 1 };
 };
 
+#define STRINGIFY_(x) #x
+#define EXPAND_(macro, x) macro(x)
+#define CALL_SITE __FILE__ ":" EXPAND_(STRINGIFY_, __LINE__)
+
 #undef ERROR
 #define ERROR(name, number, description)                                                                               \
-	inline Error name() { return Error(number); };                                                                     \
+	inline Error name##_impl(const char* call_site) { return Error(number); };                                         \
 	enum { error_code_##name = number };
-#include "error_definitions.h"
+#include <flow/error_definitions.g.h>
 
+inline Error success() {
+	return Error(error_code_success, nullptr);
+}
 // actor_cancelled has been renamed
 inline Error actor_cancelled() {
-	return Error(error_code_operation_cancelled);
+	return Error(error_code_operation_cancelled, nullptr);
 }
 enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
-extern Error internal_error_impl(const char* file, int line);
-#define internal_error() internal_error_impl(__FILE__, __LINE__)
+extern Error internal_error_impl(const char* file, int line, const char* call_site);
+#define internal_error() internal_error_impl(__FILE__, __LINE__, CALL_SITE)
 
 extern bool isAssertDisabled(int line);
 //#define ASSERT( condition ) ((void)0)

@@ -77,9 +77,18 @@ set(FLOW_SRCS
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
+set(ERROR_DEFINITIONS ${CMAKE_CURRENT_BINARY_DIR}/error_definitions.g.h)
+set(ERROR_DICTIONARY ${CMAKE_CURRENT_BINARY_DIR}/error_dictionary.g.cpp)
+add_custom_command(OUTPUT ${ERROR_DEFINITIONS} ${ERROR_DICTIONARY}
+  COMMAND ${MONO_EXECUTABLE} ${ERROR_GEN_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/error_definitions.xml ${ERROR_DEFINITIONS} ${ERROR_DICTIONARY}
+  DEPENDS error_gen error_definitions.xml
+  COMMENT "Generate error_defintions")
+add_custom_target(error_definitions DEPENDS ${ERROR_DEFINITIONS})
+
 actor_set(FLOW_BUILD "${FLOW_SRCS}")
-add_library(flow STATIC ${FLOW_BUILD})
+add_library(flow STATIC ${FLOW_BUILD} ${ERROR_DICTIONARY})
 actor_compile(flow "${FLOW_SRCS}")
+add_dependencies(flow error_definitions)
 target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE)

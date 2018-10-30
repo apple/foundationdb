@@ -29,7 +29,7 @@
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
-		throw Error(e);
+		throw Error(e, nullptr);
 	}
 }
 
@@ -1512,7 +1512,7 @@ private:
 struct FutureInfo {
 	FutureInfo() {
 		if (g_random->coinflip()) {
-			expectedValue = Error(g_random->randomInt(1, 100));
+			expectedValue = Error(g_random->randomInt(1, 100), nullptr);
 		} else {
 			expectedValue = g_random->randomInt(0, 100);
 		}
