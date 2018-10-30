@@ -32,7 +32,7 @@
 // FoundationDB tuples can currently encode byte and unicode strings, integers,
 // large integers, floats, doubles, booleans, UUIDs, tuples, and NULL values.
 // In Go these are represented as []byte (or fdb.KeyConvertible), string, int64
-// (or int, uint, uint64), *big.Int (or big.Int), float32, float64, bool, 
+// (or int, uint, uint64), *big.Int (or big.Int), float32, float64, bool,
 // UUID, Tuple, and nil.
 package tuple
 
@@ -165,7 +165,6 @@ func (p *packer) encodeUint(i uint64) {
 
 	p.putBytes(scratch[8-n:])
 }
-
 
 func (p *packer) encodeInt(i int64) {
 	if i >= 0 {
@@ -302,7 +301,7 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 // the tuple contains an element of any type other than []byte,
 // fdb.KeyConvertible, string, int64, int, uint64, uint, *big.Int, big.Int, float32,
 // float64, bool, tuple.UUID, nil, or a Tuple with elements of valid types. It will
-// also panic if an integer is specified with a value outside the range 
+// also panic if an integer is specified with a value outside the range
 // [-2**2040+1, 2**2040-1]
 //
 // Tuple satisfies the fdb.KeyConvertible interface, so it is not necessary to
