@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
 #include <tls.h>

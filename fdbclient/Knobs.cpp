@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Knobs.h"
-#include "FDBTypes.h"
-#include "SystemData.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
@@ -39,6 +39,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
+	init( FAILURE_EMERGENCY_DELAY,                30.0 );
+	init( FAILURE_MAX_GENERATIONS,                  10 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -77,7 +79,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( WATCH_POLLING_TIME,                      1.0 ); if( randomize && BUGGIFY ) WATCH_POLLING_TIME = 5.0;
 	init( NO_RECENT_UPDATES_DURATION,             20.0 ); if( randomize && BUGGIFY ) NO_RECENT_UPDATES_DURATION = 0.1;
 	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
-	init( WATCH_TIMEOUT,                         900.0 ); if( randomize ) WATCH_TIMEOUT = 20.0;
+	init( WATCH_TIMEOUT,                         900.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 
@@ -308,7 +308,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 	}
 }
 static double lastErrorTime = 0;
-ACTOR Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string message) {
+void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string message) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if(now() - lastErrorTime > CLIENT_KNOBS->BACKUP_ERROR_DELAY) {
@@ -316,12 +316,13 @@ ACTOR Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key k
 		lastErrorTime = now();
 	}
 	tr->set(keyErrors, message);
-	return Void();
 }
 
-
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message) {
-	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){return logErrorWorker(tr, keyErrors, message); });
+	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { 
+		logErrorWorker(tr, keyErrors, message); 
+		return Future<Void>(Void());
+	});
 }
 
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message) {

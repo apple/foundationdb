@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/UnitTest.h"
 
 void forceLinkIndexedSetTests();
@@ -113,7 +113,7 @@ struct UnitTestWorkload : TestWorkload {
 
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
-TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
+TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));
 	return Void();
 }

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "ReplicationPolicy.h"
-#include "Replication.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
 
 
@@ -451,7 +451,7 @@ void testReplicationPolicy(int nTests) {
 	testPolicySerialization(policy);
 }
 
-TEST_CASE("ReplicationPolicy/Serialization") {
+TEST_CASE("/ReplicationPolicy/Serialization") {
 	testReplicationPolicy(1);
 	return Void();
 }

@@ -23,7 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "ReplicationTypes.h"
+#include "fdbrpc/ReplicationTypes.h"
 
 
 typedef std::string	repTestType;

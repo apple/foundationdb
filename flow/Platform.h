@@ -538,6 +538,18 @@ bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
 void* loadFunction(void* lib, const char* func_name);
 
+#ifdef _WIN32
+inline static int ctzll( uint64_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward64( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+#else
+#define ctzll __builtin_ctzll
+#endif
+
 // MSVC not support noexcept yet
 #ifndef __GNUG__
 #ifndef VS14

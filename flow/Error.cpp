@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Error.h"
-#include "Trace.h"
-#include "Knobs.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
+#include "flow/Knobs.h"
 #include <iostream>
 using std::cout;
 using std::endl;

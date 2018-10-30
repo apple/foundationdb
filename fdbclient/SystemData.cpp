@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "SystemData.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
@@ -559,3 +559,21 @@ const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
+
+const KeyRangeRef monitorConfKeys(
+	LiteralStringRef("\xff\x02/monitorConf/"),
+	LiteralStringRef("\xff\x02/monitorConf0")
+);
+
+const KeyRef restoreLeaderKey = LiteralStringRef("\xff\x02/restoreLeader");
+const KeyRangeRef restoreWorkersKeys(
+	LiteralStringRef("\xff\x02/restoreWorkers/"),
+	LiteralStringRef("\xff\x02/restoreWorkers0")
+);
+
+const Key restoreWorkerKeyFor( UID const& agentID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreWorkersKeys.begin );
+	wr << agentID;
+	return wr.toStringRef();
+}

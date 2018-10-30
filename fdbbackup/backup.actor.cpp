@@ -1081,8 +1081,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			backupTagUids.push_back(config.getUid());
 
 			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
 			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
@@ -2621,13 +2621,19 @@ int main(int argc, char* argv[]) {
 			commandLine += argv[a];
 		}
 
+		delete FLOW_KNOBS;
+		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FLOW_KNOBS = flowKnobs;
+
 		delete CLIENT_KNOBS;
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
-				if (!clientKnobs->setKnob( k->first, k->second )) {
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second )) 
+				{
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -2672,7 +2678,6 @@ int main(int argc, char* argv[]) {
 		Reference<Cluster> source_cluster;
 		Reference<ClusterConnectionFile> source_ccf;
 		Database source_db;
-		const KeyRef databaseKey = LiteralStringRef("DB");
 		FileBackupAgent ba;
 		Key tag;
 		Future<Optional<Void>> f;
@@ -2746,7 +2751,7 @@ int main(int argc, char* argv[]) {
 				.detail("MemoryLimit", memLimit)
 				.trackLatest("ProgramStart");
 
-			db = cluster->createDatabase(databaseKey, localities).get();
+			db = cluster->createDatabase(localities).get();
 			return true;
 		};
 
@@ -2769,7 +2774,7 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			}
 
-			source_db = source_cluster->createDatabase(databaseKey, localities).get();
+			source_db = source_cluster->createDatabase(localities).get();
 		}
 
 		switch (programExe)

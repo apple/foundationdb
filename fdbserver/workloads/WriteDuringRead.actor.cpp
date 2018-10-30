@@ -22,7 +22,7 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/Atomic.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -78,7 +78,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			extraDB = extraCluster->createDatabase().get();
 			useSystemKeys = false;
 		}
 

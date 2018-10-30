@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "ReadYourWrites.h"
-#include "Subspace.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Subspace.h"
 #include "flow/genericactors.actor.h"
 
 // Codec is a utility struct to convert a type to and from a Tuple.  It is used by the template

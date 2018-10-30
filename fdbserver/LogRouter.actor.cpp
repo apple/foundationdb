@@ -20,14 +20,14 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
-#include "WorkerInterface.h"
-#include "WaitFailure.h"
-#include "Knobs.h"
-#include "ServerDBInfo.h"
-#include "LogSystem.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbclient/SystemData.h"
-#include "ApplyMetadataMutation.h"
-#include "RecoveryState.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Stats.h"
@@ -206,6 +206,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
+					wait(yield(TaskTLogCommit));
 					//TraceEvent("LogRouterVersion").detail("Ver",ver);
 				}
 				lastVer = ver;
@@ -217,6 +218,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					if(ver > self->version.get()) {
 						wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 						self->version.set( ver );
+						wait(yield(TaskTLogCommit));
 					}
 					break;
 				}

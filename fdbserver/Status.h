@@ -23,8 +23,8 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "WorkerInterface.h"
-#include "MasterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
 typedef std::map< NetworkAddress, std::pair<std::string,UID> > ProcessIssuesMap;

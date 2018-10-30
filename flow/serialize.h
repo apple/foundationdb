@@ -24,8 +24,8 @@
 
 #include <stdint.h>
 #include <set>
-#include "Error.h"
-#include "Arena.h"
+#include "flow/Error.h"
+#include "flow/Arena.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer

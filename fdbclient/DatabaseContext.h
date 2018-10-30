@@ -22,14 +22,14 @@
 #define DatabaseContext_h
 #pragma once
 
-#include "NativeAPI.h"
-#include "KeyRangeMap.h"
-#include "MasterProxyInterface.h"
-#include "ClientDBInfo.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/ClientDBInfo.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "EventTypes.actor.h"
+#include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 
 class LocationInfo : public MultiInterface<StorageServerInterface> {
@@ -51,15 +51,14 @@ public:
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
 public:
-	static Future<Database> createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, Standalone<StringRef> dbName, LocalityData const& clientLocality ); 
-	//static Future< Void > configureDatabase( ZookeeperInterface const& zk, int configScope, int configMode, Standalone<StringRef> dbName = Standalone<StringRef>() );
+	static Future<Database> createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, LocalityData const& clientLocality ); 
 
 	// For internal (fdbserver) use only: create a database context for a DB with already known client info
 	static Database create( Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID = TaskDefaultEndpoint, bool lockAware = false );
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( clientInfo, cluster, clientInfoMonitor, dbName, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware )); }
+	Database clone() const { return Database(new DatabaseContext( clientInfo, cluster, clientInfoMonitor, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware )); }
 
 	pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -90,7 +89,7 @@ public:
 //private: friend class ClientInfoMonitorActor;
 	explicit DatabaseContext( Reference<AsyncVar<ClientDBInfo>> clientInfo, 
 		Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
-		Standalone<StringRef> dbName, Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware );
+		Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware );
 
 	// These are reference counted
 	Reference<Cluster> cluster;
@@ -127,8 +126,6 @@ public:
 
 	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
 
-	// for logging/debugging (relic of multi-db support)
-	Standalone<StringRef> dbName;
 	Standalone<StringRef> dbId;
 
 	int64_t transactionReadVersions;

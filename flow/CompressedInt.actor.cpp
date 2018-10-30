@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "UnitTest.h"
-#include "CompressedInt.h"
+#include "flow/UnitTest.h"
+#include "flow/CompressedInt.h"
 
 void printBitsLittle(size_t const size, void const * const ptr)
 {
@@ -86,7 +86,7 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 	}
 }
 
-TEST_CASE("flow/compressed_ints") {
+TEST_CASE("/flow/compressed_ints") {
 	testCompressedInt<int>(-2, LiteralStringRef("\x7e"));
 	testCompressedInt<int>(-1, LiteralStringRef("\x7f"));
 	testCompressedInt<int>(0, LiteralStringRef("\x80"));

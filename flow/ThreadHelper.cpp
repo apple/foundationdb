@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "ThreadHelper.actor.h"
+#include "flow/ThreadHelper.actor.h"
 
 ThreadCallback* ThreadCallback::addCallback(ThreadCallback *cb) {
 	return (new ThreadMultiCallback())->addCallback(this)->addCallback(cb);

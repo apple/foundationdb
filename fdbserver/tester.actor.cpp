@@ -25,15 +25,15 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
-#include "TesterInterface.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
-#include "workloads/workloads.h"
-#include "Status.h"
-#include "QuietDatabase.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/Status.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "CoordinationInterface.h"
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -284,7 +284,6 @@ struct CompoundWorkload : TestWorkload {
 };
 
 TestWorkload *getWorkloadIface( WorkloadRequest work, VectorRef<KeyValueRef> options, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	options.push_back( work.arena, KeyValueRef(LiteralStringRef("dbName"), work.database) );
 	Value testName = getOption( options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified") );
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -378,7 +377,7 @@ ACTOR Future<Void> testDatabaseLiveness( Database cx, double databasePingDelay, 
 		} catch( Error& e ) {
 			if( e.code() != error_code_actor_cancelled )
 				TraceEvent(SevError, ("PingingDatabaseLivenessError_" + context).c_str()).error(e)
-					.detail("Database", printable(cx->dbName)).detail("PingDelay", databasePingDelay);
+					.detail("PingDelay", databasePingDelay);
 			throw;
 		}
 	}
@@ -491,18 +490,15 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 	state Database cx;
 	try {
 		std::map<std::string, std::string> details;
-		details["Database"] = printable(work.database);
 		details["WorkloadTitle"] = printable(work.title);
 		details["ClientId"] = format("%d", work.clientId);
 		details["ClientCount"] = format("%d", work.clientCount);
 		details["WorkloadTimeout"] = format("%d", work.timeout);
-		startRole(workIface.id(), UID(), "Tester", details);
+		startRole(Role::TESTER, workIface.id(), UID(), details);
 
-		Standalone<StringRef> database = work.database;
-
-		if( database.size() ) {
+		if( work.useDatabase ) {
 			Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
-			Database _cx = wait(cluster->createDatabase(database, locality));
+			Database _cx = wait(cluster->createDatabase(locality));
 			cx = _cx;
 
 			wait( delay(1.0) );
@@ -526,7 +522,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 
 		wait(test);
 		
-		endRole(workIface.id(), "Tester", "Complete");
+		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
@@ -536,7 +532,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete || e.code() == error_code_actor_cancelled;
-		endRole(workIface.id(), "Tester", "Error", ok, e);
+		endRole(Role::TESTER, workIface.id(), "Error", ok, e);
 
 		if (e.code() != error_code_test_specification_invalid && e.code() != error_code_timed_out) {
 			throw;  // fatal errors will kill the testerServer as well
@@ -624,12 +620,11 @@ void logMetrics( vector<PerfMetric> metrics ) {
 }
 
 ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< TesterInterface > testers, 
-	StringRef database, TestSpec spec ) {
+	TestSpec spec ) {
 	// FIXME: Fault tolerance for test workers (handle nonresponse or broken_promise from each getReply below)
 	TraceEvent("TestRunning").detail( "WorkloadTitle", printable(spec.title) )
 		.detail("TesterCount", testers.size()).detail("Phases", spec.phases)
-		.detail("TestTimeout", spec.timeout)
-		.detail("Database", printable( database ));
+		.detail("TestTimeout", spec.timeout);
 	state vector< Future< WorkloadInterface > > workRequests;
 	state vector<vector<PerfMetric>> metricsResults;
 
@@ -640,7 +635,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	for(; i < testers.size(); i++) {
 		WorkloadRequest req;
 		req.title = spec.title;
-		req.database = database;
+		req.useDatabase = spec.useDB;
 		req.timeout = spec.timeout;
 		req.databasePingDelay = spec.databasePingDelay;
 		req.options = spec.options;
@@ -724,7 +719,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 }
 
 //Sets the database configuration by running the ChangeConfig workload
-ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface > testers, StringRef database, StringRef configMode) {
+ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface > testers, StringRef configMode) {
 	state TestSpec spec;
 	Standalone<VectorRef<KeyValueRef>> options;
 	spec.title = LiteralStringRef("ChangeConfig");
@@ -732,12 +727,12 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("configMode"), configMode));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
-	DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
+	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
 	return Void();
 }
 
 //Runs the consistency check workload, which verifies that the database is in a consistent state
-ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > testers, StringRef database, bool doQuiescentCheck,
+ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > testers, bool doQuiescentCheck,
 									double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state TestSpec spec;
 
@@ -761,7 +756,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 	state double start = now();
 	state bool lastRun = false;
 	loop {
-		DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
+		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
 		if(testResults.ok() || lastRun) {
 			if( g_network->isSimulated() ) {
 				g_simulator.connectionFailuresDisableDuration = connectionFailures;
@@ -776,12 +771,12 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 	}
 }
 
-ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers, StringRef database, TestSpec spec, Reference<AsyncVar<ServerDBInfo>> dbInfo )
+ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers, TestSpec spec, Reference<AsyncVar<ServerDBInfo>> dbInfo )
 {
 	state DistributedTestResults testResults;
 
 	try {
-		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, database, spec );
+		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, spec );
 		if( spec.timeout > 0 ) {
 			fTestResults = timeoutError( fTestResults, spec.timeout );
 		}
@@ -816,7 +811,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 		if(spec.runConsistencyCheck) {
 			try {
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
-				wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
+				wait(timeoutError(checkConsistency(cx, testers, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
 			}
 			catch(Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
@@ -959,6 +954,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "minimumRegions" ) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		} else if( attrib == "buggify" ) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {
@@ -998,7 +995,6 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 }
 
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
-	state Standalone<StringRef> database = LiteralStringRef("DB");
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
 	state Future<Void> ccMonitor = monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo );  // FIXME: locality
@@ -1034,17 +1030,16 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		Database _cx = wait( DatabaseContext::createDatabase( ci, Reference<Cluster>(), database, locality ) );
+		Database _cx = wait( DatabaseContext::createDatabase( ci, Reference<Cluster>(), locality ) );
 		cx = _cx;
-	} else
-		database = LiteralStringRef("");
+	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
 
 	//Change the configuration (and/or create the database) if necessary
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
-			wait(timeoutError(changeConfiguration(cx, testers, database, startingConfiguration), 2000.0));
+			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
 		}
 		catch(Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
@@ -1065,7 +1060,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
-		bool ok = wait( runTest( cx, testers, database, tests[idx], dbInfo ) );
+		bool ok = wait( runTest( cx, testers, tests[idx], dbInfo ) );
 		// do we handle a failure here?
 	}
 

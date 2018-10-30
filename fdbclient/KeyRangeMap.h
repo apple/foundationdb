@@ -23,12 +23,12 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "boost/range.hpp"
 #include "flow/IndexedSet.h"
-#include "SystemData.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/RangeMap.h"
-#include "Knobs.h"
+#include "fdbclient/Knobs.h"
 
 using boost::iterator_range;
 

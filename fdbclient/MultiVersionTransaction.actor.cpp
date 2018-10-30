@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "MultiVersionTransaction.h"
-#include "MultiVersionAssignmentVars.h"
-#include "ThreadSafeTransaction.h"
+#include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/MultiVersionAssignmentVars.h"
+#include "fdbclient/ThreadSafeTransaction.h"
 
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
@@ -223,8 +223,8 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 }
 	
 // DLCluster
-ThreadFuture<Reference<IDatabase>> DLCluster::createDatabase(Standalone<StringRef> dbName) {
-	FdbCApi::FDBFuture *f = api->clusterCreateDatabase(cluster, (uint8_t*)dbName.toString().c_str(), dbName.size());
+ThreadFuture<Reference<IDatabase>> DLCluster::createDatabase() {
+		FdbCApi::FDBFuture *f = api->clusterCreateDatabase(cluster, (uint8_t*)"DB", 2);
 
 	return toThreadFuture<Reference<IDatabase>>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		FdbCApi::FDBDatabase *db;
@@ -566,8 +566,8 @@ void MultiVersionTransaction::reset() {
 }
 
 // MultiVersionDatabase
-MultiVersionDatabase::MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed) 
-	: dbState(new DatabaseState(cluster, dbName, db, changed)) {}
+MultiVersionDatabase::MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed) 
+	: dbState(new DatabaseState(cluster, db, changed)) {}
 
 MultiVersionDatabase::~MultiVersionDatabase() {
 	dbState->cancelCallbacks();
@@ -575,7 +575,7 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
 	auto cluster = Reference<ThreadSafeAsyncVar<Reference<ICluster>>>(new ThreadSafeAsyncVar<Reference<ICluster>>(Reference<ICluster>(NULL)));
-	return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(new MultiVersionCluster()), LiteralStringRef("DB"), db, ThreadFuture<Void>(Never())));
+	return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(new MultiVersionCluster()), db, ThreadFuture<Void>(Never())));
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
@@ -585,6 +585,16 @@ Reference<ITransaction> MultiVersionDatabase::createTransaction() {
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(dbState->optionLock);
 
+
+	auto itr = FDBDatabaseOptions::optionInfo.find(option);
+	if(itr != FDBDatabaseOptions::optionInfo.end()) {
+		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
+	}
+	else {
+		TraceEvent("UnknownDatabaseOption").detail("Option", option);
+		throw invalid_option();
+	}
+
 	if(dbState->db) {
 		dbState->db->setOption(option, value);
 	}
@@ -592,8 +602,8 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	dbState->options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
 }
 
-MultiVersionDatabase::DatabaseState::DatabaseState(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed)
-	: cluster(cluster), dbName(dbName), db(db), dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(db)), cancelled(false), changed(changed)
+MultiVersionDatabase::DatabaseState::DatabaseState(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed)
+	: cluster(cluster), db(db), dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(db)), cancelled(false), changed(changed)
 {
 	addref();
 	int userParam;
@@ -667,7 +677,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase() {
 
 	if(currentCluster.value) {
 		addref();
-		dbFuture = currentCluster.value->createDatabase(dbName);
+		dbFuture = currentCluster.value->createDatabase();
 		dbFuture.callOrSetAsCallback(this, userParam, false);
 	}
 }
@@ -710,28 +720,37 @@ MultiVersionCluster::~MultiVersionCluster() {
 	clusterState->cancelConnections();
 }
 
-ThreadFuture<Reference<IDatabase>> MultiVersionCluster::createDatabase(Standalone<StringRef> dbName) {
+ThreadFuture<Reference<IDatabase>> MultiVersionCluster::createDatabase() {
 	auto cluster = clusterState->clusterVar->get();
 
 	if(cluster.value) {
-		ThreadFuture<Reference<IDatabase>> dbFuture = abortableFuture(cluster.value->createDatabase(dbName), cluster.onChange);
+		ThreadFuture<Reference<IDatabase>> dbFuture = abortableFuture(cluster.value->createDatabase(), cluster.onChange);
 
-		return mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(dbFuture, [this, cluster, dbName](ErrorOr<Reference<IDatabase>> db) {
+		return mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(dbFuture, [this, cluster](ErrorOr<Reference<IDatabase>> db) {
 			if(db.isError() && db.getError().code() != error_code_cluster_version_changed) {
 				return db;
 			}
 
 			Reference<IDatabase> newDb = db.isError() ? Reference<IDatabase>(NULL) : db.get();
-			return ErrorOr<Reference<IDatabase>>(Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), dbName, newDb, cluster.onChange)));
+			return ErrorOr<Reference<IDatabase>>(Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), newDb, cluster.onChange)));
 		});
 	}
 	else {
-		return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), dbName, Reference<IDatabase>(), cluster.onChange));
+		return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), Reference<IDatabase>(), cluster.onChange));
 	}
 }
 
 void MultiVersionCluster::setOption(FDBClusterOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(clusterState->optionLock);
+
+	auto itr = FDBClusterOptions::optionInfo.find(option);
+	if(itr != FDBClusterOptions::optionInfo.end()) {
+		TraceEvent("SetClusterOption").detail("Option", itr->second.name);
+	}
+	else {
+		TraceEvent("UnknownClusterOption").detail("Option", option);
+		throw invalid_option();
+	}
 
 	if(clusterState->cluster) {
 		clusterState->cluster->setOption(option, value);
@@ -756,7 +775,7 @@ void MultiVersionCluster::Connector::connect() {
 				}
 				else {
 					candidateCluster = cluster.get();
-					return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.get()->createDatabase(LiteralStringRef("DB")));
+					return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.get()->createDatabase());
 				}
 			});
 
@@ -986,6 +1005,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
 
 	if(filename.empty() || !fileExists(path)) {
+		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
 		throw file_not_found();
 	}
 
@@ -1052,6 +1072,15 @@ void MultiVersionApi::setNetworkOption(FDBNetworkOptions::Option option, Optiona
 }
 
 void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	auto itr = FDBNetworkOptions::optionInfo.find(option);
+	if(itr != FDBNetworkOptions::optionInfo.end()) {
+		TraceEvent("SetNetworkOption").detail("Option", itr->second.name);
+	}
+	else {
+		TraceEvent("UnknownNetworkOption").detail("Option", option);
+		throw invalid_option();
+	}
+
 	if(option == FDBNetworkOptions::DISABLE_MULTI_VERSION_CLIENT_API) {
 		validateOption(value, false, true);
 		disableMultiVersionClientApi();
@@ -1390,7 +1419,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 // UNIT TESTS
 extern bool noUnseed;
 
-TEST_CASE( "fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
+TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 	auto vals = parseOptionValues("a");
 	ASSERT(vals.size() == 1 && vals[0] == "a");
 
@@ -1672,7 +1701,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -1741,7 +1770,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -1781,7 +1810,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -1814,7 +1843,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

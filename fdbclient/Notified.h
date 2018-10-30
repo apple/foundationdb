@@ -22,7 +22,7 @@
 #define FDBCLIENT_NOTIFIED_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/TDMetric.actor.h"
 
 struct NotifiedVersion {

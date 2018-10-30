@@ -26,11 +26,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "MasterInterface.h"
-#include "RecoveryState.h"
-#include "TLogInterface.h"
-#include "WorkerInterface.h"
-#include "Knobs.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/Knobs.h"
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
 struct ClusterControllerFullInterface {
@@ -194,7 +194,6 @@ struct GetWorkersRequest {
 };
 
 struct RegisterMasterRequest {
-	Standalone<StringRef> dbName;
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
@@ -214,7 +213,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
+		ar & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
 	}
 };
 
@@ -230,6 +229,6 @@ struct GetServerDBInfoRequest {
 	}
 };
 
-#include "ServerDBInfo.h" // include order hack
+#include "fdbserver/ServerDBInfo.h" // include order hack
 
 #endif

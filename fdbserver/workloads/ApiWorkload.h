@@ -22,10 +22,10 @@
 #define FDBSERVER_APIWORKLOAD_H
 #pragma once
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "MemoryKeyValueStore.h"
+#include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/actorcompiler.h"
 
 //an enumeration of apis being tested
@@ -282,7 +282,7 @@ struct ApiWorkload : TestWorkload {
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			extraDB = extraCluster->createDatabase().get();
 		}
 	}
 

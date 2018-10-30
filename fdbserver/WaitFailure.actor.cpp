@@ -20,7 +20,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/Deque.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){

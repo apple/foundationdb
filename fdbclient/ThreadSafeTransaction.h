@@ -22,10 +22,10 @@
 #define FDBCLIENT_THREADSAFETRANSACTION_H
 #pragma once
 
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "flow/ThreadHelper.actor.h"
-#include "ClusterInterface.h"
-#include "IClientApi.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/IClientApi.h"
 
 class ThreadSafeDatabase;
 
@@ -33,7 +33,7 @@ class ThreadSafeCluster : public ICluster, public ThreadSafeReferenceCounted<Thr
 public:
 	static ThreadFuture<Reference<ICluster>> create( std::string connFilename, int apiVersion = -1 );
 	~ThreadSafeCluster();
-	ThreadFuture<Reference<IDatabase>> createDatabase( Standalone<StringRef> dbName );
+	ThreadFuture<Reference<IDatabase>> createDatabase();
 
 	void setOption( FDBClusterOptions::Option option, Optional<StringRef> value  = Optional<StringRef>() );
 

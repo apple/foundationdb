@@ -25,24 +25,24 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "ConflictSet.h"
-#include "DataDistribution.h"
-#include "Knobs.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/Knobs.h"
 #include <iterator>
-#include "WaitFailure.h"
-#include "WorkerInterface.h"
-#include "Ratekeeper.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "CoordinatedState.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/Ratekeeper.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"  // copy constructors for ServerCoordinators class
 #include "fdbrpc/sim_validation.h"
-#include "DBCoreState.h"
-#include "LogSystem.h"
-#include "LogSystemDiskQueueAdapter.h"
-#include "IKeyValueStore.h"
-#include "ApplyMetadataMutation.h"
-#include "RecoveryState.h"
+#include "fdbserver/DBCoreState.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/RecoveryState.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
@@ -201,7 +201,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
 
-	Standalone<StringRef> dbName;
 	Standalone<StringRef> dbId;
 
 	MasterInterface myInterface;
@@ -227,7 +226,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		MasterInterface const& myInterface,
 		ServerCoordinators const& coordinators,
 		ClusterControllerFullInterface const& clusterController,
-		Standalone<StringRef> const& dbName,
 		Standalone<StringRef> const& dbId,
 		PromiseStream<Future<Void>> const& addActor,
 		bool forceRecovery
@@ -238,7 +236,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  cstate(coordinators, addActor, dbgid),
 		  coordinators(coordinators),
 		  clusterController(clusterController),
-		  dbName(dbName),
 		  dbId(dbId),
 		  forceRecovery(forceRecovery),
 		  lastEpochEnd(invalidVersion),
@@ -436,7 +433,6 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 
 Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& logSystemConfig, vector<MasterProxyInterface> proxies, vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount, vector<UID> priorCommittedLogServers ) {
 	RegisterMasterRequest masterReq;
-	masterReq.dbName = self->dbName;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
 	masterReq.logSystemConfig = logSystemConfig;
@@ -585,7 +581,22 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	return Void();
 }
 
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<std::pair<int8_t,Version>>> locality) {
+	loop {
+		int8_t loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
+		Version ver = locality->get().second;
+		if(ver == invalidVersion || loc != locality->get().first) {
+			ver = oldLogSystem->getKnownCommittedVersion(loc);
+		}
+		locality->set( std::make_pair(loc,ver) );
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality", loc).detail("Version", ver);
+		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange(loc) );
+	}
+}
+
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
+	state Reference<AsyncVar<std::pair<int8_t,Version>>> myLocality = Reference<AsyncVar<std::pair<int8_t,Version>>>( new AsyncVar<std::pair<int8_t,Version>>(std::make_pair(tagLocalityInvalid, invalidVersion) ) );
+	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
 	// For now, we also obtain the recovery metadata that the log system obtained during the end_epoch process for comparison
@@ -595,8 +606,8 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
-	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag, myLocality );
+	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no
@@ -643,8 +654,19 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(txsTag);
 	}
-	for(auto& kv : rawTags) {
-		self->allTags.push_back(decodeServerTagValue( kv.value ));
+
+	if(self->forceRecovery) {
+		int8_t usableLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
+		for(auto& kv : rawTags) {
+			Tag tag = decodeServerTagValue( kv.value );
+			if(tag.locality == usableLocality) {
+				self->allTags.push_back(tag);
+			}
+		}
+	} else {
+		for(auto& kv : rawTags) {
+			self->allTags.push_back(decodeServerTagValue( kv.value ));
+		}
 	}
 
 	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
@@ -1282,8 +1304,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
-	if( debugResult )
-		TraceEvent(SevError, "DBRecoveryDurabilityError");
+	if( debugResult ) {
+		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError");
+	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid).detail("TLogs", self->logSystem->describe()).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
@@ -1308,7 +1331,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, remoteRecovered.getFuture() ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
-		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->dbName, self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
+		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
 	}
 
 	if( self->resolvers.size() > 1 )
@@ -1325,7 +1348,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 {
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, db->get().dbName, LiteralStringRef(""), addActor, forceRecovery ) );
+	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
 	TEST( !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() ) );  // Master born doomed

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Platform.h"
+#include "fdbrpc/Platform.h"
 #include <algorithm>
 #include "flow/ActorCollection.h"
 #include "flow/FaultInjection.h"

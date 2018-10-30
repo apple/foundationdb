@@ -22,8 +22,8 @@
 #define FDBSERVER_LOGSYSTEM_H
 #pragma once
 
-#include "TLogInterface.h"
-#include "WorkerInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WorkerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -623,6 +623,13 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) = 0;
 		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
+
+	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) = 0;
+		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
+
+	virtual Version getKnownCommittedVersion(int8_t loc) = 0;
+
+	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) = 0;
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)

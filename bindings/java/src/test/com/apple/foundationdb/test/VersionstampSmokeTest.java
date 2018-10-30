@@ -32,7 +32,7 @@ import com.apple.foundationdb.tuple.Versionstamp;
 
 public class VersionstampSmokeTest {
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(600);
+		FDB fdb = FDB.selectAPIVersion(610);
 		try(Database db = fdb.open()) {
 			db.run(tr -> {
 				tr.clear(Tuple.from("prefix").range());

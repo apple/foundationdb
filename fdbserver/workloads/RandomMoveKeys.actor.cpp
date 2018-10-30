@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbclient/NativeAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -114,8 +114,7 @@ struct MoveKeysWorkload : TestWorkload {
 		return vector<StorageServerInterface>(t.begin(), t.end());
 	}
 
-	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload *self, KeyRange keys, vector<StorageServerInterface> destinationTeam, 
-			MoveKeysLock lock, std::string dbName ) {
+	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload *self, KeyRange keys, vector<StorageServerInterface> destinationTeam, MoveKeysLock lock ) {
 		state TraceInterval relocateShardInterval("RelocateShard");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
@@ -196,7 +195,7 @@ struct MoveKeysWorkload : TestWorkload {
 					inFlight.insert( keys, team );
 					for(int r=0; r<ranges.size(); r++) {
 						auto& rTeam = inFlight.rangeContaining(ranges[r].begin)->value();
-						inFlightActors.insert( ranges[r], self->doMoveKeys( cx, self, ranges[r], rTeam, lock, self->dbName.toString() ) );
+						inFlightActors.insert( ranges[r], self->doMoveKeys( cx, self, ranges[r], rTeam, lock ) );
 					}
 				}
 			} catch (Error& e) {

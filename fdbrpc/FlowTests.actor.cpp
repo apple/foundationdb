@@ -23,8 +23,8 @@
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
-#include "fdbrpc.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -223,7 +223,7 @@ ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
 	return Void();
 }
 
-TEST_CASE("flow/flow/cancel1")
+TEST_CASE("/flow/flow/cancel1")
 {
 	bool exits = false;
 	Promise<Void> p;
@@ -251,7 +251,7 @@ ACTOR static Future<Void> noteCancel(int* cancelled) {
 	}
 }
 
-TEST_CASE("flow/flow/cancel2")
+TEST_CASE("/flow/flow/cancel2")
 {
 	int c1 = 0, c2 = 0, c3 = 0;
 
@@ -267,7 +267,7 @@ TEST_CASE("flow/flow/cancel2")
 	return Void();
 }
 
-TEST_CASE("flow/flow/nonserializable futures")
+TEST_CASE("/flow/flow/nonserializable futures")
 {
 	// Types no longer need to be statically serializable to make futures, promises, actors
 	{
@@ -301,7 +301,7 @@ TEST_CASE("flow/flow/nonserializable futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/networked futures")
+TEST_CASE("/flow/flow/networked futures")
 {
 	// RequestStream can be serialized
 	{
@@ -338,7 +338,7 @@ TEST_CASE("flow/flow/networked futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/quorum")
+TEST_CASE("/flow/flow/quorum")
 {
 	vector<Promise<int>> ps(5);
 	vector<Future<int>> fs;
@@ -357,7 +357,7 @@ TEST_CASE("flow/flow/quorum")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial futures")
+TEST_CASE("/flow/flow/trivial futures")
 {
 	Future<int> invalid;
 	ASSERT(!invalid.isValid());
@@ -372,7 +372,7 @@ TEST_CASE("flow/flow/trivial futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial promises")
+TEST_CASE("/flow/flow/trivial promises")
 {
 	Future<int> f;
 
@@ -405,7 +405,7 @@ TEST_CASE("flow/flow/trivial promises")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial promisestreams")
+TEST_CASE("/flow/flow/trivial promisestreams")
 {
 	FutureStream<int> f;
 
@@ -440,7 +440,7 @@ TEST_CASE("flow/flow/trivial promisestreams")
 	return Void();
 }
 
-TEST_CASE("flow/flow/callbacks")
+TEST_CASE("/flow/flow/callbacks")
 {
 	Promise<int> p;
 	Future<int> f = p.getFuture();
@@ -475,7 +475,7 @@ TEST_CASE("flow/flow/callbacks")
 	return Void();
 }
 
-TEST_CASE("flow/flow/promisestream callbacks")
+TEST_CASE("/flow/flow/promisestream callbacks")
 {
 	PromiseStream<int> p;
 
@@ -508,7 +508,7 @@ TEST_CASE("flow/flow/promisestream callbacks")
 
 //Incompatible with --crash, so we are commenting it out for now
 /*
-TEST_CASE("flow/flow/promisestream multiple wait error")
+TEST_CASE("/flow/flow/promisestream multiple wait error")
 {
 	state int result = 0;
 	state PromiseStream<int> p;
@@ -528,7 +528,7 @@ TEST_CASE("flow/flow/promisestream multiple wait error")
 }
 */
 
-TEST_CASE("flow/flow/trivial actors")
+TEST_CASE("/flow/flow/trivial actors")
 {
 	ASSERT(expectActorCount(0));
 
@@ -583,7 +583,7 @@ TEST_CASE("flow/flow/trivial actors")
 	return Void();
 }
 
-TEST_CASE("flow/flow/yieldedFuture/progress")
+TEST_CASE("/flow/flow/yieldedFuture/progress")
 {
 	// Check that if check_yield always returns true, the yieldedFuture will do nothing immediately but will
 	// get one thing done per "tick" (per delay(0) returning).
@@ -619,7 +619,7 @@ TEST_CASE("flow/flow/yieldedFuture/progress")
 	return Void();
 }
 
-TEST_CASE("flow/flow/yieldedFuture/random")
+TEST_CASE("/flow/flow/yieldedFuture/random")
 {
 	// Check expectations about exactly how yieldedFuture responds to check_yield results
 
@@ -666,7 +666,7 @@ TEST_CASE("flow/flow/yieldedFuture/random")
 }
 
 
-TEST_CASE("flow/perf/yieldedFuture")
+TEST_CASE("/flow/perf/yieldedFuture")
 {
 	double start;
 	int N = 1000000;
@@ -700,7 +700,7 @@ TEST_CASE("flow/perf/yieldedFuture")
 	return Void();
 }
 
-TEST_CASE("flow/flow/chooseTwoActor")
+TEST_CASE("/flow/flow/chooseTwoActor")
 {
 	ASSERT(expectActorCount(0));
 
@@ -714,7 +714,7 @@ TEST_CASE("flow/flow/chooseTwoActor")
 	return Void();
 }
 
-TEST_CASE("flow/flow/perf/actor patterns")
+TEST_CASE("/flow/flow/perf/actor patterns")
 {
 	double start;
 	int N = 1000000;
@@ -1063,7 +1063,7 @@ struct YAMRandom {
 	}
 };
 
-TEST_CASE("flow/flow/YieldedAsyncMap/randomized")
+TEST_CASE("/flow/flow/YieldedAsyncMap/randomized")
 {
 	state YAMRandom<YieldedAsyncMap<int, int>> yamr;
 	state int it;
@@ -1074,7 +1074,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/randomized")
 	return Void();
 }
 
-TEST_CASE("flow/flow/AsyncMap/randomized")
+TEST_CASE("/flow/flow/AsyncMap/randomized")
 {
 	state YAMRandom<AsyncMap<int, int>> yamr;
 	state int it;
@@ -1085,7 +1085,7 @@ TEST_CASE("flow/flow/AsyncMap/randomized")
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/basic")
+TEST_CASE("/flow/flow/YieldedAsyncMap/basic")
 {
 	state YieldedAsyncMap<int, int> yam;
 	state Future<Void> y0 = yam.onChange(1);
@@ -1107,7 +1107,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/basic")
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/cancel")
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel")
 {
 	state YieldedAsyncMap<int, int> yam;
 	//ASSERT(yam.count(1) == 0);
@@ -1132,7 +1132,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel")
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2")
 {
 	state YieldedAsyncMap<int, int> yam;
 
@@ -1154,7 +1154,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
 	return Void();
 }
 
-TEST_CASE("flow/flow/AsyncVar/basic")
+TEST_CASE("/flow/flow/AsyncVar/basic")
 {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
@@ -1183,7 +1183,7 @@ ACTOR static Future<Void> waitAfterCancel( int* output ) {
 	return Void();
 }
 
-TEST_CASE("fdbrpc/flow/wait_expression_after_cancel")
+TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 {
 	int a = -1;
 	Future<Void> f = waitAfterCancel(&a);

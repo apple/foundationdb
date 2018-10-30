@@ -18,23 +18,23 @@
  * limitations under the License.
  */
 
-#include "DatabaseContext.h"
-#include "NativeAPI.h"
-#include "Atomic.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/Atomic.h"
 #include "flow/Platform.h"
 #include "flow/ActorCollection.h"
-#include "SystemData.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"
-#include "StorageServerInterface.h"
-#include "MasterProxyInterface.h"
-#include "ClusterInterface.h"
-#include "FailureMonitorClient.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/FailureMonitorClient.h"
 #include "flow/DeterministicRandom.h"
-#include "KeyRangeMap.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "flow/SystemMonitor.h"
-#include "MutationList.h"
-#include "CoordinationInterface.h"
-#include "MonitorLeader.h"
+#include "fdbclient/MutationList.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
 #include "fdbrpc/TLSConnection.h"
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
@@ -474,9 +474,9 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 DatabaseContext::DatabaseContext(
 	Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
-	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
-	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
-  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
+	Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, 
+	bool enableLocalityLoadBalance, bool lockAware )
+  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbId(dbId),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), transactionsCommitStarted(0),
 	transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), transactionsResourceConstrained(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
@@ -494,14 +494,11 @@ DatabaseContext::DatabaseContext(
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Standalone<StringRef> dbName,
-	Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo )
-{
+ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
 	try {
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
-			req.dbName = dbName;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
 			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
 
@@ -529,7 +526,6 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	} catch( Error& e ) {
 		TraceEvent(SevError, "MonitorClientInfoError")
 			.error(e)
-			.detail("DBName", printable(dbName))
 			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
 			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
 
@@ -537,20 +533,15 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	}
 }
 
-Future< Database > DatabaseContext::createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, Standalone<StringRef> dbName, LocalityData const& clientLocality ) {
-	if (dbName != LiteralStringRef("DB")) {
-		return invalid_database_name(); // we no longer offer multi-database support, so all databases *must* be named this
-	}
-	else {
-		Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
-		Future<Void> monitor = monitorClientInfo( clusterInterface, dbName, cluster ? cluster->getConnectionFile() : Reference<ClusterConnectionFile>(), info );
+Future< Database > DatabaseContext::createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, LocalityData const& clientLocality ) {
+	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	Future<Void> monitor = monitorClientInfo( clusterInterface, cluster ? cluster->getConnectionFile() : Reference<ClusterConnectionFile>(), info );
 
-		return std::move( Database( new DatabaseContext( info, cluster, monitor, dbName, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false ) ) );
-	}
+	return std::move( Database( new DatabaseContext( info, cluster, monitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false ) ) );
 }
 
 Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID, bool lockAware ) {
-	return Database( new DatabaseContext( info, Reference<Cluster>(), dependency, LiteralStringRef("DB"), LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware ) );
+	return Database( new DatabaseContext( info, Reference<Cluster>(), dependency, LiteralStringRef(""), taskID, clientLocality, enableLocalityLoadBalance, lockAware ) );
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -741,8 +732,8 @@ Reference<Cluster> Cluster::createCluster(std::string connFileName, int apiVersi
 	return Reference<Cluster>(new Cluster( rccf, apiVersion));
 }
 
-Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName, LocalityData locality ) {
-	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, locality );
+Future<Database> Cluster::createDatabase( LocalityData locality ) {
+	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), locality );
 }
 
 Future<Void> Cluster::onConnected() {
@@ -773,23 +764,26 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, true);
 
 			std::string optionValue = value.get().toString();
+			TraceEvent("SetKnob").detail("KnobString", optionValue);
+
 			size_t eq = optionValue.find_first_of('=');
 			if(eq == optionValue.npos) {
+				TraceEvent(SevWarnAlways, "InvalidKnobString").detail("KnobString", optionValue);
 				throw invalid_option_value();
 			}
 
-			std::string knob_name = optionValue.substr(0, eq);
-			std::string knob_value = optionValue.substr(eq+1);
-			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knob_name, knob_value ) &&
-				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knob_name, knob_value ))
+			std::string knobName = optionValue.substr(0, eq);
+			std::string knobValue = optionValue.substr(eq+1);
+			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knobName, knobValue ) &&
+				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knobName, knobValue ))
 			{
-				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knob_name.c_str());
+				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
+				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
 			}
 			break;
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
-			initTLSOptions();
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);

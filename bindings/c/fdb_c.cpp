@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 600
+#define FDB_API_VERSION 610
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"
@@ -315,10 +315,13 @@ void fdb_cluster_destroy( FDBCluster* c ) {
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
-											int db_name_length ) {
-	return (FDBFuture*)
-		( CLUSTER(c)->createDatabase( StringRef( db_name,
-											 db_name_length ) ).extractPtr() );
+											int db_name_length ) 
+{
+	if(strncmp((const char*)db_name, "DB", db_name_length) != 0) {
+		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
+	}
+
+	return (FDBFuture*)CLUSTER(c)->createDatabase().extractPtr();
 }
 
 extern "C" DLLEXPORT

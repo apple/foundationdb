@@ -27,11 +27,11 @@
 
 #include <openssl/objects.h>
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSPolicy.h"
+#include "FDBLibTLS/FDBLibTLSPlugin.h"
+#include "FDBLibTLS/FDBLibTLSPolicy.h"
 
 struct FDBLibTLSVerifyTest {
 	FDBLibTLSVerifyTest(std::string input):

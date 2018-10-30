@@ -22,9 +22,9 @@
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #pragma once
 
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
-#include "IClientApi.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -178,7 +178,7 @@ public:
 	DLCluster(Reference<FdbCApi> api, FdbCApi::FDBCluster *cluster) : api(api), cluster(cluster) {}
 	~DLCluster() { api->clusterDestroy(cluster); }
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
+	ThreadFuture<Reference<IDatabase>> createDatabase();
 	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 	void addref() { ThreadSafeReferenceCounted<DLCluster>::addref(); }
@@ -278,7 +278,7 @@ class MultiVersionCluster;
 
 class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
+	MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed);
 	~MultiVersionDatabase();
 
 	Reference<ITransaction> createTransaction();
@@ -291,7 +291,7 @@ public:
 
 private:
 	struct DatabaseState : ThreadCallback, ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
+		DatabaseState(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed);
 
 		void updateDatabase();
 		void cancelCallbacks();
@@ -304,7 +304,6 @@ private:
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
-		const Standalone<StringRef> dbName;
 
 		ThreadFuture<Reference<IDatabase>> dbFuture;
 		ThreadFuture<Void> changed;
@@ -343,7 +342,7 @@ public:
 	MultiVersionCluster(MultiVersionApi *api, std::string clusterFilePath, Reference<ICluster> cluster);
 	~MultiVersionCluster();
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
+	ThreadFuture<Reference<IDatabase>> createDatabase();
 	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 	void addref() { ThreadSafeReferenceCounted<MultiVersionCluster>::addref(); }

@@ -32,21 +32,21 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "WorkerInterface.h"
-#include "TLogInterface.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
-#include "WaitFailure.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbclient/VersionedMap.h"
-#include "StorageMetrics.h"
+#include "fdbserver/StorageMetrics.h"
 #include "fdbrpc/sim_validation.h"
-#include "ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/Stats.h"
-#include "LogSystem.h"
-#include "RecoveryState.h"
-#include "LogProtocolMessage.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -157,6 +157,7 @@ struct StorageServerDisk {
 	void writeKeyValue( KeyValueRef kv );
 	void clearRange( KeyRangeRef keys );
 
+	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
@@ -349,6 +350,7 @@ public:
 	NotifiedVersion oldestVersion;           // See also storageVersion()
 	NotifiedVersion durableVersion; 	     // At least this version will be readable from storage after a power failure
 
+	Deque<std::pair<Version,Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage server
 
 	uint64_t logProtocol;
@@ -365,6 +367,7 @@ public:
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
+	Future<Void> durableInProgress;
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
@@ -409,6 +412,7 @@ public:
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
+		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 
 		Counters(StorageServer* self)
 			: cc("StorageServer", self->thisServerID.toString()),
@@ -430,7 +434,11 @@ public:
 			atomicMutations("AtomicMutations", cc),
 			updateBatches("UpdateBatches", cc),
 			updateVersions("UpdateVersions", cc),
-			loops("Loops", cc)
+			loops("Loops", cc),
+			fetchWaitingMS("FetchWaitingMS", cc),
+			fetchWaitingCount("FetchWaitingCount", cc),
+			fetchExecutingMS("FetchExecutingMS", cc),
+			fetchExecutingCount("FetchExecutingCount", cc)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
@@ -459,6 +467,7 @@ public:
 		:	instanceID(g_random->randomUniqueID().first()),
 			storage(this, storage), db(db),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+			durableInProgress(Void()),
 			versionLag(0),
 			updateEagerReads(0),
 			shardChangeCounter(0),
@@ -1482,17 +1491,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 		// Expand the clear
 		const auto& d = data.atLatest();
 
-		// Up through 2.0.3, when a clear of a single key is
-		// translated to a single key range, if the key exceeded the
-		// key size limit the begin and end of the range will be
-		// equal. We need to be able to recover from a database that
-		// was left in this state as long as we're supporting upgrades
-		// from 2.0.3 or earlier.
-		if ( (m.param1.size() == CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) && (m.param2 == m.param1) ) {
-			return false;
-		}
-		ASSERT( m.param2 > m.param1 );
-
 		// If another clear overlaps the beginning of this one, engulf it
 		auto i = d.lastLess(m.param1);
 		if (i && i->isClearTo() && i->getEndKey() >= m.param1)
@@ -1514,7 +1512,6 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 			else
 				m.param2 = i.key();
 		}
-		ASSERT( m.param2 > m.param1 );
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
@@ -1815,10 +1812,21 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		wait( data->fetchKeysParallelismLock.take( TaskDefaultYield, fetchBlockBytes ) );
 		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock, fetchBlockBytes );
 
-		wait(delay(0));
+		state double executeStart = now();
+		++data->counters.fetchWaitingCount;
+		data->counters.fetchWaitingMS += 1000*(executeStart - startt);
+
+		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated until all mutations for a version
+		// have been processed. We need to take the durableVersionLock to ensure data->version is greater than the version of the mutation which caused
+		// the fetch to be initiated.
+		wait( data->durableVersionLock.take() );
 
 		shard->phase = AddingShard::Fetching;
 		state Version fetchVersion = data->version.get();
+
+		data->durableVersionLock.release();
+
+		wait(delay(0));
 
 		TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID).detail("FKID", interval.pairID).detail("Version", fetchVersion);
 
@@ -2005,6 +2013,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		coalesceShards(data, keys);
 
 		validate(data);
+
+		++data->counters.fetchExecutingCount;
+		data->counters.fetchExecutingMS += 1000*(now() - executeStart);
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){
@@ -2255,7 +2266,8 @@ bool containsRollback( VersionUpdateRef const& changes, Version& rollbackVersion
 
 class StorageUpdater {
 public:
-	StorageUpdater(Version fromVersion, Version newOldestVersion, Version restoredVersion) : fromVersion(fromVersion), newOldestVersion(newOldestVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
+	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false) {}
+	StorageUpdater(Version fromVersion, Version restoredVersion) : fromVersion(fromVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
@@ -2281,7 +2293,6 @@ public:
 		if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 	}
 
-	Version newOldestVersion;
 	Version currentVersion;
 private:
 	Version fromVersion;
@@ -2322,7 +2333,7 @@ private:
 			BinaryReader br(m.param2, Unversioned());
 			br >> rollbackVersion;
 
-			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion) {
+			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion ) {
 				TEST( true );  // ShardApplyPrivateData shard rollback
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 					.detail("FromVersion", fromVersion)
@@ -2330,12 +2341,10 @@ private:
 					.detail("AtVersion", currentVersion)
 					.detail("StorageVersion", data->storageVersion());
 				ASSERT( rollbackVersion >= data->storageVersion() );
-			}
-			// Don't let oldestVersion (and thus storageVersion) go into the rolled back range of versions
-			// Since we currently don't read from uncommitted log systems, seeing the lastEpochEnd implies that currentVersion is fully committed, so we can safely make it durable
-			newOldestVersion = currentVersion;
-			if ( rollbackVersion < fromVersion )
 				rollback( data, rollbackVersion, currentVersion );
+			}
+
+			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
 			if( (m.type == MutationRef::SetValue && !matchesThisServer) || (m.type == MutationRef::ClearRange && matchesThisServer) )
@@ -2462,26 +2471,43 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), data->restoredVersion);
+		state StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
 
 		state bool injectedChanges = false;
-		for(auto& c : fii.changes) {
-			for(auto& m : c.mutations) {
-				updater.applyMutation(data, m, c.version);
+		state int changeNum = 0;
+		state int mutationBytes = 0;
+		for(; changeNum < fii.changes.size(); changeNum++) {
+			state int mutationNum = 0;
+			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
+			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
+				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
+				if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+					mutationBytes = 0;
+					wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+				}
 			}
 		}
 
-		Version ver = invalidVersion;
+		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		//TraceEvent("SSUpdatePeeked", data->thisServerID).detail("FromEpoch", data->updateEpoch).detail("FromSeq", data->updateSequence).detail("ToEpoch", results.end_epoch).detail("ToSeq", results.end_seq).detail("MsgSize", results.messages.size());
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			auto &rd = *cloneCursor2->reader();
+			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+				mutationBytes = 0;
+				//Instead of just yielding, leave time for the storage server to respond to reads
+				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+			}
 
-			if (cloneCursor2->version().version > ver) ASSERT(cloneCursor2->version().version > data->version.get());
+			if (cloneCursor2->version().version > ver) {
+				ASSERT(cloneCursor2->version().version > data->version.get());
+			}
+
+			auto &rd = *cloneCursor2->reader();
 
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
@@ -2505,7 +2531,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 						TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
 
 					updater.applyMutation(data, msg, ver);
-
+					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
 					++data->counters.mutations;
 					switch(msg.type) {
@@ -2549,7 +2575,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			ver = updater.currentVersion;
 		}
 
-		if(ver != invalidVersion) {
+		if(ver != invalidVersion && ver > data->version.get()) {
 			debugKeyRange("SSUpdate", ver, allKeys);
 
 			data->mutableData().createNewVersion(ver);
@@ -2560,17 +2586,26 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
+			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			for(int i = 0; i < data->recoveryVersionSkips.size(); i++) {
+				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
+			}
+
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxReadTransactionLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+			//	.detail("MaxVersionInMemory", maxVersionsInMemory);
 
 			// Trigger updateStorage if necessary
-			ASSERT(updater.newOldestVersion <= data->version.get());
-			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - maxVersionsInMemory;
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get()-1);
-			proposedOldestVersion = std::max(proposedOldestVersion, updater.newOldestVersion);
+			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+
+			while(!data->recoveryVersionSkips.empty() && proposedOldestVersion > data->recoveryVersionSkips.front().first) {
+				data->recoveryVersionSkips.pop_front();
+			}
 			data->desiredOldestVersion.set(proposedOldestVersion);
+
 		}
 
 		validate(data);
@@ -2584,10 +2619,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		return Void();  // update will get called again ASAP
-	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot)
+	} catch (Error& err) {
+		state Error e = err;
+		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
-		throw;
+		} else if (e.code() == error_code_please_reboot) {
+			wait( data->durableInProgress );
+		}
+		throw e;
 	}
 }
 
@@ -2596,6 +2635,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		ASSERT( data->durableVersion.get() == data->storageVersion() );
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		wait( delay(0, TaskUpdateStorage) );
+
+		state Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version startOldestVersion = data->storageVersion();
 		state Version newOldestVersion = data->storageVersion();
@@ -2625,19 +2667,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait( durable );
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+		
+		durableInProgress.send(Void());
+		wait( delay(0, TaskUpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
-		// are applied after we change the durable version.
+		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
+		// because otherwise the latest version of mutableData might be partially loaded.
 		wait( data->durableVersionLock.take() );
-		data->durableVersionLock.release();
-
-		wait( delay(0, TaskUpdateStorage) );
-
 		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
-			wait( yield(TaskUpdateStorage) );
+			if(g_network->check_yield(TaskUpdateStorage)) {
+				data->durableVersionLock.release();
+				wait(delay(0, TaskUpdateStorage));
+				wait( data->durableVersionLock.take() );
+			}
 		}
+
+		data->durableVersionLock.release();
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
@@ -3265,10 +3313,13 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	self.shards.insert( allKeys, Reference<ShardInfo>() );
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
-	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed)
+	if (e.code() == error_code_please_reboot) {
+		// do nothing.
+	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
-	else
+	} else {
 		persistentData->close();
+	}
 
 	if ( e.code() == error_code_worker_removed ||
 		 e.code() == error_code_recruitment_failed ||
@@ -3290,6 +3341,9 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
+		wait( self.storage.init() );
+		wait( self.storage.commit() );
+
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;

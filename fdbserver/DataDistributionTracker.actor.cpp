@@ -20,8 +20,8 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
-#include "DataDistribution.h"
-#include "Knobs.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -41,7 +41,7 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	return BandwidthStatusNormal;
 }
 
-ACTOR Future<Void> updateMaxShardSize( Standalone<StringRef> dbName, Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
+ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
 	state int64_t lastDbSize = 0;
 	state int64_t granularity = g_network->isSimulated() ?
 		SERVER_KNOBS->DD_SHARD_SIZE_GRANULARITY_SIM : SERVER_KNOBS->DD_SHARD_SIZE_GRANULARITY;
@@ -619,7 +619,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self, Reference<I
 	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, allKeys.end), 0 );
 	self->readyToStart.send(Void());
 	wait( initialSize );
-	self->maxShardSizeUpdater = updateMaxShardSize( self->cx->dbName, self->dbSizeEstimate, self->maxShardSize );
+	self->maxShardSizeUpdater = updateMaxShardSize( self->dbSizeEstimate, self->maxShardSize );
 
 	return Void();
 }
@@ -690,7 +690,7 @@ ACTOR Future<Void> dataDistributionTracker(
 				TraceEvent("DDTrackerStats", self.masterId)
 					.detail("Shards", self.shards.size())
 					.detail("TotalSizeBytes", self.dbSizeEstimate->get())
-					.trackLatest( format("%s/DDTrackerStats", printable(cx->dbName).c_str() ).c_str() );
+					.trackLatest( "DDTrackerStats" );
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
 			}

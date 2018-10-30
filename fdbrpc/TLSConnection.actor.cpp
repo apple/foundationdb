@@ -22,11 +22,11 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
-#include "TLSConnection.h"
-#include "ITLSPlugin.h"
-#include "LoadPlugin.h"
-#include "Platform.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/TLSConnection.h"
+#include "fdbrpc/ITLSPlugin.h"
+#include "fdbrpc/LoadPlugin.h"
+#include "fdbrpc/Platform.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Name of specialized TLS Plugin
@@ -82,8 +82,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		wait( r == ITLSSession::WANT_WRITE ? self->conn->onWritable() : self->conn->onReadable() );
 	}
 
-	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID())
-		.detail("Peer", self->getPeerAddress());
+	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
 
 	return Void();
 }

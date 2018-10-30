@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "MemoryKeyValueStore.h"
+#include "fdbserver/workloads/MemoryKeyValueStore.h"
 
 //Get the value associated with a key
 Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {

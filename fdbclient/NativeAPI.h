@@ -24,12 +24,12 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "FDBTypes.h"
-#include "MasterProxyInterface.h"
-#include "FDBOptions.g.h"
-#include "CoordinationInterface.h"
-#include "ClusterInterface.h"
-#include "ClientLogEvents.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/ClientLogEvents.h"
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -110,7 +110,7 @@ public:
 	static Reference<Cluster> createCluster(std::string connFileName, int apiVersion);
 
 	// See DatabaseContext::createDatabase
-	Future<Database> createDatabase( Standalone<StringRef> dbName, LocalityData locality = LocalityData() );
+	Future<Database> createDatabase( LocalityData locality = LocalityData() );
 
 	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value);
 

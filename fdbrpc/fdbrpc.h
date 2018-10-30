@@ -23,9 +23,9 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FlowTransport.h" // NetworkMessageReceiver Endpoint
-#include "FailureMonitor.h"
-#include "networksender.actor.h"
+#include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/networksender.actor.h"
 
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
@@ -368,4 +368,4 @@ void load(Ar& ar, RequestStream<T>& value) {
 }
 
 #endif
-#include "genericactors.actor.h"
+#include "fdbrpc/genericactors.actor.h"

@@ -31,11 +31,11 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
-#include "NativeAPI.h"
-#include "Status.h"
-#include "ReadYourWrites.h"
-#include "DatabaseConfiguration.h"
-#include "MonitorLeader.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MonitorLeader.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
@@ -46,6 +46,7 @@ public:
 		CONFLICTING_OPTIONS,
 		UNKNOWN_OPTION,
 		INCOMPLETE_CONFIGURATION,
+		INVALID_CONFIGURATION,
 		DATABASE_ALREADY_CREATED,
 		DATABASE_CREATED,
 		SUCCESS
@@ -164,6 +165,12 @@ Future<int> setDDMode( Database const& cx, int const& mode );
 
 Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
 
+Future<Void> waitForPrimaryDC( Database const& cx, StringRef const& dcId );
+
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
+
+void schemaCoverage( std::string const& spath, bool covered=true );
+bool schemaMatch( StatusObject const schema, StatusObject const result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+
 #endif

@@ -92,6 +92,11 @@ struct DBCoreState {
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
+		for(auto& it : tLogs) {
+			for(auto& log : it.tLogs) {
+				priorCommittedLogServers.push_back(log);
+			}
+		}
 		for(int i = 0; i < oldTLogData.size(); i++) {
 			for(auto& it : oldTLogData[i].tLogs) {
 				for(auto& log : it.tLogs) {

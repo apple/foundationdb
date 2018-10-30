@@ -18,21 +18,21 @@
  * limitations under the License.
  */
 
-#include "simulator.h"
+#include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
-#include "IAsyncFile.h"
-#include "AsyncFileCached.actor.h"
-#include "AsyncFileNonDurable.actor.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/Hash3.h"
-#include "TraceFileIO.h"
+#include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
-#include "Net2FileSystem.h"
+#include "fdbrpc/Net2FileSystem.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "AsyncFileWriteChecker.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 
 
 using std::min;
@@ -1279,7 +1279,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
@@ -1377,7 +1377,7 @@ public:
 		return true;
 	}
 
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal) {
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill, KillType* ktFinal) {
 		auto ktOrig = kt;
 		auto processes = getAllProcesses();
 		std::map<Optional<Standalone<StringRef>>, int>	datacenterZones;
@@ -1400,7 +1400,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {

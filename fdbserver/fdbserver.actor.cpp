@@ -26,34 +26,35 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "CoordinationInterface.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "MoveKeys.h"
-#include "ConflictSet.h"
-#include "DataDistribution.h"
-#include "NetworkTest.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/RestoreInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/NetworkTest.h"
+#include "fdbserver/IKeyValueStore.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <fstream>
-#include "pubsub.h"
+#include "fdbserver/pubsub.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #undef min
 #undef max
 #endif
-#include "SimulatedCluster.h"
-#include "TesterInterface.h"
-#include "workloads/workloads.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/workloads/workloads.h"
 #include <time.h>
-#include "Status.h"
+#include "fdbserver/Status.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
-#include "CoroFlow.h"
+#include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 
 #define BOOST_DATE_TIME_NO_LIB
@@ -246,75 +247,6 @@ bool debugKeyRange( const char* context, Version version, KeyRangeRef const& key
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) { return false; }
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return false; }
 #endif
-
-Future<Void> debugQueryServer( DebugQueryRequest const& req ) {
-	Standalone<VectorRef<DebugEntryRef>> reply;
-
-	for(auto v = debugEntries.begin(); v != debugEntries.end(); ++v)
-		for(auto m = v->begin(); m != v->end(); ++m) {
-			if (m->mutation.type == m->mutation.ClearRange || m->mutation.type == m->mutation.DebugKeyRange) {
-				if (!KeyRangeRef(m->mutation.param1, m->mutation.param2).contains( req.search ))
-					continue;
-			} else if (m->mutation.type == m->mutation.SetValue) {
-				if (m->mutation.param1 != req.search)
-					continue;
-			}
-			reply.push_back( reply.arena(), *m );
-		}
-
-	req.reply.send(reply);
-	return Void();
-}
-
-auto sortByTime = [](DebugEntryRef const& a, DebugEntryRef const& b) { return a.time < b.time; };
-
-/*ACTOR Future<Void> debugSearchMutationCluster( ZookeeperInterface zk, Key key ) {
-	state ZKWatch<ClusterControllerFullInterface> ccWatch(zk, LiteralStringRef("ClusterController"));
-	state ClusterControllerFullInterface cc = wait( ccWatch.get() );
-
-	ASSERT( ccWatch.getLastVersion() );
-
-	Optional<vector<WorkerInterface>> workerList = wait( cc.getWorkers.tryGetReply( GetWorkersRequest() ) );
-	if( !workerList.present() ) {
-		printf("ERROR: CC interface not in ZK\n");
-		return Void();
-	}
-	state vector<WorkerInterface> workers = workerList.get();
-
-	state vector<Future<Standalone<VectorRef<DebugEntryRef>>>> replies( workers.size() );
-	for(int w=0; w<workers.size(); w++) {
-		DebugQueryRequest req;
-		req.search = key;
-		replies[w] = timeoutError(workers[w].debugQuery.getReply( req ), 5.0);
-	}
-	//state vector<Standalone<VectorRef<DebugEntryRef>>> result = wait( getAll( replies ) );
-	wait(waitForAllReady( replies ));
-	state vector<Standalone<VectorRef<DebugEntryRef>>> result( workers.size() );
-	for(int r=0; r<result.size(); r++) {
-		if (replies[r].isError())
-			printf("ERROR: Couldn't get results from '%s'\n", workers[r].debugQuery.getEndpoint().address.toString().c_str());
-		else
-			result[r] = replies[r].get();
-	}
-	ASSERT( result.size() == workers.size() );
-
-	Standalone<VectorRef<DebugEntryRef>> all;
-	for(int r=0; r<result.size(); r++)
-		all.append( all.arena(), &result[r][0], result[r].size() );
-	std::sort( all.begin(), all.end(), sortByTime );
-	printf("\n\n");
-	for(auto e = all.begin(); e != all.end(); ++e) {
-		const char* type =
-			e->mutation.type == MutationRef::SetValue ? "SetValue" :
-			e->mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			e->mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			"UnknownMutation";
-		printf("%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", e->time, e->address.toString().c_str(), e->context.toString().c_str(), e->version, type, printable(e->mutation.param1).c_str(), printable(e->mutation.param2).c_str());
-	}
-	printf("\n\n");
-
-	return Void();
-}*/
 
 #ifdef _WIN32
 #include <sddl.h>
@@ -637,7 +569,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	if( devhelp ) {
 		printf("  -r ROLE, --role ROLE\n"
 			   "                 Server role (valid options are fdbd, test, multitest,\n");
-		printf("                 simulation, networktestclient, networktestserver,\n");
+		printf("                 simulation, networktestclient, networktestserver, restore\n");
 		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
 #ifdef _WIN32
 		printf("  -n, --newconsole\n"
@@ -838,6 +770,7 @@ int main(int argc, char* argv[]) {
 			CreateTemplateDatabase,
 			NetworkTestClient,
 			NetworkTestServer,
+			Restore,
 			KVFileIntegrityCheck,
 			KVFileGenerateIOLogChecksums,
 			ConsistencyCheck
@@ -971,6 +904,7 @@ int main(int argc, char* argv[]) {
 					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
 					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
 					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
+					else if (!strcmp(sRole, "restore")) role = Restore;
 					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
 					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
 					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
@@ -1490,7 +1424,7 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer) {
+			if (role == FDBD || role == NetworkTestServer || role == Restore) {
 				try {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
 					if (listenError.isReady()) listenError.get();
@@ -1641,12 +1575,23 @@ int main(int argc, char* argv[]) {
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
+		} else if (role == Restore) {
+			f = stopAfter( restoreWorker(connectionFile, localities) );
+			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter( KVFileCheck(kvFile, true) );
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
-			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
-			g_network->run();
+			Optional<Void> result;
+			try {
+				GenerateIOLogChecksumFile(kvFile);
+				result = Void();
+			}
+			catch(Error &e) {
+				fprintf(stderr, "Fatal Error: %s\n", e.what());
+			}
+
+			f = result;
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

@@ -22,17 +22,17 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "Knobs.h"
-#include "MoveKeys.h"
-#include "WorkerInterface.h"
-#include "LeaderElection.h"
-#include "WaitFailure.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "Status.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/LeaderElection.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Status.h"
 #include <algorithm>
 #include "fdbclient/DatabaseContext.h"
-#include "RecoveryState.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -95,10 +95,12 @@ public:
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
+		int unfinishedRecoveries;
+		int logGenerations;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false),
+		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
-			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo( LiteralStringRef("DB") ) ) ),
+			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
 
@@ -801,6 +803,11 @@ public:
 			return false;
 		}
 
+		// Do not trigger better master exists if the cluster controller is excluded, since the master will change anyways once the cluster controller is moved
+		if(id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
 		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].priority > db.config.regions[1].priority &&
 			db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 			checkRegions(db.config.regions);
@@ -1002,13 +1009,14 @@ public:
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 
-	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
+	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
+		serverInfo.myLocality = locality;
 		db.serverInfo->set( serverInfo );
 		cx = openDBOnServer(db.serverInfo, TaskDefaultEndpoint, true, true);
 	}
@@ -1060,6 +1068,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			rmq.forceRecovery = db->forceRecovery;
 
 			cluster->masterProcessId = masterWorker.worker.first.locality.processId();
+			cluster->db.unfinishedRecoveries++;
 			ErrorOr<MasterInterface> newMaster = wait( masterWorker.worker.first.master.tryGetReply( rmq ) );
 			if (newMaster.present()) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", newMaster.get().id());
@@ -1067,7 +1076,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 					.detail("Address", newMaster.get().address())
-					.trackLatest("DB/RecruitedMasterWorker");
+					.trackLatest("RecruitedMasterWorker");
 
 				iMaster = newMaster.get();
 
@@ -1076,7 +1085,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				db->forceRecovery = false;
 				db->forceMasterFailure = Promise<Void>();
 
-				auto dbInfo = ServerDBInfo( LiteralStringRef("DB") );
+				auto dbInfo = ServerDBInfo();
 				dbInfo.master = iMaster;
 				dbInfo.id = g_random->randomUniqueID();
 				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
@@ -1158,7 +1167,6 @@ ACTOR Future<Void> clusterGetServerInfo(
 
 ACTOR Future<Void> clusterOpenDatabase(
 	ClusterControllerData::DBInfo* db,
-	Standalone<StringRef> dbName,
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
@@ -1301,7 +1309,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 }
 
 ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
-	state Future<Void> failed = waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+	state Future<Void> failed = worker.address() == g_network->getLocalAddress() ? Never() : waitFailureClient( worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
 	loop {
 		choose {
@@ -1342,7 +1350,7 @@ struct FailureStatusInfo {
 };
 
 //The failure monitor client relies on the fact that the failure detection server will not declare itself failed
-ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMonitoringRequest > requests ) {
+ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::DBInfo* db, FutureStream< FailureMonitoringRequest > requests ) {
 	state Version currentVersion = 0;
 	state std::map<NetworkAddress, FailureStatusInfo> currentStatus;	// The status at currentVersion
 	state std::deque<SystemFailureStatus> statusHistory;	// The last change in statusHistory is from currentVersion-1 to currentVersion
@@ -1440,13 +1448,16 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
+			bool tooManyLogGenerations = std::max(db->unfinishedRecoveries, db->logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS;
+
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
-
-				if ( it->first != g_network->getLocalAddress() && ( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) {
+				if ( it->first != g_network->getLocalAddress() && ( tooManyLogGenerations ?
+					( delay > CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY ) :
+					( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
 					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", it->first).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
-						.detail("PivotDelay", pivotDelay);
+						.detail("PivotDelay", pivotDelay).detail("UnfinishedRecoveries", db->unfinishedRecoveries).detail("LogGenerations", db->logGenerations);
 					statusHistory.push_back( SystemFailureStatus( it->first, FailureStatus(true) ) );
 					++currentVersion;
 					it = currentStatus.erase(it);
@@ -1542,14 +1553,22 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest const& req ) {
 	req.reply.send( Void() );
 
-	TraceEvent("MasterRegistrationReceived", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
+	TraceEvent("MasterRegistrationReceived", self->id).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
 		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount).detail("Stalled", req.recoveryStalled);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
 	if ( db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
-		TraceEvent("MasterRegistrationNotFound", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
+		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
 		return;
+	}
+
+	if ( req.recoveryState == RecoveryState::FULLY_RECOVERED ) {
+		self->db.unfinishedRecoveries = 0;
+		self->db.logGenerations = 0;
+		ASSERT( !req.logSystemConfig.oldTLogs.size() );
+	} else {
+		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -2124,15 +2143,15 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
-ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators ) {
-	state ClusterControllerData self( interf );
+ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
+	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
 	state uint64_t step = 0;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<ErrorOr<Void>> error = errorOr( actorCollection( addActor.getFuture() ) );
 
 	auto pSelf = &self;
-	addActor.send( failureDetectionServer( self.id, interf.clientInterface.failureMonitoring.getFuture() ) );
+	addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
 	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	addActor.send( self.updateWorkerList.init( self.db.db ) );
 	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
@@ -2147,17 +2166,17 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	loop choose {
 		when( ErrorOr<Void> err = wait( error ) ) {
 			if (err.isError()) {
-				endRole(interf.id(), "ClusterController", "Stop Received Error", false, err.getError());
+				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
 			}
 			else {
-				endRole(interf.id(), "ClusterController", "Stop Received Signal", true);
+				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
 			}
 
 			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected cluster controller)
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			addActor.send( clusterOpenDatabase( &self.db, req.dbName, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
+			addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			addActor.send( clusterRecruitFromConfiguration( &self, req ) );
@@ -2199,7 +2218,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			req.reply.send(workers);
 		}
 		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
-			if(self.db.masterRegistrationCount == 0) {
+			if(self.db.masterRegistrationCount == 0 || self.db.serverInfo->get().recoveryState <= RecoveryState::RECRUITING) {
 				if (!self.db.forceMasterFailure.isSet()) {
 					self.db.forceRecovery = true;
 					self.db.forceMasterFailure.send( Void() );
@@ -2222,7 +2241,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.
-			endRole(interf.id(), "ClusterController", "Leader Replaced", true);
+			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
 			TEST(true); // Lost Cluster Controller Role
 			return Void();
 		}
@@ -2232,7 +2251,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
-ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
+ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, LocalityData locality ) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -2249,13 +2268,13 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 			}
 
 			hasConnected = true;
-			startRole(cci.id(), UID(), "ClusterController");
+			startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 			inRole = true;
 
-			wait( clusterControllerCore( cci, leaderFail, coordinators ) );
+			wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
 		} catch(Error& e) {
 			if (inRole)
-				endRole(cci.id(), "ClusterController", "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
+				endRole(Role::CLUSTER_CONTROLLER, cci.id(), "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
 			else
 				TraceEvent( e.code() == error_code_coordinators_changed ? SevInfo : SevError, "ClusterControllerCandidateError", cci.id()).error(e);
 			throw;
@@ -2263,13 +2282,13 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 	}
 }
 
-ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles ) {
+ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality ) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators( connFile );
-			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo ) );
+			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo, locality ) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver

@@ -22,8 +22,8 @@
 #define FDBCLIENT_ICLIENTAPI_H
 #pragma once
 
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -84,7 +84,7 @@ public:
 class ICluster {
 public:
 	virtual ~ICluster() {}
-	virtual ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName) = 0;
+	virtual ThreadFuture<Reference<IDatabase>> createDatabase() = 0;
 	virtual void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 
 	virtual void addref() = 0;

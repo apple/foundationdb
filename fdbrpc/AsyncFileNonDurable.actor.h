@@ -23,16 +23,16 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILENONDURABLE_ACTOR_G_H)
 	#define FLOW_ASYNCFILENONDURABLE_ACTOR_G_H
-	#include "AsyncFileNonDurable.actor.g.h"
+	#include "fdbrpc/AsyncFileNonDurable.actor.g.h"
 #elif !defined(FLOW_ASYNCFILENONDURABLE_ACTOR_H)
 	#define FLOW_ASYNCFILENONDURABLE_ACTOR_H
 
 #include "flow/flow.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/ActorCollection.h"
-#include "simulator.h"
-#include "TraceFileIO.h"
-#include "RangeMap.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TraceFileIO.h"
+#include "fdbrpc/RangeMap.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max

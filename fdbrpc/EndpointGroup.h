@@ -22,7 +22,7 @@
 #define FLOW_ENDPOINT_GROUP_H
 #pragma once
 
-#include "flow.h"
+#include "fdbrpc/flow.h"
 
 // EndpointGroup makes it easier to implement backward compatibility for interface serialization
 // It also provides a central place to implement more compact serialization for a group of related endpoints in the future.

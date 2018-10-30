@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "KeyRangeMap.h"
-#include "NativeAPI.h"
-#include "CommitTransaction.h"
-#include "FDBTypes.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadYourWrites.h"
 
 void KeyRangeActorMap::getRangesAffectedByInsertion( const KeyRangeRef& keys, vector< KeyRange >& affectedRanges ) {
 	auto s = map.rangeContaining( keys.begin );
