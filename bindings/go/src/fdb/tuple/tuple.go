@@ -32,7 +32,7 @@
 // FoundationDB tuples can currently encode byte and unicode strings, integers,
 // large integers, floats, doubles, booleans, UUIDs, tuples, and NULL values.
 // In Go these are represented as []byte (or fdb.KeyConvertible), string, int64
-// (or int, uint, uint64), *big.Int (or big.Int, uint64), float32, float64, bool, 
+// (or int, uint, uint64), *big.Int (or big.Int), float32, float64, bool, 
 // UUID, Tuple, and nil.
 package tuple
 
@@ -52,8 +52,8 @@ import (
 // result in a runtime panic).
 //
 // The valid types for TupleElement are []byte (or fdb.KeyConvertible), string,
-// int64 (or int, uint, uint64), *big.Int (or big.Int, uint64), float, double, 
-// bool, UUID, Tuple, and nil.
+// int64 (or int, uint, uint64), *big.Int (or big.Int), float, double, bool,
+// UUID, Tuple, and nil.
 type TupleElement interface{}
 
 // Tuple is a slice of objects that can be encoded as FoundationDB tuples. If
@@ -62,7 +62,7 @@ type TupleElement interface{}
 //
 // Given a Tuple T containing objects only of these types, then T will be
 // identical to the Tuple returned by unpacking the byte slice obtained by
-// packing T (modulo type normalization to []byte and int64).
+// packing T (modulo type normalization to []byte, uint64, and int64).
 type Tuple []TupleElement
 
 // UUID wraps a basic byte array as a UUID. We do not provide any special
@@ -151,36 +151,39 @@ func (p *packer) encodeBytes(code byte, b []byte) {
 	p.putByte(0x00)
 }
 
-func (p *packer) encodeInt(i int64) {
+func (p *packer) encodeUint(i uint64) {
 	if i == 0 {
 		p.putByte(intZeroCode)
 		return
 	}
 
-	var n int
+	n := bisectLeft(i)
 	var scratch [8]byte
 
-	switch {
-	case i > 0:
-		n = bisectLeft(uint64(i))
-		p.putByte(byte(intZeroCode + n))
-		binary.BigEndian.PutUint64(scratch[:], uint64(i))
-	case i < 0:
-		n = bisectLeft(uint64(-i))
-		p.putByte(byte(intZeroCode - n))
-		offsetEncoded := int64(sizeLimits[n]) + i
-		binary.BigEndian.PutUint64(scratch[:], uint64(offsetEncoded))
+	p.putByte(byte(intZeroCode + n))
+	binary.BigEndian.PutUint64(scratch[:], i)
+
+	p.putBytes(scratch[8-n:])
+}
+
+
+func (p *packer) encodeInt(i int64) {
+	if i >= 0 {
+		p.encodeUint(uint64(i))
+		return
 	}
+
+	n := bisectLeft(uint64(-i))
+	var scratch [8]byte
+
+	p.putByte(byte(intZeroCode - n))
+	offsetEncoded := int64(sizeLimits[n]) + i
+	binary.BigEndian.PutUint64(scratch[:], uint64(offsetEncoded))
 
 	p.putBytes(scratch[8-n:])
 }
 
 func (p *packer) encodeBigInt(i *big.Int) {
-	if i.Cmp(big.NewInt(math.MaxInt64)) <= 0 && i.Cmp(big.NewInt(math.MinInt64)) >= 0 {
-		p.encodeInt(i.Int64())
-		return
-	}
-
 	length := len(i.Bytes())
 	if length > 0xff {
 		panic(fmt.Sprintf("Integer magnitude is too large (more than 255 bytes)"))
@@ -215,16 +218,6 @@ func (p *packer) encodeBigInt(i *big.Int) {
 		}
 
 		p.putBytes(intBytes)
-	}
-}
-
-func (p *packer) encodeUint(i uint64) {
-	if i > math.MaxInt64 {
-		val := new(big.Int)
-		val.SetUint64(i)
-		p.encodeBigInt(val)
-	} else {
-		p.encodeInt(int64(i))
 	}
 }
 
@@ -265,14 +258,14 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 			if nested {
 				p.putByte(0xff)
 			}
-		case int64:
-			p.encodeInt(e)
-		case uint64:
-			p.encodeUint(e)
 		case int:
 			p.encodeInt(int64(e))
+		case int64:
+			p.encodeInt(e)
 		case uint:
 			p.encodeUint(uint64(e))
+		case uint64:
+			p.encodeUint(e)
 		case *big.Int:
 			p.encodeBigInt(e)
 		case big.Int:
@@ -348,9 +341,9 @@ func decodeString(b []byte) (string, int) {
 	return string(bp), idx
 }
 
-func decodeInt(b []byte) (int64, int) {
+func decodeInt(b []byte) (interface{}, int) {
 	if b[0] == intZeroCode {
-		return 0, 1
+		return int64(0), 1
 	}
 
 	var neg bool
@@ -365,14 +358,17 @@ func decodeInt(b []byte) (int64, int) {
 	copy(bp[8-n:], b[1:n+1])
 
 	var ret int64
-
 	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &ret)
 
 	if neg {
-		ret -= int64(sizeLimits[n])
+		return ret - int64(sizeLimits[n]), n + 1
 	}
 
-	return ret, n + 1
+	if ret > 0 {
+		return ret, n + 1
+	}
+
+	return uint64(ret), n + 1
 }
 
 func decodeBigInt(b []byte) (*big.Int, int) {

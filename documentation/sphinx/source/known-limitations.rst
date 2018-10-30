@@ -76,7 +76,7 @@ Anyone who can connect to a FoundationDB cluster can read and write every key in
 Current limitations
 ===================
 
-These limitations do not reflect fundamental aspects of our design and are likely be resolved or mitigated in future versions. Administrators should be aware of these issues, but longer-term application development should be less driven by them.
+These limitations do not reflect fundamental aspects of our design and are likely to be resolved or mitigated in future versions. Administrators should be aware of these issues, but longer-term application development should be less driven by them.
 
 .. _long-transactions:
 
