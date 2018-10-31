@@ -90,7 +90,7 @@ class ResultSet(object):
             if any([s is not None for s in sequence_nums]):
                 results = {i: r for i, r in results.items() if r.sequence_num(self.specification) == min(sequence_nums)}
             else:
-                results = {i: r for i, r in results.items() if r.matches(min(results.values()), self.specification)}
+                results = {i: r for i, r in results.items() if r.matches_key(min(results.values()), self.specification)}
 
             for i in results.keys():
                 indices[i] += 1
