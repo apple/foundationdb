@@ -202,7 +202,7 @@ module FDB
         if v == 0
           @@INT_ZERO_CODE.chr
         elsif v > 0
-          if v >= @@size_limits[-1]
+          if v > @@size_limits[-1]
             length = (v.bit_length + 7) / 8
             result = @@POS_INT_END.chr + length.chr
             length.times do |i|
@@ -214,8 +214,8 @@ module FDB
             (@@INT_ZERO_CODE+n).chr + [v].pack("Q>").slice(8-n, n)
           end
         else
-          if -v >= @@size_limits[-1]
-            length = (v.bit_length + 7) / 8
+          if -v > @@size_limits[-1]
+            length = ((-v).bit_length + 7) / 8
             v += (1 << (length * 8)) - 1
             result = @@NEG_INT_START.chr + (length ^ 0xff).chr
             length.times do |i|

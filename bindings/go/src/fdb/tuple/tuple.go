@@ -99,6 +99,8 @@ var sizeLimits = []uint64{
 	1<<(8*8) - 1,
 }
 
+var minInt64BigInt = big.NewInt(math.MinInt64)
+
 func bisectLeft(u uint64) int {
 	var n int
 	for sizeLimits[n] < u {
@@ -188,7 +190,7 @@ func (p *packer) encodeBigInt(i *big.Int) {
 		panic(fmt.Sprintf("Integer magnitude is too large (more than 255 bytes)"))
 	}
 
-	if i.Sign() > 0 {
+	if i.Sign() >= 0 {
 		intBytes := i.Bytes()
 		if length > 8 {
 			p.putByte(byte(posIntEnd))
@@ -370,7 +372,7 @@ func decodeInt(b []byte) (interface{}, int) {
 	return uint64(ret), n + 1
 }
 
-func decodeBigInt(b []byte) (*big.Int, int) {
+func decodeBigInt(b []byte) (interface{}, int) {
 	val := new(big.Int)
 	offset := 1
 	var length int
@@ -383,10 +385,8 @@ func decodeBigInt(b []byte) (*big.Int, int) {
 
 		offset += 1
 	} else {
-		length = int(b[0]) - intZeroCode
-		if length < 0 {
-			length = -length
-		}
+		// Must be a negative 8 byte integer
+		length = 8
 	}
 
 	val.SetBytes(b[offset : length+offset])
@@ -395,6 +395,11 @@ func decodeBigInt(b []byte) (*big.Int, int) {
 		sub := new(big.Int).Lsh(big.NewInt(1), uint(length)*8)
 		sub.Sub(sub, big.NewInt(1))
 		val.Sub(val, sub)
+	}
+
+	// This is the only value that fits in an int64 or uint64 that is decoded with this function
+	if val.Cmp(minInt64BigInt) == 0 {
+		return val.Int64(), length + offset
 	}
 
 	return val, length + offset
@@ -448,7 +453,9 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			el, off = decodeBytes(b[i:])
 		case b[i] == stringCode:
 			el, off = decodeString(b[i:])
-		case negIntStart+1 < b[i] && b[i] < posIntEnd-1:
+		case negIntStart+1 < b[i] && b[i] < posIntEnd:
+			el, off = decodeInt(b[i:])
+		case negIntStart+1 == b[i] && (b[i+1] & 0x80 != 0):
 			el, off = decodeInt(b[i:])
 		case negIntStart <= b[i] && b[i] <= posIntEnd:
 			el, off = decodeBigInt(b[i:])
