@@ -925,30 +925,6 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					break;
 				}
 
-				//MXX: No need to print out so many information. Print out the tci and self->teamCollections.size(), we will know which data center got stuck.
-				/*
-				TraceEvent(SevWarn, "BestTeamStuckOnce").detail("BestTeamsSize",bestTeams.size())
-					.detail("FoundTeams", foundTeams).detail("AnyHealthy", anyHealthy).detail("WantsNewServers", rd.wantsNewServers)
-					.detail("StuckCount", stuckCount);
-				int i = 0;
-				for ( auto &team : bestTeams ) {
-					TraceEvent(SevWarn, "BestTeam").detail("IsSource", team.second)
-						.detail("IsHealthy", team.first->isHealthy())
-						.detail("ServerUID", "CheckBelow");
-					for ( auto &uid : team.first->getServerIDs() ) {
-						TraceEvent("Server").detail("Index", i).detail("UID", uid);
-					}
-					i++;
-				}
-				if ( stuckCount > bestTeamStuckThreshold ) {
-					printf("[WARNING] BestTeamStuck for %d times!\n", stuckCount);
-					TraceEvent(SevWarn, "BestTeamStuckTooLong").detail("StuckCountEach50", stuckCount)
-							.detail("TeamCollectionIndex", tciIndex).detail("FoundTeams", foundTeams)
-							.detail("AnyWithSource", anyWithSource).detail("AllHealthy", allHealthy).detail("AnyHealthy", anyHealthy);
-					bestTeamStuckThreshold += 50; // Log each 50 bestTeamStuck
-				}
-				*/
-
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
 				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount)

@@ -147,11 +147,9 @@ PolicyAcross::~PolicyAcross()
 	return;
 }
 
-/**
- * Debug purpose only
- * Trace all record entries to help debug
- * @param fromServers the servers' locality to be printed out.
- */
+// Debug purpose only
+// Trace all record entries to help debug
+// fromServers is the servers locality to be printed out.
 void IReplicationPolicy::traceLocalityRecords(LocalitySetRef const& fromServers)
 {
 	std::vector<Reference<LocalityRecord>> const& recordArray = fromServers->getRecordArray();
@@ -179,13 +177,11 @@ void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record
 	}
 }
 
-/**
- * Validate if the team satisfies the replication policy
- * LocalitySet is the base class about the locality information
- * @param solutionSet: the team to be validated
- * @param fromServers: the location information of all servers
- * @return true if the team satisfies the policy; false otherwise
- */
+// Validate if the team satisfies the replication policy
+// LocalitySet is the base class about the locality information
+// solutionSet is the team to be validated
+// fromServers is the location information of all servers
+// return true if the team satisfies the policy; false otherwise
 bool PolicyAcross::validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
 		LocalitySetRef const&				fromServers ) const
@@ -222,8 +218,6 @@ bool PolicyAcross::validate(
 			}
 		}
 		for (auto& itValid : validMap) {
-			//MXX: remove this question.
-			//MX: Q: why do we need to validate the itValid again? What is the logic behind this?
 			if (_policy->validate(itValid.second, fromServers)) { //itValid.second is the vector of LocalityEntries that belong to the same locality
 				if (g_replicationdebug > 4) {
 					printf("Across valid solution: %6lu key: %-7s count:%3d of%3d value: (%3d) %-10s policy: %-10s => %s\n",
@@ -258,11 +252,10 @@ bool PolicyAcross::validate(
 	return valid;
 }
 
-/*
- * Choose new servers from "least utilized" alsoServers and append the new servers to results
- * fromserverse are the servers that have already been chosen and that should be excluded from being selected as replicas.
- * FIXME: Simplify this function, such as removing unnecessary printf
- */
+
+// Choose new servers from "least utilized" alsoServers and append the new servers to results
+// fromserverse are the servers that have already been chosen and that should be excluded from being selected as replicas.
+// FIXME: Simplify this function, such as removing unnecessary printf
 bool PolicyAcross::selectReplicas(
 	LocalitySetRef	&						fromServers,
 	std::vector<LocalityEntry> const&		alsoServers,

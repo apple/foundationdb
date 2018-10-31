@@ -635,12 +635,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 					.detail("DestServerSize", destStorageServers.size())
 					.detail("ConfigStorageTeamSize", configuration.storageTeamSize)
 					.detail("UsableRegions", configuration.usableRegions);
-				//MX: record the server reponsible for the problematic shards
+				// Record the server reponsible for the problematic shards
 				int i = 0;
 				for ( auto& id : sourceStorageServers ) {
 					TraceEvent("IncorrectSizeTeamInfo").detail("ServerUID", id).detail("TeamIndex", i++);
 				}
-				//TraceEvent(SevError, "QuitCheck").detail("ErrorOnPurpose", *(int *) NULL);
 				self->testFailure("Invalid team size");
 				return false;
 			}
