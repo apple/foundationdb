@@ -31,7 +31,7 @@ struct SumType {
 	std::string toString() { return format("0x%08x%08x", part1, part2); }
 };
 
-void checksum(std::string const &file, uint8_t *page, int pageSize, LogicalPageID logical, PhysicalPageID physical, bool write) {
+bool checksum(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logical, PhysicalPageID physical, bool write) {
 	// Calculates and then stores or verifies the checksum at the end of the page.
 	// If write is true then the checksum is written into the page
 	// If write is false then the checksum is compared to the in-page sum and
@@ -48,21 +48,29 @@ void checksum(std::string const &file, uint8_t *page, int pageSize, LogicalPageI
 	sumOut->part2 = logical; 
 	hashlittle2(page, pageSize, &sumOut->part1, &sumOut->part2);
 
-	//debug_printf("checksum %s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n", write ? "write" : "read", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, StringRef(page, pageSize).toHexString().c_str());
+	debug_printf("checksum %s%s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n",
+		write ? "write" : "read", (!write && sum != *pSumInPage) ? " MISMATCH" : "", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, "" /*StringRef((uint8_t *)page, pageSize).toHexString().c_str()*/);
 
 	// Verify if not in write mode
 	if(!write && sum != *pSumInPage) {
-		auto e = checksum_failed();
 		TraceEvent (SevError, "IndirectShadowPagerPageChecksumFailure")
 			.detail("UserPageSize", pageSize)
-			.detail("Filename", file.c_str())
+			.detail("Filename", file->getFilename())
 			.detail("LogicalPage", logical)
 			.detail("PhysicalPage", physical)
 			.detail("ChecksumInPage", pSumInPage->toString())
-			.detail("ChecksumCalculated", sum.toString())
-			.error(e);
-		throw e;
+			.detail("ChecksumCalculated", sum.toString());
+		return false;
 	}
+	return true;
+}
+
+inline bool checksumRead(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logical, PhysicalPageID physical) {
+	return checksum(file, page, pageSize, logical, physical, false);
+}
+
+inline void checksumWrite(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logical, PhysicalPageID physical) {
+	checksum(file, page, pageSize, logical, physical, true);
 }
 
 IndirectShadowPage::IndirectShadowPage() : fastAllocated(true) {
@@ -78,7 +86,7 @@ IndirectShadowPage::~IndirectShadowPage() {
 		FastAllocator<4096>::release(data);
 	}
 	else if(file) {
-		file->releaseZeroCopy(data, PAGE_BYTES, physicalPageID * PAGE_BYTES);
+		file->releaseZeroCopy(data, PAGE_BYTES, (int64_t) physicalPageID * PAGE_BYTES);
 	}
 }
 
@@ -431,17 +439,13 @@ ACTOR Future<Void> waitAndFreePhysicalPageID(IndirectShadowPager *pager, Physica
 	return Void();
 }
 
-// TODO: we need to be more careful about making sure the action that caused the page to be freed is durable before freeing the page
-// Otherwise, the page could be rewritten prematurely.
+// TODO: Freeing physical pages must be done *after* committing the page map changes that cause the physical page to no longer be used.
+// Otherwise, the physical page could be reused by a write followed by a power loss in which case the mapping change would not
+// have been committed and so the physical page should still contain its previous data but it's been overwritten.
 void IndirectShadowPager::freePhysicalPageID(PhysicalPageID pageID) {
 	debug_printf("%s: Freeing physical %u\n", pageFileName.c_str(), pageID);
 	auto itr = busyPages.find(pageID);
-	if(itr != busyPages.end()) {
-		operations.add(waitAndFreePhysicalPageID(this, pageID, itr->second.onUnused.getFuture()));
-	}
-	else {
-		pagerFile.freePage(pageID);
-	}
+	pagerFile.freePage(pageID);
 }
 
 void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID) {
@@ -489,8 +493,9 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 
 	logPageTableUpdate(pageID, updateVersion, physicalPageID);
 
-	checksum(basename, contents->mutate(), IndirectShadowPage::PAGE_BYTES, pageID, physicalPageID, true);
-	Future<Void> write = holdWhile(contents, dataFile->write(contents->begin(), IndirectShadowPage::PAGE_BYTES, physicalPageID * IndirectShadowPage::PAGE_BYTES));
+	checksumWrite(dataFile.getPtr(), contents->mutate(), IndirectShadowPage::PAGE_BYTES, pageID, physicalPageID);
+
+	Future<Void> write = holdWhile(contents, dataFile->write(contents->begin(), IndirectShadowPage::PAGE_BYTES, (int64_t) physicalPageID * IndirectShadowPage::PAGE_BYTES));
 
 	if(write.isError()) {
 		if(errorPromise.canBeSet()) {
@@ -568,6 +573,12 @@ ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
 	if(pager->errorPromise.canBeSet())
 		pager->errorPromise.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
 
+	// Cancel all outstanding reads
+	for(auto &i : pager->busyPages) {
+		i.second.read.cancel();
+	}
+	ASSERT(pager->busyPages.empty());
+
 	wait(ready(pager->writeActors.signal()));
 	wait(ready(pager->operations.signal()));
 	wait(ready(pager->committing));
@@ -596,6 +607,23 @@ void IndirectShadowPager::dispose() {
 
 void IndirectShadowPager::close() {
 	shutdown(this, false);
+}
+
+ACTOR Future<Reference<IPage>> rawRead(Reference<IAsyncFile> file, IndirectShadowPager::BusyPage *bp) {
+	try {
+		wait(file->readZeroCopy(&bp->data, &bp->len, (int64_t) bp->physicalID * IndirectShadowPage::PAGE_BYTES));
+
+		if(!checksumRead(file.getPtr(), (uint8_t *)bp->data, bp->len, bp->logicalID, bp->physicalID)) {
+			debug_printf("CHECKSUM MISMATCH reading, bp address %p  readerCount %d  logical %u   physical %u  data %p\n", &bp, bp->readerCount, bp->logicalID, bp->physicalID, bp->data);
+			throw checksum_failed();
+		}
+		return Reference<IPage>(new IndirectShadowPage((uint8_t *)bp->data, file, bp->physicalID));
+		
+	}
+	catch(Error &e) {
+		file->releaseZeroCopy(bp->data, bp->len, (int64_t) bp->physicalID * IndirectShadowPage::PAGE_BYTES);
+		throw;
+	}
 }
 
 ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID logicalPageID, Version version) {
@@ -630,30 +658,37 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	//wait(pager->writeActors.signalAndCollapse());
 	//IndirectShadowPager::BusyPage &bp = i->second;
 
+	// If we're the first concurrent reader to try to read this page then start the actual read,
+	// otherwise the read actor was already started.
 	if(bp.readerCount == 1) {
 		ASSERT(!bp.read.isValid());
-		state int len = IndirectShadowPage::PAGE_BYTES;
-		state void *buf = nullptr;
-		bp.read = map(pager->dataFile->readZeroCopy(&buf, &len, (int64_t) physicalPageID * IndirectShadowPage::PAGE_BYTES),
-			[=](Void) {
-				ASSERT(len == IndirectShadowPage::PAGE_BYTES);
-				checksum(pager->basename, (uint8_t *)buf, len, logicalPageID, physicalPageID, false);
-				return Reference<IPage>(new IndirectShadowPage((uint8_t *)buf, pager->dataFile, physicalPageID));
-			});
+		bp.len = IndirectShadowPage::PAGE_BYTES;
+		bp.data = nullptr;
+		bp.physicalID = physicalPageID;
+		bp.logicalID = logicalPageID;
+		bp.read = rawRead(pager->dataFile, &bp);
 	}
 
-	Reference<IPage> p = wait(bp.read);
+	state Optional<Error> err;
+	try {
+		wait(ready(i->second.read));
+	} catch(Error &e) {
+		err = e;
+	}
 
 	IndirectShadowPager::BusyPage &bp = i->second;
-
+	Future<Reference<IPage>> read = bp.read;
 	--bp.readerCount;
 	if(bp.readerCount == 0) {
-		Promise<Void> pUnused = bp.onUnused;
 		pager->busyPages.erase(i);
-		pUnused.send(Void());
 	}
 
-	return p;
+	if(err.present()) {
+		throw err.get();
+	}
+
+	// This will throw if the read was an error, if *this was cancelled then we won't be here.
+	return read.get();
 }
 
 Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID pageID, Version version) {
@@ -742,25 +777,25 @@ ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, L
 
 	try {
 		try {
-			wait(pager->dataFile->readZeroCopy(&data, &bytes, from * IndirectShadowPage::PAGE_BYTES));
+			wait(pager->dataFile->readZeroCopy(&data, &bytes, (int64_t)from * IndirectShadowPage::PAGE_BYTES));
 		}
 		catch(Error &e) {
 			zeroCopied = false;
 			data = page->mutate();
-			int _bytes = wait(pager->dataFile->read(data, page->size(), from * IndirectShadowPage::PAGE_BYTES));
+			int _bytes = wait(pager->dataFile->read(data, page->size(), (int64_t)from * IndirectShadowPage::PAGE_BYTES));
 			bytes = _bytes;
 		}
 
 		ASSERT(bytes == IndirectShadowPage::PAGE_BYTES);
-		checksum(pager->basename, page->mutate(), bytes, logical, to, true);
-		wait(pager->dataFile->write(data, bytes, to * IndirectShadowPage::PAGE_BYTES));
+		checksumWrite(pager->dataFile.getPtr(), page->mutate(), bytes, logical, to);
+		wait(pager->dataFile->write(data, bytes, (int64_t)to * IndirectShadowPage::PAGE_BYTES));
 		if(zeroCopied) {
-			pager->dataFile->releaseZeroCopy(data, bytes, from * IndirectShadowPage::PAGE_BYTES);
+			pager->dataFile->releaseZeroCopy(data, bytes, (int64_t)from * IndirectShadowPage::PAGE_BYTES);
 		}
 	}
 	catch(Error &e) {
 		if(zeroCopied) {
-			pager->dataFile->releaseZeroCopy(data, bytes, from * IndirectShadowPage::PAGE_BYTES);
+			pager->dataFile->releaseZeroCopy(data, bytes, (int64_t)from * IndirectShadowPage::PAGE_BYTES);
 		}
 		pager->pagerFile.freePage(to);
 		throw e;
@@ -834,7 +869,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 			pagerFile->freePages.erase(freePageItr, pagerFile->freePages.end());
 			ASSERT(pagerFile->vacuumQueue.empty() || pagerFile->vacuumQueue.rbegin()->first < eraseStartPage);
 
-			wait(pager->dataFile->truncate(pagerFile->pagesAllocated * IndirectShadowPage::PAGE_BYTES));
+			wait(pager->dataFile->truncate((int64_t)pagerFile->pagesAllocated * IndirectShadowPage::PAGE_BYTES));
 		}
 
 		wait(delayUntil(start + (double)IndirectShadowPage::PAGE_BYTES / SERVER_KNOBS->VACUUM_BYTES_PER_SECOND)); // TODO: figure out the correct mechanism here
@@ -844,7 +879,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 PagerFile::PagerFile(IndirectShadowPager *pager) : fileSize(0), pagesAllocated(0), pager(pager), vacuumQueueReady(false), minVacuumQueuePage(0) {}
 
 PhysicalPageID PagerFile::allocatePage(LogicalPageID logicalPageID, Version version) {
-	ASSERT(pagesAllocated * IndirectShadowPage::PAGE_BYTES <= fileSize);
+	ASSERT((int64_t)pagesAllocated * IndirectShadowPage::PAGE_BYTES <= fileSize);
 	ASSERT(fileSize % IndirectShadowPage::PAGE_BYTES == 0);
 
 	PhysicalPageID allocatedPage;
@@ -853,7 +888,7 @@ PhysicalPageID PagerFile::allocatePage(LogicalPageID logicalPageID, Version vers
 		freePages.erase(freePages.begin());
 	}
 	else {
-		if(pagesAllocated * IndirectShadowPage::PAGE_BYTES == fileSize) {
+		if((int64_t)pagesAllocated * IndirectShadowPage::PAGE_BYTES == fileSize) {
 			fileSize += (1 << 24);
 			// TODO: extend the file before writing beyond the end.
 		}

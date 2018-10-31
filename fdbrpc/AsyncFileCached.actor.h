@@ -315,13 +315,11 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		// If zero-copy reads are in progress, allow whole page writes to a new page buffer so the effects
 		// are not seen by the prior readers who still hold zeroCopyRead pointers
 		bool fullPage = offset == 0 && length == pageCache->pageSize;
-		if(zeroCopyRefCount != 0) {
-			ASSERT(fullPage);
-			orphan();
-		}
+		ASSERT(zeroCopyRefCount == 0 || fullPage);
+
 		setDirty();
 
-		if (valid || fullPage) {
+		if ( zeroCopyRefCount == 0 && (valid || fullPage) ) {
 			valid = true;
 			memcpy( static_cast<uint8_t*>(this->data) + offset, data, length );
 			return yield();
@@ -338,6 +336,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	ACTOR static Future<Void> waitAndWrite( AFCPage* self, void const* data, int length, int offset ) {
 		wait( self->notReading );
+		if(self->zeroCopyRefCount != 0) {
+			self->orphan();
+		}
 		memcpy( static_cast<uint8_t*>(self->data) + offset, data, length );
 		return Void();
 	}

@@ -178,8 +178,12 @@ public:
 	struct BusyPage {
 		BusyPage() : readerCount(0) {}
 		int readerCount;
-		Promise<Void> onUnused;
 		Future<Reference<IPage>> read;
+		int64_t offset;
+		int len;
+		void *data;
+		PhysicalPageID physicalID;
+		LogicalPageID logicalID;
 	};
 
 	typedef std::map<PhysicalPageID, BusyPage> BusyPageMapT;
