@@ -242,7 +242,7 @@
 
 .. |option-tls-plugin-blurb| replace::
 
-    Sets the :ref:`TLS plugin <configuring-tls-plugin>` to load. This option, if used, must be set before any other TLS options.
+    Sets the :ref:`TLS plugin <configuring-tls>` to load. This option, if used, must be set before any other TLS options.
 
 .. |option-tls-cert-path-blurb| replace::
 
