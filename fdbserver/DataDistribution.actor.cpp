@@ -32,6 +32,7 @@
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "../flow/Trace.h"
 
 class TCTeamInfo;
 struct TCMachineInfo;
@@ -392,8 +393,6 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 
 			// Wait for any change to the serverKeys for this server
 			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskDataDistribution) );
-			//tr.waitForChanges( KeyRangeRef( serverKeysPrefixFor(serverID),
-			//					 serverKeysPrefixFor(serverID).toString() + allKeys.end.toString() ) );
 			tr.reset();
 		} catch (Error& e) {
 			wait( tr.onError(e) );
@@ -586,7 +585,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
 
-	std::map< Standalone<StringRef>, Reference<TCMachineInfo> > machine_info; // all machines info. Key must be unique across processes on the same machine
+	std::map< Standalone<StringRef>, Reference<TCMachineInfo> > machine_info; // All machines info. Key must be unique across processes on the same machine
 	std::vector< Reference<TCMachineTeamInfo> > machineTeams; // all machine teams
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
@@ -757,7 +756,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			//   tracking is "edge triggered")
 			// SOMEDAY: Account for capacity, load (when shardMetrics load is high)
 
-			ASSERT( self->teams.size() );
+			// self->teams.size() can be 0 under the test  -f foundationdb/tests/slow/ConfigureTest.txt -b on -s 780181629
+			// The situation happens rarely. We may want to eliminate this situation someday
+			if( !self->teams.size() ) {
+				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
+				return Void();
+			}
 
 			int64_t bestLoadBytes = 0;
 			Optional<Reference<IDataDistributionTeam>> bestOption;
@@ -1111,6 +1115,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// A non-initial team must have its machine team created and its size must be correct
 		ASSERT( isInitialTeam ||
 				(machineTeamInfo.isValid() && teamInfo->serverIDs.size() == configuration.storageTeamSize) );
+
 		// Create a machine team if it does not exist
 		// Note an initial team may be added at init() even though the team size is not storageTeamSize
 		if ( !machineTeamInfo.isValid() && !machineIDs.empty() ) {
@@ -1329,7 +1334,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
-	void traceAllInfo(bool shouldPrint) {
+	// To enable verbose debug info, set shouldPrint to true
+	void traceAllInfo(bool shouldPrint = false) {
 		if ( !shouldPrint )
 			return;
 
@@ -1341,10 +1347,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		traceMachineLocalityMap();
 	}
 
-	void traceAllInfo() {
-		traceAllInfo(false); // set to true to enable verbose debug info
-	}
-
+	// We must rebuild machine locality map whenever the entry in the map is inserted or removed
 	void rebuildMachineLocalityMap() {
 		machineLocalityMap.clear();
 		int numHealthyMachine = 0;
@@ -1365,15 +1368,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
-
-	/*
-	 * Create machineTeamsToBuild number of machine teams
-	 * No operation if machineTeamsToBuild is 0
-	 *
-	 * Five steps to create each machine team, which are document in the function
-	 * Reuse ReplicationPolicy selectReplicas func to select machine team
-	 * return number of added machine teams
-	 */
+	// Create machineTeamsToBuild number of machine teams
+	// No operation if machineTeamsToBuild is 0
+	//
+	// Five steps to create each machine team, which are document in the function
+	// Reuse ReplicationPolicy selectReplicas func to select machine team
+	// return number of added machine teams
 	int addBestMachineTeams(int targetMachineTeamsToBuild) {
 		int addedMachineTeams = 0;
 		int totalServerIndex = 0;
@@ -1387,7 +1387,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		machineTeamsToBuild = targetMachineTeamsToBuild;
 
 		if ( machine_info.size() < configuration.storageTeamSize ) {
-			TraceEvent(SevWarn, "DataDistributionBuildMachineTeams", masterId)
+			TraceEvent(SevWarn, "DataDistributionBuildMachineTeams", masterId).suppressFor(10)
 				.detail("Reason","Not enough machines for a team. Machine number should be larger than Team size")
 				.detail("MachineNumber",machine_info.size()).detail("TeamSize", configuration.storageTeamSize);
 			return addedMachineTeams;
@@ -1441,7 +1441,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			std::vector<UID*> bestTeam;
 			int bestScore = std::numeric_limits<int>::max();
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
-			for ( int i = 0; i < maxAttempts && i < 100; i++) {
+			for ( int i = 0; i < maxAttempts && i < 100; i++ ) {
 				// Choose a team that balances the # of teams per server among the teams that have the least-utilized server
 				team.clear();
 				auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
@@ -1455,16 +1455,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// selectReplicas() may return server not in server_info. Retry if it happens
 				// Reproduce the situation with -r simulation -f foundationdb/tests/fast/BackupToDBCorrectnessClean.txt  -b on -s 801184616
 				// MX: Q: Why should selectReplicas return invalid server. Should not we avoid this in selectReplicas.
+				// TODO: Test it by triggering SevError. If no SevError is triggered, change it to assert
 				int valid = true;
 				for ( auto &pUID : team ) {
 					if ( server_info.find(*pUID) == server_info.end() ) {
-						TraceEvent("SelectReplicasChoseInvalidTeam").detail("Primary", primary)
+						TraceEvent(SevError, "SelectReplicasChoseInvalidTeam").detail("Primary", primary)
 							.detail("AddedMachineTeams", addedMachineTeams)
 							.detail("Attempt", i).detail("ServerInfoSize", server_info.size())
 							.detail("InvalidUID", (*pUID).toString())
 							.detail("ServerTeamNum", server_info[*pUID]->teams.size())
 							.detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-						traceAllInfo();
+						traceAllInfo(true);
 						valid = false;
 						break;
 					}
@@ -1475,7 +1476,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				// MX:Q: why will this happen? If this happens, it means selectReplicas() did not choose a correct team in the first place!
+				// TODO: Test it by triggering SevError. If no SevError is triggered, change it to assert
 				if ( team.size() != configuration.storageTeamSize) {
+					TraceEvent(SevError, "SelectReplicasChooseATeamWithIncorrectSize");
+					traceAllInfo(true);
 					maxAttempts += 1;
 				}
 
