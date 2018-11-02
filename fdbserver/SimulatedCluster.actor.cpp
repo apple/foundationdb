@@ -597,7 +597,7 @@ ACTOR Future<Void> simulatedMachine(
 
 ACTOR Future<Void> restartSimulatedSystem(
 		vector<Future<Void>> *systemActors, std::string baseFolder, int* pTesterCount,
-		Optional<ClusterConnectionString> *pConnString, Reference<TLSOptions> tlsOptions, int extraDB) {
+		Optional<ClusterConnectionString> *pConnString, Standalone<StringRef> *pStartingConfiguration, Reference<TLSOptions> tlsOptions, int extraDB) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -619,13 +619,20 @@ ACTOR Future<Void> restartSimulatedSystem(
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
 		int useSeedForMachine = g_random->randomInt(0, machineCount);
+		std::vector<std::string> dcIds;
 		for( int i = 0; i < machineCount; i++) {
 			Optional<Standalone<StringRef>> dcUID;
 			std::string zoneIdString = ini.GetValue("META", format("%d", i).c_str());
 			Standalone<StringRef> zoneId = StringRef(zoneIdString);
 			std::string	dcUIDini = ini.GetValue(zoneIdString.c_str(), "dcUID");
-			if (!dcUIDini.empty()) dcUID = StringRef(dcUIDini);
+			
+			if (!dcUIDini.empty()) {
+				dcUID = StringRef(dcUIDini);
+			}
 			ProcessClass processClass = ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(zoneIdString.c_str(), "mClass")), ProcessClass::CommandLineSource);
+			if(processClass != ProcessClass::TesterClass) {
+				dcIds.push_back(dcUIDini);
+			}
 
 			std::vector<uint32_t> ipAddrs;
 			int processes = atoi(ini.GetValue(zoneIdString.c_str(), "processes"));
@@ -656,6 +663,32 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 		g_simulator.desiredCoordinators = desiredCoordinators;
 		g_simulator.processesPerMachine = processesPerMachine;
+
+		uniquify(dcIds);
+		if(!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
+			StatusObject primaryObj;
+			StatusObject primaryDcObj;
+			primaryDcObj["id"] = dcIds[0];
+			primaryDcObj["priority"] = 2;
+			StatusArray primaryDcArr;
+			primaryDcArr.push_back(primaryDcObj);
+
+			StatusObject remoteObj;
+			StatusObject remoteDcObj;
+			remoteDcObj["id"] = dcIds[1];
+			remoteDcObj["priority"] = 1;
+			StatusArray remoteDcArr;
+			remoteDcArr.push_back(remoteDcObj);
+
+			primaryObj["datacenters"] = primaryDcArr;
+			remoteObj["datacenters"] = remoteDcArr;
+
+			StatusArray regionArr;
+			regionArr.push_back(primaryObj);
+			regionArr.push_back(remoteObj);
+
+			*pStartingConfiguration = "single usable_regions=2 regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+		}
 	}
 	catch (Error& e) {
 		TraceEvent(SevError, "RestartSimulationError").error(e);
@@ -1259,7 +1292,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, tlsOptions, extraDB), 100.0 ) );
+			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, tlsOptions, extraDB), 100.0 ) );
 		}
 		else {
 			g_expect_full_pointermap = 1;
