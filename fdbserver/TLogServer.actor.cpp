@@ -701,14 +701,14 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 		if(logData->version_sizes.empty()) {
 			nextVersion = logData->version.get();
 		} else {
-		Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
-		while( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT && sizeItr != logData->version_sizes.end()
-				&& (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD || sizeItr->value.first == 0) )
-		{
-			totalSize += sizeItr->value.first + sizeItr->value.second;
-			++sizeItr;
-			nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
-		}
+			Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
+			while( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT && sizeItr != logData->version_sizes.end()
+					&& (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD || sizeItr->value.first == 0) )
+			{
+				totalSize += sizeItr->value.first + sizeItr->value.second;
+				++sizeItr;
+				nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
+			}
 		}
 
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
@@ -1594,7 +1594,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 	return Void();
 }
 
-ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInterface tli ) {
+ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInterface tli, bool pulledRecoveryVersions ) {
 	if(logData->removed.isReady()) {
 		Void _ = wait(delay(0)); //to avoid iterator invalidation in restorePersistentState when removed is already ready
 		ASSERT(logData->removed.isError());
@@ -1620,7 +1620,7 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	if(!logData->isPrimary) {
 		std::vector<Tag> tags;
 		tags.push_back(logData->remoteTag);
-		logData->addActor.send( pullAsyncData(self, logData, tags, logData->unrecoveredBefore, Optional<Version>(), true, false) );
+		logData->addActor.send( pullAsyncData(self, logData, tags, pulledRecoveryVersions ? logData->recoveredAt + 1 : logData->unrecoveredBefore, Optional<Version>(), true, false) );
 	}
 
 	try {
@@ -1849,7 +1849,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			it.second->queueCommittedVersion.set(it.second->version.get());
 		}
 		it.second->recoveryComplete.sendError(end_of_stream());
-		self->sharedActors.send( tLogCore( self, it.second, id_interf[it.first] ) );
+		self->sharedActors.send( tLogCore( self, it.second, id_interf[it.first], false ) );
 	}
 
 	if(registerWithMaster.canBeSet()) registerWithMaster.send(Void());
@@ -1943,6 +1943,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	TraceEvent("TLogStart", logData->logId);
 	state Future<Void> updater;
+	state bool pulledRecoveryVersions = false;
 	try {
 		if( logData->removed.isReady() ) {
 			throw logData->removed.getError();
@@ -1971,7 +1972,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			logData->initialized = true;
 			self->newLogData.trigger();
 
-			if(req.isPrimary && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
+			if((req.isPrimary || req.recoverFrom.logRouterTags == 0) && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
 				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalitySatellite) {
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
@@ -1981,9 +1982,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false, true) || logData->removed);
 				}
+				pulledRecoveryVersions = true;
+				logData->knownCommittedVersion = req.recoverAt;
 			}
 
-			if(req.isPrimary && logData->version.get() < req.recoverAt && !logData->stopped) {
+			if((req.isPrimary || req.recoverFrom.logRouterTags == 0) && logData->version.get() < req.recoverAt && !logData->stopped) {
 				// Log the changes to the persistent queue, to be committed by commitQueue()
 				TLogQueueEntryRef qe;
 				qe.version = req.recoverAt;
@@ -2039,7 +2042,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	TraceEvent("TLogReady", logData->logId).detail("AllTags", describe(req.allTags)).detail("Locality", logData->locality);
 
 	updater = Void();
-	Void _ = wait( tLogCore( self, logData, recruited ) );
+	Void _ = wait( tLogCore( self, logData, recruited, pulledRecoveryVersions ) );
 	return Void();
 }
 
