@@ -24,13 +24,13 @@ services:
     <<: *build-setup
     environment:
       - RELEASE=true
-    command: /bin/bash -cl 'make && make packages'
+    command: /bin/bash -cl 'make clean && make packages'
 
   build-snapshot: &build-snapshot
     <<: *build-setup
     environment:
       - RELEASE=false
-    command: /bin/bash -cl 'make && make packages'
+    command: /bin/bash -cl 'make clean && make packages'
 
   build-prb:
     <<: *build-snapshot
