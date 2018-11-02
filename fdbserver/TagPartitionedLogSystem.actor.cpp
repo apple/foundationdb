@@ -881,7 +881,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return;
 		}
 		for(auto& t : tLogs) {
-			if(t->locality == tagLocalitySpecial || t->locality == tag.locality || (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+			if(t->locality == tagLocalitySpecial || t->locality == tag.locality || tag.locality == tagLocalityUpgraded || (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
 				for(auto& log : t->logServers) {
 					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 					if (prev < upTo)
