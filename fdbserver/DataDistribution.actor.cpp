@@ -1273,18 +1273,6 @@ struct DDTeamCollection {
 			.detail("NonFailedServerCount", desiredServerVector.size());
 	}
 
-	void countHealthyTeams() {
-		int healthy = 0;
-		for(auto it = teams.begin(); it != teams.end(); it++) {
-			if( (*it)->isHealthy() ) {
-				healthy++;
-			}
-		}
-		TraceEvent(healthy == healthyTeamCount ? SevInfo : SevWarnAlways, "HealthyTeamCheck", masterId)
-			.detail("ValidatedCount", healthy)
-			.detail("ProvidedCount", healthyTeamCount);
-	}
-
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
 		return (includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end() || (otherTrackedDCs.present() && std::find(otherTrackedDCs.get().begin(), otherTrackedDCs.get().end(), newServer.locality.dcId()) == otherTrackedDCs.get().end()));
 	}
@@ -2147,7 +2135,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				TraceEvent("TotalDataInFlight", masterId).detail("Primary", self.primary).detail("TotalBytes", self.getDebugTotalDataInFlight()).detail("UnhealthyServers", self.unhealthyServers)
 					.detail("HighestPriority", highestPriority).trackLatest( self.primary ? "TotalDataInFlight" : "TotalDataInFlightRemote" );
 				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL );
-				self.countHealthyTeams();
 			}
 			when( Void _ = wait( self.serverTrackerErrorOut.getFuture() ) ) {} // Propagate errors from storageServerTracker
 			when( Void _ = wait( error ) ) {}
