@@ -1362,8 +1362,8 @@ struct DDTeamCollection {
 ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<TCTeamInfo> team) {
 	state int lastServersLeft = team->getServerIDs().size();
 	state bool lastAnyUndesired = false;
-	state bool wrongSize = team->getServerIDs().size() != self->configuration.storageTeamSize;
-	state bool lastReady = self->initialFailureReactionDelay.isReady();
+	state bool wrongSize = !g_network->isSimulated() && team->getServerIDs().size() != self->configuration.storageTeamSize;
+	state bool lastReady = false;
 	state bool lastHealthy;
 	state bool lastOptimal;
 	state bool lastWrongConfiguration = team->isWrongConfiguration();
