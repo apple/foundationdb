@@ -3413,9 +3413,6 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
 							self->history = rep.history;
-							while(self->history.size() && self->history.back().first < self->version.get() ) {
-								self->history.pop_back();
-							}
 
 							if(rep.newTag.present()) {
 								self->tag = rep.newTag.get();
