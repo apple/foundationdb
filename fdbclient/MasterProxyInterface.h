@@ -28,6 +28,7 @@
 
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
 
 	LocalityData locality;
 	RequestStream< struct CommitTransactionRequest > commit;
@@ -96,7 +97,7 @@ struct CommitTransactionRequest {
 	}
 };
 
-static inline int getBytes( CommitTransactionRequest const& r ) { 
+static inline int getBytes( CommitTransactionRequest const& r ) {
 	// SOMEDAY: Optimize
 	//return r.arena.getSize(); // NOT correct because arena can be shared!
 	int total = sizeof(r);
