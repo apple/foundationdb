@@ -1747,7 +1747,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent(SevInfo, "TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted");
 
 	Void _ = wait(timeKeeperSetVersion(self));
 
@@ -1755,6 +1755,11 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
 		loop {
 			try {
+				if(!g_network->isSimulated()) {
+					UID debugID = g_random->randomUniqueID();
+					TraceEvent("TimeKeeperStarted", debugID);
+					tr->debugTransaction(debugID);
+				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
