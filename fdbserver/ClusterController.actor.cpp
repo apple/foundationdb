@@ -1757,7 +1757,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 			try {
 				if(!g_network->isSimulated()) {
 					UID debugID = g_random->randomUniqueID();
-					TraceEvent("TimeKeeperStarted", debugID);
+					TraceEvent("TimeKeeperCommit", debugID);
 					tr->debugTransaction(debugID);
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
