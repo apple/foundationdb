@@ -2270,7 +2270,7 @@ ACTOR Future<Void> dataDistribution(
 			for(auto& kv : replicaKeys) {
 				auto dcId = decodeDatacenterReplicasKey(kv.key);
 				auto replicas = decodeDatacenterReplicasValue(kv.value);
-				if((primaryDcId.size() && primaryDcId[0] == dcId) || (remoteDcIds.size() && remoteDcIds[0] == dcId)) {
+				if((primaryDcId.size() && primaryDcId[0] == dcId) || (remoteDcIds.size() && remoteDcIds[0] == dcId && configuration.usableRegions > 1)) {
 					if(replicas > configuration.storageTeamSize) {
 						tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
 					}
