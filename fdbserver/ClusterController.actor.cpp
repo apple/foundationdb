@@ -616,7 +616,7 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				std::swap(regions[0], regions[1]);
 			}
 
