@@ -78,6 +78,9 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 	if( it != cx->server_interf.end() ) {
 		if(it->second->interf.getVersion.getEndpoint().token != ssi.getVersion.getEndpoint().token) {
 			if(it->second->interf.locality == ssi.locality) {
+				//FIXME: load balance holds pointers to individual members of the interface, and this assignment will swap out the object they are
+				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load balance to take an AsyncVar<Reference<Interface>>
+				//       so that it is notified when the interface changes.
 				it->second->interf = ssi;
 			} else {
 				it->second->notifyContextDestroyed();
