@@ -36,17 +36,28 @@ std::string generateRegions(int& regions) {
 		return " usable_regions=1 regions=\"\"";
 	}
 
+	int primaryPriority = 1;
+	int remotePriority = -1;
+	double priorityType = g_random->random01();
+	if(priorityType < 0.1) {
+		primaryPriority = -1;
+		remotePriority = 1;
+	} else if(priorityType < 0.2) {
+		remotePriority = 1;
+		primaryPriority = 1;
+	}
+
 	StatusObject primaryObj;
 	StatusObject primaryDcObj;
 	primaryDcObj["id"] = "0";
-	primaryDcObj["priority"] = 2;
+	primaryDcObj["priority"] = primaryPriority;
 	StatusArray primaryDcArr;
 	primaryDcArr.push_back(primaryDcObj);
 
 	StatusObject remoteObj;
 	StatusObject remoteDcObj;
 	remoteDcObj["id"] = "1";
-	remoteDcObj["priority"] = -1;
+	remoteDcObj["priority"] = remotePriority;
 	StatusArray remoteDcArr;
 	remoteDcArr.push_back(remoteDcObj);
 
