@@ -91,8 +91,8 @@ Bindings
 * C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] `(Issue #518) <https://github.com/apple/foundationdb/issues/518>`_
 * The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] `(PR #710) <https://github.com/apple/foundationdb/pull/710>`_
 * Java: the `Versionstamp::getUserVersion() </javadoc/com/apple/foundationdb/tuple/Versionstamp.html#getUserVersion-->`_ method did not handle user versions greater than ``0x00FF`` due to operator precedence errors. [6.0.11] `(Issue #761) <https://github.com/apple/foundationdb/issues/761>`_
-* Python: bindings didn't work with Python 3.7 because of the new `async` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
-* Go: `PrefixRange` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
+* Python: bindings didn't work with Python 3.7 because of the new ``async`` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
+* Go: ``PrefixRange`` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
 
 
 Other Changes
