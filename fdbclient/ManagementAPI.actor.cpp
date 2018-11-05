@@ -267,39 +267,108 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 	}
 }
 
-ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m ) {
+ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
 
-	if (!m.size())
+	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
+	}
 
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
 	if (creating) {
 		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
-		if (!isCompleteConfiguration(m))
+		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
-	} else {
-		state Future<DatabaseConfiguration> fConfig = getDatabaseConfiguration(cx);
-		Void _ = wait( success(fConfig) || delay(1.0) );
-
-		if(fConfig.isReady()) {
-			DatabaseConfiguration config = fConfig.get();
-			for(auto kv : m) {
-				config.set(kv.first, kv.second);
-			}
-			if(!config.isValid()) {
-				return ConfigurationResult::INVALID_CONFIGURATION;
-			}
 		}
 	}
 
+	state Future<Void> tooLong = delay(4.5);
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+			if(!creating && !force) {
+				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				Void _ = wait( success(fConfig) || tooLong );
+
+				if(!fConfig.isReady()) {
+					return ConfigurationResult::DATABASE_UNAVAILABLE;
+				}
+
+				if(fConfig.isReady()) {
+					ASSERT( fConfig.get().size() < CLIENT_KNOBS->TOO_MANY );
+					state DatabaseConfiguration oldConfig;
+					oldConfig.fromKeyValues((VectorRef<KeyValueRef>) fConfig.get());
+					state DatabaseConfiguration newConfig = oldConfig;
+					for(auto kv : m) {
+						newConfig.set(kv.first, kv.second);
+					}
+					if(!newConfig.isValid()) {
+						return ConfigurationResult::INVALID_CONFIGURATION;
+					}
+
+					if(oldConfig.usableRegions==1 && newConfig.usableRegions==2) {
+						//must only have one region with priority >= 0
+						int activeRegionCount = 0;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								activeRegionCount++;
+							}
+						}
+						if(activeRegionCount > 1) {
+							return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
+						}
+					}
+
+					state Future<Standalone<RangeResultRef>> fServerList = (newConfig.regions.size()) ? tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) : Future<Standalone<RangeResultRef>>();
+
+					if(newConfig.usableRegions==2) {
+						//all regions with priority >= 0 must be fully replicated
+						state std::vector<Future<Optional<Value>>> replicasFutures;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
+							}
+						}
+						Void _ = wait( waitForAll(replicasFutures) || tooLong );
+
+						for(auto& it : replicasFutures) {
+							if(!it.isReady()) {
+								return ConfigurationResult::DATABASE_UNAVAILABLE;
+							}
+							if(!it.get().present()) {
+								return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+							}
+						}
+					}
+
+					if(newConfig.regions.size()) {
+						//all storage servers must be in one of the regions
+						Void _ = wait( success(fServerList) || tooLong );
+						if(!fServerList.isReady()) {
+							return ConfigurationResult::DATABASE_UNAVAILABLE;
+						}
+						Standalone<RangeResultRef> serverList = fServerList.get();
+						ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+						std::set<Key> newDcIds;
+						for(auto& it : newConfig.regions) {
+							newDcIds.insert(it.dcId);
+						}
+						for(auto& s : serverList) {
+							auto ssi = decodeServerListValue( s.value );
+							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
+								return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
+							}
+						}
+					}
+				}
+			}
+
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
@@ -635,7 +704,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force ) {
 	if( modes.size() && modes[0] == LiteralStringRef("auto") && conf.present() ) {
 		return autoConfig(cx, conf.get());
 	}
@@ -644,16 +713,16 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes, bool force ) {
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string,std::string> m;
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
 ACTOR Future<vector<ProcessData>> getWorkers( Transaction* tr ) {
