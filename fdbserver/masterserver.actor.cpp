@@ -221,6 +221,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
+	bool neverCreated;
 
 	MasterData(
 		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
@@ -241,6 +242,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  dbName(dbName),
 		  dbId(dbId),
 		  forceRecovery(forceRecovery),
+		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
@@ -527,12 +529,14 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<StorageServerInterface>* seedServers, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
-		if (self->configuration.initialized)
+		if (self->configuration.initialized) {
 			status = RecoveryStatus::configuration_invalid;
-		else if (!self->cstate.prevDBState.tLogs.size())
+		} else if (!self->cstate.prevDBState.tLogs.size()) {
 			status = RecoveryStatus::configuration_never_created;
-		else
+			self->neverCreated = true;
+		} else {
 			status = RecoveryStatus::configuration_missing;
+		}
 		TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", status)
 			.detail("Status", RecoveryStatus::names[status])
@@ -1211,6 +1215,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			when (Void _ = wait( reg )) { throw internal_error(); }
 			when (Void _ = wait( recoverAndEndEpoch )) {}
 		}
+	}
+
+	if(self->neverCreated) {
+		recoverStartTime = now();
 	}
 
 	recoverAndEndEpoch.cancel();
