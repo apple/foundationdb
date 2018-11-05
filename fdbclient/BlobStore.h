@@ -25,9 +25,9 @@
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbclient/Knobs.h"
-#include "IRateControl.h"
-#include "HTTP.h"
-#include "JSONDoc.h"
+#include "fdbrpc/IRateControl.h"
+#include "fdbclient/HTTP.h"
+#include "fdbclient/JSONDoc.h"
 
 // Representation of all the things you need to connect to a blob store instance with some credentials.
 // Reference counted because a very large number of them could be needed.
