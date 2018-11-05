@@ -849,7 +849,7 @@ void ILogSystem::MultiCursor::advanceTo(LogMessageVersion n) {
 }
 
 Future<Void> ILogSystem::MultiCursor::getMore(int taskID) {
-	auto startVersion = cursors.back()->version();
+	LogMessageVersion startVersion = cursors.back()->version();
 	while( cursors.size() > 1 && cursors.back()->version() >= epochEnds.back() ) {
 		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
 		cursors.pop_back();

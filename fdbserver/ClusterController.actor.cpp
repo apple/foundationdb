@@ -1766,6 +1766,10 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 		loop {
 			try {
 				if(!g_network->isSimulated()) {
+					// This is done to provide an arbitrary logged transaction every ~10s.
+					// FIXME: replace or augment this with logging on the proxy which tracks
+					//       how long it is taking to hear responses from each other component.
+
 					UID debugID = g_random->randomUniqueID();
 					TraceEvent("TimeKeeperCommit", debugID);
 					tr->debugTransaction(debugID);
