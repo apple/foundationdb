@@ -421,7 +421,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		int bestSet = 0;
 		std::vector<Reference<LogSet>> localSets;
 		Version lastBegin = 0;
+		bool foundSpecial = false;
 		for(auto& log : tLogs) {
+			if(log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
+				foundSpecial = true;
+			}
 			if(log->isLocal && log->logServers.size() && (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded || log->locality == tag.locality ||
 				tag == txsTag || tag.locality == tagLocalityLogRouter || (tag.locality == tagLocalityUpgraded && log->locality != tagLocalitySatellite))) {
 				lastBegin = std::max(lastBegin, log->startVersion);
@@ -464,7 +468,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				int bestOldSet = 0;
 				std::vector<Reference<LogSet>> localOldSets;
 				Version thisBegin = begin;
+				bool thisSpecial = false;
 				for(auto& log : oldLogData[i].tLogs) {
+					if(log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
+						thisSpecial = true;
+					}
 					if(log->isLocal && log->logServers.size() && (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded || log->locality == tag.locality ||
 						tag == txsTag || tag.locality == tagLocalityLogRouter || (tag.locality == tagLocalityUpgraded && log->locality != tagLocalitySatellite))) {
 						thisBegin = std::max(thisBegin, log->startVersion);
@@ -477,7 +485,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				if(!localOldSets.size()) {
 					TraceEvent("TLogPeekNoLocalSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin);
-					if(!cursors.size()) {
+					if(!cursors.size() && !foundSpecial) {
 						i++;
 						continue;
 					}
@@ -486,6 +494,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					} else {
 						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 					}
+				}
+				if(thisSpecial) {
+					foundSpecial = true;
 				}
 
 				if(thisBegin < lastBegin) {
@@ -605,7 +616,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		int bestSet = -1;
 		bool foundSpecial = false;
+		int logCount = 0;
 		for(int t = 0; t < tLogs.size(); t++) {
+			if(tLogs[t]->logServers.size() && tLogs[t]->locality != tagLocalitySatellite) {
+				logCount++;
+			}
 			if(tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
 				if( tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded ) {
 					foundSpecial = true;
@@ -616,7 +631,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		if(bestSet == -1) {
 			TraceEvent("TLogPeekLocalNoBestSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end);
-			if(useMergePeekCursors) {
+			if(useMergePeekCursors || logCount > 1) {
 				throw worker_removed();
 			} else {
 				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
@@ -656,7 +671,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				int bestOldSet = -1;
+				logCount = 0;
 				for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
+					if(oldLogData[i].tLogs[t]->logServers.size() && oldLogData[i].tLogs[t]->locality != tagLocalitySatellite) {
+						logCount++;
+					}
 					if(oldLogData[i].tLogs[t]->logServers.size() && (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || oldLogData[i].tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
 						if( oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded ) {
 							foundSpecial = true;
@@ -674,8 +693,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(bestOldSet == -1) {
-					if(oldLogData[i].logRouterTags == 0) {
-						TraceEvent("TLogPeekLocalNoLogRouterTags", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size()).detail("Idx", i);
+					if(oldLogData[i].logRouterTags == 0 || logCount > 1) {
+						TraceEvent("TLogPeekLocalNoLogRouterTags", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size()).detail("Idx", i).detail("LogRouterTags", oldLogData[i].logRouterTags).detail("LogCount", logCount);
 						throw worker_removed();
 					}
 					i++;
