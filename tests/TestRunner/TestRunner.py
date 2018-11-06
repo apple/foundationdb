@@ -238,3 +238,4 @@ if __name__ == '__main__':
     res = run_simulation_test(basedir, args.testtype, args.name,
                               args.testfile, args.restart, args.buggify,
                               args.seed)
+    sys.exit(0 if res else 1)
