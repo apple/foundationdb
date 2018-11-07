@@ -953,7 +953,14 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 		throw checksum_failed();
 
 	// No etag -> bad response.
-	std::string etag = r->headers["ETag"];
+	std::string etag;
+
+	for (const auto &h : r->headers) {
+		if(0 == strcasecmp(h.first.c_str(), "etag")) {
+			etag = h.second;
+			break;
+		}
+	}
 	if(etag.empty())
 		throw http_bad_response();
 
