@@ -574,8 +574,12 @@ ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
 		pager->errorPromise.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
 
 	// Cancel all outstanding reads
-	for(auto &i : pager->busyPages) {
-		i.second.read.cancel();
+	auto i = pager->busyPages.begin();
+	auto iEnd = pager->busyPages.end();
+
+	while(i != iEnd) {
+		// Advance before calling cancel as the rawRead cancel will destroy the map entry it lives in
+		(i++)->second.read.cancel();
 	}
 	ASSERT(pager->busyPages.empty());
 
@@ -595,7 +599,7 @@ ACTOR void shutdown(IndirectShadowPager *pager, bool dispose) {
 		pager->pageTableLog->close();
 	}
 
-	wait(pageTableClosed);
+	wait(ready(pageTableClosed));
 
 	pager->closed.send(Void());
 	delete pager;
@@ -609,24 +613,32 @@ void IndirectShadowPager::close() {
 	shutdown(this, false);
 }
 
-ACTOR Future<Reference<IPage>> rawRead(Reference<IAsyncFile> file, IndirectShadowPager::BusyPage *bp) {
-	try {
-		wait(file->readZeroCopy(&bp->data, &bp->len, (int64_t) bp->physicalID * IndirectShadowPage::PAGE_BYTES));
+ACTOR Future<Reference<const IPage>> rawRead(IndirectShadowPager *pager, LogicalPageID logicalPageID, PhysicalPageID physicalPageID) {
+	state void *data;
+	state int len = IndirectShadowPage::PAGE_BYTES;
+	state bool readSuccess = false;
 
-		if(!checksumRead(file.getPtr(), (uint8_t *)bp->data, bp->len, bp->logicalID, bp->physicalID)) {
-			debug_printf("CHECKSUM MISMATCH reading, bp address %p  readerCount %d  logical %u   physical %u  data %p\n", &bp, bp->readerCount, bp->logicalID, bp->physicalID, bp->data);
+	try {
+		wait(pager->dataFile->readZeroCopy(&data, &len, (int64_t) physicalPageID * IndirectShadowPage::PAGE_BYTES));
+		readSuccess = true;
+
+		if(!checksumRead(pager->dataFile.getPtr(), (uint8_t *)data, len, logicalPageID, physicalPageID)) {
 			throw checksum_failed();
 		}
-		return Reference<IPage>(new IndirectShadowPage((uint8_t *)bp->data, file, bp->physicalID));
-		
+
+		pager->busyPages.erase(physicalPageID);
+		return Reference<const IPage>(new IndirectShadowPage((uint8_t *)data, pager->dataFile, physicalPageID));
 	}
 	catch(Error &e) {
-		file->releaseZeroCopy(bp->data, bp->len, (int64_t) bp->physicalID * IndirectShadowPage::PAGE_BYTES);
+		pager->busyPages.erase(physicalPageID);
+		if(readSuccess || e.code() == error_code_actor_cancelled) {
+			pager->dataFile->releaseZeroCopy(data, len, (int64_t) physicalPageID * IndirectShadowPage::PAGE_BYTES);
+		}
 		throw;
 	}
 }
 
-ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID logicalPageID, Version version) {
+Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID logicalPageID, Version version) {
 	ASSERT(logicalPageID < pager->pageTable.size());
 	PageVersionMap &pageVersionMap = pager->pageTable[logicalPageID];
 
@@ -635,60 +647,21 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 		debug_printf("%s: Page version map empty! op=error id=%u @%lld\n", pager->pageFileName.c_str(), logicalPageID, version);
 		ASSERT(false);
 	}
-
 	--itr;
-
-	state PhysicalPageID physicalPageID = itr->second;
-	debug_printf("%s: Reading logical %d v%lld physical %d mapSize %lu\n", pager->pageFileName.c_str(), logicalPageID, version, physicalPageID, pageVersionMap.size());
+	PhysicalPageID physicalPageID = itr->second;
 	ASSERT(physicalPageID != PagerFile::INVALID_PAGE);
 
-	state IndirectShadowPager::BusyPageMapT::iterator i = pager->busyPages.find(physicalPageID);
+	debug_printf("%s: Reading logical %d v%lld physical %d mapSize %lu\n", pager->pageFileName.c_str(), logicalPageID, version, physicalPageID, pageVersionMap.size());
 
-	// Page not in use yet
-	if(i == pager->busyPages.end() || i->first != physicalPageID) {
-		i = pager->busyPages.insert(i, {physicalPageID, IndirectShadowPager::BusyPage()});
+	IndirectShadowPager::BusyPage &bp = pager->busyPages[physicalPageID];
+	if(!bp.read.isValid()) {
+		Future<Reference<const IPage>> get = rawRead(pager, logicalPageID, physicalPageID);
+		if(!get.isReady()) {
+			bp.read = get;
+		}
+		return get;
 	}
-	//IndirectShadowPager::BusyPage &bp = pager->busyPages[physicalPageID];
-	IndirectShadowPager::BusyPage &bp = i->second;
-	++bp.readerCount;
-
-	// We are relying on the use of AsyncFileCached for performance here. We expect that all write actors will complete immediately (with a possible yield()),
-	// so this wait should either be nonexistent or just a yield.
-	// This causes a crash due to lifetime issues, and isn't necessary when using AsyncFileCached.
-	//wait(pager->writeActors.signalAndCollapse());
-	//IndirectShadowPager::BusyPage &bp = i->second;
-
-	// If we're the first concurrent reader to try to read this page then start the actual read,
-	// otherwise the read actor was already started.
-	if(bp.readerCount == 1) {
-		ASSERT(!bp.read.isValid());
-		bp.len = IndirectShadowPage::PAGE_BYTES;
-		bp.data = nullptr;
-		bp.physicalID = physicalPageID;
-		bp.logicalID = logicalPageID;
-		bp.read = rawRead(pager->dataFile, &bp);
-	}
-
-	state Optional<Error> err;
-	try {
-		wait(ready(i->second.read));
-	} catch(Error &e) {
-		err = e;
-	}
-
-	IndirectShadowPager::BusyPage &bp = i->second;
-	Future<Reference<IPage>> read = bp.read;
-	--bp.readerCount;
-	if(bp.readerCount == 0) {
-		pager->busyPages.erase(i);
-	}
-
-	if(err.present()) {
-		throw err.get();
-	}
-
-	// This will throw if the read was an error, if *this was cancelled then we won't be here.
-	return read.get();
+	return bp.read;
 }
 
 Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID pageID, Version version) {
@@ -698,7 +671,7 @@ Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectSh
 	}
 
 	Future<Reference<const IPage>> f = getPageImpl(this, snapshot, pageID, version);
-	operations.add(forwardError(success(f), errorPromise));
+	operations.add(forwardError(ready(f), errorPromise));  // For some reason if success is ready() then shutdown hangs when waiting on operations
 	return f;
 }
 
