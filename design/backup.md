@@ -54,6 +54,8 @@ Instead looking at restore on key space, we can replay events on version space, 
 mutation log only once. At each version vx,
 * Wait for all the KV ranges recorded before vx to restore first.
 * Replay (a-z, vx), but ignore mutations for the keys that are not yet restored by KV ranges.
+  Because the keys that are not yet restored by KV ranges will eventually be restored at a later version,
+  the mutations on those keys can be safely ignored. 
 
 For the above example, it would look like
 * KV ranges:
@@ -69,16 +71,16 @@ For the above example, it would look like
   		* Wait for all KV ranges recorded before v10 to restore - Everything except (y-z, v10)
   		* Replay (a-x, v10)
     * At v11:
-  		* Nothing to wait
+  		* Wait for key range (y-z, v10) to restore.
   		* Replay (a-z, v11)
     * At vk:
   		* Replay (a-z, vk)
 
-Even though, in the above description logging mutations is shown as continuous task, this is actually devided into
-  two logical parts. During KV ranges are being backedup, we start a mutation log backup in parallel. Until, we complete
+Even though, in the above description logging mutations is shown as continuous task, this is actually divided into
+  two logical parts. During KV ranges are being backed up, we start a mutation log backup in parallel. Until, we complete
   KV range backup and the parallel mutation logs backup, cluster is not in restorable phase. Once these two tasks are
-  completed, now cluster can be restored back to the last version. To be able to restore after even after the KV range
-  backup, we continue to backup mutation logs called differental log backup. With differential backup, we can restore
+  completed, now cluster can be restored back to the last version. To be able to restore even after the KV range
+  backup, we continue to backup mutation logs called differential log backup. With differential backup, we can restore
   to any version since KV range backup completed. It would look like below
 
 ```
@@ -112,5 +114,5 @@ With the above backup scenario, we could restore to any version from c to d or g
 #### Continuous Backup
 
 Instead of going through the pain of monitoring for backup becoming too large and restarting backup, we could just
-have backup running continuously with KVrange task restarting once in a while (with some policy ofcourse). Continuous
-backup is already committed, its not discussed here yet.
+have backup running continuously with KVrange task restarting once in a while (with some policy of course). 
+The code for continuous has already committed. The document will be added in the future.
