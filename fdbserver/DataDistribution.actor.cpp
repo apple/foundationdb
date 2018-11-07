@@ -1086,7 +1086,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// The empty team is used as the starting point to move data to the remote DB
 	// begin : the start of the team member ID
 	// end : end of the team member ID
-	// isIntialTeam : is the team added at init() when we recreate teams by looking up DB
+	// isIntialTeam : is the team added at init() when we recreate teams by looking up DB or added by functions not addTeamsBestOf()
 	template<class InputIt>
 	void addTeam( InputIt begin, InputIt end, bool isInitialTeam) {
 		vector< Reference<TCServerInfo> > newTeamServers;
@@ -1106,7 +1106,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		//Add the reference of machineTeam (with machineIDs) into process team
 		vector< Standalone<StringRef> > machineIDs;
 		for ( auto server = newTeamServers.begin(); server != newTeamServers.end(); ++server ) {
-			machineIDs.push_back(server->machine->machineID);
+			machineIDs.push_back((*server)->machine->machineID);
 		}
 		sort(machineIDs.begin(), machineIDs.end());
 		Reference<TCMachineTeamInfo> machineTeamInfo = findMachineTeam(machineIDs);
@@ -1428,8 +1428,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if ( leastUsedMachines.size() ) {
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = g_random->randomChoice(leastUsedMachines);
-				if ( tcMachineInfo->serversOnMachine.empty() ) {
-					TraceEvent(SevWarn, "NoServersOnMachine").detail("Primary", primary).detail("LeastUsedMachinesNumber", leastUsedMachines.size())
+				if ( tcMachineInfo->serversOnMachine.empty() ) { //TODO: Change to assert if it never happens
+					TraceEvent(SevError, "NoServersOnMachine").detail("Primary", primary).detail("LeastUsedMachinesNumber", leastUsedMachines.size())
 						.detail("NumServersOnMachine", tcMachineInfo->serversOnMachine.size() );
 					continue;
 				}
@@ -1494,7 +1494,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					maxAttempts += 1;
 					continue;
 				}
-				if ( !isMachineTeamHealthy(machineIDs) ) {
+				if ( !isMachineTeamHealthy(machineIDs) ) { //TODO: Change to assert if it never happens
 					TraceEvent(SevError, "MachineTeamUnhealthy_ShouldNeverHappenHere")
 						.detail("Primary", primary).detail("MachineIDSize", machineIDs.size());
 					traceAllInfo(true);
@@ -1533,7 +1533,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			} else {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Primary", primary)
-					.detail("Reason","Unable to make desired machine Teams");
+					.detail("Reason", "Unable to make desired machine Teams");
 				break;
 			}
 
@@ -1604,7 +1604,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for ( auto &id : machineIDs ) {
 			if ( machine_info.find(id) == machine_info.end()
 				 || machine_info[id]->serversOnMachine.size() == 0 ) {
-				TraceEvent("InvalidMachineID").detail("MachineID", id.contents().printable())
+				TraceEvent(SevError, "InvalidMachineID").detail("MachineID", id.contents().printable())
 					.detail("ServerNumber", machine_info[id]->serversOnMachine.size());
 				return false;
 			}
@@ -1614,11 +1614,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 
-	 // Set targetMachineTeam with a random machine team among those have the smallest machine-team-score
-	 // Return 0 if succeed; return 1 otherwise
-	int findOneLeastUsedMachineTeam( std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> &machineTeamStats,
-									 std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>  &machineTeamPenalties,
-									 Reference<TCMachineTeamInfo> &targetMachineTeam ) {
+	 // Return targetMachineTeam with a random machine team among those have the smallest machine-team-score
+	 // targetMachineTeam is invalid if no such machine team is found
+	 Reference<TCMachineTeamInfo> findOneLeastUsedMachineTeam( std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> &machineTeamStats,
+									 std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>  &machineTeamPenalties) {
 		machineTeamStats.clear();
 		for ( auto &machineTeam : machineTeams ) {
 			if ( !isMachineTeamHealthy(machineTeam) ) {
@@ -1644,12 +1643,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 		if ( leastUsedMachineTeams.size() > 0 ) {
-			targetMachineTeam = g_random->randomChoice(leastUsedMachineTeams);
-			return 0;
+			return g_random->randomChoice(leastUsedMachineTeams);
 		} else {
 			TraceEvent("LeastUsedMachineTeamsNotFound").detail("Debug", "CheckInfoBelow");
 			traceAllInfo(true);
-			return 1;
+			return Reference<TCMachineTeamInfo>();
 		}
 
 	}
@@ -1814,8 +1812,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT;// BEST_OF_AMT = 4
 			for ( int i = 0; i < maxAttempts && i < 100; i++) {
 				//Step 2: Choose 1 least used machine team
-				Reference<TCMachineTeamInfo> chosenMachineTeam;
-				if ( findOneLeastUsedMachineTeam(machineTeamStats, machineTeamPenalties, chosenMachineTeam) ) {
+				Reference<TCMachineTeamInfo> chosenMachineTeam = findOneLeastUsedMachineTeam(machineTeamStats, machineTeamPenalties);
+				if ( !chosenMachineTeam.isValid() ) {
 					//TODO: MX: Debug: may change SevWarn to SevError to trigger error in correctness test.
 					//TODO: MX: Ask Evan: We may face the situation that temporarily we have no healthy machine. What should we do?
 					TraceEvent(SevWarn, "MachineTeamNotFound").detail("Primary", primary).detail("MachineTeamNumber", machineTeams.size());
@@ -2771,7 +2769,7 @@ ACTOR Future<Void> storageServerTracker(
 						}
 						for(auto it : newBadTeams) {
 							if( self->removeTeam(it) ) {
-								self->addTeam(it->servers);
+								self->addTeam(it->servers, true);
 								addedNewBadTeam = true;
 							}
 						}
@@ -3069,9 +3067,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 					}
 				}
 
-				TraceEvent("TotalDataInFlight", masterId).detail("Primary", self.primary).detail("TotalBytes", self.getDebugTotalDataInFlight()).detail("UnhealthyServers", self.unhealthyServers)
-					.detail("ServerNumber", self.server_info.size()).detail("StorageTeamSize", self.configuration.storageTeamSize)
-					.detail("HighestPriority", highestPriority).trackLatest( self.primary ? "TotalDataInFlight" : "TotalDataInFlightRemote" );
+				TraceEvent("TotalDataInFlight", self->masterId).detail("Primary", self->primary).detail("TotalBytes", self->getDebugTotalDataInFlight()).detail("UnhealthyServers", self->unhealthyServers)
+					.detail("ServerNumber", self->server_info.size()).detail("StorageTeamSize", self->configuration.storageTeamSize)
+					.detail("HighestPriority", highestPriority).trackLatest( self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote" );
 				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL );
 			}
 			when( wait( self->serverTrackerErrorOut.getFuture() ) ) {} // Propagate errors from storageServerTracker
