@@ -497,8 +497,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo(LiteralStringRef("DB"))) );
 	state Future<Void> metricsLogger;
-	state PromiseStream<InitializeTLogRequest> tlogRequests;
-	state Future<Void> tlog = Void();
+	state std::map<KeyValueStoreType::StoreType, std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 
 	state WorkerInterface interf( locality );
 
@@ -596,13 +595,14 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
-				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
+				auto& logData = sharedLogs[s.storeType];
+				Future<Void> tl = tLog( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
 				recoveries.push_back(recovery.getFuture());
 
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
-				if(tlog.isReady()) {
-					tlog = oldLog.getFuture() || tl;
+				if(!logData.first.isValid() || logData.first.isReady()) {
+					logData.first = oldLog.getFuture() || tl;
 				}
 				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
@@ -683,8 +683,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
-				tlogRequests.send(req);
-				if(tlog.isReady()) {
+				auto& logData = sharedLogs[req.storeType];
+				logData.second.send(req);
+				if(!logData.first.isValid() || logData.first.isReady()) {
 					UID logId = g_random->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -699,10 +700,10 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>(), Promise<Void>() );
-					tlog = handleIOErrors( tlog, data, logId );
-					tlog = handleIOErrors( tlog, queue, logId );
-					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tlog ) );
+					logData.first = tLog( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>() );
+					logData.first = handleIOErrors( logData.first, data, logId );
+					logData.first = handleIOErrors( logData.first, queue, logId );
+					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
 				}
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
@@ -862,7 +863,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
-		tlog = Void();
+		sharedLogs.clear();
 
 		if (e.code() != error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
