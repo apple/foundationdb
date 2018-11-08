@@ -16,21 +16,19 @@ services:
 
   build-docs:
     <<: *build-setup
-    environment:
-      - RELEASE=false
-    command: /bin/bash -cl 'make clean && make docpackage'
+    command: make docpackage
 
   build-release: &build-release
     <<: *build-setup
     environment:
       - RELEASE=true
-    command: /bin/bash -cl 'make clean && make packages'
+    command: make packages
 
   build-snapshot: &build-snapshot
     <<: *build-setup
     environment:
       - RELEASE=false
-    command: /bin/bash -cl 'make clean && make packages'
+    command: make packages
 
   build-prb:
     <<: *build-snapshot
@@ -39,5 +37,4 @@ services:
     <<: *build-setup
     volumes:
       - ..:/foundationdb
-      - ~/.m2:/root/.m2
     entrypoint: /bin/bash
