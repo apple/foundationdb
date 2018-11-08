@@ -2100,10 +2100,18 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	state Transaction tr(self->cx);
 	loop {
 		try {
-			tr.addReadConflictRange(singleKeyRange(datacenterReplicasKeyFor(dcId)));
+			Optional<Value> val = wait( tr.get(datacenterReplicasKeyFor(dcId)) );
+			state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
+			if(oldReplicas == self->configuration.storageTeamSize) {
+				TraceEvent("DDUpdatedAlready", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+				return Void();
+			}
+			if(oldReplicas < self->configuration.storageTeamSize) {
+				tr.set(rebootWhenDurableKey, StringRef());
+			}
 			tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(self->configuration.storageTeamSize));
 			Void _ = wait( tr.commit() );
-			TraceEvent("DDUpdatedReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+			TraceEvent("DDUpdatedReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
 			return Void();
 		} catch( Error &e ) {
 			Void _ = wait( tr.onError(e) );
