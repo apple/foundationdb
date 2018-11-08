@@ -30,13 +30,13 @@
 #include <sstream>
 #include <time.h>
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/serialize.h"
 #include "flow/Net2Packet.h"
-#include "IRateControl.h"
-#include "BlobStore.h"
-#include "md5/md5.h"
-#include "libb64/encode.h"
+#include "fdbrpc/IRateControl.h"
+#include "fdbclient/BlobStore.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
 
 ACTOR template<typename T> static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 	try {

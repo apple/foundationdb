@@ -181,8 +181,8 @@ class InstructionSet(TestInstructions, list):
             tr[subspace.pack((start + i,))] = instruction.to_value()
 
     def insert_operations(self, db, subspace):
-        for i in range(0, int(math.ceil(len(self) / 1000.0))):
-            self._insert_operations_transactional(db, subspace, i * 1000, 1000)
+        for i in range(0, int(math.ceil(len(self) / 5000.0))):
+            self._insert_operations_transactional(db, subspace, i * 5000, 5000)
 
 
 class ThreadedInstructionSet(TestInstructions):

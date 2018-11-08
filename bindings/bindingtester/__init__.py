@@ -58,14 +58,17 @@ class Result:
         self.key_tuple = subspace.unpack(key)
         self.values = values
 
-    def matches(self, rhs, specification):
+    def matches_key(self, rhs, specification):
         if not isinstance(rhs, Result):
             return False
 
         left_key = self.key_tuple[specification.key_start_index:]
-        right_key = self.key_tuple[specification.key_start_index:]
+        right_key = rhs.key_tuple[specification.key_start_index:]
 
-        if len(left_key) != len(right_key) or left_key != right_key:
+        return left_key == right_key
+
+    def matches(self, rhs, specification):
+        if not self.matches_key(rhs, specification):
             return False
 
         for value in self.values:

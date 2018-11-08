@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "AsyncFileBlobStore.actor.h"
-#include "AsyncFileReadAhead.actor.h"
+#include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/UnitTest.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() {

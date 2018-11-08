@@ -30,11 +30,11 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
-
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/BlobStore.h"
+#include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+
+#include "fdbrpc/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1080,8 +1080,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			backupTagUids.push_back(config.getUid());
 
 			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
 			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
