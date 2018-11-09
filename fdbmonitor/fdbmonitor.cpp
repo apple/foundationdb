@@ -1375,8 +1375,11 @@ int main(int argc, char** argv) {
 					}
 					else {
 						/* Otherwise kill each process individually but don't wait on them yet */
-						for(auto i : id_pid) {
-							kill_process(i.first, false);
+						auto i = id_pid.begin();
+						auto iEnd = id_pid.end();
+						while(i != iEnd) {
+							// Must advance i before calling kill_process() which erases the entry at i
+							kill_process((i++)->first, false);
 						}
 					}
 
