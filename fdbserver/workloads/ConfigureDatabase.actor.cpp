@@ -209,6 +209,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		: TestWorkload(wcx), retries("Retries")
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 200.0 );
+		g_simulator.usableRegions = 1;
 	}
 
 	virtual std::string description() { return "DestroyDatabaseWorkload"; }
