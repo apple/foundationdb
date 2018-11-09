@@ -339,45 +339,45 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
-				int bytes = getBytes(req);
+					int bytes = getBytes(req);
 
-				// Drop requests if memory is under severe pressure
-				if(commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
-					req.reply.sendError(proxy_memory_limit_exceeded());
-					TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded").suppressFor(60).detail("MemBytesCount", commitData->commitBatchesMemBytesCount).detail("MemLimit", memBytesLimit);
-					continue;
-				}
-
-				++commitData->stats.txnCommitIn;
-
-				if(req.debugID.present()) {
-					g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "MasterProxyServer.batcher");
-				}
-
-				if(!batch.size()) {
-					commitData->commitBatchStartNotifications.send(Void());
-					if(now() - lastBatch > commitData->commitBatchInterval) {
-						timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskProxyCommitBatcher);
+					// Drop requests if memory is under severe pressure
+					if(commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
+						req.reply.sendError(proxy_memory_limit_exceeded());
+						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded").suppressFor(60).detail("MemBytesCount", commitData->commitBatchesMemBytesCount).detail("MemLimit", memBytesLimit);
+						continue;
 					}
-					else {
-						timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskProxyCommitBatcher);
+
+					++commitData->stats.txnCommitIn;
+
+					if(req.debugID.present()) {
+						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "MasterProxyServer.batcher");
 					}
-				}
 
-				if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
-					out.send({ batch, batchBytes });
-					lastBatch = now();
-					commitData->commitBatchStartNotifications.send(Void());
-					timeout = delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher);
-					batch = std::vector<CommitTransactionRequest>();
-					batchBytes = 0;
-				}
+					if(!batch.size()) {
+						commitData->commitBatchStartNotifications.send(Void());
+						if(now() - lastBatch > commitData->commitBatchInterval) {
+							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskProxyCommitBatcher);
+						}
+						else {
+							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskProxyCommitBatcher);
+						}
+					}
 
-				batch.push_back(req);
-				batchBytes += bytes;
-				commitData->commitBatchesMemBytesCount += bytes;
-			}
-			when(Void _ = wait(timeout)) {}
+					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
+						out.send({ batch, batchBytes });
+						lastBatch = now();
+						commitData->commitBatchStartNotifications.send(Void());
+						timeout = delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher);
+						batch = std::vector<CommitTransactionRequest>();
+						batchBytes = 0;
+					}
+
+					batch.push_back(req);
+					batchBytes += bytes;
+					commitData->commitBatchesMemBytesCount += bytes;
+				}
+				when(Void _ = wait(timeout)) {}
 			}
 		}
 		out.send({ std::move(batch), batchBytes });
