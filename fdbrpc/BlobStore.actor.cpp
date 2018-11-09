@@ -26,6 +26,7 @@
 #include <time.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include "fdbrpc/IAsyncFile.h"
 
 json_spirit::mObject BlobStoreEndpoint::Stats::getJSON() {
@@ -956,7 +957,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 	std::string etag;
 
 	for (const auto &h : r->headers) {
-		if(0 == strcasecmp(h.first.c_str(), "etag")) {
+		if(boost::iequals(h.first, "etag")) {
 			etag = h.second;
 			break;
 		}
