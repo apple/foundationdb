@@ -71,9 +71,6 @@
     <ActorCompiler Include="AsyncFileNonDurable.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-    <ActorCompiler Include="batcher.actor.h">
-      <EnableCompile>false</EnableCompile>
-    </ActorCompiler>
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="crc32c.h" />
