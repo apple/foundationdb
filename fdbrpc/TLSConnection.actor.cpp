@@ -76,7 +76,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		int r = self->session->handshake();
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
-			TraceEvent("TLSConnectionHandshakeError", self->getDebugID());
+			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0);
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );

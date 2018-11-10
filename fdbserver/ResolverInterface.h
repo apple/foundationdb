@@ -26,6 +26,8 @@
 
 struct ResolverInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
+
 	LocalityData locality;
 	UID uniqueID;
 	RequestStream< struct ResolveTransactionBatchRequest > resolve;

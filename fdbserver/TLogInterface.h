@@ -30,6 +30,8 @@
 
 struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
+
 	LocalityData locality;
 	UID uniqueID;
 	UID sharedTLogID;

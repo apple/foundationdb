@@ -62,7 +62,7 @@ struct ChangeConfigWorkload : TestWorkload {
 
 			Void _ = wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
-				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
+				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode, true));
 				TraceEvent("WaitForReplicasExtra");
 				Void _ = wait( waitForFullReplication( extraDB ) );
 				TraceEvent("WaitForReplicasExtraEnd");
@@ -87,7 +87,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if( self->configMode.size() ) {
-			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode, true ) );
 			TraceEvent("WaitForReplicas");
 			Void _ = wait( waitForFullReplication( cx ) );
 			TraceEvent("WaitForReplicasEnd");

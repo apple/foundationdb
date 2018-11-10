@@ -345,7 +345,7 @@ bool FDBLibTLSSession::verify_peer() {
 	if (!rc) {
 		// log the various failure reasons
 		for (std::string reason : verify_failure_reasons) {
-			TraceEvent(reason.c_str(), uid);
+			TraceEvent(reason.c_str(), uid).suppressFor(1.0);
 		}
 	}
 

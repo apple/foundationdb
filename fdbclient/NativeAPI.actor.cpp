@@ -73,38 +73,40 @@ static void initTLSOptions() {
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
-Reference<LocationInfo> LocationInfo::getInterface( DatabaseContext *cx, std::vector<StorageServerInterface> const& alternatives, LocalityData const& clientLocality ) {
-	std::vector<UID> handles;
-	for( auto const& alternative : alternatives )
-		handles.push_back( alternative.getVersion.getEndpoint().token ); // getVersion here was a random choice
-	std::sort( handles.begin(), handles.end() );
-	ASSERT( handles.size() );
+Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *cx, StorageServerInterface const& ssi, LocalityData const& locality ) {
+	auto it = cx->server_interf.find( ssi.id() );
+	if( it != cx->server_interf.end() ) {
+		if(it->second->interf.getVersion.getEndpoint().token != ssi.getVersion.getEndpoint().token) {
+			if(it->second->interf.locality == ssi.locality) {
+				//FIXME: load balance holds pointers to individual members of the interface, and this assignment will swap out the object they are
+				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load balance to take an AsyncVar<Reference<Interface>>
+				//       so that it is notified when the interface changes.
+				it->second->interf = ssi;
+			} else {
+				it->second->notifyContextDestroyed();
+				Reference<StorageServerInfo> loc( new StorageServerInfo(cx, ssi, locality) );
+				cx->server_interf[ ssi.id() ] = loc.getPtr();
+				return loc;
+			}
+		}
 
-	auto it = cx->ssid_locationInfo.find( handles );
-	if( it != cx->ssid_locationInfo.end() ) {
-		return Reference<LocationInfo>::addRef( it->second );
+		return Reference<StorageServerInfo>::addRef( it->second );
 	}
 
-	Reference<LocationInfo> loc( new LocationInfo(cx, alternatives, clientLocality) );
-	cx->ssid_locationInfo[ handles ] = loc.getPtr();
+	Reference<StorageServerInfo> loc( new StorageServerInfo(cx, ssi, locality) );
+	cx->server_interf[ ssi.id() ] = loc.getPtr();
 	return loc;
 }
 
-void LocationInfo::notifyContextDestroyed() {
+void StorageServerInfo::notifyContextDestroyed() {
 	cx = NULL;
 }
 
-LocationInfo::~LocationInfo() {
+StorageServerInfo::~StorageServerInfo() {
 	if( cx ) {
-		std::vector<UID> handles;
-		for( auto const& alternative : getAlternatives() )
-			handles.push_back( alternative.v.getVersion.getEndpoint().token ); // must match above choice of UID
-		std::sort( handles.begin(), handles.end() );
-		ASSERT_ABORT( handles.size() );
-
-		auto it = cx->ssid_locationInfo.find( handles );
-		if( it != cx->ssid_locationInfo.end() )
-			cx->ssid_locationInfo.erase( it );
+		auto it = cx->server_interf.find( interf.id() );
+		if( it != cx->server_interf.end() )
+			cx->server_interf.erase( it );
 		cx = NULL;
 	}
 }
@@ -555,9 +557,9 @@ Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future
 
 DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
-	for(auto it = ssid_locationInfo.begin(); it != ssid_locationInfo.end(); it = ssid_locationInfo.erase(it))
+	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
-	ASSERT_ABORT( ssid_locationInfo.empty() );
+	ASSERT_ABORT( server_interf.empty() );
 	locationCache.insert( allKeys, Reference<LocationInfo>() );
 }
 
@@ -603,8 +605,14 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 }
 
 Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& keys, const vector<StorageServerInterface>& servers ) {
+	vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
+	serverRefs.reserve(servers.size());
+	for(auto& interf : servers) {
+		serverRefs.push_back( StorageServerInfo::getInterface( this, interf, clientLocality ) );
+	}
+
 	int maxEvictionAttempts = 100, attempts = 0;
-	Reference<LocationInfo> loc = LocationInfo::getInterface( this, servers, clientLocality);
+	Reference<LocationInfo> loc = Reference<LocationInfo>( new LocationInfo(serverRefs) );
 	while( locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
 		TEST( true ); // NativeAPI storage server locationCache entry evicted
 		attempts++;
@@ -663,8 +671,8 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 		case FDBDatabaseOptions::MACHINE_ID:
 			clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
 			if( clientInfo->get().proxies.size() )
-				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
-			ssid_locationInfo.clear();
+				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ) );
+			server_interf.clear();
 			locationCache.insert( allKeys, Reference<LocationInfo>() );
 			break;
 		case FDBDatabaseOptions::MAX_WATCHES:
@@ -674,7 +682,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 			if( clientInfo->get().proxies.size() )
 				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
-			ssid_locationInfo.clear();
+			server_interf.clear();
 			locationCache.insert( allKeys, Reference<LocationInfo>() );
 			break;
 	}
@@ -924,7 +932,7 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies() {
 	return masterProxies;
 }
 
-//Actor which will wait until the ProxyInfo returned by the DatabaseContext cx is not NULL
+//Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
 ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx) {
 	loop{
 		Reference<ProxyInfo> proxies = cx->getMasterProxies();
@@ -2916,31 +2924,21 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 	StorageMetrics permittedError,
 	int shardLimit )
 {
-	state int tooManyShardsCount = 0;
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskDataDistribution) ) );
+		vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskDataDistribution) ) );
 
-		if( locations.size() == shardLimit ) {
-			TraceEvent(!g_network->isSimulated() && ++tooManyShardsCount >= 15 ? SevWarnAlways : SevWarn, "WaitStorageMetricsPenalty")
-				.detail("Keys", printable(keys))
-				.detail("Locations", locations.size())
-				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
-				.detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
-			Void _ = wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
-			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
-			cx->invalidateCache( keys );
-		} else {
-			tooManyShardsCount = 0;
-			//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
+		//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
+		if(locations.size() < shardLimit) {
 			try {
+				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					StorageMetrics x = wait( waitStorageMetricsMultipleLocations( locations, min, max, permittedError ) );
-					return x;
+					fx = waitStorageMetricsMultipleLocations( locations, min, max, permittedError );
 				} else {
 					WaitMetricsRequest req( keys, min, max );
-					StorageMetrics x = wait( loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskDataDistribution ) );
-					return x;
+					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskDataDistribution );
 				}
+				StorageMetrics x = wait(fx);
+				return x;
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
@@ -2949,6 +2947,14 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 				cx->invalidateCache(keys);
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
 			}
+		} else {
+			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
+				.detail("Keys", printable(keys))
+				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
+				.detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
+			Void _ = wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
+			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
+			cx->invalidateCache( keys );
 		}
 	}
 }

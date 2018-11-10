@@ -1191,7 +1191,7 @@ ACTOR static Future<Void> readRequestServer(
 						}
 					} else {
 						rep.newLocality = true;
-						int8_t maxTagLocality = 0;
+						int8_t maxTagLocality = -1;
 						auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
 						for( auto& kv : localityKeys ) {
 							maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));

@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.14
+6.0.15
 ======
 
 Features
@@ -30,6 +30,7 @@ Performance
 * Significantly reduced master recovery times for clusters with large amounts of data. [6.0.14] `(PR #836) <https://github.com/apple/foundationdb/pull/836>`_
 * Reduced read and commit latencies for clusters which are processing transactions larger than 1MB. [6.0.14] `(PR #851) <https://github.com/apple/foundationdb/pull/851>`_
 * Significantly reduced recovery times when executing rollbacks on the memory storage engine. [6.0.14] `(PR #821) <https://github.com/apple/foundationdb/pull/821>`_
+* Clients update their key location cache much more efficiently after storage server reboots. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 
 Fixes
 -----
@@ -59,6 +60,8 @@ Fixes
 * Excluding a process that was both the cluster controller and something else would cause two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
 * Very rarely, backup snapshots would stop making progress. [6.0.14] `(PR #837) <https://github.com/apple/foundationdb/pull/837>`_
+* Sometimes data distribution calculated the size of a shard incorrectly. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Changing the storage engine configuration would not effect which storage engine was used by the transaction logs. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 
 Fixes only impacting 6.0.0+
 ---------------------------
@@ -74,6 +77,10 @@ Fixes only impacting 6.0.0+
 * The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * A bug in status collection led to various workload metrics being missing and the cluster reporting unhealthy. [6.0.13] `(PR #834) <https://github.com/apple/foundationdb/pull/834>`_
+* Data distribution did not stop tracking certain unhealthy teams, leading to incorrect status reporting. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Fixed a variety of problems related to changing between different region configurations. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* fdbcli protects against configuration changes which could cause irreversible damage to a cluster. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Significantly reduced both client and server memory usage in clusters with large amounts of data and usable_regions=2. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 
 Status
 ------

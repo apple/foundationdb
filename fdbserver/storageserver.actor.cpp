@@ -347,6 +347,7 @@ public:
 	NotifiedVersion desiredOldestVersion;    // We can increase oldestVersion (and then durableVersion) to this version when the disk permits
 	NotifiedVersion oldestVersion;           // See also storageVersion()
 	NotifiedVersion durableVersion; 	     // At least this version will be readable from storage after a power failure
+	Version rebootAfterDurableVersion;
 
 	Deque<std::pair<Version,Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage server
@@ -465,6 +466,7 @@ public:
 		:	instanceID(g_random->randomUniqueID().first()),
 			storage(this, storage), db(db),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
 			versionLag(0),
 			updateEagerReads(0),
@@ -2252,16 +2254,6 @@ struct OrderByVersion {
 	}
 };
 
-bool containsRollback( VersionUpdateRef const& changes, Version& rollbackVersion ) {
-	for(auto it = changes.mutations.begin(); it; ++it)
-		if (it->type == it->SetValue && it->param1 == lastEpochEndKey) {
-			BinaryReader br(it->param2, Unversioned());
-			br >> rollbackVersion;
-			return true;
-		}
-	return false;
-}
-
 class StorageUpdater {
 public:
 	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false) {}
@@ -2347,6 +2339,9 @@ private:
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
 			if( (m.type == MutationRef::SetValue && !matchesThisServer) || (m.type == MutationRef::ClearRange && matchesThisServer) )
 				throw worker_removed();
+		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
+			data->rebootAfterDurableVersion = currentVersion;
+			TraceEvent("RebootWhenDurableSet", data->thisServerID).detail("DurableVersion", data->durableVersion.get()).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
@@ -2665,7 +2660,12 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		Void _ = wait( durable );
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
-		
+
+		if(newOldestVersion > data->rebootAfterDurableVersion) {
+			TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			throw please_reboot();
+		}
+
 		durableInProgress.send(Void());
 		Void _ = wait( delay(0, TaskUpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
@@ -3376,7 +3376,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<MultiInterface<MasterProxyInterface>> proxies( new MultiInterface<MasterProxyInterface>(self->db->get().client.proxies, self->db->get().myLocality, ALWAYS_FRESH) );
+		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies, self->db->get().myLocality) );
 		choose {
 			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
@@ -3413,9 +3413,6 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
 							self->history = rep.history;
-							while(self->history.size() && self->history.back().first < self->version.get() ) {
-								self->history.pop_back();
-							}
 
 							if(rep.newTag.present()) {
 								self->tag = rep.newTag.get();
