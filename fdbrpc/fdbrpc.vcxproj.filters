@@ -18,7 +18,6 @@
     <ActorCompiler Include="FailureMonitor.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="ActorFuzz.actor.cpp" />
-    <ActorCompiler Include="batcher.actor.h" />
     <ActorCompiler Include="AsyncFileReadAhead.actor.h" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
   </ItemGroup>
