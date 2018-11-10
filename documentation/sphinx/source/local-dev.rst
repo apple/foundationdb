@@ -5,7 +5,7 @@ Local Development
 Download the FoundationDB package
 =================================
 
-:doc:`Download the FoundationDB package <downloads>` for macOS (FoundationDB-*.pkg) onto your local development machine.
+:doc:`Download the FoundationDB package <downloads>` for macOS (FoundationDB-\*.pkg) onto your local development machine.
 
 Install the FoundationDB binaries
 =================================

@@ -24,8 +24,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
-	Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
-	state Database cx = wait(cluster->createDatabase(locality));
+	state Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST,locality);
 	state RestoreInterface interf;
 	interf.initEndpoints();
 	state Optional<RestoreInterface> leaderInterf;

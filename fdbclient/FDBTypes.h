@@ -92,6 +92,11 @@ static std::string describe( const int item ) {
 }
 
 template <class T>
+static std::string describe( Reference<T> const& item ) {
+	return item->toString();
+}
+
+template <class T>
 static std::string describe( T const& item ) {
 	return item.toString();
 }

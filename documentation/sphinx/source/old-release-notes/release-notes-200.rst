@@ -223,12 +223,12 @@ Node
 ----
 * Support for API version 200 and backwards compatibility with previous API versions.
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
-* Support for the :ref:`Promise/A+ specification <api-node-promises>` with supporting utilities.
+* Support for the Promise/A+ specification with supporting utilities.
 * Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.
 * Added ``as_foundationdb_key`` and ``as_foundationdb_value`` support.
 * Node prints a stack trace if an error occurs in a callback from V8.
 * Snapshot transactions can be used in retry loops.
-* The :ref:`methods <api-node-setAndWatch>` ``db.setAndWatch`` and ``db.clearAndWatch`` now return an object with a watch member instead of a future.
+* The methods ``db.setAndWatch`` and ``db.clearAndWatch`` now return an object with a watch member instead of a future.
 * Fix: Could not use the ``'this'`` pointer with the retry decorator.
 * Fix: Node transactional decorator didn't return a result to the caller if the function was called with a transaction.
 * Fix: The program could sometimes crash when watches were manually cancelled.

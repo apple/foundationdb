@@ -100,7 +100,7 @@ Parameters and client bindings
 ------------------------------
 
 The default LibreSSL-based implementation
-=================================
+=========================================
 
 FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.
 
@@ -230,7 +230,7 @@ Field               Well known name
 ``subjectAltName``  Subject Alternative Name
 ==================  ========================
 
-Within a subject alternative name requirement, the value specified is required to have the form ``prefix:value``, where the prefix specifies the type of value being matched against.  The following prefixes are supported.
+Within a subject alternative name requirement, the value specified is required to have the form ``prefix:value``, where the prefix specifies the type of value being matched against.  The following prefixes are supported:
 
 ======  ===========================
 Prefix  Well known name
@@ -239,7 +239,7 @@ DNS     Domain Name
 URI     Uniform Resource Identifier
 IP      IP Address
 EMAIL   Email Address
-======  ============================
+======  ===========================
 
 The following operators are supported:
 

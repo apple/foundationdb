@@ -30,11 +30,11 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
-
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/BlobStore.h"
+#include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+
+#include "fdbrpc/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>

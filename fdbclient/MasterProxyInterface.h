@@ -28,6 +28,7 @@
 
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
 
 	LocalityData locality;
 	RequestStream< struct CommitTransactionRequest > commit;
@@ -96,12 +97,12 @@ struct CommitTransactionRequest {
 	}
 };
 
-static inline int getBytes( CommitTransactionRequest const& r ) { 
+static inline int getBytes( CommitTransactionRequest const& r ) {
 	// SOMEDAY: Optimize
 	//return r.arena.getSize(); // NOT correct because arena can be shared!
 	int total = sizeof(r);
 	for(auto m = r.transaction.mutations.begin(); m != r.transaction.mutations.end(); ++m)
-		total += m->expectedSize();
+		total += m->expectedSize() + CLIENT_KNOBS->PROXY_COMMIT_OVERHEAD_BYTES;
 	for(auto i = r.transaction.read_conflict_ranges.begin(); i != r.transaction.read_conflict_ranges.end(); ++i)
 		total += i->expectedSize();
 	for(auto i = r.transaction.write_conflict_ranges.begin(); i != r.transaction.write_conflict_ranges.end(); ++i)

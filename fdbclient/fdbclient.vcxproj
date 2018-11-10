@@ -20,13 +20,14 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ActorCompiler Include="KeyRangeMap.actor.cpp" />
-    <ActorCompiler Include="NativeAPI.actor.cpp" />
-  </ItemGroup>
-  <ItemGroup>
+    <ActorCompiler Include="AsyncFileBlobStore.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="BackupContainer.h" />
     <ClInclude Include="BackupAgent.h" />
+    <ClInclude Include="BlobStore.h" />
     <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />
     <ClInclude Include="ClientWorkerInterface.h" />
@@ -34,19 +35,21 @@
     <ClInclude Include="CommitTransaction.h" />
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="DatabaseConfiguration.h" />
-    <ActorCompiler Include="DatabaseContext.h" />
+    <ClInclude Include="DatabaseContext.h" />
     <ActorCompiler Include="EventTypes.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
-    <ClInclude Include="KeyBackedTypes.h" />
-    <ClInclude Include="MetricLogger.h" />
-    <ActorCompiler Include="MetricLogger.actor.cpp" />
-    <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="FDBOptions.g.h" />
     <ClInclude Include="FDBOptions.h" />
     <ClInclude Include="FDBTypes.h" />
+    <ClInclude Include="HTTP.h" />
+    <ClInclude Include="KeyBackedTypes.h" />
+    <ClInclude Include="MetricLogger.h" />
+    <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="IClientApi.h" />
+    <ClInclude Include="JsonBuilder.h" />
+    <ClInclude Include="JSONDoc.h" />
     <ClInclude Include="json_spirit\json_spirit_error_position.h" />
     <ClInclude Include="json_spirit\json_spirit_reader_template.h" />
     <ClInclude Include="json_spirit\json_spirit_value.h" />
@@ -54,8 +57,13 @@
     <ClInclude Include="json_spirit\json_spirit_writer_template.h" />
     <ClInclude Include="KeyRangeMap.h" />
     <ClInclude Include="Knobs.h" />
+    <ClInclude Include="libb64\cdecode.h" />
+    <ClInclude Include="libb64\cencode.h" />
+    <ClInclude Include="libb64\decode.h" />
+    <ClInclude Include="libb64\encode.h" />
     <ClInclude Include="ManagementAPI.h" />
     <ClInclude Include="MasterProxyInterface.h" />
+    <ClInclude Include="md5\md5.h" />
     <ClInclude Include="MonitorLeader.h" />
     <ClInclude Include="MultiVersionAssignmentVars.h" />
     <ClInclude Include="MultiVersionTransaction.h" />
@@ -66,41 +74,52 @@
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
     <ClInclude Include="Schemas.h" />
+    <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="SnapshotCache.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
     <ClInclude Include="StorageServerInterface.h" />
+    <ClInclude Include="Subspace.h" />
     <ClInclude Include="SystemData.h" />
     <ClInclude Include="TaskBucket.h" />
     <ClInclude Include="ThreadSafeTransaction.h" />
+    <ClInclude Include="Tuple.h" />
     <ActorCompiler Include="VersionedMap.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="VersionedMap.h" />
     <ClInclude Include="WriteMap.h" />
-    <ClInclude Include="Subspace.h" />
-    <ClInclude Include="Tuple.h" />
-    <ClInclude Include="JsonBuilder.h" />
+    <ClInclude Include="xml2json.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
-    <ActorCompiler Include="ReadYourWrites.actor.cpp" />
+    <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
+    <ClCompile Include="AutoPublicAddress.cpp" />
     <ActorCompiler Include="BackupAgentBase.actor.cpp" />
     <ActorCompiler Include="BackupContainer.actor.cpp" />
+    <ActorCompiler Include="BlobStore.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
     <ClCompile Include="DatabaseConfiguration.cpp" />
-    <ClCompile Include="AutoPublicAddress.cpp" />
+    <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
+    <ActorCompiler Include="HTTP.actor.cpp" />
+    <ActorCompiler Include="KeyRangeMap.actor.cpp" />
     <ClCompile Include="Knobs.cpp" />
+    <ClCompile Include="libb64\cdecode.c" />
+    <ClCompile Include="libb64\cencode.c" />
+    <ClCompile Include="md5\md5.c" />
+    <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ActorCompiler Include="MonitorLeader.actor.cpp" />
     <ActorCompiler Include="ManagementAPI.actor.cpp" />
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
+    <ActorCompiler Include="NativeAPI.actor.cpp" />
+    <ActorCompiler Include="ReadYourWrites.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
+    <ClCompile Include="sha1\SHA1.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />

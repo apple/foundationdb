@@ -99,7 +99,7 @@ For large clusters, you can manually set the allocated number of processes of a 
 
 Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` is an integer greater than 0, or -1 to reset the value to its default.
 
-For recommendations on appropriate values for process types in large clusters, see :ref:`configuration-large-cluster-performance`.
+For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
 coordinators
 ------------

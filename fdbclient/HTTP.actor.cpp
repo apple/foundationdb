@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/HTTP.h"
-#include "fdbrpc/md5/md5.h"
-#include "fdbrpc/libb64/encode.h"
+#include "fdbclient/HTTP.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
 #include <cctype>
-#include "fdbrpc/xml2json.hpp"
+#include "fdbclient/xml2json.hpp"
 
 namespace HTTP {
 
