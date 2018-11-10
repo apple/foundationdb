@@ -500,6 +500,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo )
 {
 	try {
+		state Optional<std::string> incorrectConnectionString;
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
@@ -510,11 +511,18 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 			ClusterConnectionString fileConnectionString;
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
 				req.issues = LiteralStringRef("incorrect_cluster_file_contents");
+				std::string connectionString = ccf->getConnectionString().toString();
 				if(ccf->canGetFilename()) {
-					TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", ccf->getFilename())
+					// Don't log a SevWarnAlways the first time to account for transient issues (e.g. someone else changing the file right before us)
+					TraceEvent(incorrectConnectionString.present() && incorrectConnectionString.get() == connectionString ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+						.detail("Filename", ccf->getFilename())
 						.detail("ConnectionStringFromFile", fileConnectionString.toString())
-						.detail("CurrentConnectionString", ccf->getConnectionString().toString());
+						.detail("CurrentConnectionString", connectionString);
 				}
+				incorrectConnectionString = connectionString;
+			}
+			else {
+				incorrectConnectionString = Optional<std::string>();
 			}
 
 			choose {
