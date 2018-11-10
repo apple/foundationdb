@@ -18,11 +18,12 @@
  * limitations under the License.
  */
 
-#include "HTTP.h"
-#include "md5/md5.h"
-#include "libb64/encode.h"
+#include "fdbclient/HTTP.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
+#include "fdbclient/xml2json.hpp"
+
 #include <cctype>
-#include "xml2json.hpp"
 
 namespace HTTP {
 

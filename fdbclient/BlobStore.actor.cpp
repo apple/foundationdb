@@ -20,13 +20,13 @@
 
 #include "BlobStore.h"
 
-#include "md5/md5.h"
-#include "libb64/encode.h"
-#include "sha1/SHA1.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
+#include "fdbclient/sha1/SHA1.h"
 #include "time.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 
 json_spirit::mObject BlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;

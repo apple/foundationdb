@@ -9,19 +9,19 @@
 #include <string>
 #include <cctype>
 
-#include "rapidxml/rapidxml.hpp"
-#include "rapidxml/rapidxml_utils.hpp"
-#include "rapidxml/rapidxml_print.hpp"
+#include "fdbclient/rapidxml/rapidxml.hpp"
+#include "fdbclient/rapidxml/rapidxml_utils.hpp"
+#include "fdbclient/rapidxml/rapidxml_print.hpp"
 
-#include "rapidjson/document.h"
-#include "rapidjson/prettywriter.h"
-#include "rapidjson/encodedstream.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/reader.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
-#include "rapidjson/error/en.h"
+#include "fdbclient/rapidjson/document.h"
+#include "fdbclient/rapidjson/prettywriter.h"
+#include "fdbclient/rapidjson/encodedstream.h"
+#include "fdbclient/rapidjson/stringbuffer.h"
+#include "fdbclient/rapidjson/reader.h"
+#include "fdbclient/rapidjson/writer.h"
+#include "fdbclient/rapidjson/filereadstream.h"
+#include "fdbclient/rapidjson/filewritestream.h"
+#include "fdbclient/rapidjson/error/en.h"
 
 /* [Start] This part is configurable */
 static const char xml2json_text_additional_name[] = "#text";

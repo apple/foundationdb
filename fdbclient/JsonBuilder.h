@@ -5,7 +5,7 @@
 #include <cmath>
 #include "flow/flow.h"
 #include "flow/Trace.h"
-#include "fdbrpc/JSONDoc.h"
+#include "fdbclient/JSONDoc.h"
 
 class JsonBuilder;
 class JsonBuilderObject;
