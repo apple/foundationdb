@@ -31,15 +31,15 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
- *   FDBCluster -> ICluster
+ *   FDBCluster -> char
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
 
+#define CLUSTER(c) ((char*)c)
 #define DB(d) ((IDatabase*)d)
-#define CLUSTER(c) ((ICluster*)c)
 #define TXN(t) ((ITransaction*)t)
 
 /* 
@@ -129,7 +129,7 @@ fdb_error_t fdb_stop_network() {
 
 extern "C" DLLEXPORT
 fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter) {
-    CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
+	CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
 }
 
 
@@ -238,7 +238,7 @@ extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster ) {
 	CATCH_AND_RETURN(
 		*out_cluster = (FDBCluster*)
-		( (TSAV( Reference<ICluster>, f )->get() ).extractPtr() ); );
+		( (TSAV( char*, f )->get() ) ); );
 }
 
 extern "C" DLLEXPORT
@@ -295,7 +295,12 @@ fdb_error_t fdb_future_get_string_array(
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
-	return (FDBFuture*) API->createCluster( cluster_file_path ? cluster_file_path : ""/*, g_api_version*/ ).extractPtr();
+	char *path = NULL;
+	if(cluster_file_path) {
+		path = new char[strlen(cluster_file_path) + 1];
+		strcpy(path, cluster_file_path);
+	}
+	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
 
 extern "C" DLLEXPORT
@@ -304,13 +309,13 @@ fdb_error_t fdb_cluster_set_option( FDBCluster* c,
 							 uint8_t const* value,
 							 int value_length )
 {
-	CATCH_AND_RETURN(
-		CLUSTER(c)->setOption( (FDBClusterOptions::Option)option, value ? StringRef( value, value_length ) : Optional<StringRef>() ); );
+	// There are no cluster options
+	return error_code_success;
 }
 
 extern "C" DLLEXPORT
 void fdb_cluster_destroy( FDBCluster* c ) {
-	CATCH_AND_DIE( CLUSTER(c)->delref(); );
+	CATCH_AND_DIE( delete[] CLUSTER(c); );
 }
 
 extern "C" DLLEXPORT
@@ -321,7 +326,7 @@ FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
-	return (FDBFuture*)CLUSTER(c)->createDatabase().extractPtr();
+	return (FDBFuture*) API->createDatabase( c ? CLUSTER(c) : "").extractPtr();
 }
 
 extern "C" DLLEXPORT
