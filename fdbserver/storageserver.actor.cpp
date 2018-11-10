@@ -56,6 +56,19 @@ using std::make_pair;
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
+inline bool canReplyWith(Error e) {
+	switch(e.code()) {
+		case error_code_transaction_too_old:
+		case error_code_future_version:
+		case error_code_wrong_shard_server:
+		case error_code_process_behind:
+		//case error_code_all_alternatives_failed:
+			return true;
+		default:
+			return false;
+	};
+}
+
 struct StorageServer;
 class ValueOrClearToRef {
 public:
@@ -157,6 +170,7 @@ struct StorageServerDisk {
 	void writeKeyValue( KeyValueRef kv );
 	void clearRange( KeyRangeRef keys );
 
+	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
@@ -770,7 +784,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
-		if (e.code() == error_code_internal_error || e.code() == error_code_actor_cancelled) throw;
+		if(!canReplyWith(e))
+			throw;
 		req.reply.sendError(e);
 	}
 
@@ -833,7 +848,8 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 			}
 		}
 	} catch (Error& e) {
-		if( e.code() == error_code_internal_error || e.code() == error_code_actor_cancelled ) throw;
+		if(!canReplyWith(e))
+			throw;
 		req.reply.sendError(e);
 	}
 	return Void();
@@ -1303,7 +1319,8 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			data->counters.bytesQueried += req.limitBytes - remainingLimitBytes;
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_internal_error || e.code() == error_code_actor_cancelled) throw;
+		if(!canReplyWith(e))
+			throw;
 		req.reply.sendError(e);
 	}
 
@@ -1349,7 +1366,8 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 	}
 	catch (Error& e) {
 		//if (e.code() == error_code_wrong_shard_server) TraceEvent("WrongShardServer").detail("In","getKey");
-		if (e.code() == error_code_internal_error || e.code() == error_code_actor_cancelled) throw;
+		if(!canReplyWith(e))
+			throw;
 		req.reply.sendError(e);
 	}
 
@@ -3462,6 +3480,7 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	try {
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
+		wait(self.storage.init());
 		bool ok = wait( self.storage.restoreDurableState() );
 		if (!ok) {
 			if(recovered.canBeSet()) recovered.send(Void());

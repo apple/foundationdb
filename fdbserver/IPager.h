@@ -29,7 +29,7 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_always(...) fprintf(stderr, __VA_ARGS__)
+#define debug_printf_always(...) { fprintf(stdout, "%s %f ", g_network->getLocalAddress().toString().c_str(), now()), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
 
 #if REDWOOD_DEBUG
   #define debug_printf debug_printf_always

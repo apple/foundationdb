@@ -147,19 +147,20 @@ void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) 
 		p->second->releaseZeroCopy();
 	}
 	else {
-		// Otherwise, the data pointer must exist in the orphaned pages map
+		// Otherwise, the data pointer might exist in the orphaned pages map
 		auto o = orphanedPages.find(data);
-		ASSERT(o != orphanedPages.end());
-		if(o->second == 1) {
-			if (data) {
-				if (length == 4096)
-					FastAllocator<4096>::release(data);
-				else
-					aligned_free(data);
+		if(o != orphanedPages.end()) {
+			if(o->second == 1) {
+				if (data) {
+					if (length == 4096)
+						FastAllocator<4096>::release(data);
+					else
+						aligned_free(data);
+				}
 			}
-		}
-		else {
-			--o->second;
+			else {
+				--o->second;
+			}
 		}
 	}
 }

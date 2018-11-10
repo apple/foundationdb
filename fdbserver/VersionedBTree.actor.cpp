@@ -115,6 +115,7 @@ static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize
 	btpage->flags = newFlags;
 	btpage->kvBytes = 0;
 	btpage->count = 0;
+	btpage->extensionPageCount = 0;
 	btpage->tree().build(nullptr, nullptr, StringRef(), StringRef());
 }
 
@@ -446,6 +447,8 @@ public:
 	static Key beginKey;
 	static Key endKey;
 
+	// All async opts on the btree are based on pager reads, writes, and commits, so
+	// we can mostly forward these next few functions to the pager
 	virtual Future<Void> getError() {
 		return m_pager->getError();
 	}
@@ -454,26 +457,28 @@ public:
 		return m_pager->onClosed();
 	}
 
-	virtual void dispose() {
-		return m_pager->dispose();
+	void close_impl(bool dispose) {
+		IPager *pager = m_pager;
+		delete this;
+		if(dispose)
+			pager->dispose();
+		else
+			pager->close();
 	}
 
-	ACTOR void close_impl(VersionedBTree *btree) {
-		btree->m_init.cancel();
-		btree->m_latestCommit.cancel();
-		Future<Void> closed = btree->m_pager->onClosed();
-		btree->m_pager->close();
-		wait(closed);
-		delete btree;
+	virtual void dispose() {
+		return close_impl(true);
 	}
 
 	virtual void close() {
-		return close_impl(this);
+		return close_impl(false);
 	}
 
 	virtual KeyValueStoreType getType() NOT_IMPLEMENTED
 	virtual bool supportsMutation(int op) NOT_IMPLEMENTED
-	virtual StorageBytes getStorageBytes() NOT_IMPLEMENTED
+	virtual StorageBytes getStorageBytes() {
+		return m_pager->getStorageBytes();
+	}
 
 	// Writes are provided in an ordered stream.
 	// A write is considered part of (a change leading to) the version determined by the previous call to setWriteVersion()
@@ -893,12 +898,12 @@ private:
 	};
 
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize) {
-		debug_printf("readPage() op=read id=%u @%lld\nn", id, snapshot->getVersion());
+		debug_printf("readPage() op=read id=%u @%lld\n", id, snapshot->getVersion());
 		Reference<const IPage> raw = wait(snapshot->getPhysicalPage(id));
 
 		const BTreePage *pTreePage = (const BTreePage *)raw->begin();
 		if(pTreePage->extensionPageCount == 0) {
-			debug_printf("readPage() Found normal page for op=read id=%u @%lld\nn", id, snapshot->getVersion());
+			debug_printf("readPage() Found normal page for op=read id=%u @%lld\n", id, snapshot->getVersion());
 			return raw;
 		}
 
@@ -1782,7 +1787,7 @@ Future<T> catchError(Promise<Void> error, Future<T> f) {
 		T result = wait(f);
 		return result;
 	} catch(Error &e) {
-		if(error.canBeSet())
+		if(e.code() != error_code_actor_cancelled && error.canBeSet())
 			error.sendError(e);
 		throw;
 	}
@@ -1791,11 +1796,10 @@ Future<T> catchError(Promise<Void> error, Future<T> f) {
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
-		// TODO: These implementation-specific things should really be passed in as arguments, and this class should 
-		// be an IKeyValueStore implementation that wraps IVersionedStore.
-		m_pager = new IndirectShadowPager(filePrefix);
-		m_tree = new VersionedBTree(m_pager, filePrefix, m_pager->getUsablePageSize());
-		m_init = catchError(m_error, init_impl(this));
+		// TODO: This constructor should really just take an IVersionedStore
+		IPager *pager = new IndirectShadowPager(filePrefix);
+		m_tree = new VersionedBTree(pager, filePrefix, pager->getUsablePageSize());
+		m_init = catchError(init_impl(this));
 	}
 
 	virtual Future<Void> init() {
@@ -1803,26 +1807,27 @@ public:
 	}
 
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwoodUnversioned *self) {
+		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
 		wait(self->m_tree->init());
 		Version v = wait(self->m_tree->getLatestVersion());
 		self->m_tree->setWriteVersion(v + 1);
+		TraceEvent(SevInfo, "RedwoodInitComplete").detail("FilePrefix", self->m_filePrefix);
 		return Void();
 	}
 
 	ACTOR void shutdown(KeyValueStoreRedwoodUnversioned *self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
+		if(self->m_error.canBeSet()) {
+			self->m_error.sendError(actor_cancelled());  // Ideally this should be shutdown_in_progress
+		}
 		self->m_init.cancel();
-		delete self->m_tree;
-		Future<Void> closedFuture = self->m_pager->onClosed();
+		Future<Void> closedFuture = self->m_tree->onClosed();
 		if(dispose)
-			self->m_pager->dispose();
+			self->m_tree->dispose();
 		else
-			self->m_pager->close();
+			self->m_tree->close();
 		wait(closedFuture);
 		self->m_closed.send(Void());
-		if(self->m_error.canBeSet()) {
-			self->m_error.sendError(shutdown_in_progress());
-		}
 		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		delete self;
 	}
@@ -1842,7 +1847,7 @@ public:
 	Future<Void> commit(bool sequential = false) {
 		Future<Void> c = m_tree->commit();
 		m_tree->setWriteVersion(m_tree->getWriteVersion() + 1);
-		return catchError(m_error, c);
+		return catchError(c);
 	}
 
 	virtual KeyValueStoreType getType() {
@@ -1850,10 +1855,12 @@ public:
 	}
 
 	virtual StorageBytes getStorageBytes() {
-		return m_pager->getStorageBytes();
+		return m_tree->getStorageBytes();
 	}
 
-	virtual Future< Void > getError() { return m_error.getFuture(); };
+	virtual Future< Void > getError() {
+		return delayed(m_error.getFuture());
+	};
 
 	void clear(KeyRangeRef range, const Arena* arena = 0) {
 		m_tree->clear(range);
@@ -1864,8 +1871,7 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRangeRef keys, int rowLimit, int byteLimit) {
-		wait(self->m_init);
+	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRange keys, int rowLimit, int byteLimit) {
 		state Standalone<VectorRef<KeyValueRef>> result;
 		state int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
@@ -1879,8 +1885,9 @@ public:
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
 				accumulatedBytes += kv.expectedSize();
 				result.push_back(result.arena(), kv);
-				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
+				if(--rowLimit == 0 || accumulatedBytes >= byteLimit) {
 					break;
+				}
 				wait(cur->next(true));
 			}
 		} else {
@@ -1892,8 +1899,9 @@ public:
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
 				accumulatedBytes += kv.expectedSize();
 				result.push_back(result.arena(), kv);
-				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
+				if(--rowLimit == 0 || accumulatedBytes >= byteLimit) {
 					break;
+				}
 				wait(cur->prev(true));
 			}
 		}
@@ -1901,11 +1909,10 @@ public:
 	}
 
 	virtual Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
-		return catchError(m_error, readRange_impl(this, keys, rowLimit, byteLimit));
+		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}
 
-	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, Optional< UID > debugID) {
-		wait(self->m_init);
+	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, Key key, Optional< UID > debugID) {
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
@@ -1917,11 +1924,10 @@ public:
 	}
 
 	virtual Future< Optional< Value > > readValue(KeyRef key, Optional< UID > debugID = Optional<UID>()) {
-		return catchError(m_error, readValue_impl(this, key, debugID));
+		return catchError(readValue_impl(this, key, debugID));
 	}
 
-	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, int maxLength, Optional< UID > debugID) {
-		wait(self->m_init);
+	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, Key key, int maxLength, Optional< UID > debugID) {
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		wait(cur->findEqual(key));
@@ -1934,7 +1940,7 @@ public:
 	}
 
 	virtual Future< Optional< Value > > readValuePrefix(KeyRef key, int maxLength, Optional< UID > debugID = Optional<UID>()) {
-		return catchError(m_error, readValuePrefix_impl(this, key, maxLength, debugID));
+		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
 	}
 
 	virtual ~KeyValueStoreRedwoodUnversioned() {
@@ -1942,11 +1948,14 @@ public:
 
 private:
 	std::string m_filePrefix;
-	IPager *m_pager;
 	VersionedBTree *m_tree;
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
+
+	template <typename T> inline Future<T> catchError(Future<T> f) {
+		return ::catchError(m_error, f);
+	}
 };
 
 IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) {
@@ -2343,7 +2352,7 @@ TEST_CASE("!/redwood/correctness") {
 				btree->close();
 				wait(closedFuture);
 
-				debug_printf_always("Reopening btree\n");
+				debug_printf("Reopening btree\n");
 				IPager *pager = new IndirectShadowPager(pagerFile);
 				btree = new VersionedBTree(pager, pagerFile, pageSize);
 				wait(btree->init());
