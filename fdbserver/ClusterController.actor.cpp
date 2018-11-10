@@ -47,22 +47,24 @@ struct WorkerInfo : NonCopyable {
 	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
+	double lastAvailableTime;
 	WorkerInterface interf;
 	ProcessClass initialClass;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
-	WorkerInfo() : gen(-1), reboots(0), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo) {}
+		watcher(watcher), reply(reply), gen(gen), reboots(0), lastAvailableTime(now()), interf(interf), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), priorityInfo(r.priorityInfo) {}
+		reboots(r.reboots), lastAvailableTime(r.lastAvailableTime), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), priorityInfo(r.priorityInfo) {}
 	void operator=( WorkerInfo&& r ) noexcept(true) {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
 		gen = r.gen;
 		reboots = r.reboots;
+		lastAvailableTime = r.lastAvailableTime;
 		interf = std::move(r.interf);
 		initialClass = r.initialClass;
 		processClass = r.processClass;
@@ -519,7 +521,14 @@ public:
 		}
 
 		if(!remoteStartTime.present()) {
-			remoteStartTime = now();
+			double maxAvailableTime = 0;
+			for(auto& it : result.remoteTLogs) {
+				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
+			}
+			for(auto& it : result.logRouters) {
+				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
+			}
+			remoteStartTime = maxAvailableTime;
 		}
 
 		if( now() - remoteStartTime.get() < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY &&
@@ -608,7 +617,7 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				std::swap(regions[0], regions[1]);
 			}
 
@@ -1295,6 +1304,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 	auto watcher = cluster->id_worker.find(processID);
 	ASSERT(watcher != cluster->id_worker.end());
 
+	watcher->second.lastAvailableTime = now();
 	watcher->second.reboots++;
 	wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
 
@@ -1645,8 +1655,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 
-	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
-
+	if(info == self->id_worker.end()) {
+		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+	} else {
+		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+	}
 	if ( w.address() == g_network->getLocalAddress() ) {
 		self->clusterControllerProcessId = w.locality.processId();
 		self->clusterControllerDcId = w.locality.dcId();
@@ -1743,7 +1756,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent(SevInfo, "TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted");
 
 	wait(timeKeeperSetVersion(self));
 
@@ -1751,6 +1764,15 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
 		loop {
 			try {
+				if(!g_network->isSimulated()) {
+					// This is done to provide an arbitrary logged transaction every ~10s.
+					// FIXME: replace or augment this with logging on the proxy which tracks
+					//       how long it is taking to hear responses from each other component.
+
+					UID debugID = g_random->randomUniqueID();
+					TraceEvent("TimeKeeperCommit", debugID);
+					tr->debugTransaction(debugID);
+				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);

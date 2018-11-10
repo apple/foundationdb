@@ -12,9 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="ActorFuzz.actor.cpp" />
-    <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
-    <ActorCompiler Include="BlobStore.actor.cpp" />
-    <ActorCompiler Include="HTTP.actor.cpp" />
     <ActorCompiler Include="AsyncFileCached.actor.cpp" />
     <ActorCompiler Include="AsyncFileNonDurable.actor.cpp" />
     <ActorCompiler Include="dsltest.actor.cpp" />
@@ -25,10 +22,6 @@
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
     <ClCompile Include="crc32c.cpp" />
     <ClCompile Include="generated-constants.cpp" />
-    <ClCompile Include="sha1\SHA1.cpp" />
-    <ClCompile Include="libb64\cencode.c" />
-    <ClCompile Include="libb64\cdecode.c" />
-    <ClCompile Include="md5\md5.c" />
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
@@ -60,9 +53,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ActorFuzz.h" />
-    <ActorCompiler Include="AsyncFileBlobStore.actor.h">
-      <EnableCompile>false</EnableCompile>
-    </ActorCompiler>
     <ActorCompiler Include="AsyncFileEIO.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
@@ -81,9 +71,6 @@
     <ActorCompiler Include="AsyncFileNonDurable.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-    <ActorCompiler Include="batcher.actor.h">
-      <EnableCompile>false</EnableCompile>
-    </ActorCompiler>
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="crc32c.h" />
@@ -95,25 +82,16 @@
     <ActorCompiler Include="genericactors.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-    <ClInclude Include="JSONDoc.h" />
     <ClInclude Include="linux_kaio.h" />
     <ClInclude Include="LoadPlugin.h" />
     <ActorCompiler Include="networksender.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
-    <ClInclude Include="sha1\SHA1.h" />
-    <ClInclude Include="libb64\encode.h" />
-    <ClInclude Include="libb64\cencode.h" />
-    <ClInclude Include="libb64\decode.h" />
-    <ClInclude Include="libb64\cdecode.h" />
-    <ClInclude Include="md5\md5.h" />
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="IRateControl.h" />
     <ClInclude Include="Platform.h" />
     <ClInclude Include="fdbrpc.h" />
     <ClInclude Include="FlowTransport.h" />
-    <ClInclude Include="BlobStore.h" />
-    <ClInclude Include="HTTP.h" />
     <ClInclude Include="ITLSPlugin.h" />
     <ClInclude Include="libcoroutine\Base.h" />
     <ClInclude Include="libcoroutine\Common.h" />
@@ -134,7 +112,6 @@
     <ClInclude Include="Smoother.h" />
     <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="TraceFileIO.h" />
-    <ClInclude Include="xml2json.hpp" />
     <ClInclude Include="zlib\zlib.h" />
     <ClInclude Include="zlib\deflate.h" />
     <ClInclude Include="zlib\gzguts.h" />

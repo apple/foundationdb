@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/BlobStore.h"
+#include "fdbclient/BlobStore.h"
 
-#include "fdbrpc/md5/md5.h"
-#include "fdbrpc/libb64/encode.h"
-#include "fdbrpc/sha1/SHA1.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
+#include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
