@@ -701,7 +701,7 @@ int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {
 	return storageServerShards[ssID];
 }
 
-vector<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::getTeamsFor( KeyRangeRef keys ) {
+std::pair<vector<ShardsAffectedByTeamFailure::Team>,vector<ShardsAffectedByTeamFailure::Team>> ShardsAffectedByTeamFailure::getTeamsFor( KeyRangeRef keys ) {
 	return shard_teams[keys.begin];
 }
 
@@ -720,14 +720,20 @@ void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
 }
 
 void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
-	std::set<Team> teams;
+	std::vector<Team> teams;
+	std::vector<Team> prevTeams;
 	auto rs = shard_teams.intersectingRanges(keys);
 	for(auto it = rs.begin(); it != rs.end(); ++it) {
-		for(auto t=it->value().begin(); t!=it->value().end(); ++t) {
-			teams.insert( *t );
+		for(auto t=it->value().first.begin(); t!=it->value().first.end(); ++t) {
+			teams.push_back( *t );
 			erase(*t, it->range());
 		}
+		for(auto t=it->value().second.begin(); t!=it->value().second.end(); ++t) {
+			prevTeams.push_back( *t );
+		}
 	}
+	uniquify(teams);
+	uniquify(prevTeams);
 
 	/*TraceEvent("ShardsAffectedByTeamFailureDefine")
 		.detail("KeyBegin", printable(keys.begin))
@@ -735,12 +741,12 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 		.detail("TeamCount", teams.size()); */
 
 	auto affectedRanges = shard_teams.getAffectedRangesAfterInsertion(keys);
-	shard_teams.insert( keys, vector<Team>(teams.begin(), teams.end()) );
+	shard_teams.insert( keys, std::make_pair(teams, prevTeams) );
 
 	for(auto r=affectedRanges.begin(); r != affectedRanges.end(); ++r) {
-		auto& teams = shard_teams[r->begin];
-		for(auto t=teams.begin(); t!=teams.end(); ++t) {
-			insert(*t, *r);
+		auto& t = shard_teams[r->begin];
+		for(auto it=t.first.begin(); it!=t.first.end(); ++it) {
+			insert(*it, *r);
 		}
 	}
 	check();
@@ -754,33 +760,39 @@ void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team>
 		.detail("NewTeam", describe(destinationTeam));*/
 
 	auto ranges = shard_teams.intersectingRanges( keys );
-	std::vector< std::pair<std::vector<Team>,KeyRange> > modifiedShards;
+	std::vector< std::pair<std::pair<std::vector<Team>,std::vector<Team>>,KeyRange> > modifiedShards;
 	for(auto it = ranges.begin(); it != ranges.end(); ++it) {
 		if( keys.contains( it->range() ) ) {
 			// erase the many teams that were associated with this one shard
-			for(auto t = it->value().begin(); t != it->value().end(); ++t) {
+			for(auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
 				erase(*t, it->range());
 			}
 
 			// save this modification for later insertion
-			modifiedShards.push_back( std::pair<std::vector<Team>,KeyRange>( destinationTeams, it->range() ) );
+			std::vector<Team> prevTeams = it->value().second;
+			prevTeams.insert(prevTeams.end(), it->value().first.begin(), it->value().first.end());
+			uniquify(prevTeams);
+
+			modifiedShards.push_back( std::pair<std::pair<std::vector<Team>,std::vector<Team>>,KeyRange>( std::make_pair(destinationTeams, prevTeams), it->range() ) );
 		} else {
 			// for each range that touches this move, add our team as affecting this range
 			for(auto& team : destinationTeams) {
 				insert(team, it->range());
-
-				// if we are not in the list of teams associated with this shard, add us in
-				auto& teams = it->value();
-				if( std::find( teams.begin(), teams.end(), team ) == teams.end() ) {
-					teams.push_back( team );
-				}
 			}
+
+			// if we are not in the list of teams associated with this shard, add us in
+			auto& teams = it->value();
+			teams.second.insert(teams.second.end(), teams.first.begin(), teams.first.end());
+			uniquify(teams.second);
+
+			teams.first.insert(teams.first.end(), destinationTeams.begin(), destinationTeams.end());
+			uniquify(teams.first);
 		}
 	}
 
 	// we cannot modify the KeyRangeMap while iterating through it, so add saved modifications now
 	for( int i = 0; i < modifiedShards.size(); i++ ) {
-		for( auto& t : modifiedShards[i].first) {
+		for( auto& t : modifiedShards[i].first.first) {
 			insert(t, modifiedShards[i].second);
 		}
 		shard_teams.insert( modifiedShards[i].second, modifiedShards[i].first );
@@ -789,19 +801,26 @@ void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team>
 	check();
 }
 
+void ShardsAffectedByTeamFailure::finishMove( KeyRangeRef keys ) {
+	auto ranges = shard_teams.containedRanges(keys);
+	for(auto it = ranges.begin(); it != ranges.end(); ++it) {
+		it.value().second.clear();
+	}
+}
+
 void ShardsAffectedByTeamFailure::check() {
 	if (EXPENSIVE_VALIDATION) {
 		for(auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
 			if (i->range() != t->second ||
-				!std::count(i->value().begin(), i->value().end(), t->first))
+				!std::count(i->value().first.begin(), i->value().first.end(), t->first))
 			{
 				ASSERT(false);
 			}
 		}
 		auto rs = shard_teams.ranges();
 		for(auto i = rs.begin(); i != rs.end(); ++i)
-			for(vector<Team>::iterator t = i->value().begin(); t != i->value().end(); ++t)
+			for(vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
 				if (!team_shards.count( std::make_pair( *t, i->range() ) )) {
 					std::string teamDesc, shards;
 					for(int k=0; k<t->servers.size(); k++)

@@ -1466,57 +1466,52 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 					for(int i=0; i<shards.size(); i++) {
 						int maxPriority = team->getPriority();
-						int maxOtherPriority = maxPriority;
 						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
-							for( int t=0; t<teams.size(); t++) {
-								if( teams[t].servers.size() ) {
-									bool foundServer = false;
-									for(auto tc : self->teamCollections) {
-										if( tc->server_info.count( teams[t].servers[0] ) ) {
-											ASSERT(!foundServer);
-											foundServer = true;
-											auto& info = tc->server_info[teams[t].servers[0]];
+							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
+								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
+								if( !t.servers.size() ) {
+									maxPriority = PRIORITY_TEAM_0_LEFT;
+									break;
+								}
 
-											bool found = false;
-											for( int i = 0; i < info->teams.size(); i++ ) {
-												if( info->teams[i]->serverIDs == teams[t].servers ) {
-													if(teams[t].primary == self->primary) {
-														maxPriority = std::max( maxPriority, info->teams[i]->getPriority() );
-													} else {
-														maxOtherPriority = std::max( maxOtherPriority, info->teams[i]->getPriority() );
-													}
-													found = true;
-													break;
-												}
-											}
+								auto tc = self->teamCollections[t.primary ? 0 : 1];
+								ASSERT(tc->primary == t.primary);
+								if( tc->server_info.count( t.servers[0] ) ) {
+									auto& info = tc->server_info[t.servers[0]];
 
-											TEST(!found); // A removed team is still associated with a shard in SABTF
+									bool found = false;
+									for( int k = 0; k < info->teams.size(); k++ ) {
+										if( info->teams[k]->serverIDs == t.servers ) {
+											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
+											found = true;
+											break;
 										}
 									}
-									TEST(!foundServer); // A removed server is still associated with a team in SABTF
+
+									//If we cannot find the team, it could be a bad team so assume unhealthy priority
+									if(!found) {
+										maxPriority = std::max<int>( maxPriority, PRIORITY_TEAM_UNHEALTHY );
+									}
+								} else {
+									TEST(true); // A removed server is still associated with a team in SABTF
 								}
 							}
 						}
 
-						if( maxPriority == team->getPriority() || lastPriority > maxPriority ) {
-							RelocateShard rs;
-							rs.keys = shards[i];
-							rs.priority = std::max(maxPriority,maxOtherPriority);
+						RelocateShard rs;
+						rs.keys = shards[i];
+						rs.priority = maxPriority;
 
-							self->output.send(rs);
-							if(g_random->random01() < 0.01) {
-								TraceEvent("SendRelocateToDDQx100", self->masterId)
-									.detail("Team", team->getDesc())
-									.detail("KeyBegin", printable(rs.keys.begin))
-									.detail("KeyEnd", printable(rs.keys.end))
-									.detail("Priority", rs.priority)
-									.detail("TeamFailedMachines", team->getServerIDs().size()-serversLeft)
-									.detail("TeamOKMachines", serversLeft);
-							}
-						} else {
-							TraceEvent("RelocationNotSentToDDQ", self->masterId)
-								.detail("Team", team->getDesc());
+						self->output.send(rs);
+						if(g_random->random01() < 0.01) {
+							TraceEvent("SendRelocateToDDQx100", self->masterId)
+								.detail("Team", team->getDesc())
+								.detail("KeyBegin", printable(rs.keys.begin))
+								.detail("KeyEnd", printable(rs.keys.end))
+								.detail("Priority", rs.priority)
+								.detail("TeamFailedMachines", team->getServerIDs().size()-serversLeft)
+								.detail("TeamOKMachines", serversLeft);
 						}
 					}
 				} else {
@@ -1706,7 +1701,7 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 		}
 	}
 	Void _ = wait(self->addSubsetComplete.getFuture());
-	TraceEvent("DDRemovingBadTeams", self->masterId);
+	TraceEvent("DDRemovingBadTeams", self->masterId).detail("Primary", self->primary);
 	for(auto it : self->badTeams) {
 		it->tracker.cancel();
 	}
@@ -2145,7 +2140,6 @@ ACTOR Future<Void> serverGetTeamRequests(TeamCollectionInterface tci, DDTeamColl
 // Keep track of servers and teams -- serves requests for getRandomTeam
 ACTOR Future<Void> dataDistributionTeamCollection(
 	Reference<DDTeamCollection> teamCollection,
-	std::vector<DDTeamCollection*> teamCollections,
 	Reference<InitialDataDistribution> initData,
 	TeamCollectionInterface tci,
 	Reference<AsyncVar<struct ServerDBInfo>> db)
@@ -2154,8 +2148,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
 	state Future<Void> error = actorCollection( self->addActor.getFuture() );
-
-	self->teamCollections = teamCollections;
 
 	try {
 		Void _ = wait( DDTeamCollection::init( self, initData ) );
@@ -2415,6 +2407,11 @@ ACTOR Future<Void> dataDistribution(
 				if(configuration.usableRegions > 1) {
 					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].remoteSrc, false));
 				}
+				if(g_network->isSimulated()) {
+					TraceEvent("DDInitShard").detail("Keys", printable(keys)).detail("PrimarySrc", describe(initData->shards[shard].primarySrc)).detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
+					.detail("PrimaryDest", describe(initData->shards[shard].primaryDest)).detail("RemoteDest", describe(initData->shards[shard].remoteDest));
+				}
+
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if(initData->shards[shard].hasDest) {
 					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
@@ -2452,21 +2449,17 @@ ACTOR Future<Void> dataDistribution(
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
 
-			vector<Reference<DDTeamCollection>> teamCollections;
-			teamCollections.push_back( Reference<DDTeamCollection>( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) ) );
-			if (configuration.usableRegions > 1) {
-				teamCollections.push_back( Reference<DDTeamCollection>( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy) ) );
-			}
-
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			for(auto it : teamCollections) {
-				teamCollectionsPtrs.push_back(it.getPtr());
-			}
-
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( teamCollections[0], teamCollectionsPtrs, initData, tcis[0], db ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
+			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( teamCollections[1], teamCollectionsPtrs, initData, tcis[1], db ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
+				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy) );
+				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
+				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
+				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], db ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
 			}
+			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], db ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			Void _ = wait( waitForAll( actors ) );

@@ -154,9 +154,10 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
-	vector<Team> getTeamsFor( KeyRangeRef keys );
+	std::pair<vector<Team>,vector<Team>> getTeamsFor( KeyRangeRef keys );
 	void defineShard( KeyRangeRef keys );
 	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
+	void finishMove( KeyRangeRef keys );
 	void check();
 private:
 	struct OrderByTeamKey {
@@ -167,7 +168,7 @@ private:
 		}
 	};
 
-	KeyRangeMap< vector<Team> > shard_teams;	// A shard can be affected by the failure of multiple teams if it is a queued merge
+	KeyRangeMap< std::pair<vector<Team>,vector<Team>> > shard_teams;	// A shard can be affected by the failure of multiple teams if it is a queued merge
 	std::set< std::pair<Team,KeyRange>, OrderByTeamKey > team_shards;
 	std::map< UID, int > storageServerShards;
 
