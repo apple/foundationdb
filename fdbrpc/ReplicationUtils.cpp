@@ -268,6 +268,8 @@ bool validateAllCombinations(
 	bool															bCheckIfValid)
 {
 	bool	bValid = true;
+	LocalityGroup	localityGroup;
+	localityGroup.deep_copy(localitySet);
 
 	if (newItems.size() < nCombinationSize) {
 		bValid = false;
@@ -275,27 +277,24 @@ bool validateAllCombinations(
 	// Ensure that the current set alone does not satisfy the
 	// specified policy
 	else if ((bCheckIfValid)								&&
-					 (!localitySet.validate(policy)))
+					 (!localityGroup.satisfiesPolicy(policy)))
 	{
 		bValid = false;
 	}
 	else if ((!bCheckIfValid)								&&
-					 (localitySet.validate(policy))	)
+					 (localityGroup.satisfiesPolicy(policy))	)
 	{
 		bValid = false;
 	}
 	else
 	{
 		bool					bIsValidGroup;
-		LocalityGroup	localityGroup;
 		std::string bitmask(nCombinationSize, 1); // K leading 1's
 
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
 
 		do
 		{
-			localityGroup.deep_copy(localitySet);
-
 			// [0..N-1] integers
 			for (int i = 0; i < newItems.size(); ++i) {
 				if (bitmask[i]) {
@@ -304,7 +303,7 @@ bool validateAllCombinations(
 			}
 
 			// Check if the group combination passes validation
-			bIsValidGroup = localityGroup.validate(policy);
+			bIsValidGroup = localityGroup.satisfiesPolicy(policy);
 
 			if (((bCheckIfValid)	&&
 					 (!bIsValidGroup)	)			||
@@ -328,6 +327,8 @@ bool validateAllCombinations(
 				bValid = false;
 				break;
 			}
+			
+			localityGroup.deep_copy(localitySet);
 		}
 		// permute bitmask
 		while (std::prev_permutation(bitmask.begin(), bitmask.end()));

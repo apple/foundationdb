@@ -965,7 +965,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked->validate(logSet->tLogPolicy);
+			bool quorum_obtained = locked->satisfiesPolicy(logSet->tLogPolicy);
 			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
 			if (logSet->tLogReplicationFactor == 1 && locked->size() > 0) {
 				ASSERT(quorum_obtained);
@@ -1202,7 +1202,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		bool bTooManyFailures = (results.size() <= logSet->tLogWriteAntiQuorum);
 
 		// Check if failed logs complete the policy
-		bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor)	&& (unResponsiveSet.validate(logSet->tLogPolicy)));
+		bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor)	&& (unResponsiveSet.satisfiesPolicy(logSet->tLogPolicy)));
 
 		// Check all combinations of the AntiQuorum within the failed
 		if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, unResponsiveSet, logSet->tLogPolicy, availableItems, logSet->tLogWriteAntiQuorum, false))) {

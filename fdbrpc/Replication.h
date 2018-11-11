@@ -559,6 +559,12 @@ struct LocalityGroup : public LocalitySet {
 		return attribHashMap;
 	}
 
+	bool satisfiesPolicy(IRepPolicyRef const& policy) {
+		std::vector<LocalityEntry> resultEntries;
+		bool result = selectReplicas(policy, getEntries(), resultEntries);
+		return result && resultEntries.size() == 0;
+	}
+	
 	virtual Reference<StringToIntMap> const&	getGroupValueMap() const
 	{	return _valuemap; }
 
