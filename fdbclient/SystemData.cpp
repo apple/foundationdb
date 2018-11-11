@@ -258,6 +258,29 @@ int decodeDatacenterReplicasValue( ValueRef const& value ) {
 	return s;
 }
 
+//    "\xff\x02/tLogDatacenters/[[datacenterID]]"
+extern const KeyRangeRef tLogDatacentersKeys;
+extern const KeyRef tLogDatacentersPrefix;
+const Key tLogDatacentersKeyFor( Optional<Value> dcID );
+
+const KeyRangeRef tLogDatacentersKeys(
+	LiteralStringRef("\xff\x02/tLogDatacenters/"),
+	LiteralStringRef("\xff\x02/tLogDatacenters0") );
+const KeyRef tLogDatacentersPrefix = tLogDatacentersKeys.begin;
+
+const Key tLogDatacentersKeyFor( Optional<Value> dcID ) {
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	wr.serializeBytes( tLogDatacentersKeys.begin );
+	wr << dcID;
+	return wr.toStringRef();
+}
+Optional<Value> decodeTLogDatacentersKey( KeyRef const& key ) {
+	Optional<Value> dcID;
+	BinaryReader rd( key.removePrefix(tLogDatacentersKeys.begin), AssumeVersion(currentProtocolVersion) );
+	rd >> dcID;
+	return dcID;
+}
+
 const KeyRef primaryDatacenterKey = LiteralStringRef("\xff/primaryDatacenter");
 
 // serverListKeys.contains(k) iff k.startsWith( serverListKeys.begin ) because '/'+1 == '0'
