@@ -44,7 +44,7 @@ struct ProxyRequestsInfo {
 namespace{
 struct Resolver : ReferenceCounted<Resolver> {
 	Resolver( UID dbgid, int proxyCount, int resolverCount )
-		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE ), debugMinRecentStateVersion(0)
+		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0)
 	{
 	}
 	~Resolver() {
