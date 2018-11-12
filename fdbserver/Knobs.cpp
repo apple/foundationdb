@@ -260,10 +260,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
+	bool fastBalancing = randomize && BUGGIFY;
 	init( COMMIT_SLEEP_TIME,								  0.0001 ); if( randomize && BUGGIFY ) COMMIT_SLEEP_TIME = 0;
-	init( KEY_BYTES_PER_SAMPLE,                                  5e4 );
+	init( KEY_BYTES_PER_SAMPLE,                                  5e4 ); if( fastBalancing ) KEY_BYTES_PER_SAMPLE = 1e4;
 	init( MIN_BALANCE_TIME,                                      0.2 );
-	init( MIN_BALANCE_DIFFERENCE,                                5e6 );
+	init( MIN_BALANCE_DIFFERENCE,                                5e6 ); if( fastBalancing ) MIN_BALANCE_DIFFERENCE = 5e4;
 	init( SECONDS_BEFORE_NO_FAILURE_DELAY,                  8 * 3600 );
 	init( MAX_TXS_SEND_MEMORY,                                   1e7 ); if( randomize && BUGGIFY ) MAX_TXS_SEND_MEMORY = 1e5;
 	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND );
