@@ -90,7 +90,6 @@
     </ActorCompiler>
     <ClInclude Include="VersionedMap.h" />
     <ClInclude Include="WriteMap.h" />
-    <ClInclude Include="xml2json.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
