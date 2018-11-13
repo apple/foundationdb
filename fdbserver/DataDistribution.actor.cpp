@@ -50,6 +50,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Promise<Void> wakeUpTracker;
 	bool inDesiredDC;
 	LocalityEntry localityEntry;
+	Promise<Void> updated;
 
 	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC, Reference<LocalitySet> storageServerSet) : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -68,6 +69,9 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 			when( ErrorOr<GetPhysicalMetricsReply> rep = wait( metricsRequest ) ) {
 				if( rep.present() ) {
 					server->serverMetrics = rep;
+					if(server->updated.canBeSet()) {
+						server->updated.send(Void());
+					}
 					return Void();
 				}
 				metricsRequest = Never();
@@ -1874,6 +1878,10 @@ ACTOR Future<Void> storageServerTracker(
 						changes.get().send( std::make_pair(server->id, Optional<StorageServerInterface>()) );
 					}
 
+					if(server->updated.canBeSet()) {
+						server->updated.send(Void());
+					}
+
 					// Remove server from FF/serverList
 					Void _ = wait( removeStorageServer( cx, server->id, lock ) );
 
@@ -2096,7 +2104,13 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 }
 
 ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId) {
-	Void _ = wait(self->initialFailureReactionDelay);
+	std::vector<Future<Void>> serverUpdates;
+
+	for(auto& it : self->server_info) {
+		serverUpdates.push_back(it.second->updated.getFuture());
+	}
+
+	Void _ = wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
 	loop {
 		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
 			TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
@@ -2158,19 +2172,21 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		Void _ = wait( self->readyToStart || error );
 		TraceEvent("DDTeamCollectionReadyToStart", self->masterId).detail("Primary", self->primary);
 
-		self->addActor.send(storageRecruiter( self, db ));
-		self->addActor.send(monitorStorageServerRecruitment( self ));
-		self->addActor.send(waitServerListChange( self, serverRemoved.getFuture() ));
-		self->addActor.send(trackExcludedServers( self ));
-
 		if(self->badTeamRemover.isReady()) {
 			self->badTeamRemover = removeBadTeams(self);
 			self->addActor.send(self->badTeamRemover);
 		}
 
 		if(self->includedDCs.size()) {
+			//start this actor before any potential recruitments can happen
 			self->addActor.send(updateReplicasKey(self, self->includedDCs[0]));
 		}
+
+		self->addActor.send(storageRecruiter( self, db ));
+		self->addActor.send(monitorStorageServerRecruitment( self ));
+		self->addActor.send(waitServerListChange( self, serverRemoved.getFuture() ));
+		self->addActor.send(trackExcludedServers( self ));
+
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 		loop choose {
