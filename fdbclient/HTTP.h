@@ -20,11 +20,17 @@
 
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
-#include "IRateControl.h"
+#include "fdbrpc/IRateControl.h"
 #include "fdbclient/Knobs.h"
 
 namespace HTTP {
-	typedef std::map<std::string, std::string> Headers;
+	struct is_iless {
+		bool operator() (const std::string &a, const std::string &b) const {
+			return strcasecmp(a.c_str(), b.c_str()) < 0;
+		}
+	};
+
+	typedef std::map<std::string, std::string, is_iless> Headers;
 
 	std::string urlEncode(const std::string &s);
 

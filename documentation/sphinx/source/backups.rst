@@ -1,8 +1,8 @@
 .. _backups:
 
-######################
+######################################################
 Backup, Restore, and Replication for Disaster Recovery
-######################
+######################################################
 
 .. include:: guide-common.rst.inc
 
@@ -323,7 +323,7 @@ Optionally, the user can specify a minimum RESTORABILITY guarantee with one of t
 .. program:: fdbbackup describe
 
 ``describe``
-----------
+------------
 
 The ``describe`` subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.
 

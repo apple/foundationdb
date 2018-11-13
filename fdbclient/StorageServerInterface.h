@@ -36,6 +36,7 @@ struct StorageServerInterface {
 	};
 
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 0 };
 
 	LocalityData locality;
 	UID uniqueID;

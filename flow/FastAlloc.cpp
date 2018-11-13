@@ -374,7 +374,10 @@ void FastAllocator<Size>::getMagazine() {
 	ASSERT( block == desiredBlock );
 #endif
 #else
-	block = (void **)::allocate(magazine_size * Size, true);
+	// FIXME: We should be able to allocate larger magazine sizes here if we
+	// detect that the underlying system supports hugepages.  Using hugepages
+	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
+	block = (void **)::allocate(magazine_size * Size, false);
 #endif
 
 	//void** block = new void*[ magazine_size * PSize ];

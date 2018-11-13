@@ -54,8 +54,11 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 	try {
 		StatusObject statusObj = BinaryReader::fromStringRef<StatusObject>(v, IncludeVersion());
-		StatusArray regionArray = statusObj["regions"].get_array();
 		regions->clear();
+		if(statusObj["regions"].type() != json_spirit::array_type) {
+			return;
+		}
+		StatusArray regionArray = statusObj["regions"].get_array();
 		for (StatusObjectReader dc : regionArray) {
 			RegionInfo info;
 			json_spirit::mArray datacenters;

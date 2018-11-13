@@ -32,22 +32,19 @@
 #include "EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 
-class LocationInfo : public MultiInterface<StorageServerInterface> {
+class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
-	static Reference<LocationInfo> getInterface( DatabaseContext *cx, std::vector<StorageServerInterface> const& alternatives, LocalityData const& clientLocality );
+	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
 	void notifyContextDestroyed();
-	
-	virtual ~LocationInfo();
 
+	virtual ~StorageServerInfo();
 private:
 	DatabaseContext *cx;
-	LocationInfo( DatabaseContext* cx, vector<StorageServerInterface> const& shards, LocalityData const& clientLocality ) : cx(cx), MultiInterface( shards, clientLocality ) {}
+	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-class ProxyInfo : public MultiInterface<MasterProxyInterface> {
-public:
-	ProxyInfo( vector<MasterProxyInterface> const& proxies, LocalityData const& clientLocality ) : MultiInterface( proxies, clientLocality, ALWAYS_FRESH ) {}
-};
+typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
+typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
 public:
@@ -125,7 +122,7 @@ public:
 	int locationCacheSize;
 	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
 
-	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
+	std::map< UID, StorageServerInfo* > server_interf;
 
 	// for logging/debugging (relic of multi-db support)
 	Standalone<StringRef> dbName;

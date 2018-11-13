@@ -268,6 +268,7 @@ struct LBLocalityData {
 	enum { Present = 0 };
 	static LocalityData getLocality( Interface const& ) { return LocalityData(); }
 	static NetworkAddress getAddress( Interface const& ) { return NetworkAddress(); }
+	static bool alwaysFresh() { return true; }
 };
 
 // Template specialization that only works for interfaces with a .locality member.
@@ -277,6 +278,7 @@ struct LBLocalityData<Interface, typename std::enable_if< Interface::LocationAwa
 	enum { Present = 1 };
 	static LocalityData getLocality( Interface const& i ) { return i.locality; }
 	static NetworkAddress getAddress( Interface const& i ) { return i.address(); }
+	static bool alwaysFresh() { return Interface::AlwaysFresh; }
 };
 
 struct LBDistance {

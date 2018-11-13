@@ -1501,11 +1501,18 @@ ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) 
 
 ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
 	state ConfigurationResult::Type result;
+	state int startToken = 1;
+	state bool force = false;
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
+		if(tokens[startToken] == LiteralStringRef("FORCE")) {
+			force = true;
+			startToken = 2;
+		}
+
 		state Optional<ConfigureAutoResult> conf;
-		if( tokens[1] == LiteralStringRef("auto") ) {
+		if( tokens[startToken] == LiteralStringRef("auto") ) {
 			StatusObject s = wait( makeInterruptable(StatusClient::statusFetcher( ccf )) );
 			if(warn.isValid())
 				warn.cancel();
@@ -1565,7 +1572,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 		}
 
-		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+1,tokens.end()), conf) ) );
+		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+startToken,tokens.end()), conf, force) ) );
 		result = r;
 	}
 
@@ -1577,7 +1584,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(tokens[0]);
+		printUsage(LiteralStringRef("configure"));
 		ret=true;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
@@ -1592,6 +1599,31 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		printf("Database created\n");
 		ret=false;
 		break;
+	case ConfigurationResult::DATABASE_UNAVAILABLE:
+		printf("ERROR: The database is unavailable\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
+		printf("ERROR: All storage servers must be in one of the known regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
+		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
 		ret=false;
@@ -1603,7 +1635,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	return ret;
 }
 
-ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase) {
+ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase, bool force) {
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if(!json_spirit::read_string( contents, config )) {
@@ -1643,7 +1675,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 			return true;
 		}
 	}
-	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString) ) );
+	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString, force) ) );
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
@@ -1674,6 +1706,31 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
+		ret=false;
+		break;
+	case ConfigurationResult::DATABASE_UNAVAILABLE:
+		printf("ERROR: The database is unavailable\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
+		printf("ERROR: All storage servers must be in one of the known regions\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
+		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -2550,8 +2607,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && tokens[1] == LiteralStringRef("new"))) {
-						bool err = wait( fileConfigure( db, tokens.back().toString(), tokens.size() == 3 ) );
+					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") || tokens[1] == LiteralStringRef("FORCE")) )) {
+						bool err = wait( fileConfigure( db, tokens.back().toString(), tokens[1] == LiteralStringRef("new"), tokens[1] == LiteralStringRef("FORCE") ) );
 						if (err) is_error = true;
 					} else {
 						printUsage(tokens[0]);

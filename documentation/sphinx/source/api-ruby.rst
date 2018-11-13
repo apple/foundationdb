@@ -870,7 +870,7 @@ All future objects are a subclass of the :class:`Future` type.
 
             |future-cancel-blurb|
 
-        .. classmethod:: Future.wait_for_any(*futures) -> Fixnum
+        .. classmethod:: Future.wait_for_any(\*futures) -> Fixnum
 
             Does not return until at least one of the given future objects is ready. Returns the index in the parameter list of a ready future object.
 
