@@ -638,8 +638,9 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 			std::string content = r->content;
 			doc.parse<0>((char *)content.c_str());
 
-			xml_node<> *result = doc.first_node("ListBucketResult");
-			if(result == nullptr) {
+			// There should be exactly one node
+			xml_node<> *result = doc.first_node();
+			if(result == nullptr || strcmp(result->name(), "ListBucketResult") != 0) {
 				throw http_bad_response();
 			}
 
@@ -946,8 +947,9 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEn
 
 		doc.parse<0>((char *)content.c_str());
 
-		xml_node<> *result = doc.first_node("InitiateMultipartUploadResult");
-		if(result != nullptr) {
+		// There should be exactly one node
+		xml_node<> *result = doc.first_node();
+		if(result != nullptr && strcmp(result->name(), "InitiateMultipartUploadResult") == 0) {
 			xml_node<> *id = result->first_node("UploadId");
 			if(id != nullptr) {
 				return id->value();
