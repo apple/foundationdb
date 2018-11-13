@@ -138,7 +138,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &url, std::string *resourceFromURL, std::string *error) {
+Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &url, std::string *resourceFromURL, std::string *error, ParametersT *ignored_parameters) {
 	if(resourceFromURL)
 		resourceFromURL->clear();
 
@@ -165,12 +165,28 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			if(name.size() == 0)
 				break;
 			StringRef value = t.eat("&");
+
+			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is known to BlobStoreEndpoint.
+			// If it is, then we will set it to a good value or throw below, so the dummy set has no bad side effects.
+			bool known = knobs.set(name, 0);
+
+			// If the parameter is not known to BlobStoreEndpoint then throw unless there is an ignored_parameters set to add it to
+			if(!known) {
+				if(ignored_parameters == nullptr) {
+					throw format("%s is not a valid parameter name", name.toString().c_str());
+				}
+				(*ignored_parameters)[name.toString()] = value.toString();
+				continue;
+			}
+
+			// The parameter is known to BlobStoreEndpoint so it must be numeric and valid.
 			char *valueEnd;
 			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
 			if(*valueEnd || (ivalue == 0 && value.toString() != "0"))
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
-			if(!knobs.set(name, ivalue))
-				throw format("%s is not a valid parameter name", name.toString().c_str());
+
+			// It should not be possible for this set to fail now since the dummy set above had to have worked.
+			ASSERT(knobs.set(name, ivalue));
 		}
 
 		if(resourceFromURL != nullptr)
