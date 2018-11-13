@@ -1030,6 +1030,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send( rd );
 					return Void();
 				} else {
