@@ -215,6 +215,7 @@ public:
 	double MAX_RECOVERY_TIME;
 
 	// Resolver
+	int64_t KEY_BYTES_PER_SAMPLE;
 	int64_t SAMPLE_OFFSET_PER_KEY;
 	double SAMPLE_EXPIRATION_TIME;
 	double SAMPLE_POLL_TIME;
