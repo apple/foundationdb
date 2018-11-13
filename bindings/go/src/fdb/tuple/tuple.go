@@ -217,7 +217,7 @@ func (p *packer) encodeBigInt(i *big.Int) {
 		// For large negative numbers whose absolute value begins with 0xff bytes,
 		// the transformed bytes may begin with 0x00 bytes. However, intBytes
 		// will only contain the non-zero suffix, so this loop is needed to make
-		// the value written be the correct length
+		// the value written be the correct length.
 		for i := len(intBytes); i < length; i++ {
 			p.putByte(0x00)
 		}
