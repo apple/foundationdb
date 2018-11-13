@@ -1032,7 +1032,9 @@ public:
 	void addref() { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
 	void delref() { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
-	static std::string getURLFormat() { return BlobStoreEndpoint::getURLFormat(true); }
+	static std::string getURLFormat() {
+		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
+	}
 
 	virtual ~BackupContainerBlobStore() {}
 
