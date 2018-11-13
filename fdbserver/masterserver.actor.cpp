@@ -1274,8 +1274,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	for(auto& dc : self->primaryDcId) {
 		tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
 	}
-	for(auto& dc : self->remoteDcIds) {
-		tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+	if(self->configuration.usableRegions > 1) {
+		for(auto& dc : self->remoteDcIds) {
+			tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+		}
 	}
 
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
