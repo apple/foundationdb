@@ -787,6 +787,8 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	// Ordinarily we pass through this loop once and recover.  We go around the loop if recovery stalls for more than a second,
 	// a provisional master is initialized, and an "emergency transaction" is submitted that might change the configuration so that we can
 	// finish recovery.
+
+	state std::map<Optional<Value>,int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<vector<Standalone<CommitTransactionRef>>> recruitments = recruitEverything( self, seedServers, oldLogSystem );
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(1.0));
@@ -818,6 +820,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 				}
 
 				if(self->configuration != oldConf) { //confChange does not trigger when including servers
+					self->dcId_locality = originalLocalityMap;
 					recruitments = recruitEverything( self, seedServers, oldLogSystem );
 				}
 			}
@@ -1266,6 +1269,14 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
+
+	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
+	for(auto& dc : self->primaryDcId) {
+		tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+	}
+	for(auto& dc : self->remoteDcIds) {
+		tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+	}
 
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
 	mmApplied = tr.mutations.size();
