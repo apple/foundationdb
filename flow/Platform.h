@@ -475,6 +475,9 @@ inline static void flushOutputStreams() { fflush(NULL); }
 
 #define crashAndDie() (*(volatile int*)0 = 0)
 
+#ifdef _WIN32
+#define strcasecmp stricmp
+#endif
 
 #if defined(__GNUG__)
 #define DEFAULT_CONSTRUCTORS(X) \
