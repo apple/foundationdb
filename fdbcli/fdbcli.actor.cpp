@@ -1620,7 +1620,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		ret=false;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
-		printf("ERROR: The region configuration cannot be changed while simultaneously reducing usable_regions\n");
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
@@ -1729,7 +1729,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		ret=false;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
-		printf("ERROR: The region configuration cannot be changed while simultaneously reducing usable_regions\n");
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
 		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
