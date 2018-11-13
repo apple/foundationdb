@@ -86,7 +86,7 @@ const Value datacenterReplicasValue( int const& );
 Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
 int decodeDatacenterReplicasValue( ValueRef const& );
 
-//    "\xff\x02/TLogDatacenters/[[datacenterID]]"
+//    "\xff\x02/tLogDatacenters/[[datacenterID]]"
 extern const KeyRangeRef tLogDatacentersKeys;
 extern const KeyRef tLogDatacentersPrefix;
 const Key tLogDatacentersKeyFor( Optional<Value> dcID );
