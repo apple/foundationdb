@@ -311,7 +311,20 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
-					if(oldConfig.usableRegions==1 && newConfig.usableRegions==2) {
+					if(oldConfig.usableRegions==2 && newConfig.usableRegions==1) {
+						//cannot change region configuration
+						std::map<Key,int32_t> dcId_priority;
+						for(auto& it : newConfig.regions) {
+							dcId_priority[it.dcId] = it.priority;
+						}
+						for(auto& it : oldConfig.regions) {
+							if(!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
+								return ConfigurationResult::REGIONS_CHANGED;
+							}
+						}
+					}
+
+					if(oldConfig.usableRegions != newConfig.usableRegions) {
 						//must only have one region with priority >= 0
 						int activeRegionCount = 0;
 						for(auto& it : newConfig.regions) {

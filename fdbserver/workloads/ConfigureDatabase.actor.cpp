@@ -29,11 +29,14 @@
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
 static const char* redundancies[] = { "single", "double", "triple" };
 
-std::string generateRegions(int& regions) {
+std::string generateRegions() {
 	std::string result;
 	if(g_simulator.physicalDatacenters == 1 || (g_simulator.physicalDatacenters == 2 && g_random->random01() < 0.25) || g_simulator.physicalDatacenters == 3) {
-		regions = 1;
 		return " usable_regions=1 regions=\"\"";
+	}
+
+	if(g_random->random01() < 0.25) {
+		return format(" usable_regions=%d", g_random->randomInt(1,3));
 	}
 
 	int primaryPriority = 1;
@@ -180,16 +183,9 @@ std::string generateRegions(int& regions) {
 
 	if(g_random->random01() < 0.8) {
 		regionArr.push_back(remoteObj);
-		if(g_random->random01() < 0.8) {
-			regions = 2;
-			result += " usable_regions=2";
-		} else {
-			regions = 1;
-			result += " usable_regions=1";
+		if(g_random->random01() < 0.25) {
+			result += format(" usable_regions=%d", g_random->randomInt(1,3));
 		}
-	} else {
-		regions = 1;
-		result += " usable_regions=1";
 	}
 
 	result += " regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
@@ -320,15 +316,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if(g_simulator.physicalDatacenters == 2 || g_simulator.physicalDatacenters > 3) {
 					maxRedundancies--; //There are not enough machines for triple replication in fearless configurations
 				}
-				int redundancy = g_random->randomInt( 0, maxRedundancies);
+				int redundancy = g_random->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
 
 				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
 					config = "three_data_hall ";
 				}
 
-				state int regions = 1;
-				config += generateRegions(regions);
+				config += generateRegions();
 
 				if (g_random->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());

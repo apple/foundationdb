@@ -1610,12 +1610,17 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		ret=false;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		printf("ERROR: When usable_regions=2, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		printf("ERROR: When changing from usable_regions=1 to usable_regions=2, only one region can have priority >= 0\n");
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously reducing usable_regions\n");
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
@@ -1714,13 +1719,18 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		ret=false;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		printf("ERROR: When usable_regions=2, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		printf("ERROR: When changing from usable_regions=1 to usable_regions=2, only one region can have priority >= 0\n");
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
 		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously reducing usable_regions\n");
+		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
