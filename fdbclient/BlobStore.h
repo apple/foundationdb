@@ -125,7 +125,13 @@ public:
 			resource = "<name>";
 		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]", resource);
 	}
-	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr);
+
+	typedef std::map<std::string, std::string> ParametersT;
+
+	// Parse url and return a BlobStoreEndpoint
+	// If the url has parameters that BlobStoreEndpoint can't consume then an error will be thrown unless ignored_parameters is given in which case
+	// the unconsumed parameters will be added to it.
+	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr, ParametersT *ignored_parameters = nullptr);
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters.
 	std::string getResourceURL(std::string resource);
