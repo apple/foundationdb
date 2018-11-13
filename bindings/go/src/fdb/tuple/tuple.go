@@ -214,6 +214,10 @@ func (p *packer) encodeBigInt(i *big.Int) {
 			p.putByte(byte(intZeroCode - length))
 		}
 
+		// For large negative numbers whose absolute value begins with 0xff bytes,
+		// the transformed bytes may begin with 0x00 bytes. However, intBytes
+		// will only contain the non-zero suffix, so this loop is needed to make
+		// the value written be the correct length
 		for i := len(intBytes); i < length; i++ {
 			p.putByte(0x00)
 		}
@@ -369,6 +373,11 @@ func decodeInt(b []byte) (interface{}, int) {
 		return ret, n + 1
 	}
 
+	// The encoded value claimed to be positive yet when put in an int64
+	// produced a negative value. This means that the number must be a positive
+	// 64-bit value that uses the most significant bit. This can be fit in a
+	// uint64, so return that. Note that this is the *only* time we return
+	// a uint64.
 	return uint64(ret), n + 1
 }
 
@@ -455,7 +464,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			el, off = decodeString(b[i:])
 		case negIntStart+1 < b[i] && b[i] < posIntEnd:
 			el, off = decodeInt(b[i:])
-		case negIntStart+1 == b[i] && (b[i+1] & 0x80 != 0):
+		case negIntStart+1 == b[i] && (b[i+1]&0x80 != 0):
 			el, off = decodeInt(b[i:])
 		case negIntStart <= b[i] && b[i] <= posIntEnd:
 			el, off = decodeBigInt(b[i:])
