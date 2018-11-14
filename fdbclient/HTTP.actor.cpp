@@ -22,7 +22,6 @@
 #include "fdbclient/md5/md5.h"
 #include "fdbclient/libb64/encode.h"
 #include <cctype>
-#include "fdbclient/xml2json.hpp"
 
 namespace HTTP {
 
