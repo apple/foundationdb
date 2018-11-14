@@ -24,40 +24,39 @@ FROM ubuntu:18.04
 RUN apt-get update && \
 	apt-get install -y wget=1.19.4-1ubuntu2 \
 	dnsutils=1:9.11.3+dfsg-1ubuntu1.2 && \
-	rm -r /var/lib/apt/lists/*  
+	rm -r /var/lib/apt/lists/*
 
 # Install FoundationDB Binaries
 
 ARG FDB_VERSION
 ARG FDB_WEBSITE=https://www.foundationdb.org
 
-RUN mkdir -p /var/fdb/tmp
 WORKDIR /var/fdb/tmp
-ADD $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz .
-RUN tar -xzf fdb_$FDB_VERSION.tar.gz --strip-components=1
-RUN rm fdb_$FDB_VERSION.tar.gz
-RUN chmod u+x fdb*
-RUN mv fdb* /usr/bin
+RUN wget $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz && \
+	tar -xzf fdb_$FDB_VERSION.tar.gz --strip-components=1 && \
+	rm fdb_$FDB_VERSION.tar.gz && \
+	chmod u+x fdb* && \
+	mv fdb* /usr/bin && \
+	rm -r /var/fdb/tmp
+
 WORKDIR /var/fdb
-RUN rm -r tmp
 
 # Install FoundationDB Client Libraries
 
 ARG FDB_ADDITIONAL_VERSIONS="5.1.7"
 
-RUN mkdir -p scripts
-COPY download_multiversion_libraries.bash scripts
+COPY download_multiversion_libraries.bash scripts/
 
-ADD $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so /usr/lib/libfdb_c.so
-RUN bash scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS
+RUN wget $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -O /usr/lib/libfdb_c.so && \
+	bash scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS
 
 # Set Up Runtime Scripts and Directoris
 
-COPY fdb.bash scripts
-COPY create_server_environment.bash scripts
-COPY create_cluster_file.bash scripts
-RUN chmod u+x scripts/*.bash
-RUN mkdir -p logs
+COPY fdb.bash scripts/
+COPY create_server_environment.bash scripts/
+COPY create_cluster_file.bash scripts/
+RUN chmod u+x scripts/*.bash && \
+	mkdir -p logs
 VOLUME /var/fdb/data
 
 CMD /var/fdb/scripts/fdb.bash
