@@ -60,15 +60,6 @@ namespace HTTP {
 		return !fail_if_header_missing;
 	}
 
-	void Response::convertToJSONifXML() {
-		auto i = headers.find("Content-Type");
-		if (i != headers.end() && i->second == "application/xml") {
-			content = xml2json(content.c_str());
-			contentLen = content.length();
-			headers["Content-Type"] = "application/json";
-		}
-	}
-
 	std::string Response::toString() {
 		std::string r = format("Response Code: %d\n", code);
 		r += format("Response ContentLen: %lld\n", contentLen);

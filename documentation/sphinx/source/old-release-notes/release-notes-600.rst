@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.14
+6.0.15
 ======
 
 Features
@@ -15,6 +15,7 @@ Features
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
 * TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
 * Added the ``fileconfigure`` command to fdbcli, which configures a database from a JSON document. [6.0.10] `(PR #713) <https://github.com/apple/foundationdb/pull/713>`_
+* Backup-to-blobstore now accepts a "bucket" URL parameter for setting the bucket name where backup data will be read/written.  [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
 
 Performance
 -----------
@@ -30,6 +31,8 @@ Performance
 * Significantly reduced master recovery times for clusters with large amounts of data. [6.0.14] `(PR #836) <https://github.com/apple/foundationdb/pull/836>`_
 * Reduced read and commit latencies for clusters which are processing transactions larger than 1MB. [6.0.14] `(PR #851) <https://github.com/apple/foundationdb/pull/851>`_
 * Significantly reduced recovery times when executing rollbacks on the memory storage engine. [6.0.14] `(PR #821) <https://github.com/apple/foundationdb/pull/821>`_
+* Clients update their key location cache much more efficiently after storage server reboots. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Tuned multiple resolver configurations to do a better job balancing work between each resolver. [6.0.15] `(PR #911) <https://github.com/apple/foundationdb/pull/911>`_
 
 Fixes
 -----
@@ -59,6 +62,12 @@ Fixes
 * Excluding a process that was both the cluster controller and something else would cause two recoveries instead of one. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * Configuring from ``three_datacenter`` to ``three_datacenter_fallback`` would cause a lot of unnecessary data movement. [6.0.12] `(PR #782) <https://github.com/apple/foundationdb/pull/782>`_
 * Very rarely, backup snapshots would stop making progress. [6.0.14] `(PR #837) <https://github.com/apple/foundationdb/pull/837>`_
+* Sometimes data distribution calculated the size of a shard incorrectly. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Changing the storage engine configuration would not effect which storage engine was used by the transaction logs. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* On exit, fdbmonitor will only kill its child processes instead of its process group when run without the daemonize option. [6.0.15] `(PR #826) <https://github.com/apple/foundationdb/pull/826>`_
+* HTTP client used by backup-to-blobstore now correctly treats response header field names as case insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
+* Blobstore REST client was not following the S3 API in several ways (bucket name, date, and response formats). [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
+* Data distribution could queue shard movements for restoring replication at a low priority. [6.0.15] `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
 
 Fixes only impacting 6.0.0+
 ---------------------------
@@ -74,6 +83,10 @@ Fixes only impacting 6.0.0+
 * The transaction logs were doing a lot of unnecessary disk writes. [6.0.12] `(PR #784) <https://github.com/apple/foundationdb/pull/784>`_
 * The master will recover the transaction state store from local transaction logs if possible. [6.0.12] `(PR #801) <https://github.com/apple/foundationdb/pull/801>`_
 * A bug in status collection led to various workload metrics being missing and the cluster reporting unhealthy. [6.0.13] `(PR #834) <https://github.com/apple/foundationdb/pull/834>`_
+* Data distribution did not stop tracking certain unhealthy teams, leading to incorrect status reporting. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
+* Fixed a variety of problems related to changing between different region configurations. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_ `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
+* fdbcli protects against configuration changes which could cause irreversible damage to a cluster. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_ `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
+* Significantly reduced both client and server memory usage in clusters with large amounts of data and usable_regions=2. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 
 Status
 ------
@@ -91,8 +104,12 @@ Bindings
 * C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] `(Issue #518) <https://github.com/apple/foundationdb/issues/518>`_
 * The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] `(PR #710) <https://github.com/apple/foundationdb/pull/710>`_
 * Java: the `Versionstamp::getUserVersion() </javadoc/com/apple/foundationdb/tuple/Versionstamp.html#getUserVersion-->`_ method did not handle user versions greater than ``0x00FF`` due to operator precedence errors. [6.0.11] `(Issue #761) <https://github.com/apple/foundationdb/issues/761>`_
-* Python bindings didn't work with Python 3.7 because of the new `async` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
-
+* Python: bindings didn't work with Python 3.7 because of the new `async` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
+* Go: `PrefixRange` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
+* Go: Add Tuple layer support for `uint`, `uint64`, and `*big.Int` integers up to 255 bytes. Integer values will be decoded into the first of `int64`, `uint64`, or `*big.Int` in which they fit. `(PR #915) <https://github.com/apple/foundationdb/pull/915>`_ [6.0.15]
+* Ruby: Add Tuple layer support for integers up to 255 bytes. `(PR #915) <https://github.com/apple/foundationdb/pull/915>`_ [6.0.15]
+* Python: bindings didn't work with Python 3.7 because of the new ``async`` keyword. [6.0.13] `(Issue #830) <https://github.com/apple/foundationdb/issues/830>`_
+* Go: ``PrefixRange`` didn't correctly return an error if it failed to generate the range. [6.0.15] `(PR #878) <https://github.com/apple/foundationdb/pull/878>`_
 
 Other Changes
 -------------

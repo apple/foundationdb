@@ -170,7 +170,7 @@ module FDB
           Proc.new do || @setfunc.call(v[0], nil) end
         when String then
           Proc.new do |opt=nil| @setfunc.call(v[0], (opt.nil? ? opt : opt.encode('UTF-8')) ) end
-        when Fixnum then
+        when Integer then
           Proc.new do |opt| @setfunc.call(v[0], [opt].pack("q<")) end
         else
           raise ArgumentError, "Don't know how to set options of type #{v[2].class}"
