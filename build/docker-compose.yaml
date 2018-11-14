@@ -1,0 +1,40 @@
+version: "3"
+
+services:
+  common: &common
+    image: foundationdb-build:0.0.2
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  build-setup: &build-setup
+    <<: *common
+    depends_on: [common]
+    volumes:
+      - ..:/foundationdb
+    working_dir: /foundationdb
+
+  build-docs:
+    <<: *build-setup
+    command: make docpackage
+
+  build-release: &build-release
+    <<: *build-setup
+    environment:
+      - RELEASE=true
+    command: make packages
+
+  build-snapshot: &build-snapshot
+    <<: *build-setup
+    environment:
+      - RELEASE=false
+    command: make packages
+
+  build-prb:
+    <<: *build-snapshot
+
+  shell:
+    <<: *build-setup
+    volumes:
+      - ..:/foundationdb
+    entrypoint: /bin/bash
