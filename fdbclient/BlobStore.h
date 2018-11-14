@@ -197,6 +197,9 @@ public:
 	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
 	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
 
+	// Check if a bucket exists
+	Future<bool> bucketExists(std::string const &bucket);
+
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);
 
