@@ -660,7 +660,7 @@ The ``log_routers`` configuration option determines the number of log routers re
 Migrating a database to use a region configuration
 --------------------------------------------------
 
-To configure an existing database to use a region configuration do the following steps::
+To configure an existing database to use a region configuration do the following steps:
 
     1. Ensure all processes have their dcid locality set on the command line. All processes should exist in the same data center. If you are converting from a ``three_datacenter`` configuration, you will first need to configure down to using a single data center by changing the replication mode. Then exclude the machines in all data centers but the one that will become the initial active region.
 
@@ -681,7 +681,7 @@ When a primary data center fails, the cluster will go into a degraded state. It 
 
 .. warning:: While a data center has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed so that once the other data center comes back online it can replay history to catch back up.
 
-To drop the dead data center do the follow steps::
+To drop the dead data center do the follow steps:
 
     1. Configure the region configuration so that the dead data center has a negative priority.
 
@@ -694,7 +694,7 @@ If you are running in a configuration without a satellite data center, or you ha
 Region change safety
 --------------------
 
-The steps described above for both adding and removing replicas are enforced by ``fdbcli``. The follow are the specific conditions checked by ``fdbcli``::
+The steps described above for both adding and removing replicas are enforced by ``fdbcli``. The follow are the specific conditions checked by ``fdbcli``:
 
     * You cannot change the ``regions`` configuration while also changing ``usable_regions``.
 
