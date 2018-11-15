@@ -372,6 +372,8 @@ In addition to the more commonly used modes listed above, this version of Founda
 
     FoundationDB attempts to replicate data across two datacenters and will stay up with only two available. Data is triple replicated.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.
 
+.. warning:: ``three_datacenter`` mode is not compatible with region configuration.
+
 Changing redundancy mode
 ------------------------
 
@@ -612,6 +614,8 @@ The ``satellite_redundancy_mode`` is configured per region, and specifies how ma
 .. warning:: In release 6.0 this is implemented by waiting for all but 2 of the transaction logs. This means if you configure more than 4 satellite logs, it will still need to wait for replies from both data centers.
 
 The number of ``satellite_logs`` is also configured per region. It represents the desired number of transaction logs that should be recruited in the satellite data centers. The satellite transaction logs do slightly less work than the primary data center transaction logs. So while you should keep the ratio of logs to replicas roughly equal in the primary data center and the satellites, you may be able to balance performance with slightly less satellite transaction logs.
+
+The number of replicas in each region is controlled by redundancy level. For example ``double`` mode will put 2 replicas in each region, for a total of 4 replicas.
 
 Asymmetric configurations
 -------------------------
