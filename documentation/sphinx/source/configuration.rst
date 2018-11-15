@@ -260,7 +260,7 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory``, you should also increase the ``memory`` parameter by the same amount.
 * ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
 * ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
-* ``locality_dcid``: Data center identifier key. All processes physically located in a data center should share the id. No default value. If you are depending on data center based replication this must be set on all processes.
+* ``locality_dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
 * ``locality_data_hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
 * ``io_trust_seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
 
@@ -529,26 +529,28 @@ This is made possible by combining two features. The first is the ability to sup
 
 This is similar to ``fdbdr``, except that the asynchronous replication is done within a single cluster instead of between different FoundationDB clusters.
 
-The second feature is the ability to add a synchronous replica of the mutation log in a different data center. Because this datacenter is only holding a transient copy of the mutations being committed to the database, only a few FoundationDB processes are required to fulfill this role.
+The second feature is the ability to add a synchronous replica of the mutation log in a different datacenter. Because this datacenter is only holding a transient copy of the mutations being committed to the database, only a few FoundationDB processes are required to fulfill this role.
 
-The benefit of holding the mutation log external to the primary data center is that if the primary data center fails we will still have access to the most recent commits. This allows the remote replica to catch up to the primary. Once the remote replica has applied all the mutations it can start accepting new commits without suffering any data loss.
+The benefit of holding the mutation log external to the primary datacenter is that if the primary datacenter fails we will still have access to the most recent commits. This allows the remote replica to catch up to the primary. Once the remote replica has applied all the mutations it can start accepting new commits without suffering any data loss.
 
-An example configuration would be four total data centers, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter in each coast would only have a few FoundationDB processes.
+An example configuration would be four total datacenters, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter in each coast would only have a few FoundationDB processes.
 
-When everything is healthy, writes need to be made durable in both west coast data centers before a commit can succeed. If the data centers are close to each other, this can add as little as 2ms to commit latencies. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from the each coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.
+When everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. If the datacenters are close to each other, this can add as little as 2ms to commit latencies. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from the each coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.
 
-If either west coast data center fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point we will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.
+If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point we will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.
 
-In the event that the west coast has failed for long enough that we no longer have enough disk space to continue storing the mutation log, we can drop the replica completely. This decision is not automatic, and requires a manual change to the configuration. The database will then act as a single data center database until the west coast comes back online. Because we have dropped to west coast replica completely, to bring the west coast back online we will have to copy all the data between the regions.
+In the event that the west coast has failed for long enough that we no longer have enough disk space to continue storing the mutation log, we can drop the replica completely. This decision is not automatic, and requires a manual change to the configuration. The database will then act as a single datacenter database until the west coast comes back online. Because we have dropped to west coast replica completely, to bring the west coast back online we will have to copy all the data between the regions.
 
 Region failover generally only requires a few seconds to complete.
 
-Specifying data centers
------------------------
+Specifying datacenters
+----------------------
 
-To use region configurations all processes in the cluster need to specify what data center they are in. This can be done on the command line with either ``--locality_dcid`` or ``--datacenter_id``. This data center identifier is case sensitive.
+We use the term ``datacenter`` to denote unique locations that are failure independent from one another. Cloud providers generally expose this property of failure independence with Availability Zones.
 
-Clients should also specify their data center with the database option ``datacenter_id``. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so you will see large tail latencies on reads.
+To use region configurations all processes in the cluster need to specify what datacenter they are in. This can be done on the command line with either ``--locality_dcid`` or ``--datacenter_id``. This datacenter identifier is case sensitive.
+
+Clients should also specify their datacenter with the database option ``datacenter_id``. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so you will see large tail latencies on reads.
 
 Changing the region configuration
 ---------------------------------
@@ -581,46 +583,46 @@ The ``regions`` object in the json document should be a array. Each element of t
 
 Each region is described using a object that contains an array of ``datacenters``. Each region may also optionally provide a ``satellite_redundancy_mode`` and ``satellite_logs``.
 
-Each datacenter is described with an object that contains the ``id`` and ``priority`` of that data center. Data centers which hold a full replica of the data are referred to as primary data centers. Data centers that only store transaction logs are referred to as satellite data centers. To specify a data center is a satellite, it needs to include ``"satellite" : 1``. The priorities of satellite data centers are only compared to other satellites data centers in the same region. The priorities of primary data centers are only compared to other primary data centers.
+Each datacenter is described with an object that contains the ``id`` and ``priority`` of that datacenter. Datacenters which hold a full replica of the data are referred to as primary datacenters. Datacenters that only store transaction logs are referred to as satellite datacenters. To specify a datacenter is a satellite, it needs to include ``"satellite" : 1``. The priorities of satellite datacenters are only compared to other satellites datacenters in the same region. The priorities of primary datacenters are only compared to other primary datacenters.
 
 .. warning:: In release 6.0, FoundationDB supports at most two regions.
 
-Each region can only have one primary data center. A negative priority for a data center denotes that the system should not recover the transaction subsystem in that data center. The region with the transaction subsystem is referred to as the active region.
+Each region can only have one primary datacenter. A negative priority for a datacenter denotes that the system should not recover the transaction subsystem in that datacenter. The region with the transaction subsystem is referred to as the active region.
 
-One primary data center must have a priority >= 0. The cluster will make the region with the highest priority the active region. If two data centers have equal priority the cluster will make one of them the active region arbitrarily.
+One primary datacenter must have a priority >= 0. The cluster will make the region with the highest priority the active region. If two datacenters have equal priority the cluster will make one of them the active region arbitrarily.
 
-The ``satellite_redundancy_mode`` is configured per region, and specifies how many copies of each mutation should be replicated to the satellite data centers.
+The ``satellite_redundancy_mode`` is configured per region, and specifies how many copies of each mutation should be replicated to the satellite datacenters.
 
 ``one_satellite_single`` mode
 
-    Keep a single copy of the mutation log in the satellite data center with the highest priority. If the highest priority satellite is unavailable it will put the transaction log in the satellite data center with the next highest priority.
+    Keep a single copy of the mutation log in the satellite datacenter with the highest priority. If the highest priority satellite is unavailable it will put the transaction log in the satellite datacenter with the next highest priority.
 
 ``one_satellite_double`` mode
 
-    Keep a two copies of the mutation log in the satellite data center with the highest priority.
+    Keep a two copies of the mutation log in the satellite datacenter with the highest priority.
 
 ``one_satellite_triple`` mode
 
-    Keep a three copies of the mutation log in the satellite data center with the highest priority.
+    Keep a three copies of the mutation log in the satellite datacenter with the highest priority.
 
 ``two_satellite_safe`` mode
 
-    Keep two copies of the mutation log in each of the two satellite data centers with the highest priorities, for a total of four copies of each mutation. This mode will protect against the simultaneous loss of both the primary and one of the satellite data centers. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining data center.
+    Keep two copies of the mutation log in each of the two satellite datacenters with the highest priorities, for a total of four copies of each mutation. This mode will protect against the simultaneous loss of both the primary and one of the satellite datacenters. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining datacenter.
 
 ``two_satellite_fast`` mode
 
-    Keep two copies of the mutation log in each of the two satellite data centers with the highest priorities, for a total of four copies of each mutation. The proxies will only wait for one of the two satellite data centers to make the mutations durable before considering a commit successful. This will reduce tail latencies caused by network issues between data centers. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining data center.
+    Keep two copies of the mutation log in each of the two satellite datacenters with the highest priorities, for a total of four copies of each mutation. The proxies will only wait for one of the two satellite datacenters to make the mutations durable before considering a commit successful. This will reduce tail latencies caused by network issues between datacenters. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining datacenter.
 
-.. warning:: In release 6.0 this is implemented by waiting for all but 2 of the transaction logs. This means if you configure more than 4 satellite logs, it will still need to wait for replies from both data centers.
+.. warning:: In release 6.0 this is implemented by waiting for all but 2 of the transaction logs. This means if you configure more than 4 satellite logs, it will still need to wait for replies from both datacenters.
 
-The number of ``satellite_logs`` is also configured per region. It represents the desired number of transaction logs that should be recruited in the satellite data centers. The satellite transaction logs do slightly less work than the primary data center transaction logs. So while you should keep the ratio of logs to replicas roughly equal in the primary data center and the satellites, you may be able to balance performance with slightly less satellite transaction logs.
+The number of ``satellite_logs`` is also configured per region. It represents the desired number of transaction logs that should be recruited in the satellite datacenters. The satellite transaction logs do slightly less work than the primary datacenter transaction logs. So while you should keep the ratio of logs to replicas roughly equal in the primary datacenter and the satellites, you may be able to balance performance with slightly less satellite transaction logs.
 
 The number of replicas in each region is controlled by redundancy level. For example ``double`` mode will put 2 replicas in each region, for a total of 4 replicas.
 
 Asymmetric configurations
 -------------------------
 
-The fact that satellite policies are configured per region allows for asymmetric configurations. For example, you can have a three datacenter setup where you have two data centers on the west coast (WC1, WC2) and one data center on the east coast (EC1). We set the west coast region as our preferred active region by setting the priority of its primary data center higher than the east coast data center. The west coast region should have a satellite policy configured, so that when it is active we are making mutations durable in both west coast data centers. In the rare event that one of our west coast data center have failed, we will fail over to the east coast data center. Because this region does not a satellite data center, the mutations will only be made durable in one data center while the transaction subsystem is located here. However this is justifiable because the region will only be active if we have already lost a data center.
+The fact that satellite policies are configured per region allows for asymmetric configurations. For example, you can have a three datacenter setup where you have two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). We set the west coast region as our preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active we are making mutations durable in both west coast datacenters. In the rare event that one of our west coast datacenter have failed, we will fail over to the east coast datacenter. Because this region does not a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However this is justifiable because the region will only be active if we have already lost a datacenter.
 
 This is the region configuration that implements the example::
 
@@ -648,7 +650,7 @@ The ``usable_regions`` configuration option determines the number of regions whi
 
 .. warning:: In release 6.0 we only support values of 1 or 2, to match the maximum number of regions that can be defined in the ``regions`` json object.
 
-Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will immediately drop the replicas store in the remote region. During these changes, only one primary data center can have priority >= 0. This enforces exactly which region will lose its replica.
+Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will immediately drop the replicas store in the remote region. During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
 
 Changing the log routers configuration
 --------------------------------------
@@ -666,34 +668,34 @@ Migrating a database to use a region configuration
 
 To configure an existing database to use a region configuration do the following steps:
 
-    1. Ensure all processes have their dcid locality set on the command line. All processes should exist in the same data center. If you are converting from a ``three_datacenter`` configuration, you will first need to configure down to using a single data center by changing the replication mode. Then exclude the machines in all data centers but the one that will become the initial active region.
+    1. Ensure all processes have their dcid locality set on the command line. All processes should exist in the same datacenter. If you are converting from a ``three_datacenter`` configuration, you will first need to configure down to using a single datacenter by changing the replication mode. Then exclude the machines in all datacenters but the one that will become the initial active region.
 
-    2. Configure the region configuration. The data center with all the existing processes should have a non-negative priority. The region which will eventually store the remote replica should be added with a negative priority.
+    2. Configure the region configuration. The datacenter with all the existing processes should have a non-negative priority. The region which will eventually store the remote replica should be added with a negative priority.
 
     3. Add processes to the cluster in the remote region. These processes will not take data yet, but need to be added to the cluster. If they are added before the region configuration is set they will be assigned data like any other FoundationDB process, which will lead to high latencies.
 
     4. Configure usable_regions=2. This will cause the cluster to start copying data between the regions.
 
-    5. Watch status and wait until data movement is complete. This will mean signal that the remote data center has a full replica of all of the data in the database.
+    5. Watch status and wait until data movement is complete. This will mean signal that the remote datacenter has a full replica of all of the data in the database.
 
-    6. Change the region configuration to have a non-negative priority for the primary data centers in both regions. This will enable automatic failover between regions.
+    6. Change the region configuration to have a non-negative priority for the primary datacenters in both regions. This will enable automatic failover between regions.
 
-Handling data center failures
------------------------------
+Handling datacenter failures
+----------------------------
 
-When a primary data center fails, the cluster will go into a degraded state. It will recover to the other region and continue accepting commits, however the mutations bound for the other side will build up on the transaction logs. Eventually, the disks on the transaction logs will fill up, so the database cannot be left in this condition indefinitely. 
+When a primary datacenter fails, the cluster will go into a degraded state. It will recover to the other region and continue accepting commits, however the mutations bound for the other side will build up on the transaction logs. Eventually, the disks on the transaction logs will fill up, so the database cannot be left in this condition indefinitely. 
 
-.. warning:: While a data center has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed so that once the other data center comes back online it can replay history to catch back up.
+.. warning:: While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed so that once the other datacenter comes back online it can replay history to catch back up.
 
-To drop the dead data center do the follow steps:
+To drop the dead datacenter do the follow steps:
 
-    1. Configure the region configuration so that the dead data center has a negative priority.
+    1. Configure the region configuration so that the dead datacenter has a negative priority.
 
     2. Configure usable_regions=1.
 
-If you are running in a configuration without a satellite data center, or you have lost all machines in a region simultaneously. The ``force_recovery_with_data_loss`` command from ``fdbcli`` allows you to force a recovery to the other region which will discard the portion of the mutation log which did not make it across the WAN. Once the database has recovered, immediately follow the previous steps to drop the dead region the normal way.
+If you are running in a configuration without a satellite datacenter, or you have lost all machines in a region simultaneously. The ``force_recovery_with_data_loss`` command from ``fdbcli`` allows you to force a recovery to the other region which will discard the portion of the mutation log which did not make it across the WAN. Once the database has recovered, immediately follow the previous steps to drop the dead region the normal way.
 
-.. warning:: In 6.0 the ``force_recovery_with_data_loss`` command from ``fdbcli`` can cause data inconsistencies if it is used when processes from both non-satellite data centers are still in the cluster. In general this command has not be tested to same degree as the rest of the codebase, and should only be used in extreme emergencies.
+.. warning:: In 6.0 the ``force_recovery_with_data_loss`` command from ``fdbcli`` can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster. In general this command has not be tested to same degree as the rest of the codebase, and should only be used in extreme emergencies.
 
 Region change safety
 --------------------
@@ -711,31 +713,31 @@ The steps described above for both adding and removing replicas are enforced by 
 Monitoring
 ----------
 
-It is important to ensure the remote replica does not fall too far behind the active replica. To failover between regions all of the mutations need to be flushed from the active replica to the remote replica. If the remote replica is too far behind, this can take a very long time. The version difference between the data centers is available in status json as ``datacenter_version_difference``. This number should be less than 5 million. A large data center version difference could indicate that you need more log routers. It could also be caused by network issues between the regions. If the difference gets too large the remote replica should be dropped, similar to a data center outage that goes on too long.
+It is important to ensure the remote replica does not fall too far behind the active replica. To failover between regions all of the mutations need to be flushed from the active replica to the remote replica. If the remote replica is too far behind, this can take a very long time. The version difference between the datacenters is available in status json as ``datacenter_version_difference``. This number should be less than 5 million. A large datacenter version difference could indicate that you need more log routers. It could also be caused by network issues between the regions. If the difference gets too large the remote replica should be dropped, similar to a datacenter outage that goes on too long.
 
 Because of asymmetric write latencies in the two regions, it important to route client traffic to the currently active region. The current active region is written in the system key space as the key ``\xff/primaryDatacenter``. Clients can read and watch this key after setting the ``read_system_keys`` transaction option.
 
 Choosing coordinators
 ---------------------
 
-Choosing coordinators for a multi-region configuration provides its own set of challenges. A majority of coordinators need to be alive for the cluster to be available. There are two common coordinators setups that allow a cluster to survive the simultaneous loss of a data center and one additional machine.
+Choosing coordinators for a multi-region configuration provides its own set of challenges. A majority of coordinators need to be alive for the cluster to be available. There are two common coordinators setups that allow a cluster to survive the simultaneous loss of a datacenter and one additional machine.
 
-The first is five coordinators in five different data centers. The second is nine total coordinators spread across three data centers. There is some additional benefit to spreading the coordinators across regions rather than data centers. This is because if an entire region fails, it is still possible to recover to the other region if you are willing to accept a small amount of data loss. However, if you have lost a majority of coordinators this becomes much more difficult.
+The first is five coordinators in five different datacenters. The second is nine total coordinators spread across three datacenters. There is some additional benefit to spreading the coordinators across regions rather than datacenters. This is because if an entire region fails, it is still possible to recover to the other region if you are willing to accept a small amount of data loss. However, if you have lost a majority of coordinators this becomes much more difficult.
 
-Additionally, if a data center fails and then the second data center in the region fails 30 seconds later, we can generally survive this scenario. We can survive because the second data center only needs to be alive long enough to copy the tail of the mutation log across the WAN. However if your coordinators are in this second data center, you will still experience an outage.
+Additionally, if a datacenter fails and then the second datacenter in the region fails 30 seconds later, we can generally survive this scenario. We can survive because the second datacenter only needs to be alive long enough to copy the tail of the mutation log across the WAN. However if your coordinators are in this second datacenter, you will still experience an outage.
 
-These considerations mean that best practice is to put three coordinators in the main data centers of each region, and then put three additional coordinators in a third region.
+These considerations mean that best practice is to put three coordinators in the main datacenters of each region, and then put three additional coordinators in a third region.
 
-Comparison to other multiple data center configurations
--------------------------------------------------------
+Comparison to other multiple datacenter configurations
+------------------------------------------------------
 
 Region configuration provides very similar functionality to ``fdbdr``.
 
-If you are not using satellite data centers, the main benefit of a region configuration compared to ``fdbdr`` is that each data center is able to restore replication even after losing all copies of a key range. If we simultaneously lose two storage servers in a double replicated cluster, with ``fdbdr`` we would be forced to fail over to the remote region. With region configuration the cluster will automatically copy the missing key range from the remote replica back to the primary data center.
+If you are not using satellite datacenters, the main benefit of a region configuration compared to ``fdbdr`` is that each datacenter is able to restore replication even after losing all copies of a key range. If we simultaneously lose two storage servers in a double replicated cluster, with ``fdbdr`` we would be forced to fail over to the remote region. With region configuration the cluster will automatically copy the missing key range from the remote replica back to the primary datacenter.
 
 The main disadvantage of using a region configuration is that the total number of processes we can support in a single region is around half when compared against ``fdbdr``. This is because we have processes for both regions in the same cluster, and some singleton components like our failure monitor will have to do twice as much work. In ``fdbdr`` we have two separate cluster for each region, so the total number of processes can scale to about twice as large as using a region configuration.
 
-Region configuration is better in almost all ways than the ``three_datacenter`` replication mode. Region configuration gives you the same ability to survive the loss of one data center, however we only need to store two full replicas of the database instead of three. Region configuration is almost much more efficient with how it sends mutations across the WAN. The only reason to use ``three_datacenter`` replication is if you need low latency reads from all three locations. 
+Region configuration is better in almost all ways than the ``three_datacenter`` replication mode. Region configuration gives you the same ability to survive the loss of one datacenter, however we only need to store two full replicas of the database instead of three. Region configuration is almost much more efficient with how it sends mutations across the WAN. The only reason to use ``three_datacenter`` replication is if you need low latency reads from all three locations. 
 
 Known limitations
 -----------------
@@ -746,9 +748,9 @@ The 6.0 release still has a number of rough edges related to region configuratio
 
     * ``two_satellite_fast`` does not hide latency properly when configured with more than 4 satellite transaction logs.
 
-    * While a data center has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.
+    * While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.
 
-    * ``force_recovery_with_data_loss`` can cause data inconsistencies if it is used when processes from both non-satellite data centers are still in the cluster.
+    * ``force_recovery_with_data_loss`` can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster.
 
 .. _guidelines-process-class-config:
 
