@@ -736,7 +736,7 @@ Region configuration is better in almost all ways than the ``three_datacenter`` 
 Known limitations
 -----------------
 
-The 6.0 release still has a number of rough edges related to region configuration. This is a collection of all the issues that have been pointed out in the sections above. These issues should be significantly improved in future releases of FoundationDB::
+The 6.0 release still has a number of rough edges related to region configuration. This is a collection of all the issues that have been pointed out in the sections above. These issues should be significantly improved in future releases of FoundationDB:
 
     * FoundationDB supports replicating data to at most two regions.
 
