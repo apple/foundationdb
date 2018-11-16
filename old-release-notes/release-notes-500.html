@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Release Notes &#8212; FoundationDB 5.2</title>
+    <title>Release Notes &#8212; FoundationDB 6.0</title>
     
     <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '5.2.5',
+        VERSION:     '6.0.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -82,39 +82,44 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">5.0.7</a><ul>
+<li><a class="reference internal" href="#id1">5.0.8</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id2">5.0.6</a></li>
-<li><a class="reference internal" href="#id3">5.0.5</a><ul>
-<li><a class="reference internal" href="#id4">Fixes</a></li>
+<li><a class="reference internal" href="#id2">5.0.7</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id5">5.0.4</a><ul>
+<li><a class="reference internal" href="#id4">5.0.6</a></li>
+<li><a class="reference internal" href="#id5">5.0.5</a><ul>
 <li><a class="reference internal" href="#id6">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id7">5.0.3</a><ul>
+<li><a class="reference internal" href="#id7">5.0.4</a><ul>
 <li><a class="reference internal" href="#id8">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id9">5.0.2</a><ul>
+<li><a class="reference internal" href="#id9">5.0.3</a><ul>
 <li><a class="reference internal" href="#id10">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id11">5.0.2</a><ul>
+<li><a class="reference internal" href="#id12">Fixes</a></li>
 <li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#other">Other</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id11">5.0.1</a><ul>
-<li><a class="reference internal" href="#id12">Fixes</a></li>
+<li><a class="reference internal" href="#id13">5.0.1</a><ul>
+<li><a class="reference internal" href="#id14">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id13">5.0.0</a><ul>
-<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id15">5.0.0</a><ul>
+<li><a class="reference internal" href="#id16">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
-<li><a class="reference internal" href="#id14">Fixes</a></li>
+<li><a class="reference internal" href="#id17">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
-<li><a class="reference internal" href="#id15">Bindings</a></li>
+<li><a class="reference internal" href="#id18">Bindings</a></li>
 <li><a class="reference internal" href="#other-changes">Other Changes</a></li>
 <li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
 </ul>
@@ -163,39 +168,44 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">5.0.7</a><ul>
+<li><a class="reference internal" href="#id1">5.0.8</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id2">5.0.6</a></li>
-<li><a class="reference internal" href="#id3">5.0.5</a><ul>
-<li><a class="reference internal" href="#id4">Fixes</a></li>
+<li><a class="reference internal" href="#id2">5.0.7</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id5">5.0.4</a><ul>
+<li><a class="reference internal" href="#id4">5.0.6</a></li>
+<li><a class="reference internal" href="#id5">5.0.5</a><ul>
 <li><a class="reference internal" href="#id6">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id7">5.0.3</a><ul>
+<li><a class="reference internal" href="#id7">5.0.4</a><ul>
 <li><a class="reference internal" href="#id8">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id9">5.0.2</a><ul>
+<li><a class="reference internal" href="#id9">5.0.3</a><ul>
 <li><a class="reference internal" href="#id10">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id11">5.0.2</a><ul>
+<li><a class="reference internal" href="#id12">Fixes</a></li>
 <li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#other">Other</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id11">5.0.1</a><ul>
-<li><a class="reference internal" href="#id12">Fixes</a></li>
+<li><a class="reference internal" href="#id13">5.0.1</a><ul>
+<li><a class="reference internal" href="#id14">Fixes</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id13">5.0.0</a><ul>
-<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id15">5.0.0</a><ul>
+<li><a class="reference internal" href="#id16">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
-<li><a class="reference internal" href="#id14">Fixes</a></li>
+<li><a class="reference internal" href="#id17">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
-<li><a class="reference internal" href="#id15">Bindings</a></li>
+<li><a class="reference internal" href="#id18">Bindings</a></li>
 <li><a class="reference internal" href="#other-changes">Other Changes</a></li>
 <li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
 </ul>
@@ -211,8 +221,24 @@
   <div class="section" id="release-notes">
 <h1>Release Notes</h1>
 <div class="section" id="id1">
-<h2>5.0.7</h2>
+<h2>5.0.8</h2>
+<div class="section" id="features">
+<h3>Features</h3>
+<ul class="simple">
+<li>Support upgrades from 3.0 versions.</li>
+</ul>
+</div>
 <div class="section" id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Blob backups didn&#8217;t retry 429 errors. 429 errors do not count against the retry limit.</li>
+<li>Status was not correctly populating all configuration fields.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id2">
+<h2>5.0.7</h2>
+<div class="section" id="id3">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Blob backups became corrupt when handling non-retryable errors. &lt;<a class="reference external" href="rdar://problem/35289547">rdar://problem/35289547</a>&gt;</li>
@@ -220,12 +246,12 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id2">
+<div class="section" id="id4">
 <h2>5.0.6</h2>
 </div>
-<div class="section" id="id3">
+<div class="section" id="id5">
 <h2>5.0.5</h2>
-<div class="section" id="id4">
+<div class="section" id="id6">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Set a default memory limit of 8GB on all backup and DR executables. This limit is configurable on the command line. &lt;<a class="reference external" href="rdar://problem/34744417">rdar://problem/34744417</a>&gt;</li>
@@ -237,9 +263,9 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id5">
+<div class="section" id="id7">
 <h2>5.0.4</h2>
-<div class="section" id="id6">
+<div class="section" id="id8">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Logs continued to make their data persistent to disk after being removed. &lt;<a class="reference external" href="rdar://problem/33852607">rdar://problem/33852607</a>&gt;</li>
@@ -248,9 +274,9 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id7">
+<div class="section" id="id9">
 <h2>5.0.3</h2>
-<div class="section" id="id8">
+<div class="section" id="id10">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>In rare scenarios, recovery could get stuck for 10 minutes. &lt;<a class="reference external" href="rdar://problem/33782338">rdar://problem/33782338</a>&gt; &lt;<a class="reference external" href="rdar://problem/33780273">rdar://problem/33780273</a>&gt;</li>
@@ -261,9 +287,9 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id9">
+<div class="section" id="id11">
 <h2>5.0.2</h2>
-<div class="section" id="id10">
+<div class="section" id="id12">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Functionality to slowly delete large files with incremental truncation was not enabled. &lt;<a class="reference external" href="rdar://problem/33550683">rdar://problem/33550683</a>&gt;</li>
@@ -284,18 +310,18 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id11">
+<div class="section" id="id13">
 <h2>5.0.1</h2>
-<div class="section" id="id12">
+<div class="section" id="id14">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Bytes input and bytes durable on the log would drift apart due to rounding errors.</li>
 </ul>
 </div>
 </div>
-<div class="section" id="id13">
+<div class="section" id="id15">
 <h2>5.0.0</h2>
-<div class="section" id="features">
+<div class="section" id="id16">
 <h3>Features</h3>
 <ul class="simple">
 <li>All recoveries no longer copy log data before completion. As a result, the fast_recovery_double and fast_recovery_triple configurations have been removed. &lt;<a class="reference external" href="rdar://problem/30235865">rdar://problem/30235865</a>&gt;</li>
@@ -318,7 +344,7 @@
 <li>Added functionality to slowly delete large files with incremental truncation. &lt;<a class="reference external" href="rdar://problem/30193500">rdar://problem/30193500</a>&gt;</li>
 </ul>
 </div>
-<div class="section" id="id14">
+<div class="section" id="id17">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>Fixed a pathology where multiple successive failures could lead to a long 30+ minute availability outage. &lt;<a class="reference external" href="rdar://problem/30235865">rdar://problem/30235865</a>&gt;</li>
@@ -343,7 +369,7 @@
 <li>Added connection counts and establish/close metrics to status json. &lt;<a class="reference external" href="rdar://problem/28393970">rdar://problem/28393970</a>&gt;</li>
 </ul>
 </div>
-<div class="section" id="id15">
+<div class="section" id="id18">
 <h3>Bindings</h3>
 <ul class="simple">
 <li>API version updated to 500.</li>
@@ -421,7 +447,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 26, 2018.<br/>
+      Last updated on Nov 15, 2018.<br/>
     </p>
   </div>
 </footer>

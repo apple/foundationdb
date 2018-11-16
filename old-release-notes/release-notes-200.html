@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Release Notes (2.0) &#8212; FoundationDB 5.2</title>
+    <title>Release Notes (2.0) &#8212; FoundationDB 6.0</title>
     
     <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '5.2.5',
+        VERSION:     '6.0.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -522,12 +522,12 @@
 <ul class="simple">
 <li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
-<li>Support for the <span class="xref std std-ref">Promise/A+ specification</span> with supporting utilities.</li>
+<li>Support for the Promise/A+ specification with supporting utilities.</li>
 <li>Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.</li>
 <li>Added <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code> support.</li>
 <li>Node prints a stack trace if an error occurs in a callback from V8.</li>
 <li>Snapshot transactions can be used in retry loops.</li>
-<li>The <span class="xref std std-ref">methods</span> <code class="docutils literal"><span class="pre">db.setAndWatch</span></code> and <code class="docutils literal"><span class="pre">db.clearAndWatch</span></code> now return an object with a watch member instead of a future.</li>
+<li>The methods <code class="docutils literal"><span class="pre">db.setAndWatch</span></code> and <code class="docutils literal"><span class="pre">db.clearAndWatch</span></code> now return an object with a watch member instead of a future.</li>
 <li>Fix: Could not use the <code class="docutils literal"><span class="pre">'this'</span></code> pointer with the retry decorator.</li>
 <li>Fix: Node transactional decorator didn&#8217;t return a result to the caller if the function was called with a transaction.</li>
 <li>Fix: The program could sometimes crash when watches were manually cancelled.</li>
@@ -604,7 +604,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 26, 2018.<br/>
+      Last updated on Nov 15, 2018.<br/>
     </p>
   </div>
 </footer>

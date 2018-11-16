@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 5.2</title>
+    <title>Configuration &#8212; FoundationDB 6.0</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.2.5',
+        VERSION:     '6.0.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -105,6 +105,21 @@
 <li><a class="reference internal" href="#filesystem">Filesystem</a></li>
 <li><a class="reference internal" href="#durability-and-caching">Durability and caching</a></li>
 <li><a class="reference internal" href="#disk-partitioning">Disk partitioning</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuring-regions">Configuring regions</a><ul>
+<li><a class="reference internal" href="#specifying-datacenters">Specifying datacenters</a></li>
+<li><a class="reference internal" href="#changing-the-region-configuration">Changing the region configuration</a></li>
+<li><a class="reference internal" href="#asymmetric-configurations">Asymmetric configurations</a></li>
+<li><a class="reference internal" href="#changing-the-usable-regions-configuration">Changing the usable_regions configuration</a></li>
+<li><a class="reference internal" href="#changing-the-log-routers-configuration">Changing the log routers configuration</a></li>
+<li><a class="reference internal" href="#migrating-a-database-to-use-a-region-configuration">Migrating a database to use a region configuration</a></li>
+<li><a class="reference internal" href="#handling-datacenter-failures">Handling datacenter failures</a></li>
+<li><a class="reference internal" href="#region-change-safety">Region change safety</a></li>
+<li><a class="reference internal" href="#monitoring">Monitoring</a></li>
+<li><a class="reference internal" href="#choosing-coordinators">Choosing coordinators</a></li>
+<li><a class="reference internal" href="#comparison-to-other-multiple-datacenter-configurations">Comparison to other multiple datacenter configurations</a></li>
+<li><a class="reference internal" href="#known-limitations">Known limitations</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#guidelines-for-setting-process-class">Guidelines for setting process class</a></li>
@@ -169,6 +184,21 @@
 <li><a class="reference internal" href="#filesystem">Filesystem</a></li>
 <li><a class="reference internal" href="#durability-and-caching">Durability and caching</a></li>
 <li><a class="reference internal" href="#disk-partitioning">Disk partitioning</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuring-regions">Configuring regions</a><ul>
+<li><a class="reference internal" href="#specifying-datacenters">Specifying datacenters</a></li>
+<li><a class="reference internal" href="#changing-the-region-configuration">Changing the region configuration</a></li>
+<li><a class="reference internal" href="#asymmetric-configurations">Asymmetric configurations</a></li>
+<li><a class="reference internal" href="#changing-the-usable-regions-configuration">Changing the usable_regions configuration</a></li>
+<li><a class="reference internal" href="#changing-the-log-routers-configuration">Changing the log routers configuration</a></li>
+<li><a class="reference internal" href="#migrating-a-database-to-use-a-region-configuration">Migrating a database to use a region configuration</a></li>
+<li><a class="reference internal" href="#handling-datacenter-failures">Handling datacenter failures</a></li>
+<li><a class="reference internal" href="#region-change-safety">Region change safety</a></li>
+<li><a class="reference internal" href="#monitoring">Monitoring</a></li>
+<li><a class="reference internal" href="#choosing-coordinators">Choosing coordinators</a></li>
+<li><a class="reference internal" href="#comparison-to-other-multiple-datacenter-configurations">Comparison to other multiple datacenter configurations</a></li>
+<li><a class="reference internal" href="#known-limitations">Known limitations</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#guidelines-for-setting-process-class">Guidelines for setting process class</a></li>
@@ -353,7 +383,7 @@ Coordinators changed
 <p>The <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> file contains several sections, detailed below. Note that the presence of individual <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections actually cause <code class="docutils literal"><span class="pre">fdbserver</span></code> processes to be run.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Whenever the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> file changes, the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.</p>
+<p class="last">Whenever the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> file changes, the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.  Note that changes to the configuration file contents must be made <em>atomically</em>.  It is recommended to save the modified file to a temporary filename and then move/rename it into place, replacing the original.  Some text editors do this automatically when saving.</p>
 </div>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -425,13 +455,13 @@ Coordinators changed
 <li><code class="docutils literal"><span class="pre">storage_memory</span></code>: Maximum memory used for data storage. This parameter is used <em>only</em> with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the <code class="docutils literal"><span class="pre">storage_memory</span></code>, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
 <li><code class="docutils literal"><span class="pre">locality_machineid</span></code>: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.</li>
 <li><code class="docutils literal"><span class="pre">locality_zoneid</span></code>: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.</li>
-<li><code class="docutils literal"><span class="pre">locality_dcid</span></code>: Data center identifier key. All processes physically located in a data center should share the id. No default value. If you are depending on data center based replication this must be set on all processes.</li>
+<li><code class="docutils literal"><span class="pre">locality_dcid</span></code>: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.</li>
 <li><code class="docutils literal"><span class="pre">locality_data_hall</span></code>: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.</li>
 <li><code class="docutils literal"><span class="pre">io_trust_seconds</span></code>: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.</li>
 </ul>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">In addition to the options above, TLS settings as described for the <a class="reference internal" href="tls.html#configuring-tls-plugin"><span class="std std-ref">TLS plugin</span></a> can be specified in the [fdbserver] section.</p>
+<p class="last">In addition to the options above, TLS settings as described for the <a class="reference internal" href="tls.html#configuring-tls"><span class="std std-ref">TLS plugin</span></a> can be specified in the [fdbserver] section.</p>
 </div>
 </div>
 <div class="section" id="fdbserver-id-section-s">
@@ -572,6 +602,10 @@ data hall.</dd>
 <p class="last">FoundationDB attempts to replicate data across two datacenters and will stay up with only two available. Data is triple replicated.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.</p>
 </dd>
 </dl>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last"><code class="docutils literal"><span class="pre">three_datacenter</span></code> mode is not compatible with region configuration.</p>
+</div>
 </div>
 <div class="section" id="changing-redundancy-mode">
 <h3>Changing redundancy mode</h3>
@@ -709,6 +743,199 @@ Disk identifier: 0xe5169faa
 <p>For an SSD with a single partition, the partition should typically begin at sector 2048 (512 byte sectors yields 1024 KiB alignment).</p>
 </div>
 </div>
+<div class="section" id="configuring-regions">
+<span id="configuration-configuring-regions"></span><h2>Configuring regions</h2>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">In the following text, the term <code class="docutils literal"><span class="pre">datacenter</span></code> is used to denote unique locations that are failure independent from one another. Cloud providers generally expose this property of failure independence with Availability Zones.</p>
+</div>
+<p>Regions configuration enables automatic failover between two datacenters, without adding a WAN latency for commits, while still maintaining all the consistency properties FoundationDB provides.</p>
+<p>This is made possible by combining two features. The first is asynchronous replication between two regions. By not waiting for the commits to become durable in the remote region before reporting a commit as successful, it means the remote region will slightly lag behind the primary.  This is similar to <code class="docutils literal"><span class="pre">fdbdr</span></code>, except that the asynchronous replication is done within a single cluster instead of between different FoundationDB clusters.</p>
+<p>The second feature is the ability to add one or more synchronous replicas of the mutation log in a different datacenter. Because this datacenter is only holding a transient copy of the mutations being committed to the database, only a few FoundationDB processes are required to fulfill this role.  If the primary datacenter fails, the external mutation log replicas will still allow access to the most recent commits. This allows the lagging remote replica to catch up to the primary. Once the remote replica has applied all the mutations, it can start accepting new commits without suffering any data loss.</p>
+<p>An example configuration would be four total datacenters, two on the east coast, two on the west coast, with a preference for fast write latencies from the west coast. One datacenter on each coast would be sized to store a full copy of the data. The second datacenter on each coast would only have a few FoundationDB processes.</p>
+<p>While everything is healthy, writes need to be made durable in both west coast datacenters before a commit can succeed. The geographic proximity of the two datacenters minimizes the additional commit latency. Reads can be served from either region, and clients can get data from whichever region is closer. Getting a read version from the each coast region will still require communicating with a west coast datacenter. Clients can cache read versions if they can tolerate reading stale data to avoid waiting on read versions.</p>
+<p>If either west coast datacenter fails, the last few mutations will be propagated from the remaining west coast datacenter to the east coast. At this point, FoundationDB will start accepting commits on the east coast. Once the west coast comes back online, the system will automatically start copying all the data that was committed to the east coast back to the west coast replica. Once the west coast has caught up, the system will automatically switch back to accepting writes from the west coast again.</p>
+<p>The west coast mutation logs will maintain their copies of all committed mutations until they have been applied by the east coast datacenter.  In the event that the east coast has failed for long enough that the west coast mutation logs no longer have enough disk space to continue storing the mutations, FoundationDB can be requested to drop the east coast replica completely. This decision is not automatic, and requires a manual change to the configuration. The west coast database will then act as a single datacenter database until the east coast comes back online. Because the east coast datacenter was completely dropped from the configuration, to bring the west coast back online FoundationDB will have to copy all the data between the regions.</p>
+<p>If a region failover occurs, clients will generally only see a latency spike of a few seconds.</p>
+<div class="section" id="specifying-datacenters">
+<h3>Specifying datacenters</h3>
+<p>To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either <code class="docutils literal"><span class="pre">--locality_dcid</span></code> or <code class="docutils literal"><span class="pre">--datacenter_id</span></code>. This datacenter identifier is case sensitive.</p>
+<p>Clients should also specify their datacenter with the database option <code class="docutils literal"><span class="pre">datacenter_id</span></code>. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.</p>
+</div>
+<div class="section" id="changing-the-region-configuration">
+<h3>Changing the region configuration</h3>
+<p>To change the region configure, use the <code class="docutils literal"><span class="pre">fileconfigure</span></code> command <code class="docutils literal"><span class="pre">fdbcli</span></code>. For example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
+Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+
+The database is available.
+
+Welcome to the fdbcli. For help, type `help&#39;.
+fdb&gt; fileconfigure regions.json
+Configuration changed.
+</pre></div>
+</div>
+<p>Regions are configured in FoundationDB as a json document. For example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;regions&quot;</span><span class="p">:[{</span>
+    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
+        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC1&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span>
+    <span class="p">}],</span>
+    <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
+<span class="p">}]</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal"><span class="pre">regions</span></code> object in the json document should be an array. Each element of the array describes the configuration of an individual region.</p>
+<p>Each region is described using an object that contains an array of <code class="docutils literal"><span class="pre">datacenters</span></code>. Each region may also optionally provide a <code class="docutils literal"><span class="pre">satellite_redundancy_mode</span></code> and <code class="docutils literal"><span class="pre">satellite_logs</span></code>.</p>
+<p>Each datacenter is described with an object that contains the <code class="docutils literal"><span class="pre">id</span></code> and <code class="docutils literal"><span class="pre">priority</span></code> of that datacenter. An <code class="docutils literal"><span class="pre">id</span></code> may be any unique alphanumeric string. Datacenters which hold a full replica of the data are referred to as primary datacenters. Datacenters that only store transaction logs are referred to as satellite datacenters. To specify a datacenter is a satellite, it needs to include <code class="docutils literal"><span class="pre">&quot;satellite&quot;</span> <span class="pre">:</span> <span class="pre">1</span></code>. The priorities of satellite datacenters are only compared to other satellites datacenters in the same region. The priorities of primary datacenters are only compared to other primary datacenters.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">In release 6.0, FoundationDB supports at most two regions.</p>
+</div>
+<p>Each region can only have one primary datacenter. A negative priority for a datacenter denotes that the system should not recover the transaction subsystem in that datacenter. The region with the transaction subsystem is referred to as the active region.</p>
+<p>One primary datacenter must have a priority &gt;= 0. The cluster will make the region with the highest priority the active region. If two datacenters have equal priority the cluster will make one of them the active region arbitrarily.</p>
+<p>The <code class="docutils literal"><span class="pre">satellite_redundancy_mode</span></code> is configured per region, and specifies how many copies of each mutation should be replicated to the satellite datacenters.</p>
+<p><code class="docutils literal"><span class="pre">one_satellite_single</span></code> mode</p>
+<blockquote>
+<div>Keep one copy of the mutation log in the satellite datacenter with the highest priority. If the highest priority satellite is unavailable it will put the transaction log in the satellite datacenter with the next highest priority.</div></blockquote>
+<p><code class="docutils literal"><span class="pre">one_satellite_double</span></code> mode</p>
+<blockquote>
+<div>Keep two copies of the mutation log in the satellite datacenter with the highest priority.</div></blockquote>
+<p><code class="docutils literal"><span class="pre">one_satellite_triple</span></code> mode</p>
+<blockquote>
+<div>Keep three copies of the mutation log in the satellite datacenter with the highest priority.</div></blockquote>
+<p><code class="docutils literal"><span class="pre">two_satellite_safe</span></code> mode</p>
+<blockquote>
+<div>Keep two copies of the mutation log in each of the two satellite datacenters with the highest priorities, for a total of four copies of each mutation. This mode will protect against the simultaneous loss of both the primary and one of the satellite datacenters. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining datacenter.</div></blockquote>
+<p><code class="docutils literal"><span class="pre">two_satellite_fast</span></code> mode</p>
+<blockquote>
+<div>Keep two copies of the mutation log in each of the two satellite datacenters with the highest priorities, for a total of four copies of each mutation. FoundationDB will only synchronously wait for one of the two satellite datacenters to make the mutations durable before considering a commit successful. This will reduce tail latencies caused by network issues between datacenters. If only one satellite is available, it will fall back to only storing two copies of the mutation log in the remaining datacenter.</div></blockquote>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">In release 6.0 this is implemented by waiting for all but 2 of the transaction logs. If <code class="docutils literal"><span class="pre">satellite_logs</span></code> is set to more than 4, FoundationDB will still need to wait for replies from both datacenters.</p>
+</div>
+<p>The number of <code class="docutils literal"><span class="pre">satellite_logs</span></code> is also configured per region. It represents the desired number of transaction logs that should be recruited in the satellite datacenters. The satellite transaction logs do slightly less work than the primary datacenter transaction logs. So while the ratio of logs to replicas should be kept roughly equal in the primary datacenter and the satellites, a slightly fewer number of satellite transaction logs may be the optimal balance for performance.</p>
+<p>The number of replicas in each region is controlled by redundancy level. For example <code class="docutils literal"><span class="pre">double</span></code> mode will put 2 replicas in each region, for a total of 4 replicas.</p>
+</div>
+<div class="section" id="asymmetric-configurations">
+<h3>Asymmetric configurations</h3>
+<p>The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoudnationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenter have failed, FoundationDB will fail over to the east coast datacenter. Because this region does not a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However this is justifiable because the region will only be active if a datacenter has already been lost.</p>
+<p>This is the region configuration that implements the example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;regions&quot;</span><span class="p">:[{</span>
+    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
+        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC1&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+    <span class="p">},{</span>
+        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC2&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span>
+    <span class="p">}],</span>
+    <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span>
+<span class="p">},{</span>
+    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
+        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;EC1&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+    <span class="p">}]</span>
+<span class="p">}]</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="changing-the-usable-regions-configuration">
+<h3>Changing the usable_regions configuration</h3>
+<p>The <code class="docutils literal"><span class="pre">usable_regions</span></code> configuration option determines the number of regions which have a replica of the database.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">In release 6.0, <code class="docutils literal"><span class="pre">usable_regions</span></code> can only be configured to the values of <code class="docutils literal"><span class="pre">1</span></code> or <code class="docutils literal"><span class="pre">2</span></code>, and a maximum of 2 regions can be defined in the <code class="docutils literal"><span class="pre">regions</span></code> json object.</p>
+</div>
+<p>Increasing the <code class="docutils literal"><span class="pre">usable_regions</span></code> will start copying data from the active region to the remote region. Reducing the <code class="docutils literal"><span class="pre">usable_regions</span></code> will immediately drop the replicas in the remote region. During these changes, only one primary datacenter can have priority &gt;= 0. This enforces exactly which region will lose its replica.</p>
+</div>
+<div class="section" id="changing-the-log-routers-configuration">
+<h3>Changing the log routers configuration</h3>
+<p>FoundationDB is architected to copy every mutation between regions exactly once. This copying is done by a new role called the log router. When a mutation is committed, it will be randomly assigned to one log router, which will be responsible for copying it across the WAN.</p>
+<p>This log router will pull the mutation from exactly one of the transaction logs. This means a single socket will be used to copy mutations across the WAN per log router. Because of this, if the latency between regions is large the bandwidth-delay product means that the number of log routers could limit the throughput at which mutations can be copied across the WAN. This can be mitigated by either configuring more log routers, or increasing the TCP window scale option.</p>
+<p>To keep the work evenly distributed on the transaction logs, the number of log routers should be a multiple of the number of transaction logs.</p>
+<p>The <code class="docutils literal"><span class="pre">log_routers</span></code> configuration option determines the number of log routers recruited in the remote region.</p>
+</div>
+<div class="section" id="migrating-a-database-to-use-a-region-configuration">
+<h3>Migrating a database to use a region configuration</h3>
+<p>To configure an existing database to regions, do the following steps:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Ensure all processes have their dcid locality set on the command line. All processes should exist in the same datacenter. If converting from a <code class="docutils literal"><span class="pre">three_datacenter</span></code> configuration, first configure down to using a single datacenter by changing the replication mode. Then exclude the machines in all datacenters but the one that will become the initial active region.</li>
+<li>Configure the region configuration. The datacenter with all the existing processes should have a non-negative priority. The region which will eventually store the remote replica should be added with a negative priority.</li>
+<li>Add processes to the cluster in the remote region. These processes will not take data yet, but need to be added to the cluster. If they are added before the region configuration is set they will be assigned data like any other FoundationDB process, which will lead to high latencies.</li>
+<li>Configure <code class="docutils literal"><span class="pre">usable_regions=2</span></code>. This will cause the cluster to start copying data between the regions.</li>
+<li>Watch <code class="docutils literal"><span class="pre">status</span></code> and wait until data movement is complete. This will mean signal that the remote datacenter has a full replica of all of the data in the database.</li>
+<li>Change the region configuration to have a non-negative priority for the primary datacenters in both regions. This will enable automatic failover between regions.</li>
+</ol>
+</div></blockquote>
+</div>
+<div class="section" id="handling-datacenter-failures">
+<h3>Handling datacenter failures</h3>
+<p>When a primary datacenter fails, the cluster will go into a degraded state. It will recover to the other region and continue accepting commits, however the mutations bound for the other side will build up on the transaction logs. Eventually, the disks on the primary&#8217;s transaction logs will fill up, so the database cannot be left in this condition indefinitely.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance. This is because the transaction logs need to store all of the mutations being committed, so that once the other datacenter comes back online, it can replay history to catch back up.</p>
+</div>
+<p>To drop the dead datacenter do the follow steps:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Configure the region configuration so that the dead datacenter has a negative priority.</li>
+<li>Configure <code class="docutils literal"><span class="pre">usable_regions=1</span></code>.</li>
+</ol>
+</div></blockquote>
+<p>If you are running in a configuration without a satellite datacenter, or you have lost all machines in a region simultaneously, the <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command from <code class="docutils literal"><span class="pre">fdbcli</span></code> allows you to force a recovery to the other region.  This will discard the portion of the mutation log which did not make it across the WAN. Once the database has recovered, immediately follow the previous steps to drop the dead region the normal way.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">In 6.0 the <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command from <code class="docutils literal"><span class="pre">fdbcli</span></code> can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster. In general this command has not be tested to same degree as the rest of the codebase, and should only be used in extreme emergencies.</p>
+</div>
+</div>
+<div class="section" id="region-change-safety">
+<h3>Region change safety</h3>
+<p>The steps described above for both adding and removing replicas are enforced by <code class="docutils literal"><span class="pre">fdbcli</span></code>. The following are the specific conditions checked by <code class="docutils literal"><span class="pre">fdbcli</span></code>:</p>
+<blockquote>
+<div><ul class="simple">
+<li>You cannot change the <code class="docutils literal"><span class="pre">regions</span></code> configuration while also changing <code class="docutils literal"><span class="pre">usable_regions</span></code>.</li>
+<li>You can only change <code class="docutils literal"><span class="pre">usable_regions</span></code> when exactly one region has priority &gt;= 0.</li>
+<li>When <code class="docutils literal"><span class="pre">usable_regions</span></code> &gt; 1, all regions with priority &gt;= 0 must have a full replica of the data.</li>
+<li>All storage servers must be in one of the regions specified by the region configuration.</li>
+</ul>
+</div></blockquote>
+</div>
+<div class="section" id="monitoring">
+<h3>Monitoring</h3>
+<p>It is important to ensure the remote replica does not fall too far behind the active replica. To failover between regions, all of the mutations need to be flushed from the active replica to the remote replica. If the remote replica is too far behind, this can take a very long time. The version difference between the datacenters is available in <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> as <code class="docutils literal"><span class="pre">datacenter_version_difference</span></code>. This number should be less than 5 million. A large datacenter version difference could indicate that more log routers are needed. It could also be caused by network issues between the regions. If the difference becomes too large the remote replica should be dropped, similar to a datacenter outage that goes on too long.</p>
+<p>Because of asymmetric write latencies in the two regions, it important to route client traffic to the currently active region. The current active region is written in the system key space as the key <code class="docutils literal"><span class="pre">\xff/primaryDatacenter</span></code>. Clients can read and watch this key after setting the <code class="docutils literal"><span class="pre">read_system_keys</span></code> transaction option.</p>
+</div>
+<div class="section" id="choosing-coordinators">
+<h3>Choosing coordinators</h3>
+<p>Choosing coordinators for a multi-region configuration provides its own set of challenges. A majority of coordinators need to be alive for the cluster to be available. There are two common coordinators setups that allow a cluster to survive the simultaneous loss of a datacenter and one additional machine.</p>
+<p>The first is five coordinators in five different datacenters. The second is nine total coordinators spread across three datacenters. There is some additional benefit to spreading the coordinators across regions rather than datacenters. This is because if an entire region fails, it is still possible to recover to the other region if you are willing to accept a small amount of data loss. However, if you have lost a majority of coordinators, this becomes much more difficult.</p>
+<p>Additionally, if a datacenter fails and then the second datacenter in the region fails 30 seconds later, we can generally survive this scenario. The second datacenter only needs to be alive long enough to copy the tail of the mutation log across the WAN. However if your coordinators are in this second datacenter, you will still experience an outage.</p>
+<p>These considerations mean that best practice is to put three coordinators in the main datacenters of each of the two regions, and then put three additional coordinators in a third region.</p>
+</div>
+<div class="section" id="comparison-to-other-multiple-datacenter-configurations">
+<h3>Comparison to other multiple datacenter configurations</h3>
+<p>Region configuration provides very similar functionality to <code class="docutils literal"><span class="pre">fdbdr</span></code>.</p>
+<p>If you are not using satellite datacenters, the main benefit of a region configuration compared to <code class="docutils literal"><span class="pre">fdbdr</span></code> is that each datacenter is able to restore replication even after losing all copies of a key range. If we simultaneously lose two storage servers in a double replicated cluster, with <code class="docutils literal"><span class="pre">fdbdr</span></code> we would be forced to fail over to the remote region. With region configuration the cluster will automatically copy the missing key range from the remote replica back to the primary datacenter.</p>
+<p>The main disadvantage of using a region configuration is that the total number of processes we can support in a single region is around half when compared against <code class="docutils literal"><span class="pre">fdbdr</span></code>. This is because we have processes for both regions in the same cluster, and some singleton components like the failure monitor will have to do twice as much work. In <code class="docutils literal"><span class="pre">fdbdr</span></code>, there are two separate clusters for each region, so the total number of processes can scale to about twice as large as using a region configuration.</p>
+<p>Region configuration is better in almost all ways than the <code class="docutils literal"><span class="pre">three_datacenter</span></code> replication mode. Region configuration gives the same ability to survive the loss of one datacenter, however we only need to store two full replicas of the database instead of three. Region configuration is more efficient with how it sends mutations across the WAN. The only reason to use <code class="docutils literal"><span class="pre">three_datacenter</span></code> replication is if low latency reads from all three locations is required.</p>
+</div>
+<div class="section" id="known-limitations">
+<h3>Known limitations</h3>
+<p>The 6.0 release still has a number of rough edges related to region configuration. This is a collection of all the issues that have been pointed out in the sections above. These issues should be significantly improved in future releases of FoundationDB:</p>
+<blockquote>
+<div><ul class="simple">
+<li>FoundationDB supports replicating data to at most two regions.</li>
+<li><code class="docutils literal"><span class="pre">two_satellite_fast</span></code> does not hide latency properly when configured with more than 4 satellite transaction logs.</li>
+<li>While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.</li>
+<li><code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster.</li>
+</ul>
+</div></blockquote>
+</div>
+</div>
 <div class="section" id="guidelines-for-setting-process-class">
 <span id="guidelines-process-class-config"></span><h2>Guidelines for setting process class</h2>
 <p>In a FoundationDB cluster, each of the <code class="docutils literal"><span class="pre">fdbserver</span></code> processes perform different tasks. Each process is recruited to do a particular task based on its process <code class="docutils literal"><span class="pre">class</span></code>. For example, processes with <code class="docutils literal"><span class="pre">class=storage</span></code> are given preference to be recruited for doing storage server tasks, <code class="docutils literal"><span class="pre">class=transaction</span></code> are for log server processes and <code class="docutils literal"><span class="pre">class=stateless</span></code> are for stateless processes like proxies, resolvers, etc.,</p>
@@ -750,7 +977,7 @@ Disk identifier: 0xe5169faa
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 26, 2018.<br/>
+      Last updated on Nov 15, 2018.<br/>
     </p>
   </div>
 </footer>

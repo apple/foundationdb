@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Transport Layer Security &#8212; FoundationDB 5.2</title>
+    <title>Transport Layer Security &#8212; FoundationDB 6.0</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.2.5',
+        VERSION:     '6.0.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -88,19 +88,17 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
-<li><a class="reference internal" href="#configuring-the-tls-plugin">Configuring the TLS Plugin</a><ul>
+<li><a class="reference internal" href="#configuring-tls">Configuring TLS</a><ul>
 <li><a class="reference internal" href="#default-values">Default Values</a><ul>
-<li><a class="reference internal" href="#plugin-default-location">Plugin default location</a></li>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
 <li><a class="reference internal" href="#default-peer-verification">Default Peer Verification</a></li>
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
-<li><a class="reference internal" href="#ca-file-default-location">CA file default location</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#the-default-libressl-based-plugin">The default LibreSSL-based plugin</a><ul>
+<li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
 <li><a class="reference internal" href="#formats">Formats</a></li>
 <li><a class="reference internal" href="#required-files">Required files</a><ul>
 <li><a class="reference internal" href="#the-certificate-file">The certificate file</a></li>
@@ -169,19 +167,17 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
-<li><a class="reference internal" href="#configuring-the-tls-plugin">Configuring the TLS Plugin</a><ul>
+<li><a class="reference internal" href="#configuring-tls">Configuring TLS</a><ul>
 <li><a class="reference internal" href="#default-values">Default Values</a><ul>
-<li><a class="reference internal" href="#plugin-default-location">Plugin default location</a></li>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
 <li><a class="reference internal" href="#default-peer-verification">Default Peer Verification</a></li>
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
-<li><a class="reference internal" href="#ca-file-default-location">CA file default location</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#the-default-libressl-based-plugin">The default LibreSSL-based plugin</a><ul>
+<li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
 <li><a class="reference internal" href="#formats">Formats</a></li>
 <li><a class="reference internal" href="#required-files">Required files</a><ul>
 <li><a class="reference internal" href="#the-certificate-file">The certificate file</a></li>
@@ -213,14 +209,14 @@
 <div class="section" id="introduction">
 <h2>Introduction</h2>
 <p>Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.</p>
-<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is provided in FoundationDB via a plugin-based architecture. This document will describe the basic TLS capabilities of FoundationDB and document the default plugin, which is based on <a class="reference external" href="https://www.libressl.org/">LibreSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster&#8217;s machines must all enable TLS in order for TLS to be used.</p>
+<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on <a class="reference external" href="https://www.libressl.org/">LibreSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster&#8217;s machines must all enable TLS in order for TLS to be used.</p>
 </div>
 <div class="section" id="setting-up-foundationdb-to-use-tls">
 <h2>Setting Up FoundationDB to use TLS</h2>
 <div class="section" id="enabling-tls-in-a-new-cluster">
 <span id="enable-tls"></span><h3>Enabling TLS in a new cluster</h3>
-<p>To set a new cluster to use TLS, use the <code class="docutils literal"><span class="pre">-t</span></code> flag on <code class="docutils literal"><span class="pre">make-public.py</span></code>:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make-public.py -t
+<p>To set a new cluster to use TLS, use the <code class="docutils literal"><span class="pre">-t</span></code> flag on <code class="docutils literal"><span class="pre">make_public.py</span></code>:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py -t
 /etc/foundationdb/fdb.cluster is now using address 10.0.1.1 (TLS enabled)
 </pre></div>
 </div>
@@ -240,9 +236,9 @@
 <li>Restart the cluster and the clients.</li>
 </ol>
 </div>
-<div class="section" id="configuring-the-tls-plugin">
-<span id="configuring-tls-plugin"></span><h2>Configuring the TLS Plugin</h2>
-<p>The location and operation of the TLS plugin are configured through four settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:</p>
+<div class="section" id="configuring-tls">
+<span id="id2"></span><h2>Configuring TLS</h2>
+<p>The operation of TLS is configured through five settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:</p>
 <table border="1" class="docutils">
 <colgroup>
 <col width="20%" />
@@ -258,36 +254,31 @@
 </tr>
 </thead>
 <tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_plugin</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_plugin</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_PLUGIN</span></code></td>
-<td>Path to the file to be loaded as the TLS plugin</td>
-</tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_certificate_file</span></code></td>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_certificate_file</span></code></td>
 <td><code class="docutils literal"><span class="pre">TLS_cert_path</span></code></td>
 <td><code class="docutils literal"><span class="pre">FDB_TLS_CERTIFICATE_FILE</span></code></td>
 <td>Path to the file from which the local certificates
-can be loaded, used by the plugin</td>
+can be loaded</td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_key_file</span></code></td>
+<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_key_file</span></code></td>
 <td><code class="docutils literal"><span class="pre">TLS_key_path</span></code></td>
 <td><code class="docutils literal"><span class="pre">FDB_TLS_KEY_FILE</span></code></td>
 <td>Path to the file from which to load the private
-key, used by the plugin</td>
+key</td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_verify_peers</span></code></td>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_verify_peers</span></code></td>
 <td><code class="docutils literal"><span class="pre">TLS_verify_peers</span></code></td>
 <td><code class="docutils literal"><span class="pre">FDB_TLS_VERIFY_PEERS</span></code></td>
 <td>The byte-string for the verification of peer
-certificates and sessions, used by the plugin</td>
+certificates and sessions</td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_password</span></code></td>
+<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_password</span></code></td>
 <td><code class="docutils literal"><span class="pre">TLS_password</span></code></td>
 <td><code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code></td>
 <td>The byte-string representing the passcode for
 unencrypting the private key</td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_ca_file</span></code></td>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_ca_file</span></code></td>
 <td><code class="docutils literal"><span class="pre">TLS_ca_path</span></code></td>
 <td><code class="docutils literal"><span class="pre">FDB_TLS_CA_FILE</span></code></td>
 <td>Path to the file containing the CA certificates
@@ -302,24 +293,12 @@ to trust</td>
 <li>The default value</li>
 </ol>
 <p>As with all other command-line options to <code class="docutils literal"><span class="pre">fdbserver</span></code>, the TLS settings can be specified in the <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section of the configuration file</span></a>.</p>
-<p>The settings for certificate file, key file, peer verification, password and CA file are interpreted by the loaded plugin.</p>
+<p>The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.</p>
 <div class="section" id="default-values">
 <h3>Default Values</h3>
-<div class="section" id="plugin-default-location">
-<h4>Plugin default location</h4>
-<p>Similarly, if a value is not specified for the parameter <code class="docutils literal"><span class="pre">tls_plugin</span></code>, the file will be specified by the environment variable <code class="docutils literal"><span class="pre">FDB_TLS_PLUGIN</span></code> or, if this variable is not set, the system-dependent location:</p>
-<blockquote>
-<div><ul class="simple">
-<li>Linux: <code class="docutils literal"><span class="pre">/usr/lib/foundationdb/plugins/fdb-libressl-plugin.so</span></code></li>
-<li>macOS: <code class="docutils literal"><span class="pre">/usr/local/foundationdb/plugins/fdb-libressl-plugin.dylib</span></code></li>
-<li>Windows: <code class="docutils literal"><span class="pre">C:\Program</span> <span class="pre">Files\foundationdb\plugins\fdb-libressl-plugin.dll</span></code></li>
-</ul>
-</div></blockquote>
-<p>On Windows, this location will be relative to the chosen installation location. The environment variable <code class="docutils literal"><span class="pre">FOUNDATIONDB_INSTALL_PATH</span></code> will be used in place of <code class="docutils literal"><span class="pre">C:\Program</span> <span class="pre">Files\foundationdb\</span></code> to determine this location.</p>
-</div>
 <div class="section" id="certificate-file-default-location">
 <h4>Certificate file default location</h4>
-<p>The default behavior when the certificate or key file is not specified is to look for a file named <code class="docutils literal"><span class="pre">fdb.pem</span></code> in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location:</p>
+<p>The default behavior when the certificate or key file is not specified is to look for a file named <code class="docutils literal"><span class="pre">fdb.pem</span></code> in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:</p>
 <blockquote>
 <div><ul class="simple">
 <li>Linux: <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.pem</span></code></li>
@@ -330,30 +309,25 @@ to trust</td>
 </div>
 <div class="section" id="default-peer-verification">
 <h4>Default Peer Verification</h4>
-<p>The default peer verification is <code class="docutils literal"><span class="pre">Check.Valid=0</span></code>.</p>
+<p>The default peer verification is <code class="docutils literal"><span class="pre">Check.Valid=1</span></code>.</p>
 </div>
 <div class="section" id="default-password">
 <h4>Default Password</h4>
-<p>There is no default password. If no password is specified, the plugin assumes that private key is unencrypted.</p>
-</div>
-<div class="section" id="ca-file-default-location">
-<h4>CA file default location</h4>
-<p>If a value is not specified, the plugin searches for certs in the default openssl certs location.</p>
+<p>There is no default password. If no password is specified, it is assumed that the private key is unencrypted.</p>
 </div>
 </div>
 <div class="section" id="parameters-and-client-bindings">
 <h3>Parameters and client bindings</h3>
-<p>When loading a TLS plugin from a non-default location when using a client binding, the <code class="docutils literal"><span class="pre">TLS_PLUGIN</span></code> network option must be specified before any other TLS option. Because a loaded TLS plugin is allowed to reject the values specified in the other options, the plugin load operation will be forced by specifying one of the other options, if it not already specified.</p>
 </div>
 </div>
-<div class="section" id="the-default-libressl-based-plugin">
-<h2>The default LibreSSL-based plugin</h2>
-<p>FoundationDB offers a TLS plugin based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.</p>
-<p>For the plugin to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer&#8217;s certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.</p>
+<div class="section" id="the-default-libressl-based-implementation">
+<h2>The default LibreSSL-based implementation</h2>
+<p>FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.</p>
+<p>For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer&#8217;s certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.</p>
 <p>If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.</p>
 <div class="section" id="formats">
 <h3>Formats</h3>
-<p>The LibreSSL plugin can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.</p>
+<p>LibreSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.</p>
 </div>
 <div class="section" id="required-files">
 <h3>Required files</h3>
@@ -430,11 +404,11 @@ to proceed.</td>
 </div>
 <div class="section" id="adding-verification-requirements">
 <h4>Adding verification requirements</h4>
-<p>Requirements can be placed on the fields of the Issuer and Subject DNs in the peer&#8217;s own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of <code class="docutils literal"><span class="pre">field=value</span></code>. Only certain fields from a DN can be matched against.</p>
+<p>Requirements can be placed on the fields of the Issuer and Subject DNs in the peer&#8217;s own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of <code class="docutils literal"><span class="pre">field[&lt;&gt;]?=value</span></code>. Only certain fields from a DN can be matched against.</p>
 <table border="1" class="docutils">
 <colgroup>
-<col width="24%" />
-<col width="76%" />
+<col width="27%" />
+<col width="73%" />
 </colgroup>
 <thead valign="bottom">
 <tr class="row-odd"><th class="head">Field</th>
@@ -460,6 +434,12 @@ to proceed.</td>
 <tr class="row-odd"><td><code class="docutils literal"><span class="pre">OU</span></code></td>
 <td>Organizational Unit</td>
 </tr>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">UID</span></code></td>
+<td>Unique Identifier</td>
+</tr>
+<tr class="row-odd"><td><code class="docutils literal"><span class="pre">DC</span></code></td>
+<td>Domain Component</td>
+</tr>
 </tbody>
 </table>
 <p>The field of each condition may optionally have a DN prefix, which is otherwise considered to be for the Subject DN.</p>
@@ -480,24 +460,126 @@ to proceed.</td>
 <tr class="row-odd"><td><code class="docutils literal"><span class="pre">I.</span></code>, or <code class="docutils literal"><span class="pre">Issuer.</span></code></td>
 <td>Issuer</td>
 </tr>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">R.</span></code>, or <code class="docutils literal"><span class="pre">Root.</span></code></td>
+<td>Root</td>
+</tr>
 </tbody>
 </table>
 <p>Additionally, the verification can be restricted to certificates signed by a given root CA with the field <code class="docutils literal"><span class="pre">Root.CN</span></code>. This allows you to have different requirements for different root chains.</p>
 <p>The value of a condition must be specified in a form derived from a subset of <a class="reference external" href="http://www.ietf.org/rfc/rfc4514.txt">RFC 4514</a>. Specifically, the &#8220;raw&#8221; notation (a value starting with the <code class="docutils literal"><span class="pre">#</span></code> character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field&#8217;s value must exactly match the value in the peer&#8217;s certificate.</p>
 <p>By default, the fields of a peer certificate&#8217;s DNs are not examined.</p>
+<p>In addition to DNs, restrictions can be placed against X509 extensions. They are specified in the same fashion as DN requirements.  The supported extensions are:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="43%" />
+<col width="57%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Field</th>
+<th class="head">Well known name</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">subjectAltName</span></code></td>
+<td>Subject Alternative Name</td>
+</tr>
+</tbody>
+</table>
+<p>Within a subject alternative name requirement, the value specified is required to have the form <code class="docutils literal"><span class="pre">prefix:value</span></code>, where the prefix specifies the type of value being matched against.  The following prefixes are supported:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="18%" />
+<col width="82%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Prefix</th>
+<th class="head">Well known name</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>DNS</td>
+<td>Domain Name</td>
+</tr>
+<tr class="row-odd"><td>URI</td>
+<td>Uniform Resource Identifier</td>
+</tr>
+<tr class="row-even"><td>IP</td>
+<td>IP Address</td>
+</tr>
+<tr class="row-odd"><td>EMAIL</td>
+<td>Email Address</td>
+</tr>
+</tbody>
+</table>
+<p>The following operators are supported:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="43%" />
+<col width="57%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Operator</th>
+<th class="head">Match Type</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">=</span></code></td>
+<td>Exact Match</td>
+</tr>
+<tr class="row-odd"><td><code class="docutils literal"><span class="pre">&gt;=</span></code></td>
+<td>Prefix Match</td>
+</tr>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">&lt;=</span></code></td>
+<td>Suffix Match</td>
+</tr>
+</tbody>
+</table>
 </div>
 <div class="section" id="verification-examples">
 <h4>Verification Examples</h4>
-<p>A verification string can be of the form:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Check</span><span class="o">.</span><span class="n">Unexpired</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="n">I</span><span class="o">.</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">O</span><span class="o">=</span><span class="n">XYZCorp</span>\<span class="p">,</span> <span class="n">LLC</span>
+<p>Let&#8217;s consider a certificate, whose abridged contents is:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Certificate</span><span class="p">:</span>
+    <span class="n">Data</span><span class="p">:</span>
+        <span class="n">Version</span><span class="p">:</span> <span class="mi">3</span> <span class="p">(</span><span class="mh">0x2</span><span class="p">)</span>
+        <span class="n">Serial</span> <span class="n">Number</span><span class="p">:</span> <span class="mi">12938646789571341173</span> <span class="p">(</span><span class="mh">0xb38f4eb406a5eb75</span><span class="p">)</span>
+    <span class="n">Signature</span> <span class="n">Algorithm</span><span class="p">:</span> <span class="n">sha1WithRSAEncryption</span>
+        <span class="n">Issuer</span><span class="p">:</span> <span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span> <span class="n">ST</span><span class="o">=</span><span class="n">California</span><span class="p">,</span> <span class="n">L</span><span class="o">=</span><span class="n">Cupertino</span><span class="p">,</span> <span class="n">O</span><span class="o">=</span><span class="n">Apple</span> <span class="n">Inc</span><span class="o">.</span><span class="p">,</span> <span class="n">OU</span><span class="o">=</span><span class="n">FDB</span> <span class="n">Team</span>
+        <span class="n">Subject</span><span class="p">:</span> <span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span> <span class="n">ST</span><span class="o">=</span><span class="n">California</span><span class="p">,</span> <span class="n">L</span><span class="o">=</span><span class="n">Cupertino</span><span class="p">,</span> <span class="n">O</span><span class="o">=</span><span class="n">Apple</span> <span class="n">Inc</span><span class="o">.</span><span class="p">,</span> <span class="n">OU</span><span class="o">=</span><span class="n">FDB</span> <span class="n">Team</span>
+        <span class="n">X509v3</span> <span class="n">extensions</span><span class="p">:</span>
+            <span class="n">X509v3</span> <span class="n">Subject</span> <span class="n">Alternative</span> <span class="n">Name</span><span class="p">:</span>
+                <span class="n">DNS</span><span class="p">:</span><span class="n">test</span><span class="o">.</span><span class="n">foundationdb</span><span class="o">.</span><span class="n">org</span>
+                <span class="n">DNS</span><span class="p">:</span><span class="n">prod</span><span class="o">.</span><span class="n">foundationdb</span><span class="o">.</span><span class="n">com</span>
 </pre></div>
 </div>
-<p>This verification string would:</p>
+<p>A verification string of:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Check</span><span class="o">.</span><span class="n">Unexpired</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="n">I</span><span class="o">.</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">O</span><span class="o">=</span><span class="n">Apple</span> <span class="n">Inc</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>Would pass, and:</p>
 <ul class="simple">
 <li>Skip the check on all peer certificates that the certificate is not yet expired</li>
-<li>Require that the Issuer have a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
-<li>Require that the Subject have a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
-<li>Require that the Subject have a Organization field of <code class="docutils literal"><span class="pre">XYZCorp,</span> <span class="pre">LLC</span></code></li>
+<li>Require that the Issuer has a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
+<li>Require that the Subject has a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
+<li>Require that the Subject has a Organization field of <code class="docutils literal"><span class="pre">Apple</span> <span class="pre">Inc.</span></code></li>
+</ul>
+<p>A verification string of:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&gt;=</span><span class="n">FDB</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&lt;=</span><span class="n">Team</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">=</span><span class="n">DNS</span><span class="p">:</span><span class="n">test</span><span class="o">.</span><span class="n">foundationdb</span><span class="o">.</span><span class="n">org</span>
+</pre></div>
+</div>
+<p>Would pass, and:</p>
+<ul class="simple">
+<li>Require that the Subject has an Organization field that starts with <code class="docutils literal"><span class="pre">FDB</span></code></li>
+<li>Require that the Subject has an Organization field that ends with <code class="docutils literal"><span class="pre">Team</span></code></li>
+<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS with a value of <code class="docutils literal"><span class="pre">test.foundationdb.org</span></code>.</li>
+</ul>
+<p>A verification string of:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&gt;=</span><span class="n">DNS</span><span class="p">:</span><span class="n">prod</span><span class="o">.</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&lt;=</span><span class="n">DNS</span><span class="p">:</span><span class="o">.</span><span class="n">org</span>
+</pre></div>
+</div>
+<p>Would pass, and:</p>
+<ul class="simple">
+<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value <code class="docutils literal"><span class="pre">prod.</span></code>.</li>
+<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value <code class="docutils literal"><span class="pre">.com</span></code>.</li>
 </ul>
 </div>
 </div>
@@ -524,7 +606,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 26, 2018.<br/>
+      Last updated on Nov 15, 2018.<br/>
     </p>
   </div>
 </footer>

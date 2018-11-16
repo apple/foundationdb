@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Known Limitations &#8212; FoundationDB 5.2</title>
+    <title>Known Limitations &#8212; FoundationDB 6.0</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.2.5',
+        VERSION:     '6.0.15',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>6.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -182,7 +182,7 @@
 <p>These limitations come from fundamental design decisions and are unlikely to change in the short term. Applications using FoundationDB should plan to work around these limitations. See <a class="reference internal" href="anti-features.html"><span class="doc">Anti-Features</span></a> for related discussion of our design approach to the FoundationDB core.</p>
 <div class="section" id="large-transactions">
 <span id="id2"></span><h3>Large transactions</h3>
-<p>Transaction size cannot exceed 10,000,000 bytes of affected data. Keys, values, and ranges that you read or write are all included as affected data. Likewise, conflict ranges that you <a class="reference internal" href="api-python.html#api-python-conflict-ranges"><span class="std std-ref">add</span></a> or remove (using a <a class="reference internal" href="api-python.html#api-python-snapshot-reads"><span class="std std-ref">snapshot read</span></a> or a <a class="reference internal" href="api-python.html#api-python-no-write-conflict-range"><span class="std std-ref">transaction option</span></a>) are also added or removed from the scope of affected data.</p>
+<p>Transaction size cannot exceed 10,000,000 bytes of affected data. Keys, values, and ranges that you write are included as affected data. Keys and ranges that you read are also included as affected data, but values that you read are not. Likewise, conflict ranges that you <a class="reference internal" href="api-python.html#api-python-conflict-ranges"><span class="std std-ref">add</span></a> or remove (using a <a class="reference internal" href="api-python.html#api-python-snapshot-reads"><span class="std std-ref">snapshot read</span></a> or a <a class="reference internal" href="api-python.html#api-python-no-write-conflict-range"><span class="std std-ref">transaction option</span></a>) are also added or removed from the scope of affected data.</p>
 <p>If any single transaction exceeds one megabyte of affected data, you should modify your design. In the current version, these large transactions can cause performance issues and database availability can (briefly) be impacted.</p>
 <div class="admonition-workarounds admonition">
 <p class="first admonition-title">Workarounds</p>
@@ -221,7 +221,7 @@
 </div>
 <div class="section" id="current-limitations">
 <h2>Current limitations</h2>
-<p>These limitations do not reflect fundamental aspects of our design and are likely be resolved or mitigated in future versions. Administrators should be aware of these issues, but longer-term application development should be less driven by them.</p>
+<p>These limitations do not reflect fundamental aspects of our design and are likely to be resolved or mitigated in future versions. Administrators should be aware of these issues, but longer-term application development should be less driven by them.</p>
 <div class="section" id="long-running-transactions">
 <span id="long-transactions"></span><h3>Long running transactions</h3>
 <p>FoundationDB currently does not support transactions running for over five seconds. In particular, after 5 seconds from the first read in a transaction:</p>
@@ -279,7 +279,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 26, 2018.<br/>
+      Last updated on Nov 15, 2018.<br/>
     </p>
   </div>
 </footer>

@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":42,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":42,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10};
+var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":42,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":42,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":42,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -276,7 +276,7 @@ extends java.lang.Object</pre>
 <tr id="i22" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSPlugin-java.lang.String-">setTLSPlugin</a></span>(java.lang.String&nbsp;value)</code>
-<div class="block">Set the TLS plugin to load.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
 </tr>
 <tr id="i23" class="rowColor">
@@ -294,7 +294,7 @@ extends java.lang.Object</pre>
 <tr id="i25" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTraceLogGroup-java.lang.String-">setTraceLogGroup</a></span>(java.lang.String&nbsp;value)</code>
-<div class="block">Sets the 'logGroup' attribute with the specified value for all events in the trace output files.</div>
+<div class="block">Sets the 'LogGroup' attribute with the specified value for all events in the trace output files.</div>
 </td>
 </tr>
 <tr id="i26" class="altColor">
@@ -429,10 +429,10 @@ public&nbsp;void&nbsp;setClusterFile(java.lang.String&nbsp;value)</pre>
 <li class="blockList">
 <h4>setTraceLogGroup</h4>
 <pre>public&nbsp;void&nbsp;setTraceLogGroup(java.lang.String&nbsp;value)</pre>
-<div class="block">Sets the 'logGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'.</div>
+<div class="block">Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
-<dd><code>value</code> - value of the logGroup attribute</dd>
+<dd><code>value</code> - value of the LogGroup attribute</dd>
 </dl>
 </li>
 </ul>
@@ -456,8 +456,10 @@ public&nbsp;void&nbsp;setClusterFile(java.lang.String&nbsp;value)</pre>
 <ul class="blockList">
 <li class="blockList">
 <h4>setTLSPlugin</h4>
-<pre>public&nbsp;void&nbsp;setTLSPlugin(java.lang.String&nbsp;value)</pre>
-<div class="block">Set the TLS plugin to load. This option, if used, must be set before any other TLS options.</div>
+<pre>@Deprecated
+public&nbsp;void&nbsp;setTLSPlugin(java.lang.String&nbsp;value)</pre>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Deprecated.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>value</code> - file path or linker-resolved name</dd>
