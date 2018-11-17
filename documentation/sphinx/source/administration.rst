@@ -9,14 +9,17 @@ Administration
    :hidden:
    :titlesonly:
 
+   configuration
    moving-a-cluster
    tls
-   
+
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
 .. note:: In FoundationDB, a "cluster" refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.
 
 To administer an externally accessible cluster, you need to understand basic system tasks. You should begin with how to :ref:`start and stop the database <administration-running-foundationdb>`. Next, you should review management of a cluster, including :ref:`adding <adding-machines-to-a-cluster>` and :ref:`removing <removing-machines-from-a-cluster>` machines, and monitoring :ref:`cluster status <administration-monitoring-cluster-status>` and the basic :ref:`server processes <administration_fdbmonitor>`. You should be familiar with :ref:`managing trace files <administration-managing-trace-files>` and :ref:`other administrative concerns <administration-other-administrative-concerns>`. Finally, you should know how to :ref:`uninstall <administration-removing>` or :ref:`upgrade <upgrading-foundationdb>` the database.
+
+FoundationDB also provides a number of different :doc:`configuration <configuration>` options which you should know about when setting up a FoundationDB database.
 
 .. _administration-running-foundationdb:
 
