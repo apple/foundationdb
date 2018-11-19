@@ -1,3 +1,7 @@
+env
+  ARTIFACTS_KEY=AWS_ACCESS_KEY_ID
+  ARTIFACTS_SECRET=AWS_SECRET_ACCESS_KEY
+  ARTIFACTS_BUCKET=AWS_DEFAULT_BUCKET
 sudo: true
 
 language: python
@@ -9,10 +13,13 @@ install:
 - pip install awscli
 - $(aws ecr get-login --no-include-email)
 - docker pull ${AWS_USER_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/fdb-build
-- echo ${TRAVIS_BUILD_DIR}
 matrix:
   include:
   - name: "Compile Server"    
     script:
-      - docker run -it -v "${TRAVIS_BUILD_DIR}:/docker/foundationdb" ${AWS_USER_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/fdb-build /bin/bash -c "cd /docker/foundationdb && make"
-  
+      - docker run -it -v "${TRAVIS_BUILD_DIR}:/docker/foundationdb" ${AWS_USER_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/fdb-build /bin/bash -c "cd /docker/foundationdb"
+addons:
+  artifacts: true
+    s3_region: $AWS_DEFAULT_REGION
+    working_dir: $TRAVIS_BUILD_DIR/bin/*
+    debug: true
