@@ -1,0 +1,18 @@
+sudo: true
+
+language: python
+
+services:
+  - docker
+
+install:
+- pip install awscli
+- $(aws ecr get-login --no-include-email)
+- docker pull ${AWS_USER_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/fdb-build
+- echo ${TRAVIS_BUILD_DIR}
+matrix:
+  include:
+  - name: "Compile Server"    
+    script:
+      - docker run -it -v '${TRAVIS_BUILD_DIR}:/docker/foundationdb' ${AWS_USER_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/fdb-build /bin/bash -c "cd /docker/foundationdb && make"
+  
