@@ -45,7 +45,7 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory.
 
     ```shell
-    cd /dir/path/foundation
+    cd /dir/path/foundationdb
     docker build ./build -t <imag-tag-name>
     ```
 
