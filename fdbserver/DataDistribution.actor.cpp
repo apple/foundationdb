@@ -1431,13 +1431,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (leastUsedMachines.size()) {
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = g_random->randomChoice(leastUsedMachines);
-				if (tcMachineInfo->serversOnMachine.empty()) { // TODO: Change to assert if it never happens
-					TraceEvent(SevError, "NoServersOnMachine")
-					    .detail("Primary", primary)
-					    .detail("LeastUsedMachinesNumber", leastUsedMachines.size())
-					    .detail("NumServersOnMachine", tcMachineInfo->serversOnMachine.size());
-					continue;
-				}
+				ASSERT(!tcMachineInfo->serversOnMachine.empty());
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
 			}
@@ -1458,39 +1452,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					team.push_back((UID*)machineLocalityMap.getObject(forcedAttributes[0]));
 				}
 
-				// selectReplicas() may return server not in server_info. Retry if it happens
-				// Reproduce the situation with the following test case
-				// -r simulation -f foundationdb/tests/fast/BackupToDBCorrectnessClean.txt -b on -s 801184616
-				// TODO: Test it by triggering SevError. If no SevError is triggered, change it to assert
-				int valid = true;
+				// selectReplicas() may NEVER return server not in server_info.
 				for (auto& pUID : team) {
-					if (server_info.find(*pUID) == server_info.end()) {
-						TraceEvent(SevError, "SelectReplicasChoseInvalidTeam")
-						    .detail("Primary", primary)
-						    .detail("AddedMachineTeams", addedMachineTeams)
-						    .detail("Attempt", i)
-						    .detail("ServerInfoSize", server_info.size())
-						    .detail("InvalidUID", (*pUID).toString())
-						    .detail("ServerTeamNum", server_info[*pUID]->teams.size())
-						    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
-						traceAllInfo(true);
-						valid = false;
-						break;
-					}
-				}
-				if (valid == false) {
-					maxAttempts += 1;
-					continue;
+					ASSERT(server_info.find(*pUID) != server_info.end());
 				}
 
-				// MX:Q: why will this happen?
-				// If this happens, it means selectReplicas() did not choose a correct team in the first place!
-				// TODO: Test it by triggering SevError. If no SevError is triggered, change it to assert
-				if (team.size() != configuration.storageTeamSize) {
-					TraceEvent(SevError, "SelectReplicasChooseATeamWithIncorrectSize");
-					traceAllInfo(true);
-					maxAttempts += 1;
-				}
+				// selectReplicas() should always return a team with correct size. otherwise, it has a bug
+				ASSERT(team.size() == configuration.storageTeamSize);
 
 				int score = 0;
 				vector<Standalone<StringRef>> machineIDs;
@@ -1504,14 +1472,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					maxAttempts += 1;
 					continue;
 				}
-				if (!isMachineTeamHealthy(machineIDs)) { // TODO: Change to assert if it never happens
-					TraceEvent(SevError, "MachineTeamUnhealthy_ShouldNeverHappenHere")
-					    .detail("Primary", primary)
-					    .detail("MachineIDSize", machineIDs.size());
-					traceAllInfo(true);
-					maxAttempts += 1;
-					continue;
-				}
+				// Only choose healthy machines into machine team
+				ASSERT(isMachineTeamHealthy(machineIDs));
+
 				std::sort(machineIDs.begin(), machineIDs.end());
 				if (machineTeamExists(machineIDs)) {
 					maxAttempts += 1;
@@ -1593,14 +1556,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool isMachineHealthy(Reference<TCMachineInfo> const& machine) {
 		if (!machine.isValid() || machine_info.find(machine->machineID) == machine_info.end() ||
 		    machine_info[machine->machineID]->serversOnMachine.empty()) {
-			//TODO: Remove this debug trace
-			// Debug trace
-			// if ( !machine.isValid() )
-			//  	TraceEvent(SevWarn, "InvalidMachineTeam").detail("IsValid", machine.isValid());
-			//	else
-			//		TraceEvent(SevWarn, "InvalidMachineTeam").detail("IsValid", machine.isValid())
-			//			.detail("InMachineInfo", machine_info.find(machine->machineID) != machine_info.end())
-			// 			.detail("ServerNumber", machine_info[machine->machineID]->serversOnMachine.size());
 
 			return false;
 		}
@@ -1731,8 +1686,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto& server : team->servers) {
 			for (auto& candidateMachineTeam : server->machine->machineTeams) {
 				std::sort(candidateMachineTeam->machineIDs.begin(), candidateMachineTeam->machineIDs.end());
-				if (machineIDs ==
-				    candidateMachineTeam->machineIDs) { // TODO: We may be able to return here for performance benefit
+				if (machineIDs == candidateMachineTeam->machineIDs) {
 					numExistance++;
 					break;
 				}
@@ -1794,7 +1748,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		while (addedTeams < teamsToBuild) {
 			int machineTeamsToBuild = 1;
 			// Step 1: Create 1 best machine team
-			if (machineTeams.size() > machineTeamThreshold) { // TODO: only count valid machine team number
+			if (machineTeams.size() > machineTeamThreshold) { // SOMEDAY: only count valid machine teams
 				TEST(true);
 				if (!ignoreMachineTeamThreshhold) {
 					machineTeamsToBuild = 0; // First try to find a server team from existing machine teams
@@ -1870,13 +1824,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					continue;
 				}
 				// Pick the server team with smallest score in all attempts
+				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
 				int score = 0;
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
 				if (score < bestScore) {
 					bestScore = score;
-					bestServerTeam = serverTeam; // TODO: Improve the code efficiency
+					bestServerTeam = serverTeam;
 					bestChosenMachineTeam = chosenMachineTeam;
 				}
 			}
