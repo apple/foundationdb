@@ -145,7 +145,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 				err.error.code() == error_code_coordinators_changed ||  // The worker server was cancelled
 				err.error.code() == error_code_shutdown_in_progress;
 
-			if(!ok) {
+			if (!ok) {
 				err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
 			}
 

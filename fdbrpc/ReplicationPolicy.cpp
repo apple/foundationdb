@@ -150,11 +150,10 @@ PolicyAcross::~PolicyAcross()
 // Debug purpose only
 // Trace all record entries to help debug
 // fromServers is the servers locality to be printed out.
-void IReplicationPolicy::traceLocalityRecords(LocalitySetRef const& fromServers)
-{
+void IReplicationPolicy::traceLocalityRecords(LocalitySetRef const& fromServers) {
 	std::vector<Reference<LocalityRecord>> const& recordArray = fromServers->getRecordArray();
 	TraceEvent("LocalityRecordArray").detail("Size", recordArray.size());
-	for ( auto &record : recordArray ) {
+	for (auto& record : recordArray) {
 		traceOneLocalityRecord(record, fromServers);
 	}
 }
@@ -164,16 +163,18 @@ void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record
 	Reference<KeyValueMap> const& dataMap = record->_dataMap;
 	std::vector<AttribRecord> const& keyValueArray = dataMap->_keyvaluearray;
 
-	TraceEvent("LocalityRecordInfo").detail("EntryIndex", localityEntryIndex)
-			.detail("KeyValueArraySize", keyValueArray.size());
-	for ( int i = 0; i < keyValueArray.size(); ++i ) {
-		AttribRecord attribRecord = keyValueArray[i]; //first is key, second is value
-		TraceEvent("LocalityRecordInfo").detail("EntryIndex", localityEntryIndex)
-				.detail("ArrayIndex", i)
-				.detail("Key", attribRecord.first._id)
-				.detail("Value", attribRecord.second._id)
-				.detail("KeyName", fromServers->keyText(attribRecord.first))
-				.detail("ValueName", fromServers->valueText(attribRecord.second));
+	TraceEvent("LocalityRecordInfo")
+	    .detail("EntryIndex", localityEntryIndex)
+	    .detail("KeyValueArraySize", keyValueArray.size());
+	for (int i = 0; i < keyValueArray.size(); ++i) {
+		AttribRecord attribRecord = keyValueArray[i]; // first is key, second is value
+		TraceEvent("LocalityRecordInfo")
+		    .detail("EntryIndex", localityEntryIndex)
+		    .detail("ArrayIndex", i)
+		    .detail("Key", attribRecord.first._id)
+		    .detail("Value", attribRecord.second._id)
+		    .detail("KeyName", fromServers->keyText(attribRecord.first))
+		    .detail("ValueName", fromServers->valueText(attribRecord.second));
 	}
 }
 
@@ -188,7 +189,8 @@ bool PolicyAcross::validate(
 {
 	bool			valid = true;
 	int				count = 0;
-	AttribKey	indexKey = fromServers->keyIndex(_attribKey); // The indexKey from the policy name (e.g., zoneid) in _attribKey
+	// Get the indexKey from the policy name (e.g., zoneid) in _attribKey
+	AttribKey indexKey = fromServers->keyIndex(_attribKey);
 	auto			groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
 	std::map<AttribValue, std::vector<LocalityEntry>>	validMap;
 
@@ -218,10 +220,14 @@ bool PolicyAcross::validate(
 			}
 		}
 		for (auto& itValid : validMap) {
-			if (_policy->validate(itValid.second, fromServers)) { //itValid.second is the vector of LocalityEntries that belong to the same locality
+			// itValid.second is the vector of LocalityEntries that belong to the same locality
+			if (_policy->validate(itValid.second, fromServers)) {
 				if (g_replicationdebug > 4) {
-					printf("Across valid solution: %6lu key: %-7s count:%3d of%3d value: (%3d) %-10s policy: %-10s => %s\n",
-							itValid.second.size(), _attribKey.c_str(), count+1, _count, itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
+					printf("Across valid solution: %6lu key: %-7s count:%3d of%3d value: (%3d) %-10s policy: %-10s => "
+					       "%s\n",
+					       itValid.second.size(), _attribKey.c_str(), count + 1, _count, itValid.first._id,
+					       fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(),
+					       _policy->info().c_str());
 					if (g_replicationdebug > 5) {
 						for (auto& entry : itValid.second) {
 							printf("   entry: %s\n", fromServers->getEntryInfo(entry).c_str());
@@ -229,8 +235,7 @@ bool PolicyAcross::validate(
 					}
 				}
 				count ++;
-			}
-			else if (g_replicationdebug > 4) {
+			} else if (g_replicationdebug > 4) {
 				printf("Across invalid solution:%5lu key: %-7s value: (%3d) %-10s policy: %-10s => %s\n", itValid.second.size(), _attribKey.c_str(), itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
 				if (g_replicationdebug > 5) {
 					for (auto& entry : itValid.second) {
@@ -252,9 +257,9 @@ bool PolicyAcross::validate(
 	return valid;
 }
 
-
 // Choose new servers from "least utilized" alsoServers and append the new servers to results
-// fromserverse are the servers that have already been chosen and that should be excluded from being selected as replicas.
+// fromserverse are the servers that have already been chosen and
+// that should be excluded from being selected as replicas.
 // FIXME: Simplify this function, such as removing unnecessary printf
 bool PolicyAcross::selectReplicas(
 	LocalitySetRef	&						fromServers,
@@ -285,9 +290,9 @@ bool PolicyAcross::selectReplicas(
 				if (_selected->size()) {
 					// Pass only the also array item which are valid for the value
 					if (g_replicationdebug > 5) {
-						printf("Across !select    key: %-7s value: (%3d) %-10s entry: %s\n", _attribKey.c_str(),
-								value.get()._id, fromServers->valueText(value.get()).c_str(),
-								//Get the locality entry info (entryValue) from the to-be-selected team member alsoServer
+						// entry is the locality entry info (entryValue) from the to-be-selected team member alsoServer
+						printf("Across !select    key: %-7s value: (%3d) %-10s entry: %s\n",
+								_attribKey.c_str(), value.get()._id, fromServers->valueText(value.get()).c_str(),
 								fromServers->getEntryInfo(alsoServer).c_str());
 					}
 					resultsSize = _newResults.size();
@@ -302,9 +307,9 @@ bool PolicyAcross::selectReplicas(
 						}
 						if (g_replicationdebug > 5) {
 							printf("Across !added:%3d key: %-7s count:%3d of%3d value: (%3d) %-10s entry: %s\n",
-									resultsAdded, _attribKey.c_str(), count, _count,
-									value.get()._id, fromServers->valueText(value.get()).c_str(),
-									fromServers->getEntryInfo(alsoServer).c_str());
+							       resultsAdded, _attribKey.c_str(), count, _count, value.get()._id,
+							       fromServers->valueText(value.get()).c_str(),
+							       fromServers->getEntryInfo(alsoServer).c_str());
 						}
 						if (count >= _count) break;
 						_usedValues.insert(lowerBound, value.get());
@@ -379,16 +384,17 @@ bool PolicyAcross::selectReplicas(
 					if (_selected->size()) {
 						if (g_replicationdebug > 5) {
 							printf("Across select:%3d key: %-7s value: (%3d) %-10s entry: %s  index:%4d\n",
-									fromServers->size()-checksLeft+1, _attribKey.c_str(), value.get()._id,
-									fromServers->valueText(value.get()).c_str(), fromServers->getEntryInfo(entry).c_str(), recordIndex);
+							       fromServers->size() - checksLeft + 1, _attribKey.c_str(), value.get()._id,
+							       fromServers->valueText(value.get()).c_str(),
+							       fromServers->getEntryInfo(entry).c_str(), recordIndex);
 						}
 						if (_policy->selectReplicas(_selected, emptyEntryArray, results))
 						{
 							if (g_replicationdebug > 5) {
-								printf("Across added:%4d key: %-7s value: (%3d) %-10s policy: %-10s => %s  needed:%3d\n",
-										count+1, _attribKey.c_str(),
-										value.get()._id, fromServers->valueText(value.get()).c_str(),
-										_policy->name().c_str(), _policy->info().c_str(), _count);
+								printf("Across added:%4d key: %-7s value: (%3d) %-10s policy: %-10s => %s needed:%3d\n",
+								    count + 1, _attribKey.c_str(), value.get()._id,
+								    fromServers->valueText(value.get()).c_str(), _policy->name().c_str(),
+								    _policy->info().c_str(), _count);
 							}
 							count ++;
 							if (count >= _count) break;

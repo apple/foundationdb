@@ -881,7 +881,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 		ASSERT( rd.src.size() );
 		loop {
 			state int stuckCount = 0;
-			//state int bestTeamStuckThreshold = 50;
+			// state int bestTeamStuckThreshold = 50;
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
@@ -898,7 +898,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					req.sources = rd.src;
 					req.completeSources = rd.completeSources;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
-					// If a DC has no healthy team, we stop checking the other DCs until the unhealthy DC is healthy again or is excluded.
+					// If a DC has no healthy team, we stop checking the other DCs until
+					// the unhealthy DC is healthy again or is excluded.
 					if(!bestTeam.present()) {
 						foundTeams = false;
 						break;
@@ -927,8 +928,11 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount)
-					.detail("TeamCollectionId", tciIndex).detail("NumOfTeamCollections", self->teamCollections.size());
+				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId)
+				    .suppressFor(1.0)
+				    .detail("Count", stuckCount)
+				    .detail("TeamCollectionId", tciIndex)
+				    .detail("NumOfTeamCollections", self->teamCollections.size());
 				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
@@ -940,7 +944,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			for(int i = 0; i < bestTeams.size(); i++) {
 				auto& serverIds = bestTeams[i].first->getServerIDs();
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
-				if(allHealthy && anyWithSource && !bestTeams[i].second) { //bestTeams[i] is not the source of the shard
+				if (allHealthy && anyWithSource && !bestTeams[i].second) { // bestTeams[i] is not the source of the
+					                                                       // shard
 					int idx = g_random->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
@@ -961,12 +966,14 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 			// Sanity check
 			state int totalIds = 0;
-			for (auto &destTeam : destinationTeams) {
+			for (auto& destTeam : destinationTeams) {
 				totalIds += destTeam.servers.size();
 			}
-			if ( totalIds != self->teamSize ) {
-				TraceEvent(SevWarn, "IncorrectDestTeamSize").suppressFor(1.0).detail("ExpectedTeamSize", self->teamSize)
-						.detail("DestTeamSize", totalIds);
+			if (totalIds != self->teamSize) {
+				TraceEvent(SevWarn, "IncorrectDestTeamSize")
+				    .suppressFor(1.0)
+				    .detail("ExpectedTeamSize", self->teamSize)
+				    .detail("DestTeamSize", totalIds);
 			}
 
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
@@ -991,7 +998,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 								destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
-								ASSERT( totalIds == destIds.size() ); // Sanity check the destIDs before we move keys
+								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
 								doMoveKeys = moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, Promise<Void>(), &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock, self->recoveryVersion, self->teamCollections.size() > 1, relocateShardInterval.pairID );
 							} else {
 								self->fetchKeysComplete.insert( rd );

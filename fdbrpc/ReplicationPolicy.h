@@ -44,8 +44,7 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 			std::vector<LocalityEntry> const&		alsoServers,
 			std::vector<LocalityEntry>	&				results ) = 0;
 		virtual void traceLocalityRecords(LocalitySetRef const& fromServers);
-		virtual void traceOneLocalityRecord(Reference<LocalityRecord> record,
-											LocalitySetRef const& fromServers);
+		virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, LocalitySetRef const& fromServers);
 		virtual bool validate(
 			std::vector<LocalityEntry>	const&	solutionSet,
 			LocalitySetRef const&								fromServers ) const = 0;

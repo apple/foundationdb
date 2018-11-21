@@ -166,7 +166,7 @@ public:
 
 	Optional<Standalone<StringRef>> processId() const { return get(keyProcessId); }
 	Optional<Standalone<StringRef>> zoneId() const { return get(keyZoneId); }
-	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); } //default is ""
+	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); } // default is ""
 	Optional<Standalone<StringRef>> dcId() const { return get(keyDcId); }
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 

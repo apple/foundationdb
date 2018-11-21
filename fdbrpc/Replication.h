@@ -536,9 +536,7 @@ struct LocalityGroup : public LocalitySet {
 	}
 
 	// Get the locality info for debug purpose
-	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const {
-		return _recordArray;
-	}
+	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const { return _recordArray; }
 
 	virtual int	getMemoryUsed() const {
 		int memorySize = sizeof(_recordArray) + _keymap->getMemoryUsed();

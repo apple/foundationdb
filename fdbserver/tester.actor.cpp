@@ -1070,8 +1070,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
 			try {
-				wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) ||
-					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
+				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
+				     (databasePingDelay == 0.0 ? Never()
+				                               : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd")));
 			} catch( Error& e ) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);
 				throw;
