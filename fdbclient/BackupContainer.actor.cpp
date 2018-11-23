@@ -143,16 +143,36 @@ std::string BackupDescription::toString() const {
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
  * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
  *
- *   BackupInfo is stored as a JSON document at
- *     /info
- *   Snapshots are stored as JSON at file paths like
- *     /snapshots/snapshot,startVersion,endVersion,totalBytes
- *   Log and Range data files at file paths like
- *     /logs/.../log,startVersion,endVersion,blockSize
- *     /ranges/.../range,version,uid,blockSize
+ *   Snapshot manifests (a complete set of files constituting a database snapshot for the backup's target ranges)
+ *   are stored as JSON files at paths like
+ *       /snapshots/snapshot,minVersion,maxVersion,totalBytes
+ * 
+ *   Key range files for snapshots are stored at paths like
+ *       /kvranges/snapshot,startVersion/N/range,version,uid,blockSize
+ *     where startVersion is the version at which the backup snapshot execution began and N is a number
+ *     that is increased as key range files are generated over time (at varying rates) such that there 
+ *     are around 5,000 key range files in each folder.
  *
- *   Where ... is a multi level path which sorts lexically into version order and targets 10,000 or less
- *   entries in each folder (though a full speed snapshot could exceed this count at the innermost folder level)
+ *     Note that startVersion will NOT correspond to the minVersion of a snapshot manifest because 
+ *     snapshot manifest min/max versions are based on the actual contained data and the first data
+ *     file written will be after the start version of the snapshot's execution.
+ * 
+ *   Log files are at file paths like
+ *       /logs/.../log,startVersion,endVersion,blockSize
+ *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
+ *     unique folder per day containing about 5,000 files.
+ *
+ *   BACKWARD COMPATIBILITY
+ *
+ *   Prior to FDB version 6.0.16, key range files were stored using a different folder scheme.  Newer versions
+ *   still support this scheme for all restore and backup management operations but key range files generated
+ *   by backup using version 6.0.16 or later use the scheme describe above.  
+ * 
+ *   The old format stored key range files at paths like
+ *       /ranges/.../range,version,uid,blockSize
+ *     where ... is a multi level path with sorts lexically into version order and results in up to approximately
+ *     900 unique folders per day.  The number of files per folder depends on the configured snapshot rate and
+ *     database size and will vary from 1 to around 5,000.
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
@@ -166,8 +186,8 @@ public:
 	virtual Future<Void> create() = 0;
 
 	// Get a list of fileNames and their sizes in the container under the given path
-	// The implementation can (but does not have to) use the folder path filter to avoid traversing
-	// specific subpaths.
+	// Although not required, an implementation can avoid traversing unwanted subfolders
+	// by calling folderPathFilter(absoluteFolderPath) and checking for a false return value.
 	typedef std::vector<std::pair<std::string, int64_t>> FilesAndSizesT;
 	virtual Future<FilesAndSizesT> listFiles(std::string path = "", std::function<bool(std::string const &)> folderPathFilter = nullptr) = 0;
 
@@ -207,8 +227,22 @@ public:
 	}
 
 	// The innermost folder covers 100 seconds (1e8 versions) During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
-	static std::string rangeVersionFolderString(Version v) {
+	static std::string old_rangeVersionFolderString(Version v) {
 		return format("ranges/%s/", versionFolderString(v, 8).c_str());
+	}
+
+	// Get the root folder for a snapshot's data based on its begin version
+	static std::string snapshotFolderString(Version snapshotBeginVersion) {
+		return format("kvranges/snapshot.%018lld", snapshotBeginVersion);
+	}
+
+	// Extract the snapshot begin version from a path
+	static Version extractSnapshotBeginVersion(std::string path) {
+		Version snapshotBeginVersion;
+		if(sscanf(path.c_str(), "kvranges/snapshot.%018lld", &snapshotBeginVersion) == 1) {
+			return snapshotBeginVersion;
+		}
+		return invalidVersion;
 	}
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
@@ -220,8 +254,15 @@ public:
 		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
-	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
-		return writeFile(rangeVersionFolderString(version) + format("range,%lld,%s,%d", version, g_random->randomUniqueID().toString().c_str(), blockSize));
+	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) {
+		std::string fileName = format("range,%lld,%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
+
+		// In order to test backward compatibility in simulation, sometimes write to the old path format
+		if(BUGGIFY) {
+			return writeFile(old_rangeVersionFolderString(fileVersion) + fileName);
+		}
+
+		return writeFile(snapshotFolderString(snapshotBeginVersion) + format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
 	}
 
 	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
@@ -265,6 +306,7 @@ public:
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
 	ACTOR static Future<std::vector<RangeFile>> readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
+		// This is so we can verify that each of the files listed in the manifest file are also in the container at this time.
 		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
 		state std::map<std::string, RangeFile> rangeIndex;
 		for(auto &f : files)
@@ -386,11 +428,12 @@ public:
 		});
 	}
 
-	// List range files, in sorted version order, which contain data at or between beginVersion and endVersion
-	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
+	// List range files which contain data at or between beginVersion and endVersion
+	// NOTE: This reads the range file folder schema from FDB 6.0.15 and earlier and is provided for backward compatibility
+	Future<std::vector<RangeFile>> old_listRangeFiles(Version beginVersion, Version endVersion) {
 		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
-		std::string firstPath = cleanFolderString(rangeVersionFolderString(beginVersion));
-		std::string lastPath =  cleanFolderString(rangeVersionFolderString(endVersion));
+		std::string firstPath = cleanFolderString(old_rangeVersionFolderString(beginVersion));
+		std::string lastPath =  cleanFolderString(old_rangeVersionFolderString(endVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
@@ -407,6 +450,38 @@ public:
 				if(pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion && rf.version <= endVersion)
 					results.push_back(rf);
 			}
+			return results;
+		});
+	}
+
+	// List range files which contain data at or between beginVersion and endVersion
+	// Note: The contents of each top level snapshot.N folder do not necessarily constitute a valid snapshot
+	// and therefore listing files is not how RestoreSets are obtained.
+	// Note: Snapshots partially written using FDB versions prior to 6.0.16 will have some range files stored
+	// using the old folder scheme read by old_listRangeFiles
+	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion, Version endVersion) {
+		// Until the old folder scheme is no longer supported, read files stored using old folder scheme
+		Future<std::vector<RangeFile>> oldFiles = old_listRangeFiles(beginVersion, endVersion);
+
+		// Define filter function (for listFiles() implementations that use it) to reject any folder
+		// starting after endVersion
+		std::function<bool(std::string const &)> pathFilter = [=](std::string const &path) {
+			return extractSnapshotBeginVersion(path) > endVersion;
+		};
+
+		Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT &files) {
+			std::vector<RangeFile> results;
+			RangeFile rf;
+			for(auto &f : files) {
+				if(pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion && rf.version <= endVersion)
+					results.push_back(rf);
+			}
+			return results;
+		});
+
+		return map(success(oldFiles) && success(newFiles), [=](Void _) {
+			std::vector<RangeFile> results = std::move(newFiles.get());
+			results.insert(results.end(), std::make_move_iterator(oldFiles.get().begin()), std::make_move_iterator(oldFiles.get().end()));
 			std::sort(results.begin(), results.end());
 			return results;
 		});
@@ -1403,9 +1478,11 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 + versionShift, 150 + versionShift, 10));
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 + versionShift, 300 + versionShift, 10));
-	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 + versionShift, 10));
-	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 + versionShift, 10));
-	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 + versionShift, 10));
+	state Version snapshotBeginVersion1 = 160 + versionShift;
+	state Version snapshotBeginVersion2 = 310 + versionShift;
+	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(snapshotBeginVersion1, 0, snapshotBeginVersion1, 10));
+	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(snapshotBeginVersion1, 1, 300 + versionShift, 10));
+	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(snapshotBeginVersion2, 0, snapshotBeginVersion2, 10));
 
 	Void _ = wait(
 		   writeAndVerifyFile(c, log1, 0)
