@@ -481,7 +481,8 @@ public:
 
 		return map(success(oldFiles) && success(newFiles), [=](Void _) {
 			std::vector<RangeFile> results = std::move(newFiles.get());
-			results.insert(results.end(), std::make_move_iterator(oldFiles.get().begin()), std::make_move_iterator(oldFiles.get().end()));
+			std::vector<RangeFile> oldResults = std::move(oldFiles.get());
+			results.insert(results.end(), std::make_move_iterator(oldResults.begin()), std::make_move_iterator(oldResults.end()));
 			std::sort(results.begin(), results.end());
 			return results;
 		});
