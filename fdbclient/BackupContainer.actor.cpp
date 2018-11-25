@@ -258,7 +258,7 @@ public:
 		std::string fileName = format("range,%lld,%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
 
 		// In order to test backward compatibility in simulation, sometimes write to the old path format
-		if(BUGGIFY) {
+		if(g_network->isSimulated() && g_random->coinflip()) {
 			return writeFile(old_rangeVersionFolderString(fileVersion) + fileName);
 		}
 
@@ -1438,6 +1438,15 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
 
+int chooseFileSize(std::vector<int> &sizes) {
+	int size = 1000;
+	if(!sizes.empty()) {
+		size = sizes.back();
+		sizes.pop_back();
+	}
+	return size;
+}
+
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
 	state Standalone<StringRef> content;
 	if(size > 0) {
@@ -1460,6 +1469,12 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 	return Void();
 }
 
+// Randomly advance version by up to 1 second of versions
+Version nextVersion(Version v) {
+	int64_t increment = g_random->randomInt64(1, CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	return v + increment;
+}
+
 ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
@@ -1475,87 +1490,114 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	Void _ = wait(c->create());
 
-	state int64_t versionShift = g_random->randomInt64(0, std::numeric_limits<Version>::max() - 500);
+	state std::vector<Future<Void>> writes;
+	state std::map<Version, std::vector<std::string>> snapshots;
+	state std::map<Version, int64_t> snapshotSizes;
+	state int nRangeFiles = 0;
+	state std::map<Version, std::string> logs;
+	state Version v = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
-	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 + versionShift, 150 + versionShift, 10));
-	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 + versionShift, 300 + versionShift, 10));
-	state Version snapshotBeginVersion1 = 160 + versionShift;
-	state Version snapshotBeginVersion2 = 310 + versionShift;
-	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(snapshotBeginVersion1, 0, snapshotBeginVersion1, 10));
-	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(snapshotBeginVersion1, 1, 300 + versionShift, 10));
-	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(snapshotBeginVersion2, 0, snapshotBeginVersion2, 10));
+	// List of sizes to use to test edge cases on underlying file implementations
+	state std::vector<int> fileSizes = {0, 10000000, 5000005};
 
-	Void _ = wait(
-		   writeAndVerifyFile(c, log1, 0)
-		&& writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000))
-		&& writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000))
-		&& writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000))
-		&& writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000))
-	);
+	loop {
+		state Version logStart = v;
+		state int kvfiles = g_random->randomInt(0, 3);
 
-	Void _ = wait(
-		   c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size())
-		&& c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size())
-	);
+		while(kvfiles > 0) {
+			if(snapshots.empty()) {
+				snapshots[v] = {};
+				snapshotSizes[v] = 0;
+				if(g_random->coinflip()) {
+					v = nextVersion(v);
+				}
+			}
+			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, 10));
+			++nRangeFiles;
+			v = nextVersion(v);
+			snapshots.rbegin()->second.push_back(range->getFileName());
 
-	printf("Checking file list dump\n");
-	FullBackupListing listing = wait(c->dumpFileList());
-	ASSERT(listing.logs.size() == 2);
-	ASSERT(listing.ranges.size() == 3);
-	ASSERT(listing.snapshots.size() == 2);
+			int size = chooseFileSize(fileSizes);
+			snapshotSizes.rbegin()->second += size;
+			writes.push_back(writeAndVerifyFile(c, range, size));
+
+			if(g_random->random01() < .2) {
+				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
+				snapshots[v] = {};
+				snapshotSizes[v] = 0;
+				break;
+			}
+
+			--kvfiles;
+		}
+
+		if(logStart == v || g_random->coinflip()) {
+			v = nextVersion(v);
+		}
+		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
+		logs[logStart] = log->getFileName();
+		int size = chooseFileSize(fileSizes);
+		writes.push_back(writeAndVerifyFile(c, log, size));
+
+		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
+		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && g_random->random01() < .2) {
+			snapshots.erase(snapshots.rbegin()->first);
+			break;
+		}
+	}
+
+	Void _ = wait(waitForAll(writes));
+
+	state FullBackupListing listing = wait(c->dumpFileList());
+	ASSERT(listing.ranges.size() == nRangeFiles);
+	ASSERT(listing.logs.size() == logs.size());
+	ASSERT(listing.snapshots.size() == snapshots.size());
 
 	state BackupDescription desc = wait(c->describeBackup());
-	printf("Backup Description 1\n%s", desc.toString().c_str());
+	printf("\n%s\n", desc.toString().c_str());
 
-	ASSERT(desc.maxRestorableVersion.present());
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
-	ASSERT(rest.present());
-	ASSERT(rest.get().logs.size() == 0);
-	ASSERT(rest.get().ranges.size() == 1);
+	// Do a series of expirations and verify resulting state
+	state int i = 0;
+	for(; i < listing.snapshots.size(); ++i) {
+		// Ensure we can still restore to the latest version
+		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
+		ASSERT(rest.present());
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150 + versionShift));
-	ASSERT(!rest.present());
+		// Ensure we can restore to the end version of snapshot i
+		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
+		ASSERT(rest.present());
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300 + versionShift));
-	ASSERT(rest.present());
-	ASSERT(rest.get().logs.size() == 1);
-	ASSERT(rest.get().ranges.size() == 2);
+		// Test expiring to the end of this snapshot
+		state Version expireVersion = listing.snapshots[i].endVersion;
 
-	printf("Expire 1\n");
-	Void _ = wait(c->expireData(100 + versionShift));
-	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description 2\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 100 + versionShift);
-	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+		// Expire everything up to but not including the snapshot end version
+		printf("EXPIRE TO %lld\n", expireVersion);
+		state Future<Void> f = c->expireData(expireVersion);
+		Void _ = wait(ready(f));
 
-	printf("Expire 2\n");
-	Void _ = wait(c->expireData(101 + versionShift));
-	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description 3\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 100 + versionShift);
-	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+		// If there is an error, it must be backup_cannot_expire and we have to be on the last snapshot
+		if(f.isError()) {
+			ASSERT(f.getError().code() == error_code_backup_cannot_expire);
+			ASSERT(i == listing.snapshots.size() - 1);
+			Void _ = wait(c->expireData(expireVersion, true));
+		}
 
-	printf("Expire 3\n");
-	Void _ = wait(c->expireData(300 + versionShift));
-	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description 4\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin.present());
-	ASSERT(d.snapshots.size() == desc.snapshots.size());
-	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+		BackupDescription d = wait(c->describeBackup());
+		printf("\n%s\n", d.toString().c_str());
+	}
 
-	printf("Expire 4\n");
-	Void _ = wait(c->expireData(301 + versionShift, true));
-	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description 4\n%s", d.toString().c_str());
-	ASSERT(d.snapshots.size() == 1);
-	ASSERT(!d.minLogBegin.present());
-
+	printf("DELETING\n");
 	Void _ = wait(c->deleteContainer());
 
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description 5\n%s", d.toString().c_str());
+	printf("\n%s\n", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 0);
 	ASSERT(!d.minLogBegin.present());
+
+	FullBackupListing empty = wait(c->dumpFileList());
+	ASSERT(empty.ranges.size() == 0);
+	ASSERT(empty.logs.size() == 0);
+	ASSERT(empty.snapshots.size() == 0);
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
