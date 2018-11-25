@@ -454,7 +454,7 @@ public:
 		});
 	}
 
-	// List range files which contain data at or between beginVersion and endVersion
+	// List range files, sorted in version order, which contain data at or between beginVersion and endVersion
 	// Note: The contents of each top level snapshot.N folder do not necessarily constitute a valid snapshot
 	// and therefore listing files is not how RestoreSets are obtained.
 	// Note: Snapshots partially written using FDB versions prior to 6.0.16 will have some range files stored
@@ -466,7 +466,7 @@ public:
 		// Define filter function (for listFiles() implementations that use it) to reject any folder
 		// starting after endVersion
 		std::function<bool(std::string const &)> pathFilter = [=](std::string const &path) {
-			return extractSnapshotBeginVersion(path) > endVersion;
+			return extractSnapshotBeginVersion(path) <= endVersion;
 		};
 
 		Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT &files) {
