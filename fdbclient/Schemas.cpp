@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Schemas.h"
+#include "fdbclient/Schemas.h"
 
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
@@ -85,12 +85,42 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "data_version":12341234,
+                  "durable_version":12341234,
                   "data_lag": {
                      "seconds":5.0,
                      "versions":12341234
                   },
+                  "durability_lag": {
+                     "seconds":5.0,
+                     "versions":12341234
+                  },
                   "id":"eb84471d68c12d1d26f692a50000003f",
+                  "total_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "finished_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "bytes_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "keys_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutation_bytes":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutations":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -193,7 +223,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "worst_queue_bytes_log_server":460,
          "performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
-			"reason_id":0,
+            "reason_id":0,
             "name":{
                "$enum":[
                   "workload",
@@ -210,12 +240,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             },
             "description":"The database is not being saturated by the workload."
          },
-		 "transactions_per_second_limit":0,
-		 "released_transactions_per_second":0,
-		 "limiting_queue_bytes_storage_server":0,
+         "transactions_per_second_limit":0,
+         "released_transactions_per_second":0,
+         "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-		 "limiting_version_lag_storage_server":0,
-		 "worst_version_lag_storage_server":0
+         "limiting_version_lag_storage_server":0,
+         "worst_version_lag_storage_server":0
       },
       "incompatible_connections":[
 
@@ -226,8 +256,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "generation":2,
       "latency_probe":{
          "read_seconds":7,
-		 "immediate_priority_transaction_start_seconds":0.0,
-		 "batch_priority_transaction_start_seconds":0.0,
+         "immediate_priority_transaction_start_seconds":0.0,
+         "batch_priority_transaction_start_seconds":0.0,
          "transaction_start_seconds":0.0,
          "commit_seconds":0.02
       },
@@ -329,6 +359,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "hz":0.0,
                "counter":0,
                "roughness":0.0
+            },
+            "read_requests":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
             }
          },
          "bytes":{
@@ -427,6 +462,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
+             "ssd-redwood-experimental",
              "memory"
          ]},
          "coordinators_count":1,

@@ -19,11 +19,11 @@
  */
 
 #include "flow/IndexedSet.h"
-#include "Ratekeeper.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/Smoother.h"
-#include "ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

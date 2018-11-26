@@ -25,24 +25,24 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "ConflictSet.h"
-#include "DataDistribution.h"
-#include "Knobs.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/Knobs.h"
 #include <iterator>
-#include "WaitFailure.h"
-#include "WorkerInterface.h"
-#include "Ratekeeper.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "CoordinatedState.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/Ratekeeper.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"  // copy constructors for ServerCoordinators class
 #include "fdbrpc/sim_validation.h"
-#include "DBCoreState.h"
-#include "LogSystem.h"
-#include "LogSystemDiskQueueAdapter.h"
-#include "IKeyValueStore.h"
-#include "ApplyMetadataMutation.h"
-#include "RecoveryState.h"
+#include "fdbserver/DBCoreState.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/RecoveryState.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
@@ -220,6 +220,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
+	bool neverCreated;
 
 	MasterData(
 		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
@@ -238,6 +239,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  clusterController(clusterController),
 		  dbId(dbId),
 		  forceRecovery(forceRecovery),
+		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
@@ -294,21 +296,21 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 	if(self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if( !self->dcId_locality.count(recr.dcId) ) {
-			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", printable(recr.dcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
 			self->dcId_locality[recr.dcId] = loc;
+			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", printable(recr.dcId)).detail("Loc", loc);
 		}
 
 		if( !self->dcId_locality.count(remoteDcId) ) {
-			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", printable(remoteDcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
 			self->dcId_locality[remoteDcId] = loc;
+			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", printable(remoteDcId)).detail("Loc", loc);
 		}
 
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() * std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())) ) ) );
@@ -520,15 +522,17 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	}
 }
 
-ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<StorageServerInterface>* seedServers, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
+ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Reference<MasterData> self, vector<StorageServerInterface>* seedServers, Reference<ILogSystem> oldLogSystem ) {
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
-		if (self->configuration.initialized)
+		if (self->configuration.initialized) {
 			status = RecoveryStatus::configuration_invalid;
-		else if (!self->cstate.prevDBState.tLogs.size())
+		} else if (!self->cstate.prevDBState.tLogs.size()) {
 			status = RecoveryStatus::configuration_never_created;
-		else
+			self->neverCreated = true;
+		} else {
 			status = RecoveryStatus::configuration_missing;
+		}
 		TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", status)
 			.detail("Status", RecoveryStatus::names[status])
@@ -577,11 +581,27 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait( newSeedServers( self, recruits, seedServers ) );
-	wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem, initialConfChanges ) );
-	return Void();
+	state vector<Standalone<CommitTransactionRef>> confChanges;
+	wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem, &confChanges ) );
+	return confChanges;
+}
+
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<std::pair<int8_t,Version>>> locality) {
+	loop {
+		int8_t loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
+		Version ver = locality->get().second;
+		if(ver == invalidVersion || loc != locality->get().first) {
+			ver = oldLogSystem->getKnownCommittedVersion(loc);
+		}
+		locality->set( std::make_pair(loc,ver) );
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality", loc).detail("Version", ver);
+		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange(loc) );
+	}
 }
 
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
+	state Reference<AsyncVar<std::pair<int8_t,Version>>> myLocality = Reference<AsyncVar<std::pair<int8_t,Version>>>( new AsyncVar<std::pair<int8_t,Version>>(std::make_pair(tagLocalityInvalid, invalidVersion) ) );
+	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
 	// For now, we also obtain the recovery metadata that the log system obtained during the end_epoch process for comparison
@@ -591,7 +611,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
-	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
+	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag, myLocality );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -639,8 +659,19 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(txsTag);
 	}
-	for(auto& kv : rawTags) {
-		self->allTags.push_back(decodeServerTagValue( kv.value ));
+
+	if(self->forceRecovery) {
+		int8_t usableLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
+		for(auto& kv : rawTags) {
+			Tag tag = decodeServerTagValue( kv.value );
+			if(tag.locality == usableLocality) {
+				self->allTags.push_back(tag);
+			}
+		}
+	} else {
+		for(auto& kv : rawTags) {
+			self->allTags.push_back(decodeServerTagValue( kv.value ));
+		}
 	}
 
 	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
@@ -752,12 +783,15 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	// Ordinarily we pass through this loop once and recover.  We go around the loop if recovery stalls for more than a second,
 	// a provisional master is initialized, and an "emergency transaction" is submitted that might change the configuration so that we can
 	// finish recovery.
-	state Future<Void> recruitments = recruitEverything( self, seedServers, oldLogSystem, initialConfChanges );
+
+	state std::map<Optional<Value>,int8_t> originalLocalityMap = self->dcId_locality;
+	state Future<vector<Standalone<CommitTransactionRef>>> recruitments = recruitEverything( self, seedServers, oldLogSystem );
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(1.0));
 
 		choose {
-			when (wait( recruitments )) {
+			when (vector<Standalone<CommitTransactionRef>> confChanges = wait( recruitments )) {
+				initialConfChanges->insert( initialConfChanges->end(), confChanges.begin(), confChanges.end() );
 				provisional.cancel();
 				break;
 			}
@@ -782,7 +816,8 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 				}
 
 				if(self->configuration != oldConf) { //confChange does not trigger when including servers
-					recruitments = recruitEverything( self, seedServers, oldLogSystem, initialConfChanges );
+					self->dcId_locality = originalLocalityMap;
+					recruitments = recruitEverything( self, seedServers, oldLogSystem );
 				}
 			}
 		}
@@ -1183,6 +1218,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
+	if(self->neverCreated) {
+		recoverStartTime = now();
+	}
+
 	recoverAndEndEpoch.cancel();
 
 	ASSERT( self->proxies.size() <= self->configuration.getDesiredProxies() );
@@ -1226,6 +1265,16 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
+
+	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
+	for(auto& dc : self->primaryDcId) {
+		tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+	}
+	if(self->configuration.usableRegions > 1) {
+		for(auto& dc : self->remoteDcIds) {
+			tr.set(recoveryCommitRequest.arena, tLogDatacentersKeyFor(dc), StringRef());
+		}
+	}
 
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
 	mmApplied = tr.mutations.size();
@@ -1278,8 +1327,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
-	if( debugResult )
-		TraceEvent(SevError, "DBRecoveryDurabilityError");
+	if( debugResult ) {
+		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError");
+	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid).detail("TLogs", self->logSystem->describe()).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 

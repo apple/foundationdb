@@ -23,7 +23,7 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_BATCHER_ACTOR_G_H)
 	#define FLOW_BATCHER_ACTOR_G_H
-	#include "batcher.actor.g.h"
+	#include "fdbrpc/batcher.actor.g.h"
 #elif !defined(FLOW_BATCHER_ACTOR_H)
 	#define FLOW_BATCHER_ACTOR_H
 

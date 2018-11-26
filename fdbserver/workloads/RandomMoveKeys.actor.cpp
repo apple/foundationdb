@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbclient/NativeAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

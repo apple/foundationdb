@@ -22,7 +22,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ManagementAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -61,7 +61,7 @@ struct ChangeConfigWorkload : TestWorkload {
 
 			wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
-				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
+				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode, true));
 				TraceEvent("WaitForReplicasExtra");
 				wait( waitForFullReplication( extraDB ) );
 				TraceEvent("WaitForReplicasExtraEnd");
@@ -86,7 +86,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if( self->configMode.size() ) {
-			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode, true ) );
 			TraceEvent("WaitForReplicas");
 			wait( waitForFullReplication( cx ) );
 			TraceEvent("WaitForReplicasEnd");

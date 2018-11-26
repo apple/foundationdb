@@ -21,13 +21,178 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ManagementAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
 static const char* redundancies[] = { "single", "double", "triple" };
+
+std::string generateRegions() {
+	std::string result;
+	if(g_simulator.physicalDatacenters == 1 || (g_simulator.physicalDatacenters == 2 && g_random->random01() < 0.25) || g_simulator.physicalDatacenters == 3) {
+		return " usable_regions=1 regions=\"\"";
+	}
+
+	if(g_random->random01() < 0.25) {
+		return format(" usable_regions=%d", g_random->randomInt(1,3));
+	}
+
+	int primaryPriority = 1;
+	int remotePriority = -1;
+	double priorityType = g_random->random01();
+	if(priorityType < 0.1) {
+		primaryPriority = -1;
+		remotePriority = 1;
+	} else if(priorityType < 0.2) {
+		remotePriority = 1;
+		primaryPriority = 1;
+	}
+
+	StatusObject primaryObj;
+	StatusObject primaryDcObj;
+	primaryDcObj["id"] = "0";
+	primaryDcObj["priority"] = primaryPriority;
+	StatusArray primaryDcArr;
+	primaryDcArr.push_back(primaryDcObj);
+
+	StatusObject remoteObj;
+	StatusObject remoteDcObj;
+	remoteDcObj["id"] = "1";
+	remoteDcObj["priority"] = remotePriority;
+	StatusArray remoteDcArr;
+	remoteDcArr.push_back(remoteDcObj);
+
+	if(g_simulator.physicalDatacenters > 3 && g_random->random01() < 0.5) {
+		StatusObject primarySatelliteObj;
+		primarySatelliteObj["id"] = "2";
+		primarySatelliteObj["priority"] = 1;
+		primarySatelliteObj["satellite"] = 1;
+		primaryDcArr.push_back(primarySatelliteObj);
+
+		StatusObject remoteSatelliteObj;
+		remoteSatelliteObj["id"] = "3";
+		remoteSatelliteObj["priority"] = 1;
+		remoteSatelliteObj["satellite"] = 1;
+		remoteDcArr.push_back(remoteSatelliteObj);
+
+		if(g_simulator.physicalDatacenters > 5 && g_random->random01() < 0.5) {
+			StatusObject primarySatelliteObjB;
+			primarySatelliteObjB["id"] = "4";
+			primarySatelliteObjB["priority"] = 1;
+			primarySatelliteObjB["satellite"] = 1;
+			primaryDcArr.push_back(primarySatelliteObjB);
+
+			StatusObject remoteSatelliteObjB;
+			remoteSatelliteObjB["id"] = "5";
+			remoteSatelliteObjB["priority"] = 1;
+			remoteSatelliteObjB["satellite"] = 1;
+			remoteDcArr.push_back(remoteSatelliteObjB);
+
+			int satellite_replication_type = g_random->randomInt(0,3);
+			switch (satellite_replication_type) {
+			case 0: {
+				TEST( true );  // Simulated cluster using no satellite redundancy mode
+				break;
+			}
+			case 1: {
+				TEST( true );  // Simulated cluster using two satellite fast redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
+				break;
+			}
+			case 2: {
+				TEST( true );  // Simulated cluster using two satellite safe redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
+				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
+				break;
+			}
+			default:
+				ASSERT(false);  // Programmer forgot to adjust cases.
+			}
+		} else {
+			int satellite_replication_type = g_random->randomInt(0,4);
+			switch (satellite_replication_type) {
+			case 0: {
+				//FIXME: implement
+				TEST( true );  // Simulated cluster using custom satellite redundancy mode
+				break;
+			}
+			case 1: {
+				TEST( true );  // Simulated cluster using no satellite redundancy mode
+				break;
+			}
+			case 2: {
+				TEST( true );  // Simulated cluster using single satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+				break;
+			}
+			case 3: {
+				TEST( true );  // Simulated cluster using double satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+				break;
+			}
+			default:
+				ASSERT(false);  // Programmer forgot to adjust cases.
+			}
+		}
+
+		if (g_random->random01() < 0.25) {
+			int logs = g_random->randomInt(1,7);
+			primaryObj["satellite_logs"] = logs;
+			remoteObj["satellite_logs"] = logs;
+		}
+
+		int remote_replication_type = g_random->randomInt(0, 4);
+		switch (remote_replication_type) {
+		case 0: {
+			//FIXME: implement
+			TEST( true );  // Simulated cluster using custom remote redundancy mode
+			break;
+		}
+		case 1: {
+			TEST( true );  // Simulated cluster using default remote redundancy mode
+			break;
+		}
+		case 2: {
+			TEST( true );  // Simulated cluster using single remote redundancy mode
+			result += " remote_single";
+			break;
+		}
+		case 3: {
+			TEST( true );  // Simulated cluster using double remote redundancy mode
+			result += " remote_double";
+			break;
+		}
+		default:
+			ASSERT(false);  // Programmer forgot to adjust cases.
+		}
+
+		result += format(" log_routers=%d", g_random->randomInt(1,7));
+		result += format(" remote_logs=%d", g_random->randomInt(1,7));
+	}
+
+	primaryObj["datacenters"] = primaryDcArr;
+	remoteObj["datacenters"] = remoteDcArr;
+
+	StatusArray regionArr;
+	regionArr.push_back(primaryObj);
+
+	if(g_random->random01() < 0.8) {
+		regionArr.push_back(remoteObj);
+		if(g_random->random01() < 0.25) {
+			result += format(" usable_regions=%d", g_random->randomInt(1,3));
+		}
+	}
+
+	result += " regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+	return result;
+}
+
+
 
 struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
@@ -40,6 +205,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		: TestWorkload(wcx), retries("Retries")
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 200.0 );
+		g_simulator.usableRegions = 1;
 	}
 
 	virtual std::string description() { return "DestroyDatabaseWorkload"; }
@@ -70,7 +236,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "single" ) );
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "single", true ) );
 		return Void();
 	}
 
@@ -90,6 +256,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> singleDB( ConfigureDatabaseWorkload *self, Database cx ) {
 		state Transaction tr;
 		state int i;
+		state bool firstFearless = false;
 		loop {
 			if(g_simulator.speedUpSimulation) {
 				return Void();
@@ -145,20 +312,25 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			else if( randomChoice == 3 ) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
-				int redundancy = g_random->randomInt( 0, sizeof(redundancies)/sizeof(redundancies[0]));
+				int maxRedundancies = sizeof(redundancies)/sizeof(redundancies[0]);
+				if(g_simulator.physicalDatacenters == 2 || g_simulator.physicalDatacenters > 3) {
+					maxRedundancies--; //There are not enough machines for triple replication in fearless configurations
+				}
+				int redundancy = g_random->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
-				if(config == "triple" && g_simulator.physicalDatacenters > 4) {
-					config = "double";
-				}
+
 				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
-					config = "three_data_hall";
+					config = "three_data_hall ";
 				}
+
+				config += generateRegions();
 
 				if (g_random->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
-				ConfigurationResult::Type _ = wait( changeConfig( cx, config ) );
+				ConfigurationResult::Type _ = wait( changeConfig( cx, config, false ) );
+
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			}
 			else if( randomChoice == 4 ) {
@@ -170,7 +342,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			}
 			else if ( randomChoice == 5) {
-				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))] ) );
+				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) );
 			}
 			else {
 				ASSERT(false);

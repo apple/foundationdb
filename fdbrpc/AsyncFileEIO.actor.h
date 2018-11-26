@@ -27,17 +27,17 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILEEIO_ACTOR_G_H)
 	#define FLOW_ASYNCFILEEIO_ACTOR_G_H
-	#include "AsyncFileEIO.actor.g.h"
+	#include "fdbrpc/AsyncFileEIO.actor.g.h"
 #elif !defined(FLOW_ASYNCFILEEIO_ACTOR_H)
 	#define FLOW_ASYNCFILEEIO_ACTOR_H
 
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include "eio.h"
+#include "fdbrpc/libeio/eio.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

@@ -23,10 +23,10 @@
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h"
-#include "TesterInterface.h"
-#include "WorkerInterface.h"
-#include "ServerDBInfo.h"
-#include "Status.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -283,20 +283,20 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 }
 
 ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
-	if(g_network->isSimulated()) {
+	if(g_network->isSimulated() && g_simulator.usableRegions > 1) {
 		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
 		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
 		ASSERT(!primaryDead || !remoteDead);
 		if(primaryDead || remoteDead) {
-			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate");
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate").detail("RemoteDead", remoteDead).detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
-			ConfigurationResult::Type _ = wait( changeConfig( cx, (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1" ) );
+			ConfigurationResult::Type _ = wait( changeConfig( cx, (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1", true ) );
 			while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 				wait( dbInfo->onChange() );
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Usable_Regions");
-			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
+			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1", true ) );
 		}
 	}
 	return Void();

@@ -25,17 +25,17 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "WorkerInterface.h"
-#include "TLogInterface.h"
-#include "Knobs.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "IDiskQueue.h"
+#include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
-#include "ServerDBInfo.h"
-#include "LogSystem.h"
-#include "WaitFailure.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::pair;
@@ -290,12 +290,12 @@ namespace oldTLog {
 
 		Version prevVersion;
 
-		struct peekTrackerData {
+		struct PeekTrackerData {
 			std::map<int, Promise<Version>> sequence_version;
 			double lastUpdate;
 		};
 
-		std::map<UID, peekTrackerData> peekTracker;
+		std::map<UID, PeekTrackerData> peekTracker;
 		WorkerCache<TLogInterface> tlogCache;
 
 		Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.

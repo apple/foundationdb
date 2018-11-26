@@ -23,18 +23,18 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
 	#define FLOW_LOADBALANCE_ACTOR_G_H
-	#include "LoadBalance.actor.g.h"
+	#include "fdbrpc/LoadBalance.actor.g.h"
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 	#define FLOW_LOADBALANCE_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
-#include "FailureMonitor.h"
-#include "fdbrpc.h"
-#include "Locality.h"
-#include "QueueModel.h"
-#include "MultiInterface.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/QueueModel.h"
+#include "fdbrpc/MultiInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
@@ -155,9 +155,9 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 // Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
 //   failMon's information for load balancing and avoiding failed servers
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the list of servers
-ACTOR template <class Interface, class Request>
+ACTOR template <class Interface, class Request, class Multi>
 Future< REPLY_TYPE(Request) > loadBalance(
-	Reference<MultiInterface<Interface>> alternatives,
+	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
 	int taskID = TaskDefaultPromiseEndpoint,
@@ -273,39 +273,37 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 		if(!stream && !firstRequest.isValid() ) {
 			// Everything is down!  Wait for someone to be up.
-			if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-				g_network->networkMetrics.oldestAlternativesFailure = now();
-			}
-			
-			double serversValidTime = alternatives->getRetrievedAt();
-			double minDelay = std::min(FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED - (now() - serversValidTime), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
-			double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), minDelay);
 
-			if(serversValidTime == ALWAYS_FRESH)
-				delay = ALWAYS_FRESH;
-
-			// Making this SevWarn means a lot of clutter
-			if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
-				TraceEvent("AllAlternativesFailed")
-					.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
-					.detail("ServersValidTime", serversValidTime)
-					.detail("Alternatives", alternatives->description())
-					.detail("Delay", delay);
-			}
-
-			g_network->networkMetrics.newestAlternativesFailure = now();
-
-			if (delay < 0) {
-				throw all_alternatives_failed();
-			}
 			vector<Future<Void>> ok( alternatives->size() );
-			for(int i=0; i<ok.size(); i++)
+			for(int i=0; i<ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual( alternatives->get(i, channel).getEndpoint(), FailureStatus(false) );
-			choose {
-				when ( wait( quorum( ok, 1 ) ) ) {}
-				when ( wait( ::delayJittered( delay ) ) ) {
-					throw all_alternatives_failed(); 
+			}
+
+			if(!alternatives->alwaysFresh()) {
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+					g_network->networkMetrics.oldestAlternativesFailure = now();
 				}
+
+				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
+
+				// Making this SevWarn means a lot of clutter
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
+					TraceEvent("AllAlternativesFailed")
+						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
+						.detail("Alternatives", alternatives->description())
+						.detail("Delay", delay);
+				}
+
+				g_network->networkMetrics.newestAlternativesFailure = now();
+
+				choose {
+					when ( wait( quorum( ok, 1 ) ) ) {}
+					when ( wait( ::delayJittered( delay ) ) ) {
+						throw all_alternatives_failed();
+					}
+				}
+			} else {
+				wait( quorum( ok, 1 ) );
 			}
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff
@@ -407,19 +405,6 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}
-}
-
-// This wrapper is just to help the compiler accept the coercesion to Reference<Multinterface>
-template <class Interface, class Request, class Multi>
-inline Future< REPLY_TYPE(Request) > loadBalance(
-	Reference<Multi> alternatives,
-	RequestStream<Request> Interface::* channel,
-	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
-	bool atMostOnce = false,
-	QueueModel* model = NULL)
-{
-	return loadBalance( Reference<MultiInterface<Interface>>(alternatives), channel, request, taskID, atMostOnce, model );
 }
 
 #include "flow/unactorcompiler.h"

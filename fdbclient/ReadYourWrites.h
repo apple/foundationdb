@@ -22,9 +22,9 @@
 #define FDBCLIENT_READYOURWRITES_H
 #pragma once
 
-#include "NativeAPI.h"
-#include "KeyRangeMap.h"
-#include "RYWIterator.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/RYWIterator.h"
 #include <list>
 
 //SOMEDAY: Optimize getKey to avoid using getRange

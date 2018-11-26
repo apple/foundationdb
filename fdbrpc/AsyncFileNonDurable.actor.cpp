@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.actor.h"
 
 std::map<std::string, Future<Void>> AsyncFileNonDurable::filesBeingDeleted;
 

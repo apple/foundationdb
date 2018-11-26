@@ -22,17 +22,17 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "Knobs.h"
-#include "MoveKeys.h"
-#include "WorkerInterface.h"
-#include "LeaderElection.h"
-#include "WaitFailure.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "Status.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/LeaderElection.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Status.h"
 #include <algorithm>
 #include "fdbclient/DatabaseContext.h"
-#include "RecoveryState.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -47,22 +47,24 @@ struct WorkerInfo : NonCopyable {
 	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
+	double lastAvailableTime;
 	WorkerInterface interf;
 	ProcessClass initialClass;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
-	WorkerInfo() : gen(-1), reboots(0), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo) {}
+		watcher(watcher), reply(reply), gen(gen), reboots(0), lastAvailableTime(now()), interf(interf), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), priorityInfo(r.priorityInfo) {}
+		reboots(r.reboots), lastAvailableTime(r.lastAvailableTime), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), priorityInfo(r.priorityInfo) {}
 	void operator=( WorkerInfo&& r ) noexcept(true) {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
 		gen = r.gen;
 		reboots = r.reboots;
+		lastAvailableTime = r.lastAvailableTime;
 		interf = std::move(r.interf);
 		initialClass = r.initialClass;
 		processClass = r.processClass;
@@ -519,7 +521,14 @@ public:
 		}
 
 		if(!remoteStartTime.present()) {
-			remoteStartTime = now();
+			double maxAvailableTime = 0;
+			for(auto& it : result.remoteTLogs) {
+				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
+			}
+			for(auto& it : result.logRouters) {
+				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
+			}
+			remoteStartTime = maxAvailableTime;
 		}
 
 		if( now() - remoteStartTime.get() < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY &&
@@ -608,7 +617,7 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				std::swap(regions[0], regions[1]);
 			}
 
@@ -1009,13 +1018,14 @@ public:
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 
-	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
+	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
+		serverInfo.myLocality = locality;
 		db.serverInfo->set( serverInfo );
 		cx = openDBOnServer(db.serverInfo, TaskDefaultEndpoint, true, true);
 	}
@@ -1294,6 +1304,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 	auto watcher = cluster->id_worker.find(processID);
 	ASSERT(watcher != cluster->id_worker.end());
 
+	watcher->second.lastAvailableTime = now();
 	watcher->second.reboots++;
 	wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
 
@@ -1644,8 +1655,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 
-	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
-
+	if(info == self->id_worker.end()) {
+		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+	} else {
+		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+	}
 	if ( w.address() == g_network->getLocalAddress() ) {
 		self->clusterControllerProcessId = w.locality.processId();
 		self->clusterControllerDcId = w.locality.dcId();
@@ -1742,7 +1756,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent(SevInfo, "TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted");
 
 	wait(timeKeeperSetVersion(self));
 
@@ -1750,6 +1764,15 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
 		loop {
 			try {
+				if(!g_network->isSimulated()) {
+					// This is done to provide an arbitrary logged transaction every ~10s.
+					// FIXME: replace or augment this with logging on the proxy which tracks
+					//       how long it is taking to hear responses from each other component.
+
+					UID debugID = g_random->randomUniqueID();
+					TraceEvent("TimeKeeperCommit", debugID);
+					tr->debugTransaction(debugID);
+				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2142,8 +2165,8 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
-ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators ) {
-	state ClusterControllerData self( interf );
+ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
+	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
 	state uint64_t step = 0;
 	state PromiseStream<Future<Void>> addActor;
@@ -2217,7 +2240,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			req.reply.send(workers);
 		}
 		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
-			if(self.db.masterRegistrationCount == 0) {
+			if(self.db.masterRegistrationCount == 0 || self.db.serverInfo->get().recoveryState <= RecoveryState::RECRUITING) {
 				if (!self.db.forceMasterFailure.isSet()) {
 					self.db.forceRecovery = true;
 					self.db.forceMasterFailure.send( Void() );
@@ -2250,7 +2273,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
-ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
+ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, LocalityData locality ) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -2270,7 +2293,7 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 			startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 			inRole = true;
 
-			wait( clusterControllerCore( cci, leaderFail, coordinators ) );
+			wait( clusterControllerCore( cci, leaderFail, coordinators, locality ) );
 		} catch(Error& e) {
 			if (inRole)
 				endRole(Role::CLUSTER_CONTROLLER, cci.id(), "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
@@ -2281,13 +2304,13 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 	}
 }
 
-ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles ) {
+ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality ) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators( connFile );
-			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo ) );
+			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo, locality ) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver

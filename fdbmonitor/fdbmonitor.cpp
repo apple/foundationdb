@@ -68,7 +68,7 @@
 #include "flow/SimpleOpt.h"
 #include "SimpleIni.h"
 
-#include "../versions.h"
+#include "versions.h"
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
@@ -635,13 +635,15 @@ bool argv_equal(const char** a1, const char** a2)
 	return true;
 }
 
-void kill_process(uint64_t id) {
+void kill_process(uint64_t id, bool wait = true) {
 	pid_t pid = id_pid[id];
 
 	log_msg(SevInfo, "Killing process %d\n", pid);
 
 	kill(pid, SIGTERM);
-	waitpid(pid, NULL, 0);
+	if(wait) {
+		waitpid(pid, NULL, 0);
+	}
 
 	pid_id.erase(pid);
 	id_pid.erase(id);
@@ -1367,8 +1369,19 @@ int main(int argc, char** argv) {
 					signal(SIGCHLD, SIG_IGN);
 					sigprocmask(SIG_SETMASK, &normal_mask, NULL);
 
-					/* Send SIGHUP to all child processes */
-					kill(0, SIGHUP);
+					/* If daemonized, setsid() was called earlier so we can just kill our entire new process group */
+					if(daemonize) {
+						kill(0, SIGHUP);
+					}
+					else {
+						/* Otherwise kill each process individually but don't wait on them yet */
+						auto i = id_pid.begin();
+						auto iEnd = id_pid.end();
+						while(i != iEnd) {
+							// Must advance i before calling kill_process() which erases the entry at i
+							kill_process((i++)->first, false);
+						}
+					}
 
 					/* Wait for all child processes (says POSIX.1-2001) */
 					/* POSIX.1-2001 specifies that if the disposition of SIGCHLD is set to SIG_IGN, then children that terminate do not become zombies and a call to wait()

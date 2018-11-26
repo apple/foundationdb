@@ -19,7 +19,7 @@
  */
 
 #include <ctime>
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -378,11 +378,15 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	else if (workload->storeType == "ssd-1")
 		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_BTREE_V1);
 	else if (workload->storeType == "ssd-2")
-		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_BTREE_V2);
+		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
+	else if (workload->storeType == "ssd-redwood-experimental")
+		test.store = keyValueStoreRedwoodV1( fn, id );
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory( fn, id, 500e6 );
 	else
 		ASSERT(false);
+
+	wait(test.store->init());
 
 	state Future<Void> main = testKVStoreMain( workload, &test );
 	try {

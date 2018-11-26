@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/Locality.h"
 
 ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
@@ -42,6 +42,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL,               30 );
 	init( UNFLUSHED_DATA_RATIO,                                 0.05 ); if( randomize && BUGGIFY ) UNFLUSHED_DATA_RATIO = 0.0;
 	init( DESIRED_TOTAL_BYTES,                                150000 ); if( randomize && BUGGIFY ) DESIRED_TOTAL_BYTES = 10000;
+	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
+	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( RECOVERY_DATA_BYTE_LIMIT,                           100000 );
@@ -61,9 +63,12 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR,      double(TLOG_MESSAGE_BLOCK_BYTES) / (TLOG_MESSAGE_BLOCK_BYTES - MAX_MESSAGE_SIZE) ); //1.0121466709838096006362758832473
 	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = g_random->coinflip() ? 0.1 : 60;
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
+	init( MULTI_CURSOR_PRE_FETCH_LIMIT,                           10 );
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
 	init( VERSIONS_PER_BATCH,                 VERSIONS_PER_SECOND/20 ); if( randomize && BUGGIFY ) VERSIONS_PER_BATCH = std::max<int64_t>(1,VERSIONS_PER_SECOND/1000);
 	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
+	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
+	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
@@ -141,7 +146,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BEST_OF_AMT,                                             4 );
 	init( SERVER_LIST_DELAY,                                     1.0 );
 	init( RECRUITMENT_IDLE_DELAY,                                1.0 );
-	init( STORAGE_RECRUITMENT_DELAY,                             0.5 );
+	init( STORAGE_RECRUITMENT_DELAY,                            10.0 );
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_MERGE_COALESCE_DELAY,                             120.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
@@ -159,6 +164,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DD_LOCATION_CACHE_SIZE,                            2000000 ); if( randomize && BUGGIFY ) DD_LOCATION_CACHE_SIZE = 3;
 	init( MOVEKEYS_LOCK_POLLING_DELAY,                           5.0 );
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
+
+	// Redwood Storage Engine
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                     0 );
 
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
@@ -236,6 +245,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA,       0.1 );
 	init( COMMIT_TRANSACTION_BATCH_COUNT_MAX,                   32768 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_COUNT_MAX = 1000; // Do NOT increase this number beyond 32768, as CommitIds only budget 2 bytes for storing transaction id within each batch
 	init( COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,              8LL << 30 ); if (randomize && BUGGIFY) COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT = g_random->randomInt64(100LL << 20,  8LL << 30);
+	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
+	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,          10.0 );
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -247,15 +258,17 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RESOLVER_COALESCE_TIME,                                1.0 );
 	init( BUGGIFIED_ROW_LIMIT,                  APPLY_MUTATION_BYTES ); if( randomize && BUGGIFY ) BUGGIFIED_ROW_LIMIT = g_random->randomInt(3, 30);
 	init( PROXY_SPIN_DELAY,                                     0.01 );
-	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                 0.5  );
-	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,         10.0 );
+	init( UPDATE_REMOTE_LOG_VERSION_INTERVAL,                    2.0 );
+	init( MAX_TXS_POP_VERSION_HISTORY,                           1e5 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
+	bool fastBalancing = randomize && BUGGIFY;
 	init( COMMIT_SLEEP_TIME,								  0.0001 ); if( randomize && BUGGIFY ) COMMIT_SLEEP_TIME = 0;
+	init( KEY_BYTES_PER_SAMPLE,                                  2e4 ); if( fastBalancing ) KEY_BYTES_PER_SAMPLE = 1e3;
 	init( MIN_BALANCE_TIME,                                      0.2 );
-	init( MIN_BALANCE_DIFFERENCE,                              10000 );
+	init( MIN_BALANCE_DIFFERENCE,                                1e6 ); if( fastBalancing ) MIN_BALANCE_DIFFERENCE = 1e4;
 	init( SECONDS_BEFORE_NO_FAILURE_DELAY,                  8 * 3600 );
 	init( MAX_TXS_SEND_MEMORY,                                   1e7 ); if( randomize && BUGGIFY ) MAX_TXS_SEND_MEMORY = 1e5;
 	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND );
@@ -387,6 +400,14 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
+
+	// IPager
+	init( PAGER_RESERVED_PAGES,                                    1 );
+
+	// IndirectShadowPager
+	init( FREE_PAGE_VACUUM_THRESHOLD,                              1 );
+	init( VACUUM_QUEUE_SIZE,                                  100000 );
+	init( VACUUM_BYTES_PER_SECOND,                               1e6 );
 
 	// Timekeeper
 	init( TIME_KEEPER_DELAY,                                      10 );

@@ -20,17 +20,17 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "IKeyValueStore.h"
-#include "CoroFlow.h"
-#include "Knobs.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/CoroFlow.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
 
 extern "C" {
-#include "sqlite/sqliteInt.h"
+#include "fdbserver/sqlite/sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
-#include "template_fdb.h"
+#include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1973,9 +1973,10 @@ void createTemplateDatabase() {
 	db2.createFromScratch();
 }
 
-ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
-	if(!fileExists(filename))
+void GenerateIOLogChecksumFile(std::string filename) {
+	if(!fileExists(filename)) {
 		throw file_not_found();
+	}
 
 	FILE *f = fopen(filename.c_str(), "r");
 	FILE *fout = fopen((filename + ".checksums").c_str(), "w");
@@ -1985,8 +1986,6 @@ ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
 		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
 	fclose(f);
 	fclose(fout);
-
-	return Void();
 }
 
 // If integrity is true, a full btree integrity check is done.

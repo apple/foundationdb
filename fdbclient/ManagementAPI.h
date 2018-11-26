@@ -31,11 +31,11 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
-#include "NativeAPI.h"
-#include "Status.h"
-#include "ReadYourWrites.h"
-#include "DatabaseConfiguration.h"
-#include "MonitorLeader.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MonitorLeader.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
@@ -49,6 +49,11 @@ public:
 		INVALID_CONFIGURATION,
 		DATABASE_ALREADY_CREATED,
 		DATABASE_CREATED,
+		DATABASE_UNAVAILABLE,
+		STORAGE_IN_UNKNOWN_DCID,
+		REGION_NOT_FULLY_REPLICATED,
+		MULTIPLE_ACTIVE_REGIONS,
+		REGIONS_CHANGED,
 		SUCCESS
 	};
 };
@@ -104,11 +109,11 @@ ConfigurationResult::Type buildConfiguration( std::string const& modeString, std
 bool isCompleteConfiguration( std::map<std::string, std::string> const& options );
 
 // All versions of changeConfig apply the given set of configuration tokens to the database, and return a ConfigurationResult (or error).
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& configMode );  // Accepts tokens separated by spaces in a single string
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& configMode, bool force );  // Accepts tokens separated by spaces in a single string
 
 ConfigureAutoResult parseConfig( StatusObject const& status );
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf );  // Accepts a vector of configuration tokens
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::map<std::string, std::string> const& m );  // Accepts a full configuration in key/value format (from buildConfiguration)
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force );  // Accepts a vector of configuration tokens
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::map<std::string, std::string> const& m, bool const& force );  // Accepts a full configuration in key/value format (from buildConfiguration)
 
 Future<DatabaseConfiguration> getDatabaseConfiguration( Database const& cx );
 Future<Void> waitForFullReplication( Database const& cx );
@@ -164,6 +169,8 @@ Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, 
 Future<int> setDDMode( Database const& cx, int const& mode );
 
 Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
+
+Future<Void> waitForPrimaryDC( Database const& cx, StringRef const& dcId );
 
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );

@@ -25,15 +25,15 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
-#include "TesterInterface.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
-#include "workloads/workloads.h"
-#include "Status.h"
-#include "QuietDatabase.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/Status.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "CoordinationInterface.h"
+#include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -951,6 +951,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "minimumRegions" ) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		} else if( attrib == "buggify" ) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {

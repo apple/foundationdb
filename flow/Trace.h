@@ -26,8 +26,8 @@
 #include <stdint.h>
 #include <string>
 #include <map>
-#include "IRandom.h"
-#include "Error.h"
+#include "flow/IRandom.h"
+#include "flow/Error.h"
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)

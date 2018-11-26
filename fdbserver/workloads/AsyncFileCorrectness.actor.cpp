@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-#include "AsyncFile.actor.h"
+#include "fdbserver/workloads/AsyncFile.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enumeration representing the type of operation to be performed in a correctness test operation

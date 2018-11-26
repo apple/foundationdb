@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Tuple.h"
+#include "fdbclient/Tuple.h"
 
 static size_t find_string_terminator(const StringRef data, size_t offset) {
 	size_t i = offset;
@@ -29,7 +29,7 @@ static size_t find_string_terminator(const StringRef data, size_t offset) {
 	return i;
 }
 
-Tuple::Tuple(StringRef const& str) {
+Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 	data.append(data.arena(), str.begin(), str.size());
 
 	size_t i = 0;
@@ -49,10 +49,14 @@ Tuple::Tuple(StringRef const& str) {
 			throw invalid_tuple_data_type();
 		}
 	}
+	// If incomplete tuples are allowed, remove the last offset if i is now beyond size()
+	// Strings will never be considered incomplete due to the way the string end is found.
+	if(exclude_incomplete && i > data.size())
+		offsets.pop_back();
 }
 
-Tuple Tuple::unpack(StringRef const& str) {
-	return Tuple(str);
+Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {
+	return Tuple(str, exclude_incomplete);
 }
 
 Tuple& Tuple::append(Tuple const& tuple) {
@@ -183,7 +187,7 @@ Standalone<StringRef> Tuple::getString(size_t index) const {
 	return result;
 }
 
-int64_t Tuple::getInt(size_t index) const {
+int64_t Tuple::getInt(size_t index, bool allow_incomplete) const {
 	if(index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
@@ -205,7 +209,21 @@ int64_t Tuple::getInt(size_t index) const {
 	}
 
 	memset( &swap, neg ? '\xff' : 0, 8 - len );
-	memcpy( ((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, len );
+	// presentLen is how many of len bytes are actually present, it will be < len if the encoded tuple was truncated
+	int presentLen = std::min<int8_t>(len, data.size() - offsets[index] - 1);
+	ASSERT(len == presentLen || allow_incomplete);
+	memcpy( ((uint8_t*)&swap) + 8 - len, data.begin() + offsets[index] + 1, presentLen );
+	if(presentLen < len) {
+		int suffix = len - presentLen;
+		if(presentLen == 0) {
+			// The first byte in an int would always be at least 1, because if was 0 then a shorter int type would have been used.
+			// So if we don't have the first (most significant) byte in the encoded string, use 1 so that the decoded result
+			// maintains the encoded form's sort order with an encoded value of a shorter and same-signed type.
+			*( ((uint8_t*)&swap) + 8 - len) = 1;
+			--suffix;  // The suffix to clear below is now 1 byte shorter.
+		}
+		memset( ((uint8_t*)&swap) + 8 - suffix, 0, suffix );
+	}
 
 	swap = bigEndian64( swap );
 

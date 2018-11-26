@@ -35,8 +35,8 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 
 #include <cstdint>
 #include <cstddef>
-#include "flow.h"
-#include "TDMetric.actor.h"
+#include "flow/flow.h"
+#include "flow/TDMetric.actor.h"
 
 struct ICounter {
 	// All counters have a name and value

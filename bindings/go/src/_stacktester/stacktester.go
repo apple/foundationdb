@@ -28,6 +28,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
+	"math/big"
 	"os"
 	"reflect"
 	"runtime"
@@ -103,7 +104,7 @@ func (sm *StackMachine) waitAndPop() (ret stackEntry) {
 	switch el := ret.item.(type) {
 	case []byte:
 		ret.item = el
-	case int64, string, bool, tuple.UUID, float32, float64, tuple.Tuple:
+	case int64, uint64, *big.Int, string, bool, tuple.UUID, float32, float64, tuple.Tuple:
 		ret.item = el
 	case fdb.Key:
 		ret.item = []byte(el)
@@ -174,8 +175,10 @@ func tupleToString(t tuple.Tuple) string {
 			buffer.WriteString(", ")
 		}
 		switch el := el.(type) {
-		case int64:
+		case int64, uint64:
 			buffer.WriteString(fmt.Sprintf("%d", el))
+		case *big.Int:
+			buffer.WriteString(fmt.Sprintf("%s", el))
 		case []byte:
 			buffer.WriteString(fmt.Sprintf("%+q", string(el)))
 		case string:
@@ -184,9 +187,7 @@ func tupleToString(t tuple.Tuple) string {
 			buffer.WriteString(fmt.Sprintf("%t", el))
 		case tuple.UUID:
 			buffer.WriteString(hex.EncodeToString(el[:]))
-		case float32:
-			buffer.WriteString(fmt.Sprintf("%f", el))
-		case float64:
+		case float32, float64:
 			buffer.WriteString(fmt.Sprintf("%f", el))
 		case nil:
 			buffer.WriteString("nil")
@@ -205,8 +206,10 @@ func (sm *StackMachine) dumpStack() {
 		fmt.Printf(" %d.", sm.stack[i].idx)
 		el := sm.stack[i].item
 		switch el := el.(type) {
-		case int64:
+		case int64, uint64:
 			fmt.Printf(" %d", el)
+		case *big.Int:
+			fmt.Printf(" %s", el)
 		case fdb.FutureNil:
 			fmt.Printf(" FutureNil")
 		case fdb.FutureByteSlice:
@@ -225,9 +228,7 @@ func (sm *StackMachine) dumpStack() {
 			fmt.Printf(" %s", tupleToString(el))
 		case tuple.UUID:
 			fmt.Printf(" %s", hex.EncodeToString(el[:]))
-		case float32:
-			fmt.Printf(" %f", el)
-		case float64:
+		case float32, float64:
 			fmt.Printf(" %f", el)
 		case nil:
 			fmt.Printf(" nil")
@@ -490,7 +491,27 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "POP":
 		sm.stack = sm.stack[:len(sm.stack)-1]
 	case op == "SUB":
-		sm.store(idx, sm.waitAndPop().item.(int64)-sm.waitAndPop().item.(int64))
+		var x, y *big.Int
+		switch x1 := sm.waitAndPop().item.(type) {
+		case *big.Int:
+			x = x1
+		case int64:
+			x = big.NewInt(x1)
+		case uint64:
+			x = new(big.Int)
+			x.SetUint64(x1)
+		}
+		switch y1 := sm.waitAndPop().item.(type) {
+		case *big.Int:
+			y = y1
+		case int64:
+			y = big.NewInt(y1)
+		case uint64:
+			y = new(big.Int)
+			y.SetUint64(y1)
+		}
+
+		sm.store(idx, x.Sub(x, y))
 	case op == "CONCAT":
 		str1 := sm.waitAndPop().item
 		str2 := sm.waitAndPop().item

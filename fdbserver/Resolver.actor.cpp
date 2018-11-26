@@ -20,15 +20,15 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
-#include "ResolverInterface.h"
-#include "MasterInterface.h"
-#include "WorkerInterface.h"
-#include "WaitFailure.h"
-#include "Knobs.h"
-#include "ServerDBInfo.h"
-#include "Orderer.actor.h"
-#include "ConflictSet.h"
-#include "StorageMetrics.h"
+#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Orderer.actor.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -44,7 +44,7 @@ struct ProxyRequestsInfo {
 namespace{
 struct Resolver : ReferenceCounted<Resolver> {
 	Resolver( UID dbgid, int proxyCount, int resolverCount )
-		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE ), debugMinRecentStateVersion(0)
+		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0)
 	{
 	}
 	~Resolver() {

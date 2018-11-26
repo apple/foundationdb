@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
-#include "BackupContainer.h"
-#include "DatabaseContext.h"
-#include "ManagementAPI.h"
-#include "Status.h"
-#include "KeyBackedTypes.h"
+#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 #include <ctime>
 #include <climits>
@@ -808,7 +808,7 @@ namespace fileBackup {
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 
 		state BackupConfig config(current.first);
-		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
@@ -2813,7 +2813,7 @@ namespace fileBackup {
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
 			if(!addingToExistingBatch && beginVersion > 0) {
-				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
+				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion + 1));
 			}
 
 			// The applyLag must be retrieved AFTER potentially updating the apply end version.
@@ -3377,7 +3377,7 @@ public:
 				}
 
 				state BackupConfig config(oldUidAndAborted.get().first);
-				state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+				state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 				// Break, if no longer runnable
 				if (!FileBackupAgent::isRunnable(status)) {
@@ -3412,7 +3412,7 @@ public:
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 		if (uidAndAbortedFlag.present()) {
 			state BackupConfig prevConfig(uidAndAbortedFlag.get().first);
-			state EBackupState prevBackupStatus = wait(prevConfig.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+			state EBackupState prevBackupStatus = wait(prevConfig.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 			if (FileBackupAgent::isRunnable(prevBackupStatus)) {
 				throw backup_duplicate();
 			}
@@ -3619,7 +3619,7 @@ public:
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
-		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
@@ -3670,7 +3670,7 @@ public:
 
 		state BackupConfig config(current.first);
 		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
@@ -3709,7 +3709,7 @@ public:
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
-					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+					EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
 

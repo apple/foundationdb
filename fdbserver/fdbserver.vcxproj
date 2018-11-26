@@ -33,6 +33,7 @@
     <ActorCompiler Include="worker.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ActorCompiler Include="VersionedBTree.actor.cpp" />
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
     <ActorCompiler Include="CoroFlow.actor.cpp" />
@@ -44,18 +45,24 @@
     <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
     <ActorCompiler Include="SimulatedCluster.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
+    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ClCompile Include="Knobs.cpp" />
     <ActorCompiler Include="QuietDatabase.actor.cpp" />
     <ActorCompiler Include="networktest.actor.cpp" />
+    <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="Restore.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
+    <ActorCompiler Include="MemoryPager.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
     <ActorCompiler Include="workloads\Cycle.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\PubSubMultiples.actor.cpp" />
@@ -63,6 +70,7 @@
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
+    <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp" />
     <ClCompile Include="sqlite\btree.c">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -137,7 +145,6 @@
     <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp" />
     <ActorCompiler Include="workloads\TaskBucketCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp" />
-    <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\VersionStamp.actor.cpp" />
     <ActorCompiler Include="workloads\Serializability.actor.cpp" />
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
@@ -153,12 +160,16 @@
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="IKeyValueStore.h" />
+    <ClInclude Include="IndirectShadowPager.h" />
+    <ClInclude Include="IPager.h" />
+    <ClInclude Include="IVersionedStore.h" />
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="LogSystem.h" />
     <ClInclude Include="LogSystemConfig.h" />
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
+    <ClInclude Include="MemoryPager.h" />
     <ClInclude Include="MoveKeys.h" />
     <ClInclude Include="NetworkTest.h" />
     <ActorCompiler Include="Orderer.actor.h">
@@ -173,6 +184,7 @@
     <ClInclude Include="Ratekeeper.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
+    <ClInclude Include="RestoreInterface.h" />
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />
@@ -297,6 +309,8 @@
   </ImportGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="MyPreCompileSteps" AfterTargets="CLCompile">
-    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ') @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).xml&quot; @(ActorCompiler -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).include.xml&quot; @(CLInclude -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
+    <Exec Command="..\bin\$(Configuration)\coveragetool.exe &quot;$(OutDir)coverage.$(TargetName).compile.xml&quot; @(CLCompile -> '%(RelativeDir)%(Filename)%(Extension)', ' ')" />
   </Target>
 </Project>

@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 600)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 610)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 600
+#elif FDB_API_VERSION > 610
 #error Requested API version requires a newer version of this header
 #endif
 

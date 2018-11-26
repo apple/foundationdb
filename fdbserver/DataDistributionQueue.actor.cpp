@@ -25,10 +25,10 @@
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
-#include "DataDistribution.h"
+#include "fdbserver/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1031,6 +1031,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send( rd );
 					return Void();
 				} else {

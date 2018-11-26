@@ -25,7 +25,7 @@ sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 
 
 import util
 
-FDB_API_VERSION = 600
+FDB_API_VERSION = 610
 
 LOGGING = {
     'version': 1,
@@ -58,14 +58,17 @@ class Result:
         self.key_tuple = subspace.unpack(key)
         self.values = values
 
-    def matches(self, rhs, specification):
+    def key(self, specification):
+        return self.key_tuple[specification.key_start_index:]
+
+    def matches_key(self, rhs, specification):
         if not isinstance(rhs, Result):
             return False
 
-        left_key = self.key_tuple[specification.key_start_index:]
-        right_key = self.key_tuple[specification.key_start_index:]
+        return self.key(specification) == rhs.key(specification)
 
-        if len(left_key) != len(right_key) or left_key != right_key:
+    def matches(self, rhs, specification):
+        if not self.matches_key(rhs, specification):
             return False
 
         for value in self.values:

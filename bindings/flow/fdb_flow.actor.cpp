@@ -33,7 +33,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(600);
+	API *fdb = FDB::API::selectAPIVersion(610);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr( new Transaction(db) );
 
@@ -76,7 +76,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(600);
+	API *fdb = FDB::API::selectAPIVersion(610);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 

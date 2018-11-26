@@ -25,13 +25,13 @@
 #include <math.h> // For _set_FMA3_enable workaround in platformInit
 #endif
 
-#include "Platform.h"
-#include "Arena.h"
+#include "flow/Platform.h"
+#include "flow/Arena.h"
 
-#include "Trace.h"
-#include "Error.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
-#include "Knobs.h"
+#include "flow/Knobs.h"
 
 #include <iostream>
 #include <fstream>
@@ -43,8 +43,8 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "UnitTest.h"
-#include "FaultInjection.h"
+#include "flow/UnitTest.h"
+#include "flow/FaultInjection.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -85,7 +85,7 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
-#include "stacktrace.h"
+#include "flow/stacktrace.h"
 
 #ifdef __linux__
 /* Needed for memory allocation */
@@ -2672,7 +2672,7 @@ wchar_basic_istream& __attribute__((weak)) wchar_basic_istream::ignore(streamsiz
 
 // UnitTest for getMemoryInfo
 #ifdef __linux__
-TEST_CASE("flow/Platform/getMemoryInfo") {
+TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	printf("UnitTest flow/Platform/getMemoryInfo 1\n");
 	std::string memString =

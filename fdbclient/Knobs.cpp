@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Knobs.h"
-#include "FDBTypes.h"
-#include "SystemData.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
@@ -39,8 +39,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
-	init( FAILURE_EMERGENCY_DELAY,                60.0 );
-	init( FAILURE_MAX_GENERATIONS,                   4 );
+	init( FAILURE_EMERGENCY_DELAY,                30.0 );
+	init( FAILURE_MAX_GENERATIONS,                  10 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -51,6 +51,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
+	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -61,7 +62,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MAX_BATCH_SIZE,                           20 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1; // Note that SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_SIZE is set to match this value
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
 
-	init( LOCATION_CACHE_EVICTION_SIZE,         100000 );
+	init( LOCATION_CACHE_EVICTION_SIZE,         300000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );

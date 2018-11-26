@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "NetworkTest.h"
+#include "fdbserver/NetworkTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
@@ -97,7 +97,7 @@ static void networkTestnanosleep()
 	printf("\nnanosleep(10) latency after 5ms spin:");
 	for (int i = 0; i < 10; i++) {
 		double a = timer_monotonic() + 5e-3;
-		while (timer_monotonic() < a) 0;
+		while (timer_monotonic() < a) {}
 
 		double before = timer_monotonic();
 		timespec tv;

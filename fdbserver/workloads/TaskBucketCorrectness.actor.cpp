@@ -28,7 +28,7 @@
 #include "fdbclient/Tuple.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SayHelloTaskFunc : TaskFuncBase {
@@ -297,7 +297,7 @@ void print_subspace_key(const Subspace& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
 }
 
-TEST_CASE("fdbclient/TaskBucket/Subspace") {
+TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	Subspace subspace_test;
 	print_subspace_key(subspace_test, 0);
 	ASSERT(subspace_test.key().toString() == "");

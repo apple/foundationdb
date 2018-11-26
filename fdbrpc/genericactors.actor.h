@@ -22,12 +22,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_GENERICACTORS_ACTOR_G_H)
 	#define FDBRPC_GENERICACTORS_ACTOR_G_H
-	#include "genericactors.actor.g.h"
+	#include "fdbrpc/genericactors.actor.g.h"
 #elif !defined(RPCGENERICACTORS_ACTOR_H)
 	#define RPCGENERICACTORS_ACTOR_H
 
 #include "flow/genericactors.actor.h"
-#include "fdbrpc.h"
+#include "fdbrpc/fdbrpc.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Req>
@@ -132,7 +132,7 @@ ACTOR template <class T> Future<Void> broadcast( Future<T> input, std::vector<Re
 
 
 // Needed for the call to endpointNotFound()
-#include "FailureMonitor.h"
+#include "fdbrpc/FailureMonitor.h"
 
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>

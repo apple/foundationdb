@@ -22,8 +22,8 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
-#include "Error.h"
-#include "Platform.h"
+#include "flow/Error.h"
+#include "flow/Platform.h"
 
 // ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by scripts/alloc.pl
 //#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
@@ -37,7 +37,7 @@
 #include <memcheck.h>
 #endif
 
-#include "Hash3.h"
+#include "flow/Hash3.h"
 
 #include <vector>
 #include <cstdlib>
@@ -54,7 +54,7 @@
 #ifdef ALLOC_INSTRUMENTATION
 #include <map>
 #include <algorithm>
-#include "ThreadPrimitives.h"
+#include "flow/ThreadPrimitives.h"
 struct AllocInstrInfo {
 	int64_t allocCount;
 	int64_t deallocCount;

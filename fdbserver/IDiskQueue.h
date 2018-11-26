@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 
 class IDiskQueue : public IClosable {
 public:
@@ -55,6 +55,6 @@ public:
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit = -1 );  // opens basename+"0.fdq" and basename+"1.fdq"
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

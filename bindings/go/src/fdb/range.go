@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 600
+ #define FDB_API_VERSION 610
  #include <foundationdb/fdb_c.h>
 */
 import "C"
@@ -286,6 +286,8 @@ func (ri *RangeIterator) MustGet() KeyValue {
 	return kv
 }
 
+// Strinc returns the first key that would sort outside the range prefixed by
+// prefix, or an error if prefix is empty or contains only 0xFF bytes.
 func Strinc(prefix []byte) ([]byte, error) {
 	for i := len(prefix) - 1; i >= 0; i-- {
 		if prefix[i] != 0xFF {
@@ -311,7 +313,7 @@ func PrefixRange(prefix []byte) (KeyRange, error) {
 	copy(begin, prefix)
 	end, e := Strinc(begin)
 	if e != nil {
-		return KeyRange{}, nil
+		return KeyRange{}, e
 	}
 	return KeyRange{Key(begin), Key(end)}, nil
 }

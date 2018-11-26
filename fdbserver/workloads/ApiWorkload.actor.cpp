@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "ApiWorkload.h"
+#include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

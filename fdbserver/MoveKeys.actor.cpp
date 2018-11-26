@@ -21,8 +21,8 @@
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::min;
@@ -812,8 +812,9 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY );
 				state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY );
 				state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
+				state Future<Standalone<RangeResultRef>> fTLogDatacenters = tr.getRange( tLogDatacentersKeys, CLIENT_KNOBS->TOO_MANY );
 
-				wait( success(fListKey) && success(fTags) && success(fHistoryTags) && success(fTagLocalities) );
+				wait( success(fListKey) && success(fTags) && success(fHistoryTags) && success(fTagLocalities) && success(fTLogDatacenters) );
 
 				if (!fListKey.get().present()) {
 					if (retry) {
@@ -837,6 +838,14 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				for(auto& it : fHistoryTags.get()) {
 					Tag t = decodeServerTagValue( it.value );
 					allLocalities.insert(t.locality);
+				}
+
+				std::map<Optional<Value>,int8_t> dcId_locality;
+				for(auto& kv : fTagLocalities.get()) {
+					dcId_locality[decodeTagLocalityListKey(kv.key)] = decodeTagLocalityListValue(kv.value);
+				}
+				for(auto& it : fTLogDatacenters.get()) {
+					allLocalities.insert(dcId_locality[decodeTLogDatacentersKey(it.key)]);
 				}
 
 				if(locality >= 0 && !allLocalities.count(locality) ) {

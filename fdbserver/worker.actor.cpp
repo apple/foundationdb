@@ -24,14 +24,14 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/MetricLogger.h"
-#include "WorkerInterface.h"
-#include "IKeyValueStore.h"
-#include "WaitFailure.h"
-#include "TesterInterface.h"  // for poisson()
-#include "IDiskQueue.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/TesterInterface.h"  // for poisson()
+#include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
@@ -113,8 +113,12 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr( store->getError() );
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
-			wait(onClosed);
-			if(storeError.isReady()) throw storeError.getError();
+			if (e.isError() && e.getError().code() == error_code_please_reboot) {
+				// no need to wait.
+			} else {
+				wait(onClosed);
+			}
+			if(storeError.isReady()) throw storeError.get().getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
 		when (ErrorOr<Void> e = wait( storeError )) {
@@ -138,7 +142,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 				err.error.code() == error_code_success ||
 				err.error.code() == error_code_please_reboot ||
 				err.error.code() == error_code_actor_cancelled ||
-				err.error.code() == error_code_coordinators_changed;  // The worker server was cancelled
+				err.error.code() == error_code_coordinators_changed ||  // The worker server was cancelled
+				err.error.code() == error_code_shutdown_in_progress;
 
 			if(!ok)
 				err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
@@ -178,9 +183,12 @@ ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
+StringRef tlogQueueExtension = LiteralStringRef("fdq");
+
 std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyValueStoreType::SSD_BTREE_V1, ".fdb" );
 std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
+std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
 
 std::string validationFilename = "_validate";
 
@@ -191,7 +199,9 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-
+	
+	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
+		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
 
@@ -202,6 +212,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, prefix + id.toString() + "-" );
+	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
+		return joinPath(folder, prefix + id.toString() + ".redwood");
 
 	UNREACHABLE();
 }
@@ -248,6 +260,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result1.begin(), result1.end() );
 	auto result2 = getDiskStores( folder, memorySuffix.second, memorySuffix.first );
 	result.insert( result.end(), result2.begin(), result2.end() );
+	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
+	result.insert( result.end(), result3.begin(), result3.end() );
 	return result;
 }
 
@@ -344,7 +358,7 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	}
 }
 
-ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
+ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit, IKeyValueStore* store ) {
 	loop {
 		ErrorOr<Void> e = wait( errorOr( prevStorageServer) );
 		if (!e.isError()) return Void();
@@ -352,18 +366,13 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		TraceEvent("StorageServerRequestedReboot", id);
 
-		//if (BUGGIFY) wait(delay(1.0)); // This does the same thing as zombie()
-		// We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
-		// the old one so the failure detector will know it is gone.
 		StorageServerInterface ssi;
 		ssi.uniqueID = id;
 		ssi.locality = locality;
 		ssi.initEndpoints();
-		auto* kv = openKVStore( storeType, filename, ssi.uniqueID, memoryLimit );
-		Future<Void> kvClosed = kv->onClosed();
-		filesClosed->add( kvClosed );
-		prevStorageServer = storageServer( kv, ssi, db, folder, Promise<Void>() );
-		prevStorageServer = handleIOErrors( prevStorageServer, kv, id, kvClosed );
+
+		prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
+		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
 
@@ -447,6 +456,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	localInfo.myLocality = locality;
 	dbInfo->set(localInfo);
 
+	state Optional<std::string> incorrectConnectionString;
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
@@ -454,11 +464,18 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
 			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
+			std::string connectionString = connFile->getConnectionString().toString();
 			if(connFile->canGetFilename()) {
-				TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", connFile->getFilename())
+				// Don't log a SevWarnAlways the first time to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(incorrectConnectionString.present() && incorrectConnectionString.get() == connectionString ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+					.detail("Filename", connFile->getFilename())
 					.detail("ConnectionStringFromFile", fileConnectionString.toString())
-					.detail("CurrentConnectionString", connFile->getConnectionString().toString());
+					.detail("CurrentConnectionString", connectionString);
 			}
+			incorrectConnectionString = connectionString;
+		}
+		else {
+			incorrectConnectionString = Optional<std::string>();
 		}
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
@@ -486,9 +503,8 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
-ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
-	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles,
-	UID processIDUid) {
+ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData locality,
+	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
 	state PromiseStream< ErrorInfo > errors;
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
@@ -499,12 +515,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
-	state PromiseStream<InitializeTLogRequest> tlogRequests;
-	state Future<Void> tlog = Void();
+	state std::map<KeyValueStoreType::StoreType, std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 
-	state Standalone<StringRef> processID = processIDUid.toString();
-	state LocalityData locality = localities;
-	locality.set(LocalityData::keyProcessId, processID);
 	state WorkerInterface interf( locality );
 
 	if(metricsPrefix.size() > 0) {
@@ -584,13 +596,13 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				Promise<Void> recovery;
 				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
 				recoveries.push_back(recovery.getFuture());
-				f =  handleIOErrors( f, kv, s.storeID, kvClosed );
-				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
+				f = handleIOErrors( f, kv, s.storeID, kvClosed );
+				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
 				errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
-					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-" ), s.storeID, 10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
+					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID,  10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
 				filesClosed.add( kv->onClosed() );
 				filesClosed.add( queue->onClosed() );
 
@@ -600,13 +612,14 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
-				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
+				auto& logData = sharedLogs[s.storeType];
+				Future<Void> tl = tLog( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
 				recoveries.push_back(recovery.getFuture());
 
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
-				if(tlog.isReady()) {
-					tlog = oldLog.getFuture() || tl;
+				if(!logData.first.isValid() || logData.first.isReady()) {
+					logData.first = oldLog.getFuture() || tl;
 				}
 				errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl ) );
 			}
@@ -687,8 +700,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
-				tlogRequests.send(req);
-				if(tlog.isReady()) {
+				auto& logData = sharedLogs[req.storeType];
+				logData.second.send(req);
+				if(!logData.first.isValid() || logData.first.isReady()) {
 					UID logId = g_random->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -699,14 +713,14 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
-					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), logId );
+					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), tlogQueueExtension.toString(), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>(), Promise<Void>() );
-					tlog = handleIOErrors( tlog, data, logId );
-					tlog = handleIOErrors( tlog, queue, logId );
-					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tlog ) );
+					logData.first = tLog( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>() );
+					logData.first = handleIOErrors( logData.first, data, logId );
+					logData.first = handleIOErrors( logData.first, queue, logId );
+					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
 				}
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
@@ -742,7 +756,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					Future<Void> s = storageServer( data, recruited, req.seedTag, storageReady, dbInfo, folder );
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady( req.reqId, s );
-					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
+					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, data );
 					errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), s ) );
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
@@ -837,6 +851,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
 							included = fileExists(d.filename + ".sqlite-wal");
 						}
+						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
+							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+						}
 						else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY);
 							included = fileExists(d.filename + "1.fdq");
@@ -865,7 +882,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
-		tlog = Void();
+		sharedLogs.clear();
 
 		if (e.code() != error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
@@ -1020,6 +1037,7 @@ ACTOR Future<Void> fdbd(
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
 		
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
+		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
@@ -1029,10 +1047,10 @@ ACTOR Future<Void> fdbd(
 		Promise<Void> recoveredDiskFiles;
 
 		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "ClusterController") );
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, processIDUid), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(v,1) );

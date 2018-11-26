@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.h"
-#include "pubsub.h"
+#include "fdbserver/pubsub.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 Value uInt64ToValue( uint64_t v ) {

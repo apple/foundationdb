@@ -23,12 +23,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILECACHED_ACTOR_G_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_G_H
-	#include "AsyncFileCached.actor.g.h"
+	#include "fdbrpc/AsyncFileCached.actor.g.h"
 #elif !defined(FLOW_ASYNCFILECACHED_ACTOR_H)
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
 #include "flow/flow.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"
@@ -119,25 +119,44 @@ public:
 		return tag(f,length);
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
-		++countFileCacheWrites;
-		++countCacheWrites;
-		auto f = read_write_impl(this, const_cast<void*>(data), length, offset, true);
+	ACTOR static Future<Void> write_impl( AsyncFileCached *self, void const* data, int length, int64_t offset ) {
+		// If there is a truncate in progress before the the write position then we must 
+		// wait for it to complete.
+		if(length + offset > self->currentTruncateSize)
+			wait(self->currentTruncate);
+		++self->countFileCacheWrites;
+		++self->countCacheWrites;
+		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
 		if (!f.isReady()) {
-			++countFileCacheWritesBlocked;
-			++countCacheWritesBlocked;
+			++self->countFileCacheWritesBlocked;
+			++self->countCacheWritesBlocked;
 		}
-		return f;
+		wait(f);
+		return Void();
+	}
+
+	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+		return write_impl(this, data, length, offset);
 	}
 
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
 
-	virtual Future<Void> truncate( int64_t size );
+	// This waits for previously started truncates to finish and then truncates
+	virtual Future<Void> truncate( int64_t size ) {
+		return truncate_impl(this, size);
+	}
 
-	ACTOR Future<Void> truncate_impl( AsyncFileCached* self, int64_t size, Future<Void> truncates ) {
-		wait( truncates );
-		wait( self->uncached->truncate( size ) );
+	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
+	Future<Void> changeFileSize( int64_t size );
+
+	// This wrapper for the actual truncation operation enforces ordering of truncates.
+	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
+	ACTOR static Future<Void> truncate_impl(AsyncFileCached *self, int64_t size) {
+		wait(self->currentTruncate);
+		self->currentTruncateSize = size;
+		self->currentTruncate = self->changeFileSize(size);
+		wait(self->currentTruncate);
 		return Void();
 	}
 
@@ -187,6 +206,12 @@ private:
 	std::unordered_map<int64_t, AFCPage*> pages;
 	std::vector<AFCPage*> flushable;
 	Reference<EvictablePageCache> pageCache;
+	Future<Void> currentTruncate;
+	int64_t currentTruncateSize;
+
+	// Map of pointers which hold page buffers for pages which have been overwritten
+	// but at the time of write there were still readZeroCopy holders.
+	std::unordered_map<void *, int> orphanedPages;
 
 	Int64MetricHandle countFileCacheFinds;
 	Int64MetricHandle countFileCacheReads;
@@ -205,7 +230,7 @@ private:
 	Int64MetricHandle countCacheReadBytes;
 
 	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache ) 
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache) {
+		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(         LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(          LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -262,8 +287,6 @@ private:
 
 	static Future<Void> read_write_impl( AsyncFileCached* self, void* data, int length, int64_t offset, bool writing );
 
-	static Future<Void> truncate_impl( AsyncFileCached* self, int64_t size );
-
 	void remove_page( AFCPage* page );
 };
 
@@ -281,16 +304,35 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		return false;
 	}
 
+	// Move this page's data into the orphanedPages set of the owner
+	void orphan() {
+		owner->orphanedPages[data] = zeroCopyRefCount;
+		zeroCopyRefCount = 0;
+		notReading = Void();
+		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
+	}
+
 	Future<Void> write( void const* data, int length, int offset ) {
-		ASSERT( !zeroCopyRefCount );  // overlapping zero-copy reads and writes are undefined behavior
+		// If zero-copy reads are in progress, allow whole page writes to a new page buffer so the effects
+		// are not seen by the prior readers who still hold zeroCopyRead pointers
+		bool fullPage = offset == 0 && length == pageCache->pageSize;
+		ASSERT(zeroCopyRefCount == 0 || fullPage);
+
+		if(zeroCopyRefCount != 0) {
+			ASSERT(fullPage);
+			orphan();
+		}
+
 		setDirty();
 
-		if (valid || (offset == 0 && length == pageCache->pageSize)) {
+		// If there are no active readers then if data is valid or we're replacing all of it we can write directly
+		if (valid || fullPage) {
 			valid = true;
 			memcpy( static_cast<uint8_t*>(this->data) + offset, data, length );
 			return yield();
 		}
 
+		// If data is not valid but no read is in progress, start reading
 		if (notReading.isReady()) {
 			notReading = readThrough( this );
 		}
@@ -352,9 +394,10 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	ACTOR static Future<Void> readThrough( AFCPage* self ) {
 		ASSERT(!self->valid);
+		state void *dst = self->data;
 		if ( self->pageOffset < self->owner->prevLength ) {
 			try {
-				int _ = wait( self->owner->uncached->read( self->data, self->pageCache->pageSize, self->pageOffset ) );
+				int _ = wait( self->owner->uncached->read( dst, self->pageCache->pageSize, self->pageOffset ) );
 				if (_ != self->pageCache->pageSize)
 					TraceEvent("ReadThroughShortRead").detail("ReadAmount", _).detail("PageSize", self->pageCache->pageSize).detail("PageOffset", self->pageOffset);
 			} catch (Error& e) {
@@ -363,7 +406,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 				throw;
 			}
 		}
-		self->valid = true;
+		// If the memory we read into wasn't orphaned while we were waiting on the read then set valid to true
+		if(dst == self->data)
+			self->valid = true;
 		return Void();
 	}
 
@@ -434,7 +479,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> truncate() {
-		ASSERT( !zeroCopyRefCount );  // overlapping zero-copy reads and writes are undefined behavior
+		// Allow truncatation during zero copy reads but orphan the previous buffer
+		if( zeroCopyRefCount != 0)
+			orphan();
 		truncated = true;
 		return truncate_impl( this );
 	}

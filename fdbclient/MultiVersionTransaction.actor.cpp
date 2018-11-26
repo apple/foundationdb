@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "MultiVersionTransaction.h"
-#include "MultiVersionAssignmentVars.h"
-#include "ThreadSafeTransaction.h"
+#include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/MultiVersionAssignmentVars.h"
+#include "fdbclient/ThreadSafeTransaction.h"
 
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
@@ -1281,7 +1281,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 // UNIT TESTS
 extern bool noUnseed;
 
-TEST_CASE( "fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
+TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 	auto vals = parseOptionValues("a");
 	ASSERT(vals.size() == 1 && vals[0] == "a");
 
@@ -1563,7 +1563,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -1632,7 +1632,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar" ) {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -1672,7 +1672,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -1705,7 +1705,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE( "fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
+TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar" ) {
 	state volatile bool done = false;
 	g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

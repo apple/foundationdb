@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
@@ -136,7 +136,7 @@ struct StatusWorkload : TestWorkload {
 
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory("Status");
 
-TEST_CASE("fdbserver/status/schema/basic") {
+TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema = readJSONStrictly("{\"apple\":3,\"banana\":\"foo\",\"sub\":{\"thing\":true},\"arr\":[{\"a\":1,\"b\":2}],\"en\":{\"$enum\":[\"foo\",\"bar\"]},\"mapped\":{\"$map\":{\"x\":true}}}");
 	auto check = [&schema](bool expect_ok, std::string t) {
 		json_spirit::mValue test = readJSONStrictly(t);

@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 
 class IClosable {
 public:
@@ -72,12 +72,16 @@ public:
 			commit()
 			read()
 	*/
+	virtual Future<Void> init() {
+		return Void();
+	}
 protected:
 	virtual ~IKeyValueStore() {}
 };
 
 extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false );
-extern IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit );
+extern IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID);
+extern IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext = "fdq");
 extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
 inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string const& filename, UID logID, int64_t memoryLimit, bool checkChecksums=false, bool checkIntegrity=false ) {
@@ -88,13 +92,15 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory( filename, logID, memoryLimit );
+	case KeyValueStoreType::SSD_REDWOOD_V1:
+		return keyValueStoreRedwoodV1( filename, logID );
 	default:
 		UNREACHABLE();
 	}
 	UNREACHABLE(); // FIXME: is this right?
 }
 
-Future<Void> GenerateIOLogChecksumFile(std::string const & filename);
+void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const & filename, bool const &integrity);
 
 #endif

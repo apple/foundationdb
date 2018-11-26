@@ -1,8 +1,8 @@
 .. _backups:
 
-######################
+######################################################
 Backup, Restore, and Replication for Disaster Recovery
-######################
+######################################################
 
 .. include:: guide-common.rst.inc
 
@@ -83,19 +83,22 @@ For blob store backup locations, the Backup URL format is
 
 ::
 
-    blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>[?<param>=<value>[&<param>=<value>]...]
+    blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
 
       <api_key> - API key to use for authentication
       <secret> - API key's secret.  Optional.
       <hostname> - Remote hostname or IP address to connect to
       <port> - Remote port to connect to.  Optional.  Default is 80.
-      <name> - Name of backup.  It can contain '/' characters, to place backups into a folder-like structure.
+      <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
+      <bucket_name> - Name of the bucket to use for backup data.
       
       <param>=<value> - Optional URL parameters.  See below for details.
 
+A single bucket (specified by <bucket_name>) can hold any number of backups, each with a different <name>.
+
 If <secret> is not specified, it will be looked up in :ref:`blob credential sources<blob-credential-files>`.
 
-An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400``.
+An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups``.
 
 Blob store Backup URLs can have optional parameters at the end which set various limits on interactions with the blob store.  All values must be positive decimal integers.  The default values are not very restrictive.  The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service.
 
@@ -323,7 +326,7 @@ Optionally, the user can specify a minimum RESTORABILITY guarantee with one of t
 .. program:: fdbbackup describe
 
 ``describe``
-----------
+------------
 
 The ``describe`` subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.
 
@@ -347,7 +350,7 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
    user@host$ fdbbackup list -b <BASE_URL>
 
 ``-b <BASE_URL>`` or ``--base_url <BASE_URL>``
-  This a shortened Backup URL which looks just like a Backup URL but without the backup name so that the list command will discover and list all of the backups under that base URL.
+  This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
 
 ``fdbrestore`` command line tool

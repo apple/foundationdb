@@ -23,11 +23,11 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_INDEXEDSET_ACTOR_G_H)
 	#define FLOW_INDEXEDSET_ACTOR_G_H
-	#include "IndexedSet.actor.g.h"
+	#include "flow/IndexedSet.actor.g.h"
 #elif !defined(FLOW_INDEXEDSET_ACTOR_H)
 	#define FLOW_INDEXEDSET_ACTOR_H
 
-#include "flow.h"
+#include "flow/flow.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Node>

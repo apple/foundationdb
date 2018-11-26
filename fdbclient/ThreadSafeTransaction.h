@@ -22,10 +22,10 @@
 #define FDBCLIENT_THREADSAFETRANSACTION_H
 #pragma once
 
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "flow/ThreadHelper.actor.h"
-#include "ClusterInterface.h"
-#include "IClientApi.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/IClientApi.h"
 
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:

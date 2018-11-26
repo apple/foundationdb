@@ -23,7 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "Locality.h"
+#include "fdbrpc/Locality.h"
 
 class LocalityData;
 struct LocalitySet;

@@ -18,19 +18,19 @@
  * limitations under the License.
  */
 
-#include "Status.h"
+#include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
 #include <time.h>
-#include "CoordinationInterface.h"
-#include "DataDistribution.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/DataDistribution.h"
 #include "flow/UnitTest.h"
-#include "QuietDatabase.h"
-#include "RecoveryState.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -406,18 +406,26 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj.setKeyRawNumber("stored_bytes",metrics.getValue("BytesStored"));
-			obj.setKeyRawNumber("kvstore_used_bytes",metrics.getValue("KvstoreBytesUsed"));
-			obj.setKeyRawNumber("kvstore_free_bytes",metrics.getValue("KvstoreBytesFree"));
-			obj.setKeyRawNumber("kvstore_available_bytes",metrics.getValue("KvstoreBytesAvailable"));
-			obj.setKeyRawNumber("kvstore_total_bytes",metrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("stored_bytes", metrics.getValue("BytesStored"));
+			obj.setKeyRawNumber("kvstore_used_bytes", metrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes", metrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes", metrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes", metrics.getValue("KvstoreBytesTotal"));
 			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
-			obj.setKeyRawNumber("query_queue_max",metrics.getValue("QueryQueueMax"));
+			obj.setKeyRawNumber("query_queue_max", metrics.getValue("QueryQueueMax"));
+			obj["total_queries"] = StatusCounter(metrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
+			obj["bytes_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
+			obj["keys_queried"] = StatusCounter(metrics.getValue("RowsQueried")).getStatus();
+			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
+			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
 
 			Version version = parseInt64(metrics.getValue("Version"));
+			Version durableVersion = parseInt64(metrics.getValue("DurableVersion"));
+
 			obj["data_version"] = version;
+			obj["durable_version"] = durableVersion;
 
 			int64_t versionLag = parseInt64(metrics.getValue("VersionLag"));
 			if(maxTLogVersion > 0) {
@@ -434,7 +442,12 @@ struct RolesInfo {
 			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 			dataLag["seconds"] = dataLagSeconds;
 
+			JsonBuilderObject durabilityLag;
+			durabilityLag["versions"] = version - durableVersion;
+			durabilityLag["seconds"] = (version - durableVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+
 			obj["data_lag"] = dataLag;
+			obj["durability_lag"] = durabilityLag;
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
@@ -1379,16 +1392,19 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			throw storageServers.getError();
 		}
 
+		StatusCounter readRequests;
 		StatusCounter reads;
 		StatusCounter readKeys;
 		StatusCounter readBytes;
 
 		for(auto &ss : storageServers.get()) {
+			readRequests.updateValues( StatusCounter(ss.second.getValue("QueryQueue")));
 			reads.updateValues( StatusCounter(ss.second.getValue("FinishedQueries")));
 			readKeys.updateValues( StatusCounter(ss.second.getValue("RowsQueried")));
 			readBytes.updateValues( StatusCounter(ss.second.getValue("BytesQueried")));
 		}
 
+		operationsObj["read_requests"] = readRequests.getStatus();
 		operationsObj["reads"] = reads.getStatus();
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
@@ -1961,7 +1977,7 @@ bool checkJson(const JsonBuilder &j, const char *expected) {
 	return js == expected;
 }
 
-TEST_CASE("status/json/builder") {
+TEST_CASE("/status/json/builder") {
 	JsonBuilder json;
 	ASSERT(checkJson(json, "null"));
 
@@ -2117,7 +2133,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &l
 	return r;
 }
 
-TEST_CASE("status/json/builderPerf") {
+TEST_CASE("/status/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");
@@ -2170,7 +2186,7 @@ TEST_CASE("status/json/builderPerf") {
 	return Void();
 }
 
-TEST_CASE("status/json/merging") {
+TEST_CASE("/status/json/merging") {
 	StatusObject objA, objB, objC;
 	JSONDoc a(objA), b(objB), c(objC);
 

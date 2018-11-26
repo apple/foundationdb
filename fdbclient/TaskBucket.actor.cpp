@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "TaskBucket.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/TaskBucket.h"
+#include "fdbclient/ReadYourWrites.h"
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
@@ -733,6 +733,11 @@ public:
 			newTimeoutVersion = version + taskBucket->timeout;
 		else if(newTimeoutVersion <= version)  // Ensure that the time extension is to the future
 			newTimeoutVersion = version + 1;
+
+		// This can happen if extendTimeout is called shortly after task start and the task's timeout was jittered to be longer
+		if(newTimeoutVersion <= task->timeoutVersion) {
+			newTimeoutVersion = task->timeoutVersion + 1;
+		}
 
 		// This is where the task definition is being moved to
 		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeoutVersion).get(task->key);

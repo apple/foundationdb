@@ -75,33 +75,46 @@ class ResultSet(object):
         util.get_logger().info('Comparing results from \'%s\'...' % repr(util.subspace_to_tuple(self.specification.subspace)))
 
         num_errors = 0
+        has_filtered_error = False
+
+        # Tracks the current result being evaluated for each tester
         indices = [0 for i in range(len(self.tester_results))]
 
         name_length = max([len(name) for name in self.tester_results.keys()])
 
-        has_filtered_error = False
-
         while True:
+            # Gets the next result for each tester
             results = {i: r[indices[i]] for i, r in enumerate(self.tester_results.values()) if len(r) > indices[i]}
             if len(results) == 0:
                 break
 
+            # Attempt to 'align' the results. If two results have matching sequence numbers, then they should be compared.
+            # Only those testers which have a result matching the minimum current sequence number will be included. All
+            # others are considered to have not produced a result and will be evaluated in a future iteration.
             sequence_nums = [r.sequence_num(self.specification) for r in results.values()]
             if any([s is not None for s in sequence_nums]):
                 results = {i: r for i, r in results.items() if r.sequence_num(self.specification) == min(sequence_nums)}
-            else:
-                results = {i: r for i, r in results.items() if r.matches(min(results.values()), self.specification)}
 
+            # If these results aren't using sequence numbers, then we match two results based on whether they share the same key
+            else:
+                min_key = min([r.key(self.specification) for r in results.values()])
+                results = {i: r for i, r in results.items() if r.key(self.specification) == min_key}
+
+            # Increment the indices for those testers which produced a result in this iteration
             for i in results.keys():
                 indices[i] += 1
 
+            # Fill in 'None' values for testers that didn't produce a result and generate an output string describing the results
             all_results = {i: results[i] if i in results else None for i in range(len(self.tester_results))}
             result_str = '\n'.join(['  %-*s - %s' % (name_length, self.tester_results.keys()[i], r) for i, r in all_results.items()])
 
             result_list = results.values()
+
+            # If any of our results matches the global error filter, we ignore the result
             if any(r.matches_global_error_filter(self.specification) for r in result_list):
                 has_filtered_error = True
 
+            # The result is considered correct if every tester produced a value and all the values meet the matching criteria
             if len(results) < len(all_results) or not all(result_list[0].matches(r, self.specification) for r in result_list):
                 util.get_logger().error('\nIncorrect result: \n%s' % result_str)
                 num_errors += 1
@@ -141,7 +154,7 @@ def choose_api_version(selected_api_version, tester_min_version, tester_max_vers
             api_version = min_version
         elif random.random() < 0.9:
             api_version = random.choice([v for v in [13, 14, 16, 21, 22, 23, 100, 200, 300, 400, 410, 420, 430,
-                                                     440, 450, 460, 500, 510, 520, 600] if v >= min_version and v <= max_version])
+                                                     440, 450, 460, 500, 510, 520, 600, 610] if v >= min_version and v <= max_version])
         else:
             api_version = random.randint(min_version, max_version)
 

@@ -52,7 +52,7 @@ def get_api_version():
 
 
 def api_version(ver):
-    header_version = 600
+    header_version = 610
 
     if '_version' in globals():
         if globals()['_version'] != ver:

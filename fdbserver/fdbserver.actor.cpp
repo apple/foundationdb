@@ -26,34 +26,35 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "CoordinationInterface.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "MoveKeys.h"
-#include "ConflictSet.h"
-#include "DataDistribution.h"
-#include "NetworkTest.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/RestoreInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/NetworkTest.h"
+#include "fdbserver/IKeyValueStore.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <fstream>
-#include "pubsub.h"
+#include "fdbserver/pubsub.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #undef min
 #undef max
 #endif
-#include "SimulatedCluster.h"
-#include "TesterInterface.h"
-#include "workloads/workloads.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbserver/workloads/workloads.h"
 #include <time.h>
-#include "Status.h"
+#include "fdbserver/Status.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
-#include "CoroFlow.h"
+#include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 
 #define BOOST_DATE_TIME_NO_LIB
@@ -568,7 +569,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	if( devhelp ) {
 		printf("  -r ROLE, --role ROLE\n"
 			   "                 Server role (valid options are fdbd, test, multitest,\n");
-		printf("                 simulation, networktestclient, networktestserver,\n");
+		printf("                 simulation, networktestclient, networktestserver, restore\n");
 		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
 #ifdef _WIN32
 		printf("  -n, --newconsole\n"
@@ -769,6 +770,7 @@ int main(int argc, char* argv[]) {
 			CreateTemplateDatabase,
 			NetworkTestClient,
 			NetworkTestServer,
+			Restore,
 			KVFileIntegrityCheck,
 			KVFileGenerateIOLogChecksums,
 			ConsistencyCheck
@@ -902,6 +904,7 @@ int main(int argc, char* argv[]) {
 					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
 					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
 					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
+					else if (!strcmp(sRole, "restore")) role = Restore;
 					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
 					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
 					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
@@ -1421,7 +1424,7 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer) {
+			if (role == FDBD || role == NetworkTestServer || role == Restore) {
 				try {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
 					if (listenError.isReady()) listenError.get();
@@ -1572,12 +1575,23 @@ int main(int argc, char* argv[]) {
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
+		} else if (role == Restore) {
+			f = stopAfter( restoreWorker(connectionFile, localities) );
+			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter( KVFileCheck(kvFile, true) );
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
-			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
-			g_network->run();
+			Optional<Void> result;
+			try {
+				GenerateIOLogChecksumFile(kvFile);
+				result = Void();
+			}
+			catch(Error &e) {
+				fprintf(stderr, "Fatal Error: %s\n", e.what());
+			}
+
+			f = result;
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

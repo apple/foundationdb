@@ -22,10 +22,10 @@
 #define FDBCLIENT_CLIENTWORKERINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Status.h"
-#include "ClientDBInfo.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ClientDBInfo.h"
 
 // Streams from WorkerInterface that are safe and useful to call from a client.
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.

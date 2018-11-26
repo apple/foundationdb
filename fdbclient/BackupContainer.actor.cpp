@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "BackupContainer.h"
+#include "fdbclient/BackupContainer.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
-#include "fdbrpc/AsyncFileBlobStore.actor.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "fdbrpc/Platform.h"
+#include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -354,9 +354,9 @@ public:
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 
-	// List log files which contain data at any version >= beginVersion and < endVersion
+	// List log files which contain data at any version >= beginVersion and <= targetVersion
 	// Lists files in sorted order by begin version. Does not check that results are non overlapping or contiguous.
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version targetVersion = std::numeric_limits<Version>::max()) {
 		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
@@ -364,7 +364,7 @@ public:
 		std::string firstPath = cleanFolderString(logVersionFolderString(
 			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
 		));
-		std::string lastPath =  cleanFolderString(logVersionFolderString(endVersion));
+		std::string lastPath =  cleanFolderString(logVersionFolderString(targetVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
@@ -378,7 +378,7 @@ public:
 			std::vector<LogFile> results;
 			LogFile lf;
 			for(auto &f : files) {
-				if(pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion && lf.beginVersion < endVersion)
+				if(pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
 					results.push_back(lf);
 			}
 			std::sort(results.begin(), results.end());
@@ -517,7 +517,7 @@ public:
 			if(s.beginVersion != s.endVersion) {
 				if(!desc.minLogBegin.present() || desc.minLogBegin.get() > s.beginVersion)
 					s.restorable = false;
-				if(!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() < s.endVersion)
+				if(!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() <= s.endVersion)
 					s.restorable = false;
 			}
 
@@ -534,12 +534,12 @@ public:
 			}
 
 			// If the snapshot is covered by the contiguous log chain then update min/max restorable.
-			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion <= desc.contiguousLogEnd.get()) {
+			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion < desc.contiguousLogEnd.get()) {
 				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
 					desc.minRestorableVersion = s.endVersion;
 
-				if(!desc.maxRestorableVersion.present() || desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get())
-					desc.maxRestorableVersion = desc.contiguousLogEnd;
+				if(!desc.maxRestorableVersion.present() || (desc.contiguousLogEnd.get() - 1) > desc.maxRestorableVersion.get())
+					desc.maxRestorableVersion = desc.contiguousLogEnd.get() - 1;
 			}
 		}
 
@@ -588,9 +588,9 @@ public:
 		}
 
 		// Get log files that contain any data at or before expireEndVersion
-		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion));
+		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion - 1));
 		// Get range files up to and including expireEndVersion
-		state std::vector<RangeFile> ranges = wait(bc->listRangeFiles(scanBegin, expireEndVersion));
+		state std::vector<RangeFile> ranges = wait(bc->listRangeFiles(scanBegin, expireEndVersion - 1));
 
 		// The new logBeginVersion will be taken from the last log file, if there is one
 		state Optional<Version> newLogBeginVersion;
@@ -622,9 +622,8 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for(auto const &f : ranges) {
-			// Must recheck version because list returns data up to and including the given endVersion
-			if(f.version < expireEndVersion)
-				toDelete.push_back(std::move(f.fileName));
+			ASSERT(f.version < expireEndVersion);
+			toDelete.push_back(std::move(f.fileName));
 		}
 		ranges.clear();
 
@@ -732,7 +731,7 @@ public:
 
 				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 				while(++i != logs.end()) {
-					if(i->beginVersion > end || i->beginVersion >= targetVersion)
+					if(i->beginVersion > end || i->beginVersion > targetVersion)
 						break;
 					// If the next link in the log chain is found, update the end
 					if(i->beginVersion == end) {
@@ -993,9 +992,6 @@ private:
 
 class BackupContainerBlobStore : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
 private:
-	// All backup data goes into a single bucket
-	static const std::string BUCKET;
-
 	// Backup files to under a single folder prefix with subfolders for each named backup
 	static const std::string DATAFOLDER;
 
@@ -1005,6 +1001,9 @@ private:
 
 	Reference<BlobStoreEndpoint> m_bstore;
 	std::string m_name;
+
+	// All backup data goes into a single bucket
+	std::string m_bucket;
 
 	std::string dataPath(const std::string path) {
 		return DATAFOLDER + "/" + m_name + "/" + path;
@@ -1016,21 +1015,33 @@ private:
 	}
 
 public:
-	BackupContainerBlobStore(Reference<BlobStoreEndpoint> bstore, std::string name)
-	  : m_bstore(bstore), m_name(name) {
+	BackupContainerBlobStore(Reference<BlobStoreEndpoint> bstore, std::string name, const BlobStoreEndpoint::ParametersT &params)
+	  : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
+
+		// Currently only one parameter is supported, "bucket"
+		for(auto &kv : params) {
+			if(kv.first == "bucket") {
+				m_bucket = kv.second;
+				continue;
+			}
+			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", printable(kv.first)).detail("Value", printable(kv.second));
+			throw backup_invalid_url();
+		}
 	}
 
 	void addref() { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
 	void delref() { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
-	static std::string getURLFormat() { return BlobStoreEndpoint::getURLFormat(true); }
+	static std::string getURLFormat() {
+		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
+	}
 
 	virtual ~BackupContainerBlobStore() {}
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) {
 			return Reference<IAsyncFile>(
 				new AsyncFileReadAheadCache(
-					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, BUCKET, dataPath(path))),
+					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
 					m_bstore->knobs.read_block_size,
 					m_bstore->knobs.read_ahead_blocks,
 					m_bstore->knobs.concurrent_reads_per_file,
@@ -1039,9 +1050,9 @@ public:
 			);
 	}
 
-	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore) {
+	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
 		state std::string basePath = INDEXFOLDER + '/';
-		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(BUCKET, basePath));
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(bucket, basePath));
 		std::vector<std::string> results;
 		for(auto &f : contents.objects) {
 			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size())));
@@ -1071,11 +1082,11 @@ public:
 	};
 
 	Future<Reference<IBackupFile>> writeFile(std::string path) {
-		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, BUCKET, dataPath(path)))));
+		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 	}
 
 	Future<Void> deleteFile(std::string path) {
-		return m_bstore->deleteObject(BUCKET, dataPath(path));
+		return m_bstore->deleteObject(m_bucket, dataPath(path));
 	}
 
 	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path, std::function<bool(std::string const &)> pathFilter) {
@@ -1087,7 +1098,7 @@ public:
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BUCKET, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		FilesAndSizesT files;
 		for(auto &o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);
@@ -1101,12 +1112,12 @@ public:
 	}
 
 	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
-		wait(bc->m_bstore->createBucket(BUCKET));
+		wait(bc->m_bstore->createBucket(bc->m_bucket));
 
 		// Check/create the index entry
-		bool exists = wait(bc->m_bstore->objectExists(BUCKET, bc->indexEntry()));
+		bool exists = wait(bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry()));
 		if(!exists) {
-			wait(bc->m_bstore->writeEntireFile(BUCKET, bc->indexEntry(), ""));
+			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
 		}
 
 		return Void();
@@ -1118,10 +1129,10 @@ public:
 
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
 		// First delete everything under the data prefix in the bucket
-		wait(bc->m_bstore->deleteRecursively(BUCKET, bc->dataPath(""), pNumDeleted));
+		wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
 
 		// Now that all files are deleted, delete the index entry
-		wait(bc->m_bstore->deleteObject(BUCKET, bc->indexEntry()));
+		wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
 
 		return Void();
 	}
@@ -1129,9 +1140,12 @@ public:
 	Future<Void> deleteContainer(int *pNumDeleted) {
 		return deleteContainer_impl(Reference<BackupContainerBlobStore>::addRef(this), pNumDeleted);
 	}
+
+	std::string getBucket() const {
+		return m_bucket;
+	}
 };
 
-const std::string BackupContainerBlobStore::BUCKET = "FDB_BACKUPS_V2";
 const std::string BackupContainerBlobStore::DATAFOLDER = "data";
 const std::string BackupContainerBlobStore::INDEXFOLDER = "backups";
 
@@ -1159,13 +1173,17 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 			r = Reference<IBackupContainer>(new BackupContainerLocalDirectory(url));
 		else if(u.startsWith(LiteralStringRef("blobstore://"))) {
 			std::string resource;
-			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(url, &resource, &lastOpenError);
+
+			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
+			BlobStoreEndpoint::ParametersT backupParams;
+			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+
 			if(resource.empty())
 				throw backup_invalid_url();
 			for(auto c : resource)
 				if(!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = Reference<IBackupContainer>(new BackupContainerBlobStore(bstore, resource));
+			r = Reference<IBackupContainer>(new BackupContainerBlobStore(bstore, resource, backupParams));
 		}
 		else {
 			lastOpenError = "invalid URL prefix";
@@ -1198,13 +1216,19 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		}
 		else if(u.startsWith(LiteralStringRef("blobstore://"))) {
 			std::string resource;
-			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError);
+
+			BlobStoreEndpoint::ParametersT backupParams;
+			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError, &backupParams);
+
 			if(!resource.empty()) {
 				TraceEvent(SevWarn, "BackupContainer").detail("Description", "Invalid backup container base URL, resource aka path should be blank.").detail("URL", baseURL);
 				throw backup_invalid_url();
 			}
 
-			std::vector<std::string> results = wait(BackupContainerBlobStore::listURLs(bstore));
+			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
+			BackupContainerBlobStore dummy(bstore, "dummy", backupParams);
+
+			std::vector<std::string> results = wait(BackupContainerBlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
 		}
 		else {
@@ -1449,7 +1473,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	return Void();
 }
 
-TEST_CASE("backup/containers/localdir") {
+TEST_CASE("/backup/containers/localdir") {
 	if(g_network->isSimulated())
 		wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
 	else
@@ -1457,7 +1481,7 @@ TEST_CASE("backup/containers/localdir") {
 	return Void();
 };
 
-TEST_CASE("backup/containers/url") {
+TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
@@ -1466,7 +1490,7 @@ TEST_CASE("backup/containers/url") {
 	return Void();
 };
 
-TEST_CASE("backup/containers_list") {
+TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
 		state const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
