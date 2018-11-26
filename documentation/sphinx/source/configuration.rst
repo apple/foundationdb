@@ -478,7 +478,7 @@ FoundationDB recommends the ext4 filesystem. (However, see :ref:`Platform Issues
     * Copy-on-write type filesystems (such as Btrfs) will likely have poor performance with FoundationDB.
 
 
-Ext4 filesystems should be mounted with mount options ``default,noatime,discard``.
+Ext4 filesystems should be mounted with mount options ``defaults,noatime,discard``.
 
 .. note ::
     The ``noatime`` option disables updating of access times when reading files, an unneeded feature for FoundationDB that increases write activity on the disk. The discard option enables `TRIM <http://en.wikipedia.org/wiki/TRIM>`_ support, allowing the operating system to efficiently inform the SSD of erased blocks, maintaining high write speed and increasing drive lifetime.
