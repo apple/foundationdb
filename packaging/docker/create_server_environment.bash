@@ -29,7 +29,6 @@ source /var/fdb/scripts/create_cluster_file.bash
 
 if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
 	public_ip=127.0.0.1
-	FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:4500"
 elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
 	public_ip=$(grep `hostname` /etc/hosts | sed -e "s/\s *`hostname`.*//")
 else
@@ -39,7 +38,7 @@ fi
 
 echo "export PUBLIC_IP=$public_ip" >> $env_file
 if [[ -z $FDB_COORDINATOR ]]; then
-	FDB_COORDINATOR=$public_ip
+	FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
 fi
 
 create_cluster_file

@@ -2,7 +2,7 @@
 
 This directory provides a Docker image for running FoundationDB.
 
-The image in this directory is based on Ubuntu 18.0.4, but the commands and
+The image in this directory is based on Ubuntu 18.04, but the commands and
 scripts used to build it should be suitable for most other distros with small
 tweaks to the installation of dependencies.
 
@@ -39,7 +39,7 @@ This image supports several environment variables for run-time configuration.
 
 The port that FoundationDB should bind to. The default is 4500. 
 
-### FDB_NETWORKING
+### FDB_NETWORKING_MODE
 
 A networking mode that controls what address FoundationDB listens on. If this
 is `container` (the default), then the server will listen on its public IP
