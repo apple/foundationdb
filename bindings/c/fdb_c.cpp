@@ -295,10 +295,14 @@ fdb_error_t fdb_future_get_string_array(
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
-	char *path = NULL;
+	char *path;
 	if(cluster_file_path) {
 		path = new char[strlen(cluster_file_path) + 1];
 		strcpy(path, cluster_file_path);
+	}
+	else {
+		path = new char[1];
+		path[0] = '\0';
 	}
 	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
@@ -326,7 +330,7 @@ FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
-	return (FDBFuture*) API->createDatabase( c ? CLUSTER(c) : "").extractPtr();
+	return (FDBFuture*) API->createDatabase(CLUSTER(c)).extractPtr();
 }
 
 extern "C" DLLEXPORT
