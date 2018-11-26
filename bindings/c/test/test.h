@@ -236,22 +236,8 @@ FDBDatabase* openDatabase(struct ResultSet *rs, pthread_t *netThread) {
 	checkError(fdb_setup_network(), "setup network", rs);
 	pthread_create(netThread, NULL, &runNetwork, NULL);
 
-	FDBFuture *f = fdb_create_cluster(NULL);
-	checkError(fdb_future_block_until_ready(f), "block for cluster", rs);
-
-	FDBCluster *cluster;
-	checkError(fdb_future_get_cluster(f, &cluster), "get cluster", rs);
-
-	fdb_future_destroy(f);
-
-	f = fdb_cluster_create_database(cluster, (uint8_t*)"DB", 2);
-	checkError(fdb_future_block_until_ready(f), "block for database", rs);
-
 	FDBDatabase *db;
-	checkError(fdb_future_get_database(f, &db), "get database", rs);
-
-	fdb_future_destroy(f);
-	fdb_cluster_destroy(cluster);
+	checkError(fdb_create_database(NULL, &db), "create database", rs);
 
 	return db;
 }

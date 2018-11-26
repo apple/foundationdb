@@ -19,6 +19,7 @@
  */
 
 #define FDB_API_VERSION 610
+#define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"

@@ -26,7 +26,7 @@ import java.util.concurrent.Executor;
  * The {@code Cluster} represents a connection to a physical set of cooperating machines
  *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.
  *
- * This class is deprecated. Use {@link #FDB.open} to open a {@link #Database} directly<br>
+ * This class is deprecated. Use {@link FDB#open} to open a {@link Database} directly<br>
  * <br>
  * <b>Note:</b> {@code Cluster} objects must be {@link #close closed} when no longer in use
  *  in order to free any associated resources.

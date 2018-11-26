@@ -253,9 +253,16 @@ extern "C" {
 
     /* LEGACY API VERSIONS */
 
-#if FDB_API_VERSION < 610
+#if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
     typedef struct FDB_cluster FDBCluster;
 
+    typedef enum {
+        // This option is only a placeholder for C compatibility and should not be used
+        FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE=-1
+    } FDBClusterOption;
+#endif
+
+#if FDB_API_VERSION < 610
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster );
 
@@ -265,11 +272,6 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster( const char* cluster_file_path );
 
     DLLEXPORT void fdb_cluster_destroy( FDBCluster* c );
-
-    typedef enum {
-        // This option is only a placeholder for C compatibility and should not be used
-        FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE=-1
-    } FDBClusterOption;
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_cluster_set_option( FDBCluster* c, FDBClusterOption option,
