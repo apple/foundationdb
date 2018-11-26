@@ -98,7 +98,7 @@ class ResultSet(object):
             # If these results aren't using sequence numbers, then we match two results based on whether they share the same key
             else:
                 min_key = min([r.key(self.specification) for r in results.values()])
-                results = {i: r for i, r in results.items() if r.key(self.specification) == min_key}
+                results = {i: r for i, r in results.items() if Result.tuples_match(r.key(self.specification), min_key)}
 
             # Increment the indices for those testers which produced a result in this iteration
             for i in results.keys():
