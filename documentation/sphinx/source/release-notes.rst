@@ -5,6 +5,21 @@ Release Notes
 6.0.16
 ======
 
+Performance
+-----------
+
+* Added a new backup folder scheme which results in far fewer kv range folders. `(PR #939) <https://github.com/apple/foundationdb/pull/939>`_
+
+Fixes
+-----
+
+* Blobstore REST client attempted to create buckets that already existed. `(PR #923) <https://github.com/apple/foundationdb/pull/923>`_
+* DNS would fail if IPv6 responses were received. `(PR #945) <https://github.com/apple/foundationdb/pull/945>`_
+* Backup expiration would occasionally fail due to an incorrect assert.  `(PR #926) <https://github.com/apple/foundationdb/pull/926>`_
+
+6.0.15
+======
+
 Features
 --------
 
@@ -68,7 +83,6 @@ Fixes
 * HTTP client used by backup-to-blobstore now correctly treats response header field names as case insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
 * Blobstore REST client was not following the S3 API in several ways (bucket name, date, and response formats). [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
 * Data distribution could queue shard movements for restoring replication at a low priority. [6.0.15] `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
-* Blobstore REST client will no longer attempt to create a bucket that already exists. [6.0.16]  `(PR #923) <https://github.com/apple/foundationdb/pull/923>`_
 
 Fixes only impacting 6.0.0+
 ---------------------------
