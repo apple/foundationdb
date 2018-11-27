@@ -587,6 +587,13 @@ public:
 			scanBegin = expiredEnd.get();
 		}
 
+		TraceEvent("BackupContainerFileSystem")
+			.detail("ExpireEndVersion", expireEndVersion)
+			.detail("ScanBeginVersion", scanBegin)
+			.detail("CachedLogBegin", logBegin.orDefault(-1))
+			.detail("CachedLogEnd", logEnd.orDefault(-1))
+			.detail("CachedExpiredEnd", expiredEnd.orDefault(-1));
+
 		// Get log files that contain any data at or before expireEndVersion
 		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion - 1));
 		// Get range files up to and including expireEndVersion
@@ -622,8 +629,12 @@ public:
 
 		// Move filenames out of vector then destroy it to save memory
 		for(auto const &f : ranges) {
-			ASSERT(f.version < expireEndVersion);
-			toDelete.push_back(std::move(f.fileName));
+			// The file version must be checked here again because it is likely that expireEndVersion is in the middle of a log file, in which case
+			// after the log and range file listings are done (using the original expireEndVersion) the expireEndVersion will be moved back slightly
+			// to the begin version of the last log file found (which is also the first log to not be deleted)
+			if(f.version < expireEndVersion) {
+				toDelete.push_back(std::move(f.fileName));
+			}
 		}
 		ranges.clear();
 
