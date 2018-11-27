@@ -1002,6 +1002,7 @@ namespace fileBackup {
 
 					// Update the range bytes written in the backup config
 					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
+					backup.snapshotRangeFileCount().atomicOp(tr, 1, MutationRef::AddValue);
 
 					// See if there is already a file for this key which has an earlier begin, update the map if not.
 					Optional<BackupConfig::RangeSlice> s = wait(backup.snapshotRangeFileMap().get(tr, range.end));
@@ -1127,11 +1128,31 @@ namespace fileBackup {
 					if(done)
 						return Void();
 
-					// Start writing a new file 
+					// Start writing a new file after verifying this task should keep running as of a new read version (which must be >= outVersion)
 					outVersion = values.second;
 					// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
 					state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
-					Reference<IBackupFile> f = wait(bc->writeRangeFile(outVersion, blockSize));
+					state Version snapshotBeginVersion;
+					state int64_t snapshotRangeFileCount;
+
+					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+					loop {
+						try {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+							Void _ = wait(taskBucket->keepRunning(tr, task)
+								&& storeOrThrow(backup.snapshotBeginVersion().get(tr), snapshotBeginVersion)
+								&& storeOrThrow(backup.snapshotRangeFileCount().get(tr), snapshotRangeFileCount)
+							);
+
+							break;
+						} catch(Error &e) {
+							Void _ = wait(tr->onError(e));
+						}
+					}
+
+					Reference<IBackupFile> f = wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 					outFile = f;
 
 					// Initialize range file writer and write begin key
