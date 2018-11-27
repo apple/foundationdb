@@ -356,12 +356,25 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		TraceEvent("StorageServerRequestedReboot", id);
 
-		StorageServerInterface ssi;
-		ssi.uniqueID = id;
-		ssi.locality = locality;
-		ssi.initEndpoints();
+		StorageServerInterface recruited;
+		recruited.uniqueID = id;
+		recruited.locality = locality;
+		recruited.initEndpoints();
 
-		prevStorageServer = storageServer( store, ssi, db, folder, Promise<Void>() );
+		DUMPTOKEN(recruited.getVersion);
+		DUMPTOKEN(recruited.getValue);
+		DUMPTOKEN(recruited.getKey);
+		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getShardState);
+		DUMPTOKEN(recruited.waitMetrics);
+		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getPhysicalMetrics);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.getKeyValueStoreType);
+		DUMPTOKEN(recruited.watchValue);
+
+		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>() );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
