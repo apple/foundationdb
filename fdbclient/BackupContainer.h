@@ -156,7 +156,7 @@ public:
 
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
-	virtual Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) = 0;
+	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
