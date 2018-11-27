@@ -90,9 +90,9 @@ type ExactRange interface {
 // that the default zero-value of KeyRange specifies an empty range before all
 // keys in the database.
 type KeyRange struct {
-	// the begin (inclusive)
+	// The (inclusive) beginning of the range
 	Begin,
-	// the end (exclusive)
+	// The (exclusive) end of the range
 	End KeyConvertible
 }
 
