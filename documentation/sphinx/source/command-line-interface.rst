@@ -101,6 +101,15 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
+fileconfigure
+-------------
+
+The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+
+The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
+
+"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+
 coordinators
 ------------
 
