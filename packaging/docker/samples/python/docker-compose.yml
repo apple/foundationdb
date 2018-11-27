@@ -22,11 +22,15 @@ services:
   fdb:
     image: foundationdb:5.2.5
     environment:
-      FDB_COORDINATOR: fdbpythonsample_fdb_1
+      FDB_COORDINATOR: fdb-coordinator
+  fdb-coordinator:
+    image: foundationdb:5.2.5
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
   app:
     build:
       context: app
     ports:
       - 5000:5000
     environment:
-      FDB_COORDINATOR: fdbpythonsample_fdb_1
+      FDB_COORDINATOR: fdb-coordinator

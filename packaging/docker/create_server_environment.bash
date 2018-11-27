@@ -20,27 +20,27 @@
 # limitations under the License.
 #
 
-fdb_dir=/var/fdb
-env_file=$fdb_dir/.fdbenv
-
-: > $env_file
-
 source /var/fdb/scripts/create_cluster_file.bash
 
-if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
-	public_ip=127.0.0.1
-elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
-	public_ip=$(grep `hostname` /etc/hosts | sed -e "s/\s *`hostname`.*//")
-else
-	echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
-	exit 1
-fi
+function create_server_environment() {
+	fdb_dir=/var/fdb
+	env_file=$fdb_dir/.fdbenv
 
-echo "export PUBLIC_IP=$public_ip" >> $env_file
-if [[ -z $FDB_COORDINATOR ]]; then
-	FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
-fi
+	: > $env_file
 
-create_cluster_file
+	if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
+		public_ip=127.0.0.1
+	elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
+		public_ip=$(grep `hostname` /etc/hosts | sed -e "s/\s *`hostname`.*//")
+	else
+		echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
+		exit 1
+	fi
 
-echo $env_file
+	echo "export PUBLIC_IP=$public_ip" >> $env_file
+	if [[ -z $FDB_COORDINATOR ]]; then
+		FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
+	fi
+
+	create_cluster_file
+}

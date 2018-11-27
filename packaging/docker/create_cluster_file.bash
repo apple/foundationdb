@@ -35,6 +35,10 @@ function create_cluster_file() {
 		echo "$FDB_CLUSTER_FILE_CONTENTS" > $FDB_CLUSTER_FILE
 	elif [[ -n $FDB_COORDINATOR ]]; then
 		coordinator_ip=$(dig +short $FDB_COORDINATOR)
+		if [[ -z "$coordinator_ip" ]]; then
+			echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
+			exit 1
+		fi
 		echo "docker:docker@$coordinator_ip:4500" > $FDB_CLUSTER_FILE
 	else
 		echo "FDB_COORDINATOR environment variable not defined" 1>&2

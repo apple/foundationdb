@@ -20,7 +20,9 @@
 # limitations under the License.
 #
 
-source $(/var/fdb/scripts/create_server_environment.bash)
+source /var/fdb/scripts/create_server_environment.bash
+create_server_environment
+source /var/fdb/.fdbenv
 echo "Starting FDB server on $PUBLIC_IP:4500"
 fdbserver --listen_address 0.0.0.0:$FDB_PORT --public_address $PUBLIC_IP:4500 \
 	--datadir /var/fdb/data --logdir /var/fdb/logs \
