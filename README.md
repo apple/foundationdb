@@ -55,10 +55,10 @@ Developers on a OS for which there is no binary package, or who would like to st
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' <image-tag-name> /bin/bash
     ```
 
-1. Navigate to the mounted directory containing the foundationdb repo.
+1. Navigate to the container's mounted directory which contains the foundationdb repo.
 
     ```shell
-    cd /local/dir/path/foundationdb
+    cd /docker/dir/path/foundationdb
     ```
 1. Run `make`.
 
