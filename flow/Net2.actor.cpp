@@ -158,7 +158,6 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
-	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -478,7 +477,6 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
-	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -835,10 +833,11 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
+	state tcp::resolver tcpResolver(self->reactor.ios);
 	Promise<std::vector<NetworkAddress>> promise;
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+	tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {
 			promise.sendError(lookup_failed());
 			return;
@@ -866,6 +865,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 	});
 
 	Void _ = wait(ready(result));
+	tcpResolver.cancel();
 
 	return result.get();
 }
