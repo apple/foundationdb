@@ -23,8 +23,8 @@
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
-	state Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST,locality);
+ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
+	state Database cx = cx_input;
 	state RestoreInterface interf;
 	interf.initEndpoints();
 	state Optional<RestoreInterface> leaderInterf;
@@ -100,4 +100,10 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 		std::vector<TestReply> reps = wait( getAll(replies ));
 		testData = reps[0].replyData;
 	}
+}
+
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
+	Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST,locality);
+	Future<Void> ret = _restoreWorker(cx, locality);
+	return ret.get();
 }

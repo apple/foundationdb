@@ -411,7 +411,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					restoreTags.push_back(restoreTag);
 					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
 				}
-				
+
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
 					wait(delay(g_random->randomInt(0, 10)));
