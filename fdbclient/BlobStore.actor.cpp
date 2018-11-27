@@ -226,7 +226,7 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 }
 
 ACTOR Future<bool> bucketExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
-	Void _ = wait(b->requestRateRead->getAllowance(1));
+	wait(b->requestRateRead->getAllowance(1));
 
 	std::string resource = std::string("/") + bucket;
 	HTTP::Headers headers;

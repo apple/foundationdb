@@ -99,6 +99,7 @@
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp" />
     <ActorCompiler Include="workloads\DummyWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\BackupCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupAndParallelRestoreCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
