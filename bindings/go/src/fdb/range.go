@@ -91,7 +91,8 @@ type ExactRange interface {
 // keys in the database.
 type KeyRange struct {
 	// The (inclusive) beginning of the range
-	Begin,
+	Begin KeyConvertible
+	
 	// The (exclusive) end of the range
 	End KeyConvertible
 }
