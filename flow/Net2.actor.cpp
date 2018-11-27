@@ -835,11 +835,12 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	Promise<std::vector<NetworkAddress>> result;
+	Promise<std::vector<NetworkAddress>> promise;
+	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
 	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {
-			result.sendError(lookup_failed());
+			promise.sendError(lookup_failed());
 			return;
 		}
 
@@ -847,18 +848,26 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		
 		tcp::resolver::iterator end;
 		while(iter != end) {
-			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
-			// endpoint::to_string doesn't exist but operator<< does.
-			std::stringstream s;
-			s << iter->endpoint();
-			addrs.push_back(NetworkAddress::parse(s.str()));
+			auto endpoint = iter->endpoint();
+			// Currently only ipv4 is supported by NetworkAddress
+			auto addr = endpoint.address();
+			if(addr.is_v4()) {
+				addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+			}
 			++iter;
 		}
-		result.send(addrs);
+
+		if(addrs.empty()) {
+			promise.sendError(lookup_failed());
+		}
+		else {
+			promise.send(addrs);
+		}
 	});
 
-	std::vector<NetworkAddress> addresses = wait(result.getFuture());
-	return addresses;
+	Void _ = wait(ready(result));
+
+	return result.get();
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
