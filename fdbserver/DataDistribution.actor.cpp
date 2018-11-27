@@ -1077,8 +1077,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// The empty team is used as the starting point to move data to the remote DB
 	// begin : the start of the team member ID
 	// end : end of the team member ID
-	// isIntialTeam : False when the team is added by addTeamsBestOf();
-	// 	              True otherwise, e.g., when the team added at init() when we recreate teams by looking up DB
+	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
+	// when the team added at init() when we recreate teams by looking up DB
 	template <class InputIt>
 	void addTeam(InputIt begin, InputIt end, bool isInitialTeam) {
 		vector<Reference<TCServerInfo>> newTeamServers;
@@ -1388,14 +1388,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		machineTeamsToBuild = targetMachineTeamsToBuild;
 
-		if (machine_info.size() < configuration.storageTeamSize) {
-			TraceEvent(SevWarn, "DataDistributionBuildMachineTeams", masterId)
-			    .suppressFor(10)
-			    .detail("Reason", "Not enough machines for a team. Machine number should be larger than Team size")
-			    .detail("MachineNumber", machine_info.size())
-			    .detail("TeamSize", configuration.storageTeamSize);
-			return addedMachineTeams;
-		}
+		// The number of machines is always no smaller than the storageTeamSize in a correct configuration
+		ASSERT(machine_info.size() >= configuration.storageTeamSize);
 
 		// Step 1: Create machineLocalityMap which will be used in building machine team
 		rebuildMachineLocalityMap();
@@ -1555,8 +1549,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	bool isMachineHealthy(Reference<TCMachineInfo> const& machine) {
 		if (!machine.isValid() || machine_info.find(machine->machineID) == machine_info.end() ||
-		    machine_info[machine->machineID]->serversOnMachine.empty()) {
-
+		    machine->serversOnMachine.empty()) {
 			return false;
 		}
 
@@ -3488,7 +3481,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 		return Void();
 	}
 
-	collection->addBestMachineTeams(30); // Creat machine teams to help debug
+	collection->addBestMachineTeams(30); // Create machine teams to help debug
 	int result = collection->addTeamsBestOf(30);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
