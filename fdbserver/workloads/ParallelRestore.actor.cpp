@@ -44,7 +44,8 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		TraceEvent("RunRestoreWorkerWorkloadMX").detail("Start", "RestoreAgentDB");
+		TraceEvent("RunParallelRestoreWorkerWorkloadMX").detail("Start", "RestoreAgentDB");
+		printf("RunParallelRestoreWorkerWorkloadMX\n");
 		worker = _restoreWorker(cx, LocalityData());
 		return Void();
 	}

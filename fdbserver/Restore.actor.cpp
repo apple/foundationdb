@@ -57,11 +57,15 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			}
 		}
 
+		// Handle the dummy workload that increases a counter
 		loop {
 			choose {
 				when(TestRequest req = waitNext(interf.test.getFuture())) {
 					printf("Got Request: %d\n", req.testData);
 					req.reply.send(TestReply(req.testData + 1));
+					if (req.testData + 1 >= 10) {
+						break;
+					}
 				}
 			}
 		}
@@ -89,6 +93,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	ASSERT(agents.size() > 0);
 
+	/*
+	// Handle the dummy workload that increases a counter
 	state int testData = 0;
 	loop {
 		wait(delay(1.0));
@@ -99,7 +105,19 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		}
 		std::vector<TestReply> reps = wait( getAll(replies ));
 		testData = reps[0].replyData;
+		if ( testData >= 10 ) {
+			break;
+		}
 	}
+	 */
+
+	
+
+	printf("---MX: Perform the resource in the master now---\n");
+
+	
+
+	return Void();
 }
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
