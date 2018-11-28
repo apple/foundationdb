@@ -1349,12 +1349,12 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 #ifdef _WIN32
 	if(localtime_s(result, timep) != 0) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #elif defined(__unixish__)
 	if(localtime_r(timep, result) == NULL) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #else
 #error Port me!
