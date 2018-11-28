@@ -242,20 +242,6 @@ Future<bool> BlobStoreEndpoint::bucketExists(std::string const &bucket) {
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket;
-	HTTP::Headers headers;
-
-	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
-	return r->code == 200;
-}
-
-Future<bool> BlobStoreEndpoint::bucketExists(std::string const &bucket) {
-	return bucketExists_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
-}
-
-ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
-	wait(b->requestRateRead->getAllowance(1));
-
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
