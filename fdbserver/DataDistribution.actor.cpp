@@ -643,14 +643,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return result && resultEntries.size() == 0;
 	}
 
-	// Used for map<Reference<TCMachineTeamInfo>, int>
-	// SOMEDAY: Change it to lamda function
-	struct CompareTCMachineTeamInfoRef {
-		bool operator()(const Reference<TCMachineTeamInfo>& lhs, const Reference<TCMachineTeamInfo>& rhs) const {
-			return lhs->machineIDs < rhs->machineIDs;
-		}
-	};
-
 	DDTeamCollection(
 		Database const& cx,
 		UID masterId,
@@ -1593,40 +1585,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return g_random->randomChoice(leastUsedServers);
 	}
 
-	// Return targetMachineTeam with a random machine team among those have the smallest machine-team-score
-	// targetMachineTeam is invalid if no such machine team is found
-	Reference<TCMachineTeamInfo> findOneLeastUsedMachineTeam( Reference<TCServerInfo> chosenServer,
-	    std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>& machineTeamStats,
-	    std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>& machineTeamPenalties) {
-		machineTeamStats.clear();
-		for (auto& machineTeam : chosenServer->machine->machineTeams) {
-			if (!isMachineTeamHealthy(machineTeam)) {
-				TraceEvent(SevWarn, "MachineTeamUnhealthy").detail("MachineInfo", machineTeam->getMachineIDsStr());
-				continue;
-			}
-
-			int score = calculateMachineTeamScore(machineTeam);
-			ASSERT(machineTeamPenalties.find(machineTeam) != machineTeamPenalties.end());
-			// Penalize the team if we chose an existing server team from the machine team
-			score += machineTeamPenalties[machineTeam];
-			machineTeamStats.insert(std::make_pair(machineTeam, score));
-		}
-
-		std::vector<Reference<TCMachineTeamInfo>> leastUsedMachineTeams;
-		int minUsedNumber = std::numeric_limits<int>::max();
-		for (auto& machineTeamStat : machineTeamStats) {
-			if (machineTeamStat.second < minUsedNumber) {
-				leastUsedMachineTeams.clear();
-				minUsedNumber = machineTeamStat.second;
-			}
-			if (machineTeamStat.second == minUsedNumber) {
-				leastUsedMachineTeams.push_back(machineTeamStat.first);
-			}
-		}
-		if (leastUsedMachineTeams.size() > 0) {
-			return g_random->randomChoice(leastUsedMachineTeams);
+	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) {
+		if (!chosenServer->machine->machineTeams.empty()) {
+			return g_random->randomChoice(chosenServer->machine->machineTeams);
 		} else {
-			TraceEvent("LeastUsedMachineTeamsNotFound").detail("Debug", "CheckInfoBelow");
+			TraceEvent("NoMachineTeamForServer").detail("ServerID", chosenServer->id);
 			traceAllInfo(true);
 			return Reference<TCMachineTeamInfo>();
 		}
@@ -1641,28 +1604,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 		return count;
-	}
-
-	UID findLeastUsedServerOnMachine(Reference<TCMachineInfo> machine) {
-		vector<UID> leastUsedServers;
-		int minTeamNumber = std::numeric_limits<int>::max();
-		for (auto& server : machine->serversOnMachine) {
-			if (!server.isValid() || server_info.find(server->id) == server_info.end()) continue;
-			// Only pick healthy server, which is not failed or excluded.
-			if (server_status.get(server->id).isUnhealthy()) continue;
-
-			// if ( server->teams.size() < minTeamNumber ) {
-			int numTeams = countCorrectSizeTeam(server, configuration.storageTeamSize); // server->teams.size();
-			if (numTeams < minTeamNumber) {
-				minTeamNumber = numTeams; // server->teams.size();
-				leastUsedServers.clear();
-			}
-			if (minTeamNumber <= numTeams) { // server->teams.size();
-				leastUsedServers.push_back(server->id);
-			}
-		}
-
-		return g_random->randomChoice(leastUsedServers);
 	}
 
 	// Machine team score is the total number of server teams owned by the servers on the machine team
@@ -1783,22 +1724,18 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("CurrentTeamNumber", teams.size());
 			}
 
-			std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> machineTeamStats;
-			std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> machineTeamPenalties;
-			for (auto& machineTeam : machineTeams) {
-				machineTeamPenalties.insert(std::make_pair(machineTeam, 0));
-				machineTeamStats.insert(std::make_pair(machineTeam, 0));
-			}
-
 			std::vector<UID> bestServerTeam;
-			Reference<TCMachineTeamInfo> bestChosenMachineTeam;
 			int bestScore = std::numeric_limits<int>::max();
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 			for (int i = 0; i < maxAttempts && i < 100; ++i) {
 				// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
 				Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
-				Reference<TCMachineTeamInfo> chosenMachineTeam =
-				    findOneLeastUsedMachineTeam(chosenServer, machineTeamStats, machineTeamPenalties);
+				// Note: To avoid creating correlation of picked machine teams, we simply choose a random machine team
+				// instead of choosing the least used machine team.
+				// The correlation happens, for example, when we add two new machines, we may always choose the machine
+				// team with these two new machines because they are typically less used.
+				Reference<TCMachineTeamInfo> chosenMachineTeam = findOneRandomMachineTeam(chosenServer);
+
 				if (!chosenMachineTeam.isValid()) {
 					// TODO: MX: Debug: may change SevWarn to SevError to trigger error in correctness test.
 					// TODO: MX: Ask Evan: We may face the situation that temporarily we have no healthy machine. What
@@ -1818,7 +1755,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					if ( machine == chosenServer->machine ) {
 						serverID = chosenServer->id;
 					} else {
-						serverID = findLeastUsedServerOnMachine(machine);
+						serverID = g_random->randomChoice(machine->serversOnMachine)->id;
 					}
 					serverTeam.push_back(serverID);
 				}
@@ -1833,17 +1770,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					maxAttempts++;
 					continue;
 				}
+
 				std::sort(serverTeam.begin(), serverTeam.end());
 				if (teamExists(serverTeam)) {
-					// Decrease the possibility the chosenMachineTeam will be chosen again by increasing its team score
-					// Otherwise, we may trap into the least used machine team which always generate an existing team
-					machineTeamPenalties[chosenMachineTeam] += 2;
 					maxAttempts += 1;
 					continue;
 				}
-				// Once we find a team from the chosenMachineTeam,
-				// we expect the chosenMachineTeam is less likely be chosen in the next round
-				machineTeamPenalties[chosenMachineTeam] += 1;
+
 				// Pick the server team with smallest score in all attempts
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
 				int score = 0;
@@ -1853,7 +1786,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				if (score < bestScore) {
 					bestScore = score;
 					bestServerTeam = serverTeam;
-					bestChosenMachineTeam = chosenMachineTeam;
 				}
 			}
 
