@@ -92,7 +92,7 @@ type ExactRange interface {
 type KeyRange struct {
 	// The (inclusive) beginning of the range
 	Begin KeyConvertible
-	
+
 	// The (exclusive) end of the range
 	End KeyConvertible
 }
