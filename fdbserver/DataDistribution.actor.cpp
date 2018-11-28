@@ -1373,6 +1373,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Create machineTeamsToBuild number of machine teams
 	// No operation if machineTeamsToBuild is 0
+	// Note: The creation of machine teams should not depend on server teams:
+	// No matter how server teams will be created, we will create the same set of machine teams;
+	// We should never use server team number in building machine teams.
 	//
 	// Five steps to create each machine team, which are document in the function
 	// Reuse ReplicationPolicy selectReplicas func to select machine team
@@ -1457,9 +1460,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				int score = 0;
 				vector<Standalone<StringRef>> machineIDs;
 				for (auto process = team.begin(); process != team.end(); process++) {
-					score += server_info[**process]->teams.size();
-					Standalone<StringRef> machine_id =
-					    server_info[**process]->lastKnownInterface.locality.zoneId().get();
+					Reference<TCServerInfo> server = server_info[**process];
+					score += server->machine->machineTeams.size();
+					Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
 					machineIDs.push_back(machine_id);
 				}
 				if (!isMachineIDValid(machineIDs)) {
@@ -1483,26 +1486,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
+			// bestTeam should be a new valid team to be added into machine team now
 			// Step 5: Restore machine from its representative process team and get the machine team
 			if (bestTeam.size() == configuration.storageTeamSize) {
 				// machineIDs is used to quickly check if the machineIDs belong to an existed team
-				vector<Standalone<StringRef>> machineIDs;
 				// machines keep machines reference for performance benefit by avoiding looking up machine by machineID
 				vector<Reference<TCMachineInfo>> machines;
 				for (auto process = bestTeam.begin(); process < bestTeam.end(); process++) {
 					Reference<TCMachineInfo> machine = server_info[**process]->machine;
-					Standalone<StringRef> machine_id =
-					    server_info[**process]->lastKnownInterface.locality.zoneId().get();
-					// ASSERT( machine_info.find(machine_id) != machine_info.end() );
-					machineIDs.push_back(machine_id);
 					machines.push_back(machine);
 				}
 
-				std::sort(machineIDs.begin(), machineIDs.end());
-				if (!machineTeamExists(machineIDs)) {
-					addMachineTeam(machines);
-					addedMachineTeams++;
-				}
+				addMachineTeam(machines);
+				addedMachineTeams++;
 			} else {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId)
 				    .detail("Primary", primary)
@@ -1576,13 +1572,34 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return true;
 	}
 
+	// Return the healthy server with the least number of correct-size server teams
+	Reference<TCServerInfo> findOneLeastUsedServer() {
+		vector<Reference<TCServerInfo>> leastUsedServers;
+		int minTeamNumber = std::numeric_limits<int>::max();
+		for (auto& server : server_info) {
+			// Only pick healthy server, which is not failed or excluded.
+			if (server_status.get(server.first).isUnhealthy()) continue;
+
+			int numTeams = countCorrectSizeTeam(server.second, configuration.storageTeamSize);
+			if (numTeams < minTeamNumber) {
+				minTeamNumber = numTeams;
+				leastUsedServers.clear();
+			}
+			if (minTeamNumber == numTeams) {
+				leastUsedServers.push_back(server.second);
+			}
+		}
+
+		return g_random->randomChoice(leastUsedServers);
+	}
+
 	// Return targetMachineTeam with a random machine team among those have the smallest machine-team-score
 	// targetMachineTeam is invalid if no such machine team is found
-	Reference<TCMachineTeamInfo> findOneLeastUsedMachineTeam(
+	Reference<TCMachineTeamInfo> findOneLeastUsedMachineTeam( Reference<TCServerInfo> chosenServer,
 	    std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>& machineTeamStats,
 	    std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef>& machineTeamPenalties) {
 		machineTeamStats.clear();
-		for (auto& machineTeam : machineTeams) {
+		for (auto& machineTeam : chosenServer->machine->machineTeams) {
 			if (!isMachineTeamHealthy(machineTeam)) {
 				TraceEvent(SevWarn, "MachineTeamUnhealthy").detail("MachineInfo", machineTeam->getMachineIDsStr());
 				continue;
@@ -1590,7 +1607,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			int score = calculateMachineTeamScore(machineTeam);
 			ASSERT(machineTeamPenalties.find(machineTeam) != machineTeamPenalties.end());
-			// Penalize the team if we chose a/Tracen existing server team from the machine team
+			// Penalize the team if we chose an existing server team from the machine team
 			score += machineTeamPenalties[machineTeam];
 			machineTeamStats.insert(std::make_pair(machineTeam, score));
 		}
@@ -1737,18 +1754,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int loopCount = 0;
 		int machineTeamThreshold = machine_info.size() * SERVER_KNOBS->MAX_TEAMS_PER_SERVER;
 		bool ignoreMachineTeamThreshhold = false;
+		int machineTeamsToBuild = machineTeamThreshold - machineTeams.size();
+
+		// Pre-build all machine teams until we have the desired number of machine teams
+		if (machineTeamsToBuild > 0) {
+			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
+		} else {
+			machineTeamsToBuild = 0;
+		}
 
 		while (addedTeams < teamsToBuild) {
-			int machineTeamsToBuild = 1;
 			// Step 1: Create 1 best machine team
-			if (machineTeams.size() > machineTeamThreshold) { // SOMEDAY: only count valid machine teams
+			if (machineTeams.size() > machineTeamThreshold &&
+			    ignoreMachineTeamThreshhold ) { // SOMEDAY: only count valid machine teams
 				TEST(true);
-				if (!ignoreMachineTeamThreshhold) {
-					machineTeamsToBuild = 0; // First try to find a server team from existing machine teams
-				} else {
-					machineTeamsToBuild =
-					    1; // Ignore the machine team limit and build a new one, hoping to find a server team
-				}
+				machineTeamsToBuild = 1; // Ignore the machine team limit and build a new one, hoping to find a server team
+				addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
 				// Record the exception that we build more machine teams than the threshold
 				TraceEvent("MachineTeamNumReachThreshold")
 				    .detail("IgnoreThreshold", ignoreMachineTeamThreshhold)
@@ -1761,8 +1782,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("TeamsToBuild", teamsToBuild)
 				    .detail("CurrentTeamNumber", teams.size());
 			}
-			// Build 1 machine team if machineTeamsToBuild is not zero
-			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
 
 			std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> machineTeamStats;
 			std::map<Reference<TCMachineTeamInfo>, int, CompareTCMachineTeamInfoRef> machineTeamPenalties;
@@ -1776,9 +1795,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int bestScore = std::numeric_limits<int>::max();
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 			for (int i = 0; i < maxAttempts && i < 100; ++i) {
-				// Step 2: Choose 1 least used machine team
+				// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
+				Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
 				Reference<TCMachineTeamInfo> chosenMachineTeam =
-				    findOneLeastUsedMachineTeam(machineTeamStats, machineTeamPenalties);
+				    findOneLeastUsedMachineTeam(chosenServer, machineTeamStats, machineTeamPenalties);
 				if (!chosenMachineTeam.isValid()) {
 					// TODO: MX: Debug: may change SevWarn to SevError to trigger error in correctness test.
 					// TODO: MX: Ask Evan: We may face the situation that temporarily we have no healthy machine. What
@@ -1794,8 +1814,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				vector<UID> serverTeam;
 				int tmpIndex = 0;
 				for (auto& machine : chosenMachineTeam->machines) {
-					UID chosenServer = findLeastUsedServerOnMachine(machine); // machine->findOneLeastUsedServer();
-					serverTeam.push_back(chosenServer);
+					UID serverID;
+					if ( machine == chosenServer->machine ) {
+						serverID = chosenServer->id;
+					} else {
+						serverID = findLeastUsedServerOnMachine(machine);
+					}
+					serverTeam.push_back(serverID);
 				}
 
 				if (serverTeam.size() != configuration.storageTeamSize) {
@@ -1812,10 +1837,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				if (teamExists(serverTeam)) {
 					// Decrease the possibility the chosenMachineTeam will be chosen again by increasing its team score
 					// Otherwise, we may trap into the least used machine team which always generate an existing team
-					machineTeamPenalties[chosenMachineTeam] += 1;
+					machineTeamPenalties[chosenMachineTeam] += 2;
 					maxAttempts += 1;
 					continue;
 				}
+				// Once we find a team from the chosenMachineTeam,
+				// we expect the chosenMachineTeam is less likely be chosen in the next round
+				machineTeamPenalties[chosenMachineTeam] += 1;
 				// Pick the server team with smallest score in all attempts
 				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
 				int score = 0;
