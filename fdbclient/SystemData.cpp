@@ -523,6 +523,7 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 
 // Apply mutations constant variables
 // \xff/applyMutationsEnd/[16-byte UID] := serialize( endVersion, Unversioned() )
+// MX: This indicates what is the highest version the mutation log can be applied
 const KeyRangeRef applyMutationsEndRange(LiteralStringRef("\xff/applyMutationsEnd/"), LiteralStringRef("\xff/applyMutationsEnd0"));
 
 // \xff/applyMutationsBegin/[16-byte UID] := serialize( beginVersion, Unversioned() )
@@ -596,9 +597,80 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
 
+
+const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
+const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
+const KeyRangeRef restoreRequestKeys(
+		LiteralStringRef("\xff\x02/restoreRequests/"),
+		LiteralStringRef("\xff\x02/restoreRequests0")
+);
+
+// Encode restore agent key for agentID
 const Key restoreWorkerKeyFor( UID const& agentID ) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreWorkersKeys.begin );
 	wr << agentID;
 	return wr.toStringRef();
+}
+
+// Encode restore agent value
+const Value restoreWorkerValue( RestoreInterface const& server ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << server;
+	return wr.toStringRef();
+}
+
+RestoreInterface decodeRestoreWorkerValue( ValueRef const& value ) {
+	RestoreInterface s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+
+// Encode and decode restore request value
+// restoreRequestTrigger key
+const Value restoreRequestTriggerValue (int const numRequests) {
+	BinaryWriter wr(IncludeVersion());
+	wr << numRequests;
+	return wr.toStringRef();
+}
+const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
+	int s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+// restoreRequestDone key
+const Value restoreRequestDoneValue (int const numRequests) {
+	BinaryWriter wr(IncludeVersion());
+	wr << numRequests;
+	return wr.toStringRef();
+}
+const int decodeRestoreRequestDoneValue( ValueRef const& value ) {
+	int s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+const Key restoreRequestKeyFor( int const& index ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreRequestKeys.begin );
+	wr << index;
+	return wr.toStringRef();
+}
+
+const Value restoreRequestValue( RestoreRequest const& request ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << request;
+	return wr.toStringRef();
+}
+
+RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
+	RestoreRequest s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
 }

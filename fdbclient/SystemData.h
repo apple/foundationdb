@@ -26,6 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/RestoreInterface.h"
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -266,6 +267,21 @@ extern const KeyRangeRef monitorConfKeys;
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
 
+extern const KeyRef restoreRequestTriggerKey;
+extern const KeyRef restoreRequestDoneKey;
+extern const KeyRangeRef restoreRequestKeys;
+
 const Key restoreWorkerKeyFor( UID const& agentID );
+const Value restoreWorkerValue( RestoreInterface const& server );
+RestoreInterface decodeRestoreWorkerValue( ValueRef const& value );
+
+// MX: parallel restore
+const Value restoreRequestTriggerValue (int const numRequests);
+const int decodeRestoreRequestTriggerValue( ValueRef const& value );
+const Value restoreRequestDoneValue (int const numRequests);
+const int decodeRestoreRequestDoneValue( ValueRef const& value );
+const Key restoreRequestKeyFor( int const& index );
+const Value restoreRequestValue( RestoreRequest const& server );
+RestoreRequest decodeRestoreRequestValue( ValueRef const& value );
 
 #endif

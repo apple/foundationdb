@@ -1399,7 +1399,8 @@ ACTOR Future<Void> unlockDatabase( Transaction* tr, UID id ) {
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		printf("DBA_CheckLocked Expecting:%s Lock:%s\n", id.toString().c_str(), BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString().c_str());
 		throw database_locked();
 	}
 
@@ -1416,7 +1417,8 @@ ACTOR Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction> tr, UID 
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		printf("DBA_CheckLocked Expecting:%s Lock:%s\n", id.toString().c_str(), BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString().c_str());
 		throw database_locked();
 	}
 
@@ -1444,8 +1446,15 @@ ACTOR Future<Void> checkDatabaseLock( Transaction* tr, UID id ) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
+	if ( val.present() ) {
+		printf("DB is locked at uid:%s\n", id.toString().c_str());
+	} else {
+		printf("DB is not locked!\n");
+	}
+
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		printf("DBA_CheckLocked Expecting:%s Lock:%s\n", id.toString().c_str(), BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString().c_str());
 		throw database_locked();
 	}
 

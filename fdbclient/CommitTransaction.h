@@ -26,10 +26,19 @@
 
 static const char * typeString[] = { "SetValue", "ClearRange", "AddValue", "DebugKeyRange", "DebugKey", "NoOp", "And", "Or", "Xor", "AppendIfFits", "AvailableForReuse", "Reserved_For_LogProtocolMessage", "Max", "Min", "SetVersionstampedKey", "SetVersionstampedValue", "ByteMin", "ByteMax", "MinV2", "AndV2" };
 
+struct MutationRef;
+
+std::string getHexString(StringRef input);
+std::string getHexKey(StringRef input, int skip);
+void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string prefix);
+
+
+
 struct MutationRef { 
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
-	enum Type : uint8_t { SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or, Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue, ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP };
-	// This is stored this way for serialization purposes.
+	enum Type : uint8_t { SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or,
+		Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue,
+		ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP };	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
 

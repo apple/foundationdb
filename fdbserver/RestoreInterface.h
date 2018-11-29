@@ -23,13 +23,16 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.h"
+//#include "fdbclient/NativeAPI.h" //MX: Cannot have NativeAPI.h in this .h
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 
+class RestoreConfig;
+
 struct RestoreInterface {
 	RequestStream< struct TestRequest > test;
+	RequestStream< struct RestoreRequest > request;
 
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
@@ -42,7 +45,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & test;
+		ar & test & request;
 	}
 };
 
@@ -71,8 +74,67 @@ struct TestReply {
 	}
 };
 
+
+struct RestoreRequest {
+	//Database cx;
+	int index;
+	Key tagName;
+	Key url;
+	bool waitForComplete;
+	Version targetVersion;
+	bool verbose;
+	KeyRange range;
+	Key addPrefix;
+	Key removePrefix;
+	bool lockDB;
+	UID randomUid;
+
+	int testData;
+	std::vector<int> restoreRequests;
+	//Key restoreTag;
+
+	ReplyPromise< struct RestoreReply > reply;
+
+	RestoreRequest() : testData(0) {}
+	explicit RestoreRequest(int testData) : testData(testData) {}
+	explicit RestoreRequest(int testData, std::vector<int> &restoreRequests) : testData(testData), restoreRequests(restoreRequests) {}
+
+	explicit RestoreRequest(const int index, const Key &tagName, const Key &url, bool waitForComplete, Version targetVersion, bool verbose,
+							const KeyRange &range, const Key &addPrefix, const Key &removePrefix, bool lockDB,
+							const UID &randomUid) : index(index), tagName(tagName), url(url), waitForComplete(waitForComplete),
+													targetVersion(targetVersion), verbose(verbose), range(range),
+													addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
+													randomUid(randomUid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & index & tagName & url &  waitForComplete & targetVersion & verbose & range & addPrefix & removePrefix & lockDB & randomUid &
+		testData & restoreRequests & reply;
+	}
+
+	std::string toString() const {
+		return "index:" + std::to_string(index) + " tagName:" + tagName.contents().toString() + " url:" + url.contents().toString()
+			   + " waitForComplete:" + std::to_string(waitForComplete) + " targetVersion:" + std::to_string(targetVersion)
+			   + " verbose:" + std::to_string(verbose) + " range:" + range.toString() + " addPrefix:" + addPrefix.contents().toString()
+			   + " removePrefix:" + removePrefix.contents().toString() + " lockDB:" + std::to_string(lockDB) + " randomUid:" + randomUid.toString();
+	}
+};
+
+struct RestoreReply {
+	int replyData;
+	std::vector<int> restoreReplies;
+
+	RestoreReply() : replyData(0) {}
+	explicit RestoreReply(int replyData) : replyData(replyData) {}
+	explicit RestoreReply(int replyData, std::vector<int> restoreReplies) : replyData(replyData), restoreReplies(restoreReplies) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & replyData & restoreReplies;
+	}
+};
+
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
-
 
 #endif

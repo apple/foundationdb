@@ -6,7 +6,7 @@ testTitle=BackupAndRestore
     expectedRate=0
     clearAfterTest=false
  
-;    testName=RunRestoreWorkerWorkload
+    testName=RunRestoreWorkerWorkload
 
 ; Test case for parallel restore
     testName=BackupAndParallelRestoreCorrectness

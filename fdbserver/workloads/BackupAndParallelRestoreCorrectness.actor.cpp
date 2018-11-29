@@ -23,6 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/RestoreInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 
@@ -38,6 +39,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool locked;
 	bool allowPauses;
 	bool shareLogRange;
+
+	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
 	BackupAndParallelRestoreCorrectnessWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
@@ -89,6 +92,123 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 	}
+
+
+	static void compareDBKVs(Standalone<RangeResultRef> data, BackupAndParallelRestoreCorrectnessWorkload* self) {
+		bool hasDiff = false;
+		//Get the new KV pairs in the DB
+		std::map<Standalone<KeyRef>, Standalone<ValueRef>> newDbKVs;
+		for ( auto kvRef = data.contents().begin(); kvRef != data.contents().end(); kvRef++ ) {
+			newDbKVs.insert(std::make_pair(kvRef->key, kvRef->value));
+		}
+
+		if ( self->dbKVs.empty() ) {
+			printf("[CheckDB] set DB kv for the first time.\n");
+			self->dbKVs = newDbKVs;
+			return;
+		}
+
+		printf("[CheckDB] KV Number. Prev DB:%d Current DB:%d\n", self->dbKVs.size(), newDbKVs.size());
+		//compare the KV pairs in the DB
+		printf("---------------------Now print out the diff between the prev DB and current DB----------------------\n");
+		if ( self->dbKVs.size() >= newDbKVs.size() ) {
+			for ( auto kv = self->dbKVs.begin(); kv != self->dbKVs.end(); kv++ ) {
+				bool exist = (newDbKVs.find(kv->first) != newDbKVs.end());
+				if ( !exist ) {
+					printf("\tPrevKey:%s PrevValue:%s newValue:%s\n", getHexString(kv->first).c_str(), getHexString(kv->second).c_str(),
+						   "[Not Exist]");
+					hasDiff = true;
+				}
+				if ( exist && (newDbKVs[kv->first] != self->dbKVs[kv->first]) ) {
+					printf("\tPrevKey:%s PrevValue:%s newValue:%s\n", getHexString(kv->first).c_str(), getHexString(kv->second).c_str(),
+						   getHexString(newDbKVs[kv->first]).c_str());
+					hasDiff = true;
+				}
+			}
+		} else {
+			for ( auto newKV = newDbKVs.begin(); newKV != newDbKVs.end(); newKV++ ) {
+				bool exist = (self->dbKVs.find(newKV->first) != self->dbKVs.end());
+				if ( !exist ) {
+					printf("\tPrevKey:%s PrevValue:%s newValue:%s\n", "[Not Exist]",
+						   getHexString(newKV->first).c_str(), getHexString(newKV->second).c_str());
+					hasDiff = true;
+				}
+				if ( exist && (newDbKVs[newKV->first] != self->dbKVs[newKV->first]) ) {
+					printf("\tPrevKey:%s PrevValue:%s newValue:%s\n", getHexString(newKV->first).c_str(), getHexString(self->dbKVs[newKV->first]).c_str(),
+						   getHexString(newDbKVs[newKV->first]).c_str());
+					hasDiff = true;
+				}
+			}
+		}
+
+		int numEntries = 10;
+		int i = 0;
+		if ( hasDiff ) {
+			//print out the first and last 10 entries
+			printf("\t---Prev DB first and last %d entries\n", numEntries);
+			auto kv = self->dbKVs.begin();
+			for ( ; kv != self->dbKVs.end(); kv++ ) {
+				if ( i >= numEntries )
+					break;
+
+				printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+			}
+
+			i = self->dbKVs.size();
+			kv = self->dbKVs.end();
+			for ( --kv; kv != self->dbKVs.begin(); kv-- ) {
+				if ( i <=  self->dbKVs.size() - numEntries )
+					break;
+
+				printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+			}
+
+			printf("\t---Current DB first and last %d entries\n", numEntries);
+			kv = newDbKVs.begin();
+			i = 0;
+			for ( ; kv != newDbKVs.end(); kv++ ) {
+				if ( i >= numEntries )
+					break;
+
+				printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+			}
+
+			i = newDbKVs.size();
+			kv = newDbKVs.end();
+			for ( --kv; kv != newDbKVs.begin(); kv-- ) {
+				if ( i <=  newDbKVs.size() - numEntries )
+					break;
+
+				printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+			}
+		}
+
+		self->dbKVs = newDbKVs; //update the dbKVs
+	}
+
+	ACTOR static Future<Void> checkDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {
+		state Key keyPrefix = LiteralStringRef("");
+		//		int numPrint = 20; //number of entries in the front and end to print out.
+		state Transaction tr(cx);
+		state int retryCount = 0;
+		loop {
+			try {
+				state Version v = wait( tr.getReadVersion() );
+				state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
+				printf("Check DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
+					   data.size(), data.contents().toString().c_str());
+				compareDBKVs(data, self);
+				break;
+			} catch (Error& e) {
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CheckDBError").error(e);
+				wait(tr.onError(e));
+			}
+		}
+
+		return Void();
+	}
+
 
 	virtual std::string description() {
 		return "BackupAndParallelRestoreCorrectness";
@@ -383,11 +503,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// restore database
 				TraceEvent("BARW_Restore", randomID).detail("LastBackupContainer", lastBackupContainer->getURL()).detail("RestoreAfter", self->restoreAfter).detail("BackupTag", printable(self->backupTag));
+				printf("MX:BARW_Restore, LastBackupContainer url:%s BackupTag:%s\n",lastBackupContainer->getURL().c_str(), printable(self->backupTag).c_str() );
 				
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait( container->describeBackup() );
 
-				Version targetVersion = -1;
+				state Version targetVersion = -1;
 				if(desc.maxRestorableVersion.present()) {
 					if( g_random->random01() < 0.1 ) {
 						targetVersion = desc.minRestorableVersion.get();
@@ -405,12 +526,32 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state int restoreIndex;
 
 				// MX: Restore each range by calling backupAgent.restore()
-				for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
-					auto range = self->backupRanges[restoreIndex];
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					restoreTags.push_back(restoreTag);
-					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
-				}
+				printf("Prepare for restore requests. Number of backupRanges:%d\n", self->backupRanges.size());
+				state int numTry = 0;
+				loop {
+					state Transaction tr1(cx);
+					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
+					try {
+						printf("Prepare for restore requests. Number of backupRanges:%d, numTry:%d\n", self->backupRanges.size(), numTry++);
+						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
+							auto range = self->backupRanges[restoreIndex];
+							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+							restoreTags.push_back(restoreTag);
+//					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
+							//MX: restore the key range
+							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, g_random->randomUniqueID());
+							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+						}
+						tr1.set(restoreRequestTriggerKey, restoreRequestTriggerValue(self->backupRanges.size()));
+						wait(tr1.commit()); //Trigger MX restore
+						break;
+					} catch( Error &e ) {
+						TraceEvent("SetRestoreRequestError").detail("ErrorInfo", e.what());
+						wait( tr1.onError(e) );
+					}
+				};
+				printf("MX:Test workload triggers the restore\n");
 
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
@@ -429,7 +570,42 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				wait(waitForAll(restores));
+//				wait(waitForAll(restores)); //MX: Can be removed because we no longer reply on the Future event to mark the finish of restore
+
+				// MX: We should wait on all restore before proceeds
+				printf("Wait for restore to finish\n");
+				state int waitNum = 0;
+				loop {
+					state Transaction tr2(cx);
+					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+					try {
+						TraceEvent("CheckRestoreRequestDoneMX");
+						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
+						if ( !numFinished.present() ) { // restore has not been finished yet
+							if ( waitNum++ % 10 == 0 ) {
+								TraceEvent("CheckRestoreRequestDone").detail("SecondsOfWait", 5);
+								printf("Still waiting for restore to finish, has wait for %d seconds\n", waitNum * 5);
+							}
+							wait( delay(5.0) );
+							continue;
+						}
+						int num = decodeRestoreRequestDoneValue(numFinished.get());
+						TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
+						printf("RestoreRequestKeyDone, numFinished:%d\n", num);
+						tr2.clear(restoreRequestDoneKey);
+						wait( tr2.commit() );
+						break;
+					} catch( Error &e ) {
+						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
+						wait( tr2.onError(e) );
+					}
+
+				}
+
+				printf("MX: Restore is finished\n");
+				wait(checkDB(cx, "FinishRestore", self));
+
 
 				for (auto &restore : restores) {
 					assert(!restore.isError());
@@ -586,6 +762,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 };
+
 
 int BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests = 0;
 

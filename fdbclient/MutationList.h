@@ -28,15 +28,21 @@
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and
 	// quickly serialized, (forward) iterated or appended to.
+	// MX: MutationListRef is a list of struct Blob
+	// MX: Each blob has a struct Header following by the mutation's param1 and param2 content. The Header has the mutation's type and the length of param1 and param2
+
+
 
 private:
 	struct Blob {
+		//StringRef data Format: |type|p1len|p2len|p1_content|p2_content|
+		// |type|p1len|p2len| is the header; p1_content has p1len length; p2_content has p2len length
 		StringRef data;
 		Blob* next;
 	};
 	struct Header {
 		int type, p1len, p2len;
-		const uint8_t* p1begin() const { return (const uint8_t*)(this+1); }
+		const uint8_t* p1begin() const { return (const uint8_t*)(this+1); } //(this+1) moves the pointer by Header size and get to the beginning of p1_content
 		const uint8_t* p2begin() const { return (const uint8_t*)(this+1) + p1len; }
 		const uint8_t* end() const { return (const uint8_t*)(this+1) + p1len + p2len; }
 	};
@@ -49,8 +55,8 @@ public:
 		const MutationRef* operator->() { return &item; }
 		void operator++() {
 			ASSERT(blob->data.size() > 0);
-			auto e = ptr->end();
-			if (e == blob->data.end()) {
+			auto e = ptr->end(); // e points to the end of the current blob
+			if (e == blob->data.end()) { // the condition sanity checks e is at the end of current blob
 				blob = blob->next;
 				e = blob ? blob->data.begin() : NULL;
 			}
@@ -179,5 +185,7 @@ typedef Standalone<MutationListRef> MutationList;
 
 template <class Ar> void load( Ar& ar, MutationListRef& r ) { r.serialize_load(ar); }
 template <class Ar> void save( Ar& ar, MutationListRef const& r ) { r.serialize_save(ar); }
+
+void printMutationListRefHex(MutationListRef m, std::string prefix);
 
 #endif

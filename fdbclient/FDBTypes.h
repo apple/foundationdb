@@ -206,6 +206,10 @@ struct KeyRangeRef {
 			return a.end < b.end;
 		}
 	};
+
+	std::string toString() const {
+		return "begin:" + begin.toString() + " end:" + end.toString();
+	}
 };
 
 inline KeyRangeRef operator & (const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
@@ -472,6 +476,11 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	void serialize( Ar& ar ) {
 		ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
 	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) + " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]")
+			   + " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+	}
 };
 
 struct KeyValueStoreType {
@@ -642,5 +651,7 @@ struct ClusterControllerPriorityInfo {
 		ar & processClassFitness & isExcluded & dcFitness;
 	}
 };
+
+class Database;
 
 #endif
