@@ -1087,6 +1087,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
 		bool badTeam = !satisfiesPolicy(teamInfo->servers) || teamInfo->servers.size() != configuration.storageTeamSize;
 
+		teamInfo->tracker = teamTracker( this, teamInfo, badTeam );
+		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
+		if( badTeam ) {
+			badTeams.push_back(teamInfo);
+			return;
+		}
+
+		// For a good team, we add it to teams and create machine team for it when necessary
+		teams.push_back( teamInfo );
+		for (int i = 0; i < newTeamServers.size(); ++i) {
+			newTeamServers[i]->teams.push_back(teamInfo);
+		}
+
+		// Find or create machine team for the server team
 		// Add the reference of machineTeam (with machineIDs) into process team
 		vector<Standalone<StringRef>> machineIDs;
 		for (auto server = newTeamServers.begin(); server != newTeamServers.end(); ++server) {
@@ -1097,8 +1111,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// A team is not initial team if it is added by addTeamsBestOf() which always create a team with correct size
 		// A non-initial team must have its machine team created and its size must be correct
-		ASSERT(isInitialTeam ||
-		       (machineTeamInfo.isValid() && teamInfo->serverIDs.size() == configuration.storageTeamSize));
+		ASSERT(isInitialTeam || machineTeamInfo.isValid());
 
 		// Create a machine team if it does not exist
 		// Note an initial team may be added at init() even though the team size is not storageTeamSize
@@ -1114,16 +1127,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		teamInfo->machineTeam = machineTeamInfo;
-		teamInfo->tracker = teamTracker( this, teamInfo, badTeam );
-		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
-		if( badTeam ) {
-			badTeams.push_back( teamInfo );
-		} else {
-			teams.push_back( teamInfo );
-			for (int i = 0; i < newTeamServers.size(); ++i) {
-				newTeamServers[i]->teams.push_back( teamInfo );
-			}
-		}
 	}
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
@@ -1585,16 +1588,29 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return g_random->randomChoice(leastUsedServers);
 	}
 
+	// Randomly choose one machine team that has chosenServer and has the correct size
+	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) {
 		if (!chosenServer->machine->machineTeams.empty()) {
-			return g_random->randomChoice(chosenServer->machine->machineTeams);
-		} else {
-			TraceEvent("NoMachineTeamForServer").detail("ServerID", chosenServer->id);
-			traceAllInfo(true);
-			return Reference<TCMachineTeamInfo>();
+			std::vector<Reference<TCMachineTeamInfo>> machineTeams;
+			for (auto& mt: chosenServer->machine->machineTeams) {
+				if (isMachineTeamHealthy(mt)) {
+					machineTeams.push_back(mt);
+				}
+			}
+			if (!machineTeams.empty()) {
+				return g_random->randomChoice(machineTeams);
+			}
 		}
+
+		// If we cannot find a healthy machine team
+		TraceEvent("NoHealthyMachineTeamForServer")
+		    .detail("ServerID", chosenServer->id)
+		    .detail("MachineTeamsNumber", chosenServer->machine->machineTeams.size());
+		return Reference<TCMachineTeamInfo>();
 	}
 
+	// TODO: Remove this function if ASSERT() is never triggered
 	// A server's team may have incorrect size. We do NOT want to count those teams because they will be deleted any way
 	int countCorrectSizeTeam(Reference<TCServerInfo>& server, int expectedSize) {
 		int count = 0;
@@ -1603,6 +1619,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				++count;
 			}
 		}
+		ASSERT(count == server->teams.size());
 		return count;
 	}
 
@@ -1693,26 +1710,41 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int addedMachineTeams = 0;
 		int addedTeams = 0;
 		int loopCount = 0;
-		int machineTeamThreshold = machine_info.size() * SERVER_KNOBS->MAX_TEAMS_PER_SERVER;
 		bool ignoreMachineTeamThreshhold = false;
-		int machineTeamsToBuild = machineTeamThreshold - machineTeams.size();
+
+
+		// Exclude machine teams who have members in the wrong configuration.
+		// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
+		int healthyMachineTeamCount = 0;
+		int totalMachineTeamCount = 0;
+		for (auto mt= machineTeams.begin(); mt != machineTeams.end(); ++mt) {
+			if ((*mt)->machines.size() == configuration.storageTeamSize) {
+				if (isMachineTeamHealthy(*mt)) {
+					++healthyMachineTeamCount;
+				}
+				++totalMachineTeamCount;
+			}
+		}
+
+		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * machine_info.size();
+		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * machine_info.size();
+		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
+		int machineTeamsToBuild = std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
 
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
-		} else {
-			machineTeamsToBuild = 0;
 		}
 
 		while (addedTeams < teamsToBuild) {
 			// Step 1: Create 1 best machine team
-			if (machineTeams.size() > machineTeamThreshold &&
+			if (machineTeams.size() > maxMachineTeams &&
 			    ignoreMachineTeamThreshhold ) { // SOMEDAY: only count valid machine teams
 				TEST(true);
 				machineTeamsToBuild = 1; // Ignore the machine team limit and build a new one, hoping to find a server team
 				addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
 				// Record the exception that we build more machine teams than the threshold
-				TraceEvent("MachineTeamNumReachThreshold")
+				TraceEvent(SevWarn, "MachineTeamNumReachThreshold")
 				    .detail("IgnoreThreshold", ignoreMachineTeamThreshhold)
 				    .detail("Primary", primary)
 				    .detail("AddedMachineTeamsNumber", addedMachineTeams)
@@ -1722,6 +1754,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("StorageTeamSize", configuration.storageTeamSize)
 				    .detail("TeamsToBuild", teamsToBuild)
 				    .detail("CurrentTeamNumber", teams.size());
+			}
+
+			// Log the situation when we build too many machine teams
+			if (machineTeams.size() > 2 * maxMachineTeams) {
+				TraceEvent(SevWarnAlways, "TooManyMachineTeams")
+					.suppressFor(1.0)
+				    .detail("NumberOfMachines", machineTeams.size())
+				    .detail("MachineTeamThreshold", maxMachineTeams)
+				    .detail("CurrentNumberOfMachineTeams", machineTeams.size());
 			}
 
 			std::vector<UID> bestServerTeam;
@@ -1743,33 +1784,31 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					TraceEvent(SevWarn, "MachineTeamNotFound")
 					    .detail("Primary", primary)
 					    .detail("MachineTeamNumber", machineTeams.size());
-					traceAllInfo();
-					break;
+					continue; // try randomly to find another least used server
 				}
 
+				// From here, chosenMachineTeam must have a healthy server team
 				// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 				vector<UID> serverTeam;
 				int tmpIndex = 0;
 				for (auto& machine : chosenMachineTeam->machines) {
+					std::vector<Reference<TCServerInfo>> healthyProcesses;
+					for(auto it : machine->serversOnMachine) {
+						if(!server_status.get(it->id).isUnhealthy()) {
+							healthyProcesses.push_back(it);
+						}
+					}
+
 					UID serverID;
 					if ( machine == chosenServer->machine ) {
 						serverID = chosenServer->id;
 					} else {
-						serverID = g_random->randomChoice(machine->serversOnMachine)->id;
+						serverID = g_random->randomChoice(healthyProcesses)->id;
 					}
 					serverTeam.push_back(serverID);
 				}
 
-				if (serverTeam.size() != configuration.storageTeamSize) {
-					TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId)
-					    .detail("Primary", primary)
-					    .detail("Reason", "Unable to make desiredTeams")
-					    .detail("AddedTeams", addedTeams)
-					    .detail("TeamsToBuild", teamsToBuild)
-					    .detail("IncorrectTeamSize", serverTeam.size());
-					maxAttempts++;
-					continue;
-				}
+				ASSERT(serverTeam.size() == configuration.storageTeamSize);
 
 				std::sort(serverTeam.begin(), serverTeam.end());
 				if (teamExists(serverTeam)) {
@@ -1799,11 +1838,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 
 			// Step 4: Add the server team
-			std::sort(bestServerTeam.begin(), bestServerTeam.end());
-			if (!teamExists(bestServerTeam)) {
-				addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
-				addedTeams++;
-			}
+			addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
+			addedTeams++;
 
 			if (++loopCount > 2 * teamsToBuild * (configuration.storageTeamSize + 1)) {
 				break;
@@ -1857,14 +1893,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
 			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER*serverCount;
 
-			// Count only properly sized teams against the desired number of teams. This is to prevent "emergency" merged teams (see MoveKeys)
-			//  from overwhelming the team count (since we really did not want that team in the first place). These larger teams will not be
-			//  returned from getRandomTeam() (as used by bestTeam to find a new home for a shard).
-			// Also exclude teams who have members in the wrong configuration, since we don't want these teams either
+			//Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
 			int totalTeamCount = 0;
 			for(int i = 0; i < self->teams.size(); ++i) {
-				if( self->teams[i]->getServerIDs().size() == self->configuration.storageTeamSize && !self->teams[i]->isWrongConfiguration() ) {
+				if( !self->teams[i]->isWrongConfiguration() ) {
 					if( self->teams[i]->isHealthy() ) {
 						teamCount++;
 					}
@@ -1876,10 +1909,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				.detail("UniqueMachines", uniqueMachines).detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
 				.detail("CurrentTrackedTeams", self->teams.size()).detail("HealthyTeamCount", teamCount).detail("TotalTeamCount", totalTeamCount);
 
-			// Situation when unhealthy teams are a LOT.
-			teamCount = std::max(teamCount, desiredTeams + totalTeamCount - maxTeams);
+			// teamsToBuild is calculated such that we will not build too many teams in the situation
+			// when all (or most of) teams become unhealthy temporarily and then healthy again
+			state int teamsToBuild = std::min(desiredTeams - teamCount, maxTeams - totalTeamCount);
 
-			if( desiredTeams > teamCount ) {
+			if( teamsToBuild > 0 ) {
 				std::set<UID> desiredServerSet;
 				for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
 					if (!self->server_status.get(i->first).isUnhealthy()) {
@@ -1888,8 +1922,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
-
-				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
 
