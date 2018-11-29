@@ -552,7 +552,7 @@ private:
 						.detail("Mutations", dbgMutationCount)
 						.detail("Commits", dbgCommitCount)
 						.detail("EndsAt", self->log->getNextReadLocation());
-					loggingDelay = delay(1.0);
+						loggingDelay = delay(1.0);
 				}
 
 				Void _ = wait( yield() );

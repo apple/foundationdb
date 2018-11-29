@@ -334,7 +334,8 @@ Future<Void> storageServer(
 				StorageServerInterface const& ssi,
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder,
-				Promise<Void> const& recovered);  // changes pssi->id() to be the recovered ID
+				Promise<Void> const& recovered,
+				Reference<ClusterConnectionFile> const& connFile );  // changes pssi->id() to be the recovered ID
 Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
 Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
 Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
