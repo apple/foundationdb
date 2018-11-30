@@ -160,39 +160,52 @@ static Optional<std::pair<WorkerInterface, ProcessClass>> getWorker(std::map<Net
 }
 
 class StatusCounter {
-	public:
-		StatusCounter(double hz=0.0, double roughness=0.0, int64_t counter=0) : _hz(hz), _roughness(roughness), _counter(counter) {}
-		StatusCounter(const std::string& parsableText) {
-			parseText(parsableText);
-		}
+public:
+	StatusCounter() : hz(0), roughness(0), counter(0) {}
+	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
+	StatusCounter(const std::string& parsableText) {
+		parseText(parsableText);
+	}
 
-		StatusCounter& parseText(const std::string& parsableText) {
-			sscanf(parsableText.c_str(), "%lf %lf %lld", &_hz, &_roughness, &_counter);
-			return *this;
-		}
+	StatusCounter& parseText(const std::string& parsableText) {
+		sscanf(parsableText.c_str(), "%lf %lf %lld", &hz, &roughness, &counter);
+		return *this;
+	}
 
-		StatusCounter& updateValues(const StatusCounter& statusCounter) {
-			double hzNew = _hz + statusCounter._hz;
-			double roughnessNew = (_hz + statusCounter._hz) ? (_roughness*_hz + statusCounter._roughness*statusCounter._hz) / (_hz + statusCounter._hz) : 0.0;
-			int64_t counterNew = _counter + statusCounter._counter;
-			_hz = hzNew;
-			_roughness = roughnessNew;
-			_counter = counterNew;
-			return *this;
-		}
+	StatusCounter& updateValues(const StatusCounter& statusCounter) {
+		double hzNew = hz + statusCounter.hz;
+		double roughnessNew = (hz + statusCounter.hz) ? (roughness*hz + statusCounter.roughness*statusCounter.hz) / (hz + statusCounter.hz) : 0.0;
+		int64_t counterNew = counter + statusCounter.counter;
+		hz = hzNew;
+		roughness = roughnessNew;
+		counter = counterNew;
+		return *this;
+	}
 
-		JsonBuilderObject getStatus() const {
-			JsonBuilderObject statusObject;
-			statusObject["hz"] = _hz;
-			statusObject["roughness"] = _roughness;
-			statusObject["counter"] = _counter;
-			return statusObject;
-		}
+	JsonBuilderObject getStatus() const {
+		JsonBuilderObject statusObject;
+		statusObject["hz"] = hz;
+		statusObject["roughness"] = roughness;
+		statusObject["counter"] = counter;
+		return statusObject;
+	}
 
-	protected:
-		double	_hz;
-		double	_roughness;
-		int64_t	_counter;
+	double getHz() {
+		return hz;
+	}
+
+	double getRoughness() {
+		return roughness;
+	}
+
+	int64_t getCounter() {
+		return counter;
+	}
+
+protected:
+	double hz;
+	double roughness;
+	int64_t counter;
 };
 
 static double parseDouble(std::string const& s, bool permissive = false) {
@@ -421,6 +434,27 @@ struct RolesInfo {
 			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
 
+			std::string regularPrefix = "ReadLatency";
+			std::string filteredPrefix = "FilteredReadLatency";
+
+			JsonBuilderObject latency;
+			std::map<std::string, JsonBuilderObject> bands;
+
+			for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
+				bool regularMeasurement = itr->first.substr(0, regularPrefix.size()) == regularPrefix;
+				if(!regularMeasurement && itr->first.substr(0, filteredPrefix.size()) != filteredPrefix) {
+					continue;
+				}
+
+				std::string band = itr->first.substr(regularMeasurement ? regularPrefix.size() : filteredPrefix.size());
+				//bands[band][regularMeasurement ? "counted" : "filtered"] = StatusCounter(itr->second).getCounter();
+				latency[band] = StatusCounter(itr->second).getCounter();
+			}
+			/*for(auto itr : bands) {
+				latency[itr.first] = itr.second;
+			}*/
+			obj["read_latency_bands"] = latency;
+
 			Version version = parseInt64(metrics.getValue("Version"));
 			Version durableVersion = parseInt64(metrics.getValue("DurableVersion"));
 
@@ -453,8 +487,11 @@ struct RolesInfo {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
 		}
-		if (pDataLagSeconds)
+
+		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
+		}
+
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
 	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, TraceEventFields const& metrics, Version* pMetricVersion) {
@@ -483,6 +520,38 @@ struct RolesInfo {
 			*pMetricVersion = metricVersion;
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
+	JsonBuilderObject& addRole(std::string const& role, MasterProxyInterface& iface, TraceEventFields const& metrics) {
+		JsonBuilderObject obj;
+		obj["id"] = iface.id().shortString();
+		obj["role"] = role;
+		try {
+			std::string grvPrefix = "GRVLatency";
+			std::string commitPrefix = "CommitLatency";
+
+			JsonBuilderObject grvLatency;
+			JsonBuilderObject commitLatency;
+
+			for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
+				if(itr->first.substr(0, grvPrefix.size()) == grvPrefix) {
+					std::string band = itr->first.substr(grvPrefix.size());
+					grvLatency[band] = StatusCounter(itr->second).getCounter();
+				}
+				else if(itr->first.substr(0, commitPrefix.size()) == commitPrefix) {
+					std::string band = itr->first.substr(commitPrefix.size());
+					commitLatency[band] = StatusCounter(itr->second).getCounter();
+				}
+			}
+
+			obj["grv_latency_bands"] = grvLatency;
+			obj["commit_latency_bands"] = commitLatency;
+		} catch (Error &e) {
+			if(e.code() != error_code_attribute_not_found) {
+				throw e;
+			}
+		}
+
+		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+	}
 	template <class InterfaceType>
 	JsonBuilderObject& addRole(std::string const& role, InterfaceType& iface) {
 		return addRole(iface.address(), role, iface.id());
@@ -509,6 +578,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		std::map<std::string, JsonBuilderObject> processIssues,
 		vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers,
 		vector<std::pair<TLogInterface, TraceEventFields>> tLogs,
+		vector<std::pair<MasterProxyInterface, TraceEventFields>> proxies,
 		Database cx,
 		Optional<DatabaseConfiguration> configuration,
 		std::set<std::string> *incomplete_reasons) {
@@ -567,13 +637,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	roles.addRole("master", db->get().master);
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
 
-	state Reference<ProxyInfo> proxies = cx->getMasterProxies();
-	if (proxies) {
-		state int proxyIndex;
-		for(proxyIndex = 0; proxyIndex < proxies->size(); proxyIndex++) {
-			roles.addRole( "proxy", proxies->getInterface(proxyIndex) );
-			Void _ = wait(yield());
-		}
+	state std::vector<std::pair<MasterProxyInterface, TraceEventFields>>::iterator proxy;
+	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
+		roles.addRole( "proxy", proxy->first, proxy->second );
+		Void _ = wait(yield());
 	}
 
 	state std::vector<std::pair<TLogInterface, TraceEventFields>>::iterator log;
@@ -1217,10 +1284,10 @@ namespace std
 }
 
 ACTOR template <class iface>
-static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::string suffix) {
+static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::string eventName, bool useId) {
 	state vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
-		futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + suffix));
+		futures.push_back(latestEventOnWorker(address_workers[s.address()], (useId ? s.id().toString() + "/" + eventName : eventName)));
 	}
 
 	Void _ = wait(waitForAll(futures));
@@ -1234,13 +1301,26 @@ static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vecto
 
 ACTOR static Future<vector<std::pair<StorageServerInterface, TraceEventFields>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	vector<std::pair<StorageServerInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "/StorageMetrics"));
+	vector<std::pair<StorageServerInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "StorageMetrics", true));
 	return results;
 }
 
 ACTOR static Future<vector<std::pair<TLogInterface, TraceEventFields>>> getTLogsAndMetrics(Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
-	vector<std::pair<TLogInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "/TLogMetrics"));
+	vector<std::pair<TLogInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "TLogMetrics", true));
+	return results;
+}
+
+ACTOR static Future<vector<std::pair<MasterProxyInterface, TraceEventFields>>> getProxiesAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	Reference<ProxyInfo> proxyInfo = cx->getMasterProxies();
+	std::vector<MasterProxyInterface> servers;
+	if(proxyInfo) {
+		for(int i = 0; i < proxyInfo->size(); ++i) {
+			servers.push_back(proxyInfo->getInterface(i));
+		}
+	}
+
+	vector<std::pair<MasterProxyInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "ProxyMetrics", false));
 	return results;
 }
 
@@ -1782,6 +1862,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::map<std::string, JsonBuilderObject> processIssues = getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers;
 		state vector<std::pair<TLogInterface, TraceEventFields>> tLogs;
+		state vector<std::pair<MasterProxyInterface, TraceEventFields>> proxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
@@ -1816,10 +1897,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
-			for (auto worker : workers)
+			for (auto worker : workers) {
 				address_workers[worker.first.address()] = worker.first;
+			}
+
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, TraceEventFields>>>> proxyFuture = errorOr(getProxiesAndMetrics(cx, address_workers));
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
@@ -1876,16 +1960,27 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
 			}
-			else
+			else {
 				messages.push_back(JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
+			}
 
 			// ...also tlogs
 			ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
 			}
-			else
+			else {
 				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
+			}
+
+			// ...also proxies
+			ErrorOr<vector<std::pair<MasterProxyInterface, TraceEventFields>>> _proxies = wait(proxyFuture);
+			if (_proxies.present()) {
+				proxies = _proxies.get();
+			}
+			else {
+				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
+			}
 		}
 		else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -1895,7 +1990,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 

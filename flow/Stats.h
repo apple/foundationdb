@@ -36,6 +36,17 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include "flow.h"
 #include "TDMetric.actor.h"
 
+struct TimedRequest {
+	double requestTime;
+
+	TimedRequest() {
+		requestTime = timer();
+	}
+
+	template <class Ar> 
+	void serialize(Ar& ar) {}
+};
+
 struct ICounter {
 	// All counters have a name and value
 	virtual std::string const& getName() const = 0;
@@ -60,7 +71,7 @@ struct CounterCollection {
 	std::string id;
 };
 
-struct Counter : ICounter {
+struct Counter : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
@@ -88,7 +99,7 @@ private:
 };
 
 template <class F>
-struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>> {
+struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F && f) : name(name), f(f) { collection.counters.push_back(this); collection.counters_to_remove.push_back(this); }
 	virtual void remove() { delete this; }
 
@@ -107,6 +118,44 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>> {
 };
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
+
+class LatencyBands {
+public:
+	LatencyBands(std::string name, CounterCollection &cc) : name(name), cc(cc) {
+		addThreshold(std::numeric_limits<double>::infinity());
+	}
+
+	void addThreshold(double value) {
+		if(value > 0 && bands.count(value) == 0) {
+			bands.insert(std::make_pair(value, new Counter(format("%s%f", name.c_str(), value), cc)));
+			filteredBands.insert(std::make_pair(value, new Counter(format("Filtered%s%f", name.c_str(), value), cc)));
+		}
+	}
+
+	void addMeasurement(double measurement, bool filtered=false) {
+		const auto &targetBands = filtered ? filteredBands : bands;
+		auto itr = targetBands.upper_bound(measurement);
+		if(itr == targetBands.end()) {
+			fprintf(stderr, "Can't add measurement %lf\n", measurement);
+		}
+		ASSERT(itr != targetBands.end());
+		++(*itr->second);
+	}
+
+	~LatencyBands() {
+		for(auto itr = bands.begin(); itr != bands.end(); ++itr) {
+			delete itr->second;
+		}
+	}
+
+private:
+	std::map<double, Counter*> bands;
+	std::map<double, Counter*> filteredBands;
+
+	std::string name;
+	CounterCollection &cc;
+};
+
 
 Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
 

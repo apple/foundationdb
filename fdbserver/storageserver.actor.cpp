@@ -55,6 +55,9 @@ using std::make_pair;
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
+int64_t MAX_RESULT_SIZE = 1e4;
+int64_t MAX_SELECTOR_OFFSET = 1e2;
+
 struct StorageServer;
 class ValueOrClearToRef {
 public:
@@ -413,6 +416,8 @@ public:
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 
+		LatencyBands readLatencyBands;
+
 		Counters(StorageServer* self)
 			: cc("StorageServer", self->thisServerID.toString()),
 			getKeyQueries("GetKeyQueries", cc),
@@ -437,7 +442,8 @@ public:
 			fetchWaitingMS("FetchWaitingMS", cc),
 			fetchWaitingCount("FetchWaitingCount", cc),
 			fetchExecutingMS("FetchExecutingMS", cc),
-			fetchExecutingCount("FetchExecutingCount", cc)
+			fetchExecutingCount("FetchExecutingCount", cc),
+			readLatencyBands("ReadLatency", cc)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
@@ -459,6 +465,12 @@ public:
 			specialCounter(cc, "KvstoreBytesFree", [self](){ return self->storage.getStorageBytes().free; });
 			specialCounter(cc, "KvstoreBytesAvailable", [self](){ return self->storage.getStorageBytes().available; });
 			specialCounter(cc, "KvstoreBytesTotal", [self](){ return self->storage.getStorageBytes().total; });
+
+			readLatencyBands.addThreshold(0.0001);
+			readLatencyBands.addThreshold(0.001);
+			readLatencyBands.addThreshold(0.01);
+			readLatencyBands.addThreshold(0.1);
+			readLatencyBands.addThreshold(1);
 		}
 	} counters;
 
@@ -705,15 +717,16 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 }
 
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
-	state double startTime = timer();
+	state int64_t resultSize = 0;
+
 	try {
-		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
-		// so we need to downgrade here
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
 		++data->readQueueSizeMetric;
 		data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
+		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
+		// so we need to downgrade here
 		Void _ = wait( delay(0, TaskDefaultEndpoint) );
 
 		if( req.debugID.present() )
@@ -760,7 +773,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
-			data->counters.bytesQueried += v.get().size();
+			resultSize = v.get().size();
+			data->counters.bytesQueried += resultSize;
 		}
 
 		if( req.debugID.present() )
@@ -776,6 +790,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE);
 
 	return Void();
 };
@@ -1211,6 +1226,8 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
 {
+	state int64_t resultSize = 0;
+
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
@@ -1299,8 +1316,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			r.penalty = data->getPenalty();
 			req.reply.send( r );
 
+			resultSize = req.limitBytes - remainingLimitBytes;
+			data->counters.bytesQueried += resultSize;
 			data->counters.rowsQueried += r.data.size();
-			data->counters.bytesQueried += req.limitBytes - remainingLimitBytes;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_internal_error || e.code() == error_code_actor_cancelled) throw;
@@ -1309,11 +1327,14 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE || abs(req.begin.offset) > MAX_SELECTOR_OFFSET || abs(req.end.offset) > MAX_SELECTOR_OFFSET);
 
 	return Void();
 }
 
 ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
+	state int64_t resultSize = 0;
+
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
@@ -1340,8 +1361,10 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 			updated = firstGreaterOrEqual(k)+offset-1;	// first thing on next shard OR (large offset case) keyAfter largest key retrieved in range read
 		else
 			updated = KeySelectorRef(k,true,0); //found
+
+		resultSize = k.size();
+		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
-		data->counters.bytesQueried += k.size();
 
 		GetKeyReply reply(updated);
 		reply.penalty = data->getPenalty();
@@ -1355,6 +1378,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE || abs(req.sel.offset > MAX_SELECTOR_OFFSET));
 
 	return Void();
 }
