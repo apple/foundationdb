@@ -3497,12 +3497,19 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	int result = collection->addTeamsBestOf(10);
+	int result = 0;
+	for (int i = 0; i < 10; i++) {
+		// Due to the randomness describe above the test_case, we try multiple times to build more teams
+		result += collection->addTeamsBestOf(10);
+		if (result >= 8)
+			break;
+	}
+
 	delete(collection);
 
 	// If we find all available teams, result will be 8 because we prebuild 2 teams
 //	ASSERT(result == 8);
-	ASSERT(result >= 4); //At least we should build half of the teams
+	ASSERT(result >= 7);
 
 	return Void();
 }
