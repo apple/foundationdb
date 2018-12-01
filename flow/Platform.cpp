@@ -432,22 +432,40 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 #endif
 }
 
+Error systemErrorCodeToError() {
+#if defined(_WIN32)
+	if(GetLastError() == ERROR_IO_DEVICE) {
+		return io_error();
+	}
+#elif defined(__unixish__)
+	if(errno == EIO || errno == EROFS) {
+		return io_error();
+	}
+#else
+	#error Port me!
+#endif
+
+	return platform_error();
+}
+
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
 #ifdef __linux__
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	uint64_t blockSize = buf.f_frsize;
 #elif defined(__APPLE__)
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError() 
+		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	uint64_t blockSize = buf.f_bsize;
@@ -466,7 +484,9 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalSpace;
 	ULARGE_INTEGER totalFreeSpace;
 	if( !GetDiskFreeSpaceEx( fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace ) ) {
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		throw e;
 	}
 	total = std::min( (uint64_t) std::numeric_limits<int64_t>::max(), totalSpace.QuadPart );
 	free = std::min( (uint64_t) std::numeric_limits<int64_t>::max(), freeSpace.QuadPart );
@@ -814,8 +834,9 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	const char* dev = strrchr(buf.f_mntfromname, '/');
@@ -1709,8 +1730,9 @@ bool deleteFile( std::string const& filename ) {
 #else
 	#error Port me!
 #endif
-	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError();
-	throw platform_error();
+	Error e = systemErrorCodeToError();
+	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
+	throw errno;
 }
 
 static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
@@ -1734,8 +1756,9 @@ bool createDirectory( std::string const& directory ) {
 			return createDirectory( directory );
 		}
 	}
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
-	throw platform_error();
+	Error e = systemErrorCodeToError();
+	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	throw e;
 #elif (defined(__linux__) || defined(__APPLE__))
 	size_t sep = 0;
 	do {
@@ -1744,12 +1767,16 @@ bool createDirectory( std::string const& directory ) {
 			if (errno == EEXIST)
 				continue;
 
-			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
-			if (errno == EACCES)
-				throw file_not_writable();
-			else {
-				throw platform_error();
+			Error e;
+			if(errno == EACCES) {
+				e = file_not_writable();
 			}
+			else {
+				e = systemErrorCodeToError();
+			}
+
+			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+			throw e;
 		}
 		createdDirectory();
 	} while (sep != std::string::npos && sep != directory.length() - 1);
@@ -1768,8 +1795,9 @@ std::string abspath( std::string const& filename ) {
 #ifdef _WIN32
 	char nameBuffer[MAX_PATH];
 	if (!GetFullPathName(filename.c_str(), MAX_PATH, nameBuffer, NULL)) {
-		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError().error(e);
+		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
 	for(char*x = nameBuffer; *x; x++)
@@ -1789,8 +1817,9 @@ std::string abspath( std::string const& filename ) {
 				return joinPath( abspath( "." ), filename );
 			}
 		}
-		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError().error(e);
+		throw e;
 	}
 	return std::string(r);
 #else
