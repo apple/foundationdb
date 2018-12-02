@@ -1424,8 +1424,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT(!tcMachineInfo->serversOnMachine.empty());
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
+			} else {
+				// when leastUsedMachine is empty, we will never find a team later, so we can simply return.
+				return addedMachineTeams;
 			}
-			// TODO: If leastUsedServers is empty, you can simply return because you will never succeed.
 
 			// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 			std::vector<UID*> bestTeam;
@@ -1662,15 +1664,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int healthyMachineTeamCount = 0;
 		int totalMachineTeamCount = 0;
 		for (auto mt= machineTeams.begin(); mt != machineTeams.end(); ++mt) {
-			if ((*mt)->machines.size() == configuration.storageTeamSize) { // TODO: Remove this if if SevError never happens
-				if (isMachineTeamHealthy(*mt)) {
-					++healthyMachineTeamCount;
-				}
-				++totalMachineTeamCount;
-			} else {
-				TraceEvent(SevError, "MachineTeamHasIncorrectSize")
-				    .detail("Observation", "WeMustCheckMachineTeamSize");
+			ASSERT ((*mt)->machines.size() == configuration.storageTeamSize);
+
+			if (isMachineTeamHealthy(*mt)) {
+				++healthyMachineTeamCount;
 			}
+			++totalMachineTeamCount;
 		}
 
 		int totalHealthyMachineCount = 0;
