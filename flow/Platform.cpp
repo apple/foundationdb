@@ -463,7 +463,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 #elif defined(__APPLE__)
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
-		Error e = systemErrorCodeToError() 
+		Error e = systemErrorCodeToError();
 		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError().error(e);
 		throw e;
 	}
