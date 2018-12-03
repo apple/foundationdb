@@ -186,6 +186,21 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		self->dbKVs = newDbKVs; //update the dbKVs
 	}
 
+	static void dumpDBKVs(Standalone<RangeResultRef> data, BackupAndParallelRestoreCorrectnessWorkload* self) {
+		bool hasDiff = false;
+		//Get the new KV pairs in the DB
+		std::map<Standalone<KeyRef>, Standalone<ValueRef>> newDbKVs;
+		for ( auto kvRef = data.contents().begin(); kvRef != data.contents().end(); kvRef++ ) {
+			newDbKVs.insert(std::make_pair(kvRef->key, kvRef->value));
+		}
+
+		printf("---------------------Now print out the KV in the current DB---------------------\n");
+		for ( auto newKV = newDbKVs.begin(); newKV != newDbKVs.end(); newKV++ ) {
+			printf("\tKey:%s Value:%s\n",
+				   getHexString(newKV->first).c_str(), getHexString(newKV->second).c_str());
+		}
+	}
+
 	ACTOR static Future<Void> checkDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {
 		state Key keyPrefix = LiteralStringRef("");
 		//		int numPrint = 20; //number of entries in the front and end to print out.
@@ -208,6 +223,30 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		return Void();
 	}
+
+	ACTOR static Future<Void> dumpDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {
+		state Key keyPrefix = LiteralStringRef("");
+		//		int numPrint = 20; //number of entries in the front and end to print out.
+		state Transaction tr(cx);
+		state int retryCount = 0;
+		loop {
+			try {
+				state Version v = wait( tr.getReadVersion() );
+				state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
+				printf("dump DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
+					   data.size(), data.contents().toString().c_str());
+				dumpDBKVs(data, self);
+				break;
+			} catch (Error& e) {
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "dumpDBError").error(e);
+				wait(tr.onError(e));
+			}
+		}
+
+		return Void();
+	}
+
 
 
 	virtual std::string description() {
@@ -446,6 +485,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			// backup
 			wait(delay(self->backupAfter));
 
+			wait(checkDB(cx, "BeforeStartBackup", self));
+
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
 			state Promise<Void> submitted;
 			state Future<Void> b = doBackup(self, 0, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter, submitted);
@@ -468,6 +509,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 			TraceEvent("BARW_DoBackupDone", randomID).detail("BackupTag", printable(self->backupTag)).detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 
+			wait(checkDB(cx, "BackupDone", self));
+
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
 			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
 			state UID logUid = uidFlag.first;
@@ -489,7 +532,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			TEST(!startRestore.isReady()); //Restore starts at specified time
 			wait(startRestore);
-			
+
+			wait(checkDB(cx, "BeforeRestore", self));
+			wait(dumpDB(cx, "BeforeRestore", self));
+
 			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
 					wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
@@ -534,11 +580,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
 						printf("Prepare for restore requests. Number of backupRanges:%d, numTry:%d\n", self->backupRanges.size(), numTry++);
+						//TODO: MXX: Should we lock DB here in case DB is modified at the bacupRanges boundary.
 						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
 							auto range = self->backupRanges[restoreIndex];
 							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 							restoreTags.push_back(restoreTag);
-//					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
+//							restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
 							//MX: restore the key range
 							struct RestoreRequest restoreRequest(restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked, g_random->randomUniqueID());
 							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));

@@ -107,6 +107,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 					setValue = StringRef(format( "%010d", g_random->randomInt( 0, 1000 )));
 				state Future<Version> setFuture = self->setter( cx, setKey, setValue );
 				wait( delay( g_random->random01() ) );
+				//MXX: Example of using watch?
 				loop {
 					state ReadYourWritesTransaction tr( cx );
 

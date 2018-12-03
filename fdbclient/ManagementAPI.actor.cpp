@@ -1343,10 +1343,12 @@ ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if(val.present()) {
+		printf("DBA_LockLocked for id:%s\n", id.toString().c_str());
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
 			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			printf("DBA_LockLocked Expecting:%s, Lock:%s\n", id.toString().c_str(), BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString().c_str());
 			throw database_locked();
 		}
 	}
@@ -1362,10 +1364,12 @@ ACTOR Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> tr, UID id
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if(val.present()) {
+		printf("DBA_LockLocked for id:%s\n", id.toString().c_str());
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
 			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			printf("DBA_LockLocked Expecting:%s, Lock:%s\n", id.toString().c_str(), BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString().c_str());
 			throw database_locked();
 		}
 	}
@@ -1465,6 +1469,13 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
+
+
+	if ( val.present() ) {
+		printf("DB is locked at uid:%s\n", id.toString().c_str());
+	} else {
+		printf("DB is not locked!\n");
+	}
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();

@@ -670,7 +670,7 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  }
 
  ACTOR Future<Void> applyKVOpsToDB(Database cx) {
- 	state bool isPrint = false;
+ 	state bool isPrint = true; //Debug message
  	state std::string typeStr = "";
 
  	TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
@@ -709,6 +709,7 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  					}
 
  					wait(tr->commit());
+					++count;
  					break;
  				} catch(Error &e) {
  					printf("ApplyKVOPsToDB transaction error:%s. Type:%d, Param1:%s, Param2:%s\n", e.what(),
@@ -729,6 +730,8 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  			}
  		}
  	}
+
+ 	printf("ApplyKVOPsToDB number of kv mutations:%d\n", count);
 
  	return Void();
 }
@@ -764,7 +767,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
 
 
  	state Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
- 	TraceEvent("ApplyRangeFileToDB_MX").detail("BlockDataVectorSize", blockData.contents().size())
+ 	TraceEvent("ExtractApplyRangeFileToDB_MX").detail("BlockDataVectorSize", blockData.contents().size())
  			.detail("RangeFirstKey", blockData.front().key.printable()).detail("RangeLastKey", blockData.back().key.printable());
 
  	// First and last key are the range for this file
@@ -772,7 +775,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
 
  	// If fileRange doesn't intersect restore range then we're done.
  	if(!fileRange.intersects(restoreRange)) {
- 		TraceEvent("ApplyRangeFileToDB_MX").detail("NoIntersectRestoreRange", "FinishAndReturn");
+ 		TraceEvent("ExtractApplyRangeFileToDB_MX").detail("NoIntersectRestoreRange", "FinishAndReturn");
  		return Void();
  	}
 
@@ -811,7 +814,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
 
  //	tr->reset();
  	//MX: This is where the key-value pair in range file is applied into DB
- 	TraceEvent("ApplyRangeFileToDB_MX").detail("Progress", "StartApplyKVToDB").detail("DataSize", data.size()).detail("DataSizeLimit", dataSizeLimit);
+ 	TraceEvent("ExtractApplyRangeFileToDB_MX").detail("Progress", "StartApplyKVToDB").detail("DataSize", data.size()).detail("DataSizeLimit", dataSizeLimit);
  	loop {
  //		try {
  //			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -842,7 +845,11 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  //				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), rangeFile.version);
  				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
  					.detail("Version", rangeFile.version).detail("Op", "set");
+				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
+						getHexString(data[i].key).c_str(), getHexString(data[i].value).c_str(), data[i].key.size(), data[i].value.size());
+				
  				MutationRef m(MutationRef::Type::SetValue, data[i].key, data[i].value); //ASSUME: all operation in range file is set.
+
  				if ( kvOps.find(rangeFile.version) == kvOps.end() ) {
  					//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
  					kvOps.insert(std::make_pair(rangeFile.version, VectorRef<MutationRef>()));
@@ -883,13 +890,13 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  //					.detail("TaskInstance", (uint64_t)this);
 
 
- 			TraceEvent("ApplyRangeFileToDBEnd_MX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[rangeFile.version].size());
+ 			TraceEvent("ExtraApplyRangeFileToDB_ENDMX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[rangeFile.version].size());
 
  			// Commit succeeded, so advance starting point
  			start = i;
 
  			if(start == end) {
- 				TraceEvent("ApplyRangeFileToDB_MX").detail("Progress", "DoneApplyKVToDB");
+ 				TraceEvent("ExtraApplyRangeFileToDB_MX").detail("Progress", "DoneApplyKVToDB");
  				return Void();
  			}
  //			tr->reset();
@@ -1005,7 +1012,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  					.detail("Bytes", txBytes);
  //					.detail("TaskInstance", (uint64_t)this);
 
- 			TraceEvent("ApplyLogFileToDBEnd_MX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[logFile.version].size());
+ 			TraceEvent("ExtractApplyLogFileToDBEnd_MX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[logFile.version].size());
 
  			// Commit succeeded, so advance starting point
  			start = i;
@@ -1025,6 +1032,9 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
 		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
 		Reference<RestoreConfig> restore_input) {
  	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+
+ 	printf("prepareRestore: the current db lock status is as below\n");
+	wait(checkDatabaseLock(tr, uid));
 
  	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
  	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1254,9 +1264,9 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  //	wait(waitForAll(futures));
  	printf("Wait for  futures of concatenate mutation logs, finish waiting\n");
 
- 	printf("Now parse concatenated mutation log and register it to kvOps, start...\n");
+ 	printf("---Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
  	registerBackupMutationForAll(Version());
- 	printf("Now parse concatenated mutation log and register it to kvOps, done...\n");
+ 	printf("---Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
 
  	//Get the range file into the kvOps later
  	printf("ApplyRangeFiles\n");
@@ -1308,12 +1318,18 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  	}
 
  	printf("Now apply KVOps to DB. start...\n");
+ 	printf("DB lock status:%d\n");
+ 	tr->reset();
+ 	wait(checkDatabaseLock(tr, uid));
+	wait(tr->commit());
+
+	//Apply the kv operations to DB
  	wait( applyKVOpsToDB(cx) );
  	printf("Now apply KVOps to DB, Done\n");
  //	filterAndSortMutationOps();
 
 
- 	//TODO: Apply the kv operations
+
 
  	return Void();
  }
@@ -1329,6 +1345,14 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 	state Key removePrefix = request.removePrefix;
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
+
+	//MX: Lock DB if it is not locked
+	printf("[INFO] RestoreRequest lockDB:%d\n", lockDB);
+	if ( lockDB == false ) {
+		printf("[INFO] RestoreRequest lockDB:%d; we will forcely lock db\n", lockDB);
+		lockDB = true;
+	}
+
 
 	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 	state BackupDescription desc = wait(bc->describeBackup());

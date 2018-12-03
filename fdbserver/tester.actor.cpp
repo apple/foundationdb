@@ -675,10 +675,12 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		state std::vector< Future<bool> > checks;
 		TraceEvent("CheckingResults");
-		printf("checking tests...\n");
+		printf("checking tests... num_workloads:%d\n", workloads.size());
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back( workloads[i].check.template getReply<bool>() );
 		wait( waitForAll( checks ) );
+
+		printf("checking tests DONE num_workloads:%d\n", workloads.size());
 		
 		for(int i = 0; i < checks.size(); i++) {
 			if(checks[i].get())
@@ -1056,7 +1058,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
+		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		bool ok = wait( runTest( cx, testers, tests[idx], dbInfo ) );
+		printf("Run test:%s Done. ok:%d\n", tests[idx].title.toString().c_str(), ok);
 		// do we handle a failure here?
 	}
 
