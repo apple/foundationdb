@@ -68,6 +68,8 @@ private:
 	enum Flags { FLAG_INJECTED_FAULT=1 };
 };
 
+Error systemErrorCodeToError();
+
 #undef ERROR
 #define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
 #include "error_definitions.h"

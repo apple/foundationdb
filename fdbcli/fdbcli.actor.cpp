@@ -1618,6 +1618,11 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
 		ret=false;
@@ -1724,7 +1729,12 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
