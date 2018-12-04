@@ -1145,7 +1145,7 @@ namespace fileBackup {
 
 							wait(taskBucket->keepRunning(tr, task)
 								&& storeOrThrow(backup.snapshotBeginVersion().get(tr), snapshotBeginVersion)
-								&& storeOrThrow(backup.snapshotRangeFileCount().get(tr), snapshotRangeFileCount)
+								&& store(backup.snapshotRangeFileCount().getD(tr), snapshotRangeFileCount)
 							);
 
 							break;
