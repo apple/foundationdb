@@ -534,7 +534,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			wait(startRestore);
 
 			wait(checkDB(cx, "BeforeRestore", self));
-			wait(dumpDB(cx, "BeforeRestore", self));
+//			wait(dumpDB(cx, "BeforeRestore", self));
 
 			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
