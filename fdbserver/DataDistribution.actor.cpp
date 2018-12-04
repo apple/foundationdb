@@ -1215,7 +1215,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int constructMachineFor1Server(UID const& uid) {
 		ASSERT(server_info.find(uid) != server_info.end());
 		auto& server = server_info[uid];
-		auto& ssi = server->lastKnownInterface;
 		auto& locality = server->lastKnownInterface.locality;
 		Standalone<StringRef> machine_id = locality.zoneId().get(); // locality to machine_id with std::string type
 
@@ -3496,19 +3495,27 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	int result = 0;
-	for (int i = 0; i < 10; i++) {
-		// Due to the randomness describe above the test_case, we try multiple times to build more teams
-		result += collection->addTeamsBestOf(10);
-		if (result >= 8)
-			break;
+	int result = collection->addTeamsBestOf(10);
+
+	if (collection->machineTeams.size() != 10 || result != 8) {
+		collection->traceAllInfo(true); // Debug message
+	}
+
+	// NOTE: Due to the pure randomness in selecting a machine for a machine team,
+	// we cannot guarantee that all machine teams are created.
+	// When we chnage the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
+	//ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
+
+	// We need to guarantee a server always have at least a team so that the server can participate in data distribution
+	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
+		auto teamCount = process->second->teams.size();
+		ASSERT(teamCount >= 1);
 	}
 
 	delete(collection);
 
 	// If we find all available teams, result will be 8 because we prebuild 2 teams
-//	ASSERT(result == 8);
-//	ASSERT(result >= 7);
+	//ASSERT(result == 8);
 
 	return Void();
 }
