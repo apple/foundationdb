@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.0.17
+======
+
+Fixes
+-----
+
+* Existing backups did not make progress when upgraded to 6.0.16. `(PR #962) <https://github.com/apple/foundationdb/pull/962>`_
+
 6.0.16
 ======
 
