@@ -144,9 +144,10 @@ public:
 		}
 
 		std::string toString() const {
-			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
-				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
-				   + " endVersion:" + std::to_string(endVersion);
+			return "UNSET4TestHardness";
+//			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
+//				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
+//				   + " endVersion:" + std::to_string(endVersion);
 		}
 	};
 
@@ -546,7 +547,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				TraceEvent("CheckRestoreRequestTrigger");
+				//TraceEvent("CheckRestoreRequestTrigger");
 				printf("CheckRestoreRequestTrigger:%d\n", checkNum);
 				checkNum++;
 
@@ -557,7 +558,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 					continue;
 				}
 				int num = decodeRestoreRequestTriggerValue(numRequests.get());
-				TraceEvent("RestoreRequestKey").detail("NumRequests", num);
+				//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
 				printf("RestoreRequestNum:%d\n", num);
 
 				// TODO: Create request request info. by using the same logic in the current restore
@@ -670,7 +671,7 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  }
 
  ACTOR Future<Void> applyKVOpsToDB(Database cx) {
- 	state bool isPrint = true; //Debug message
+ 	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
  	TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
@@ -850,12 +851,14 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  //				tr->set(data[i].key.removePrefix(removePrefix).withPrefix(addPrefix), data[i].value);
  				//MXX: print out the key value version, and operations.
  //				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), rangeFile.version);
- 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
- 					.detail("Version", rangeFile.version).detail("Op", "set");
-				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
-						getHexString(data[i].key.removePrefix(removePrefix).withPrefix(addPrefix)).c_str(), getHexString(data[i].value).c_str(), data[i].key.size(), data[i].value.size());
-				
- 				MutationRef m(MutationRef::Type::SetValue, data[i].key.removePrefix(removePrefix).withPrefix(addPrefix), data[i].value); //ASSUME: all operation in range file is set.
+// 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
+// 					.detail("Version", rangeFile.version).detail("Op", "set");
+////				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
+////						getHexString(data[i].key.c_str(), getHexString(data[i].value).c_str(), data[i].key.size(), data[i].value.size());
+
+				//NOTE: Should NOT removePrefix and addPrefix for the backup data!
+				// In other words, the following operation is wrong:  data[i].key.removePrefix(removePrefix).withPrefix(addPrefix)
+ 				MutationRef m(MutationRef::Type::SetValue, data[i].key, data[i].value); //ASSUME: all operation in range file is set.
 				++kvCount;
 
  				// TODO: we can commit the kv operation into DB.
@@ -865,6 +868,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  					kvOps.insert(std::make_pair(rangeFile.version, VectorRef<MutationRef>()));
  				}
 
+ 				ASSERT(kvOps.find(rangeFile.version) != kvOps.end());
 				kvOps[rangeFile.version].push_back_deep(kvOps[rangeFile.version].arena(), m);
 
  			}
@@ -1184,12 +1188,12 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  	state std::vector<RestoreConfig::RestoreFile> files;
 
  	for(const RangeFile &f : restorable.get().ranges) {
- 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
+// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
  		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
  	}
  	for(const LogFile &f : restorable.get().logs) {
- 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
+// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
  		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
  	}
@@ -1274,9 +1278,9 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  //	wait(waitForAll(futures));
  	printf("Wait for  futures of concatenate mutation logs, finish waiting\n");
 
- 	printf("---Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
+ 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
  	registerBackupMutationForAll(Version());
- 	printf("---Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
+ 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
 
  	//Get the range file into the kvOps later
  	printf("ApplyRangeFiles\n");
@@ -1285,7 +1289,7 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  		f = files[fi];
  		printf("ApplyRangeFiles:id:%d\n", fi);
  		if ( f.isRange ) {
- 			TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString());
+ //			TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString());
  			printf("ApplyRangeFileToDB_MX FileInfo:%s\n", f.toString().c_str());
  			beginBlock = 0;
  			j = beginBlock *f.blockSize;
@@ -1298,7 +1302,7 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
 
  				// Increment beginBlock for the file
  				++beginBlock;
- 				TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
+// 				TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
  			}
  		}
  	}

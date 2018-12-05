@@ -146,40 +146,44 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		if ( hasDiff ) {
 			//print out the first and last 10 entries
 			printf("\t---Prev DB first and last %d entries\n", numEntries);
-			auto kv = self->dbKVs.begin();
-			for ( ; kv != self->dbKVs.end(); kv++ ) {
-				if ( i >= numEntries )
-					break;
+			if ( !self->dbKVs.empty() ) {
+				auto kv = self->dbKVs.begin();
+				for ( ; kv != self->dbKVs.end(); kv++ ) {
+					if ( i >= numEntries )
+						break;
 
-				printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
-			}
+					printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+				}
 
-			i = self->dbKVs.size();
-			kv = self->dbKVs.end();
-			for ( --kv; kv != self->dbKVs.begin(); kv-- ) {
-				if ( i <=  self->dbKVs.size() - numEntries )
-					break;
+				i = self->dbKVs.size();
+				kv = self->dbKVs.end();
+				for ( --kv; kv != self->dbKVs.begin(); kv-- ) {
+					if ( i <=  self->dbKVs.size() - numEntries )
+						break;
 
-				printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+					printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+				}
 			}
 
 			printf("\t---Current DB first and last %d entries\n", numEntries);
-			kv = newDbKVs.begin();
-			i = 0;
-			for ( ; kv != newDbKVs.end(); kv++ ) {
-				if ( i >= numEntries )
-					break;
+			if ( !newDbKVs.empty() ) {
+				auto kv = newDbKVs.begin();
+				i = 0;
+				for ( ; kv != newDbKVs.end(); kv++ ) {
+					if ( i >= numEntries )
+						break;
 
-				printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
-			}
+					printf("\t[Entry:%d]Key:%s Value:%s\n", i++, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+				}
 
-			i = newDbKVs.size();
-			kv = newDbKVs.end();
-			for ( --kv; kv != newDbKVs.begin(); kv-- ) {
-				if ( i <=  newDbKVs.size() - numEntries )
-					break;
+				i = newDbKVs.size();
+				kv = newDbKVs.end();
+				for ( --kv; kv != newDbKVs.begin(); kv-- ) {
+					if ( i <=  newDbKVs.size() - numEntries )
+						break;
 
-				printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+					printf("\t[Entry:%d]Key:%s Value:%s\n", i--, getHexString(kv->first).c_str(), getHexString(kv->second).c_str());
+				}
 			}
 		}
 
@@ -202,6 +206,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> checkDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {
+
+		return Void();
+
+/*
 		state Key keyPrefix = LiteralStringRef("");
 		//		int numPrint = 20; //number of entries in the front and end to print out.
 		state Transaction tr(cx);
@@ -222,6 +230,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 
 		return Void();
+*/
 	}
 
 	ACTOR static Future<Void> dumpDB(Database cx, std::string when, BackupAndParallelRestoreCorrectnessWorkload* self) {
@@ -627,11 +636,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
-						TraceEvent("CheckRestoreRequestDoneMX");
+						//TraceEvent("CheckRestoreRequestDoneMX");
 						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
 						if ( !numFinished.present() ) { // restore has not been finished yet
 							if ( waitNum++ % 10 == 0 ) {
-								TraceEvent("CheckRestoreRequestDone").detail("SecondsOfWait", 5);
+								//TraceEvent("CheckRestoreRequestDone").detail("SecondsOfWait", 5);
 								printf("Still waiting for restore to finish, has wait for %d seconds\n", waitNum * 5);
 							}
 							wait( delay(5.0) );
