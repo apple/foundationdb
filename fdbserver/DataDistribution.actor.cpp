@@ -1159,59 +1159,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return addMachineTeam(machines);
 	}
 
-	// Enumerate all possible teams by backtracing. Add a team, if it's valid, into the teamCollection
-	// FIXME: Remove this function since it can be replaced by addTeamsBestOf()
-	ACTOR Future<Void> addAllTeams(DDTeamCollection* self, int location, vector<LocalityEntry>* history,
-	                               Reference<LocalityMap<UID>> processes, vector<std::vector<UID>>* output,
-	                               int teamLimit, int* addedTeams) {
-		wait( yield( TaskDataDistributionLaunch ) );
-
-		// Add team, if valid
-		if(history->size() == self->configuration.storageTeamSize) {
-			auto valid = self->configuration.storagePolicy->validate(*history, processes); // Can be very slow!
-			if(!valid) {
-				return Void();
-			}
-			std::vector<UID> team;
-			for(auto it = history->begin(); it != history->end(); it++) {
-				team.push_back(*processes->getObject(*it));
-			}
-
-			if( !self->teamExists(team) && *addedTeams < teamLimit ) {
-				output->push_back(team);
-				(*addedTeams)++;
-			}
-			return Void();
-		}
-
-		//loop through remaining potential team members, add one and recursively call function
-		for(; location < processes->size(); location++) {
-			history->push_back(processes->getEntry(location));
-			state int depth = history->size();
-			wait( self->addAllTeams( self, location + 1, history, processes, output, teamLimit, addedTeams ) );
-			ASSERT( history->size() == depth); // the "stack" should be unchanged by this call
-			history->pop_back();
-			if(*addedTeams > teamLimit)
-				break;
-		}
-
-		return Void();
-	}
-
-	ACTOR Future<int> addAllTeams( DDTeamCollection* self, vector<UID> input, vector<std::vector<UID>>* output, int teamLimit ) {
-		state int addedTeams = 0;
-		state vector<LocalityEntry> history;
-		state Reference<LocalityMap<UID>> processes(new LocalityMap<UID>());
-		for(auto it = input.begin(); it != input.end(); it++) {
-			if(self->server_info[*it]) {
-				processes->add(self->server_info[*it]->lastKnownInterface.locality, &*it);
-			}
-		}
-		wait(self->addAllTeams(self, 0, &history, processes, output, teamLimit, &addedTeams));
-		self->configuration.storagePolicy->traceLocalityRecords(processes); // Debug purpose only
-		return addedTeams;
-	}
-
 	int constructMachineFor1Server(UID const& uid) {
 		ASSERT(server_info.find(uid) != server_info.end());
 		auto& server = server_info[uid];
@@ -3407,32 +3354,15 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
 
-	vector<UID> processes;
-	for(auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		processes.push_back(process->first);
-	}
 
-	state vector<vector<UID>> teams;
-	int result = wait(collection->addAllTeams(collection, processes, &teams, 200));
+	int result = collection->addTeamsBestOf(200);
 
 	delete(collection);
 
-	for(int i = 0; i < teams.size(); i++) {
-		auto team = teams[i];
-	}
+	// The maximum number of available server teams without considering machine locality is 120
+	// The maximum number of available server teams with machine locality constraint is 120 - 40, because
+	// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
 	ASSERT(result == 80);
-	ASSERT(teams[0] == std::vector<UID>({ UID(1,0), UID(2,0), UID(3,0) }));
-	ASSERT(teams[1] == std::vector<UID>({ UID(1,0), UID(2,0), UID(4,0) }));
-	ASSERT(teams[2] == std::vector<UID>({ UID(1,0), UID(2,0), UID(5,0) }));
-	ASSERT(teams[3] == std::vector<UID>({ UID(1,0), UID(2,0), UID(8,0) }));
-	ASSERT(teams[4] == std::vector<UID>({ UID(1,0), UID(2,0), UID(9,0) }));
-	ASSERT(teams[5] == std::vector<UID>({ UID(1,0), UID(2,0), UID(10,0) }));
-	ASSERT(teams[6] == std::vector<UID>({ UID(1,0), UID(3,0), UID(4,0) }));
-	ASSERT(teams[7] == std::vector<UID>({ UID(1,0), UID(3,0), UID(5,0) }));
-	ASSERT(teams[8] == std::vector<UID>({ UID(1,0), UID(3,0), UID(7,0) }));
-	ASSERT(teams[9] == std::vector<UID>({ UID(1,0), UID(3,0), UID(9,0) }));
-	ASSERT(teams[10] == std::vector<UID>({ UID(1,0), UID(3,0), UID(10,0) }));
-	ASSERT(teams[79] == std::vector<UID>({ UID(8,0), UID(9,0), UID(10,0) }));
 
 	return Void();
 }
@@ -3441,29 +3371,11 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
 
-	vector<UID> processes;
-	for(auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		processes.push_back(process->first);
-	}
+	int result = collection->addTeamsBestOf(10);
 
-	state vector<vector<UID>> teams;
-	int result = wait(collection->addAllTeams(collection, processes, &teams, 10));
 	delete(collection);
 
-	for(int i = 0; i < teams.size(); i++) {
-		auto team = teams[i];
-	}
 	ASSERT(result == 10);
-	ASSERT(teams[0] == std::vector<UID>({ UID(1,0), UID(2,0), UID(3,0) }));
-	ASSERT(teams[1] == std::vector<UID>({ UID(1,0), UID(2,0), UID(4,0) }));
-	ASSERT(teams[2] == std::vector<UID>({ UID(1,0), UID(2,0), UID(5,0) }));
-	ASSERT(teams[3] == std::vector<UID>({ UID(1,0), UID(2,0), UID(8,0) }));
-	ASSERT(teams[4] == std::vector<UID>({ UID(1,0), UID(2,0), UID(9,0) }));
-	ASSERT(teams[5] == std::vector<UID>({ UID(1,0), UID(2,0), UID(10,0) }));
-	ASSERT(teams[6] == std::vector<UID>({ UID(1,0), UID(3,0), UID(4,0) }));
-	ASSERT(teams[7] == std::vector<UID>({ UID(1,0), UID(3,0), UID(5,0) }));
-	ASSERT(teams[8] == std::vector<UID>({ UID(1,0), UID(3,0), UID(7,0) }));
-	ASSERT(teams[9] == std::vector<UID>({ UID(1,0), UID(3,0), UID(9,0) }));
 
 	return Void();
 }
