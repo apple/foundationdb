@@ -31,8 +31,8 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-#include "../flow/Trace.h"
 
 class TCTeamInfo;
 struct TCMachineInfo;
@@ -1638,6 +1638,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto& machineTeam : machine->machineTeams) {
 			if (machineTeam->size() == expectedSize) ++count;
 		}
+		ASSERT(count == machine->machineTeams.size()); //TODO: If this assert is never triggered, we can remove this function.
 		return count;
 	}
 
@@ -1683,6 +1684,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
 		int machineTeamsToBuild = std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
 
+		TraceEvent("BuildMachineTeams").detail("TotalHealthyMachine", totalHealthyMachineCount)
+		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
+		    .detail("DesiredMachineTeams", desiredMachineTeams)
+		    .detail("MaxMachineTeams", maxMachineTeams)
+		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0) {
 			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
@@ -2664,6 +2670,7 @@ ACTOR Future<Void> storageServerTracker(
 					server->lastKnownInterface = newInterface.first;
 					server->lastKnownClass = newInterface.second;
 					if(localityChanged) {
+						TEST(true); //Server locality changed
 						server->inDesiredDC = (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 						self->resetLocalitySet();
 						vector<Reference<TCTeamInfo>> newBadTeams;
@@ -2680,6 +2687,7 @@ ACTOR Future<Void> storageServerTracker(
 							}
 						}
 						if(addedNewBadTeam && self->badTeamRemover.isReady()) {
+							TEST(true); //Server locality change created bad teams
 							self->badTeamRemover = removeBadTeams(self);
 							self->addActor.send(self->badTeamRemover);
 						}
@@ -3495,6 +3503,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
+	int resultMachineTeams = collection->addBestMachineTeams(10);
 	int result = collection->addTeamsBestOf(10);
 
 	if (collection->machineTeams.size() != 10 || result != 8) {
@@ -3504,7 +3513,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	// NOTE: Due to the pure randomness in selecting a machine for a machine team,
 	// we cannot guarantee that all machine teams are created.
 	// When we chnage the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
-	//ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
+	ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
 
 	// We need to guarantee a server always have at least a team so that the server can participate in data distribution
 	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
@@ -3515,7 +3524,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	delete(collection);
 
 	// If we find all available teams, result will be 8 because we prebuild 2 teams
-	//ASSERT(result == 8);
+	ASSERT(result == 8);
 
 	return Void();
 }
