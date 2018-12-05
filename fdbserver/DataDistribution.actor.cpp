@@ -1348,7 +1348,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Skip unhealthy machines
 				if (!isMachineHealthy(machine.second)) continue;
 
-				int teamCount = countCorrectSizedMachineTeam(machine.second, configuration.storageTeamSize);
+				// Invariant: We only create correct size machine teams.
+				// When configuration (e.g., team size) is changed, the DDTeamCollection will be destroyed and rebuilt
+				// so that the invariant will not be violated.
+				int teamCount = machine.second->machineTeams.size();
+
 				if (teamCount < minTeamCount) {
 					leastUsedMachines.clear();
 					minTeamCount = teamCount;
@@ -1574,19 +1578,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		return true;
-	}
-
-	// A machine may have some invalid machine teams, which will eventually be removed
-	// We should only count valid machine teams for the machine so that the machine can be chosen into a new team
-	// expectedSize is the expected team size
-	// Return the number of machine teams that match the correct team size
-	int countCorrectSizedMachineTeam(Reference<TCMachineInfo>& machine, const int expectedSize) {
-		int count = 0;
-		for (auto& machineTeam : machine->machineTeams) {
-			if (machineTeam->size() == expectedSize) ++count;
-		}
-		ASSERT(count == machine->machineTeams.size()); //TODO: If this assert is never triggered, we can remove this function.
-		return count;
 	}
 
 	// Create server teams based on machine teams
