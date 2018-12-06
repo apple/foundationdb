@@ -676,7 +676,10 @@ struct SimDiskSpace {
 void doReboot( ISimulator::ProcessInfo* const& p, ISimulator::KillType const& kt );
 
 struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
-	explicit Sim2Listener( ISimulator::ProcessInfo* process ) : process(process) {}
+	explicit Sim2Listener( ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr )
+		: process(process),
+	      address(listenAddr) {}
+
 	void incomingConnection( double seconds, Reference<IConnection> conn ) {  // Called by another process!
 		incoming( Reference<Sim2Listener>::addRef( this ), seconds, conn );
 	}
@@ -688,7 +691,7 @@ struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
 		return popOne( nextConnection.getFuture() );
 	}
 
-	virtual NetworkAddress getListenAddress() { return process->address; }
+	virtual NetworkAddress getListenAddress() { return address; }
 
 private:
 	ISimulator::ProcessInfo* process;
@@ -707,6 +710,8 @@ private:
 		((Sim2Conn*)c.getPtr())->opened = true;
 		return c;
 	}
+
+	NetworkAddress address;
 };
 
 #define g_sim2 ((Sim2&)g_simulator)
@@ -775,9 +780,11 @@ public:
 		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
 		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
 
-		myc->connect(peerc, toAddr); peerc->connect(myc, NetworkAddress( getCurrentProcess()->address.ip + g_random->randomInt(0,256), g_random->randomInt(40000, 60000) ));
+		myc->connect(peerc, toAddr);
+		peerc->connect(myc, NetworkAddress( getCurrentProcess()->address.ip + g_random->randomInt(0,256),
+											g_random->randomInt(40000, 60000) ));
 
-		((Sim2Listener*)peerp->listener.getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
+		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*g_random->random01()), myc );
 	}
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) {
@@ -794,8 +801,9 @@ public:
 	}
 	virtual Reference<IListener> listen( NetworkAddress localAddr ) {
 		ASSERT( !localAddr.isTLS() );
-		ASSERT( localAddr == getCurrentProcess()->address );
-		return Reference<IListener>( getCurrentProcess()->listener );
+		Reference<IListener> listener( getCurrentProcess()->getListener(localAddr) );
+		ASSERT(listener);
+		return listener;
 	}
 	ACTOR static Future<Reference<IConnection>> waitForProcessAndConnect(
 			NetworkAddress toAddr, INetworkConnections *self ) {
@@ -949,7 +957,7 @@ public:
 	virtual void run() {
 		_run(this);
 	}
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port,
+	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess,
 		LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) {
 		ASSERT( locality.zoneId().present() );
 		MachineInfo& machine = machines[ locality.zoneId().get() ];
@@ -969,19 +977,26 @@ public:
 		// These files must live on after process kills for sim purposes.
 		if( machine.machineProcess == 0 ) {
 			NetworkAddress machineAddress(ip, 0, false, false);
-			machine.machineProcess = new ProcessInfo("Machine", locality, startingClass, machineAddress, this, "", "");
+			machine.machineProcess = new ProcessInfo("Machine", locality, startingClass, {machineAddress}, this, "", "");
 			machine.machineProcess->machine = &machine;
 		}
 
-		NetworkAddress address(ip, port, true, false); // SOMEDAY see above about becoming SSL!
-		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, address, this, dataFolder, coordinationFolder);
-		m->listener = Reference<IListener>( new Sim2Listener(m) );
+		NetworkAddressList addresses;
+		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
+			addresses.emplace_back(ip, processPort, true, false);
+		}
+
+		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
+		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
+			NetworkAddress address(ip, processPort, true, false); // SOMEDAY see above about becoming SSL!
+			m->listenerMap[address] = Reference<IListener>( new Sim2Listener(m, address) );
+			addressMap[address] = m;
+		}
 		m->machine = &machine;
 		machine.processes.push_back(m);
-		currentlyRebootingProcesses.erase(address);
-		addressMap[ m->address ] = m;
-		m->excluded = g_simulator.isExcluded(address);
-		m->cleared = g_simulator.isCleared(address);
+		currentlyRebootingProcesses.erase(addresses[0]);
+		m->excluded = g_simulator.isExcluded(addresses[0]);
+		m->cleared = g_simulator.isCleared(addresses[0]);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
@@ -1514,7 +1529,7 @@ public:
 
 	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(-1) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
-		currentProcess = new ProcessInfo( "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), NetworkAddress(), this, "", "" );
+		currentProcess = new ProcessInfo( "NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "" );
 		g_network = net2 = newNet2(false, true);
 		Net2FileSystem::newFileSystem();
 		check_yield(0);

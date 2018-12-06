@@ -49,11 +49,12 @@ public:
 		const char* coordinationFolder;
 		const char* dataFolder;
 		MachineInfo* machine;
+		NetworkAddressList addresses;
 		NetworkAddress address;
 		LocalityData	locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
-		Reference<IListener> listener;
+		std::map<NetworkAddress, Reference<IListener>> listenerMap;
 		bool failed;
 		bool excluded;
 		bool cleared;
@@ -66,9 +67,9 @@ public:
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
 
-		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddress address,
+		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
+			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses[0]), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
 				fault_injection_r(0), machine(0), cleared(false) {}
@@ -98,6 +99,15 @@ public:
 			}
 		}
 
+		const Reference<IListener> getListener(const NetworkAddress& addr) {
+			auto listener = listenerMap.find(addr);
+			if (listener == listenerMap.end()) {
+				TraceEvent("VISHESH: GetListenerFailed").detail("Address", addr.toString());
+				return Reference<IListener>();
+			}
+			return listener->second;
+		}
+
 		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
@@ -120,31 +130,12 @@ public:
 		MachineInfo() : machineProcess(0) {}
 	};
 
-	template <class Func>
-	ProcessInfo* asNewProcess( const char* name, uint32_t ip, uint16_t port, LocalityData locality, ProcessClass startingClass,
-							   Func func, const char* dataFolder, const char* coordinationFolder ) {
-		ProcessInfo* m = newProcess(name, ip, port, locality, startingClass, dataFolder, coordinationFolder);
-//		ProcessInfo* m = newProcess(name, ip, port, zoneId, machineId, dcId, startingClass, dataFolder, coordinationFolder);
-		std::swap(m, currentProcess);
-		try {
-			func();
-		} catch (Error& e) {
-			TraceEvent(SevError, "NewMachineError").error(e);
-			killProcess(currentProcess, KillInstantly);
-		} catch (...) {
-			TraceEvent(SevError, "NewMachineError").error(unknown_error());
-			killProcess(currentProcess, KillInstantly);
-		}
-		std::swap(m, currentProcess);
-		return m;
-	}
-
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
+	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
