@@ -1061,8 +1061,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return Reference<TCMachineTeamInfo>();
 	}
 
-	int countMachineTeams() { return machineTeams.size(); }
-
 	// Assume begin to end is sorted by std::sort
 	// Assume InputIt is iterator to UID
 	// Note: We must allow creating empty teams because empty team is created when a remote DB is initialized.
@@ -1159,6 +1157,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return addMachineTeam(machines);
 	}
 
+	// Construct a machine for the server uid (which is the input)
 	int constructMachineFor1Server(UID const& uid) {
 		ASSERT(server_info.find(uid) != server_info.end());
 		auto& server = server_info[uid];
@@ -1875,6 +1874,73 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return found;
 	}
 
+	// Check if the serverTeam belongs to a machine team; If not, create the machine team
+	void checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam) {
+		std::vector<Standalone<StringRef>> machineIDs;
+		for (auto& server : serverTeam->servers) {
+			Reference<TCMachineInfo> machine = server->machine;
+			machineIDs.push_back(machine->machineID);
+		}
+
+		std::sort(machineIDs.begin(), machineIDs.end());
+		if (!machineTeamExists(machineIDs)) { // Create the machine team if it does not exist
+			addMachineTeam(machineIDs.begin(), machineIDs.end());
+		}
+	}
+
+	void updateMachineRepresentativeServer(Reference<TCMachineInfo> machine) {
+		auto& representativeServer = machine->serversOnMachine[0];
+		ASSERT(server_info.find(representativeServer->id) != server_info.end());
+		TraceEvent("MachineLocalityMapUpdate")
+		    .detail("MachineID", machine->machineID.toString())
+		    .detail("RepresentativeServerIDNew", representativeServer->id.toString())
+		    .detail("IsNewServerIDValid", server_info.find(representativeServer->id) != server_info.end());
+
+		// Update macineLocalityMap when a machine locality is changed
+		rebuildMachineLocalityMap();
+	}
+
+	// Remove the removedMachineInfo machine and any related machine team
+	void removeMachine(Reference<TCMachineInfo> removedMachineInfo) {
+		// Find machines that share teams with the removed machine
+		std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
+		for (auto& machineTeam : removedMachineInfo->machineTeams) {
+			machinesWithAjoiningTeams.insert(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end());
+		}
+		machinesWithAjoiningTeams.erase(removedMachineInfo->machineID);
+		// For each machine in a machine team with the removed machine,
+		// erase shared machine teams from the list of teams.
+		for (auto it = machinesWithAjoiningTeams.begin(); it != machinesWithAjoiningTeams.end(); ++it) {
+			auto& machineTeams = machine_info[*it]->machineTeams;
+			for (int t = 0; t < machineTeams.size(); t++) {
+				auto& machineTeam = machineTeams[t];
+				if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
+							   removedMachineInfo->machineID)) {
+					machineTeams[t--] = machineTeams.back();
+					machineTeams.pop_back();
+				}
+			}
+		}
+		// Remove global machine team that includes removedMachineInfo
+		for (int t = 0; t < machineTeams.size(); t++) {
+			auto& machineTeam = machineTeams[t];
+			if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
+						   removedMachineInfo->machineID)) {
+				machineTeams[t--] = machineTeams.back();
+				machineTeams.pop_back();
+			}
+		}
+
+		// Remove removedMachineInfo from machine's global info
+		machine_info.erase(removedMachineInfo->machineID);
+		TraceEvent("MachineLocalityMapUpdate")
+				.detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
+
+		// Update macineLocalityMap when a machine is removed
+		// FIXME: add remove support to localitySet so we do not have to recreate it
+		rebuildMachineLocalityMap();
+	}
+
 	void removeServer( UID removedServer ) {
 		TraceEvent("RemovedStorageServer", masterId).detail("ServerID", removedServer);
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
@@ -1919,57 +1985,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		// Remove machine if no server on it
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
-			// Find machines that share teams with the removed machine
-			std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
-			for (auto& machineTeam : removedMachineInfo->machineTeams) {
-				machinesWithAjoiningTeams.insert(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end());
-			}
-			machinesWithAjoiningTeams.erase(removedMachineInfo->machineID);
-			// For each machine in a machine team with the removed machine,
-			// erase shared machine teams from the list of teams.
-			for (auto it = machinesWithAjoiningTeams.begin(); it != machinesWithAjoiningTeams.end(); ++it) {
-				auto& machineTeams = machine_info[*it]->machineTeams;
-				for (int t = 0; t < machineTeams.size(); t++) {
-					auto& machineTeam = machineTeams[t];
-					if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
-					               removedMachineInfo->machineID)) {
-						machineTeams[t--] = machineTeams.back();
-						machineTeams.pop_back();
-					}
-				}
-			}
-			// Remove global machine team that includes removedMachineInfo
-			for (int t = 0; t < machineTeams.size(); t++) {
-				auto& machineTeam = machineTeams[t];
-				if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
-				               removedMachineInfo->machineID)) {
-					machineTeams[t--] = machineTeams.back();
-					machineTeams.pop_back();
-				}
-			}
-
-			// Remove removedMachineInfo from machine's global info
-			machine_info.erase(removedMachineInfo->machineID);
-			TraceEvent("MachineLocalityMapUpdate")
-			    .detail("MachineUIDRemoved", removedMachineInfo->machineID.toString())
-			    .detail("ServerID", removedServerInfo->id.toString());
-
-			// Update macineLocalityMap when a machine is removed
-			// FIXME: add remove support to localitySet so we do not have to recreate it
-			rebuildMachineLocalityMap();
+			removeMachine(removedMachineInfo);
 		} else if (representServerRemoved) { // Update machine's locality if machine uses removed server's locality and machine still has servers
-			auto& representativeServer = removedMachineInfo->serversOnMachine[0];
-			auto& locality = representativeServer->lastKnownInterface.locality;
-			ASSERT(server_info.find(representativeServer->id) != server_info.end());
-			LocalityEntry localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
-			removedMachineInfo->localityEntry = localityEntry;
-			TraceEvent("MachineLocalityMapUpdate")
-			    .detail("ServerIDOld", removedServerInfo->id.toString())
-			    .detail("ServerIDNew", representativeServer->id.toString())
-			    .detail("IsNewServerIDValid", server_info.find(representativeServer->id) != server_info.end());
-
-			// Update macineLocalityMap when a machine locality is changed
-			rebuildMachineLocalityMap();
+			updateMachineRepresentativeServer(removedMachineInfo);
 		}
 
 		// Step: Remove removedServer from server's global data
@@ -2464,6 +2482,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 	return Void();
 }
 
+
 // Check the status of a storage server.
 // Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
 ACTOR Future<Void> storageServerTracker(
@@ -2609,15 +2628,54 @@ ACTOR Future<Void> storageServerTracker(
 					server->lastKnownClass = newInterface.second;
 					if(localityChanged) {
 						TEST(true); //Server locality changed
+
+						// The locality change of a server will affect machine teams related to the server.
+						// The START of handling the impact on the machine and machine teams due to the locality change
+						// First handle the impact on the machine of the server on the old locality
+						Reference<TCMachineInfo> machine = server->machine;
+						ASSERT(machine->serversOnMachine.size() >= 1);
+						if (machine->serversOnMachine.size() == 1) { // When server is the last server on the machine
+							// Remove the machine and the related machine team
+							self->removeMachine(machine);
+						} else {
+							// we remove the server from the machine, and
+							// update locality entry for the machine and the global machineLocalityMap
+							bool foundServer = false;
+							for (int i = 0; i < machine->serversOnMachine.size(); ++i) {
+								if (machine->serversOnMachine[i].getPtr() == server) {
+									machine->serversOnMachine[i--] = machine->serversOnMachine.back();
+									machine->serversOnMachine.pop_back();
+									foundServer = true;
+								}
+							}
+							ASSERT(foundServer);
+							self->updateMachineRepresentativeServer(machine);
+						}
+
+						// Second handle the impact on the destination machine where the server's new locality is;
+						// destMachineID is the unique ID of the machine where the server's new locality is
+						Standalone<StringRef> destMachineID = server->lastKnownInterface.locality.zoneId().get();
+						if (self->machine_info.find(destMachineID) == self->machine_info.end()) {
+							// When server is moved to a new machine, we construct the new machine
+							// constructMachineFor1Server() must be called after server locality is updated
+							self->constructMachineFor1Server(server->id);
+						}
+						// Ensure the server's server team belong to a machine team, and
+						// Get the newBadTeams due to the locality change
+						vector<Reference<TCTeamInfo>> newBadTeams;
+						for (auto& serverTeam : server->teams) {
+							if(!self->satisfiesPolicy(serverTeam->servers)) {
+								newBadTeams.push_back(serverTeam);
+								continue;
+							}
+							self->checkAndCreateMachineTeam(serverTeam);
+						}
+						// The END of handling the impact on the machine and machine teams due to the locality change
+
 						server->inDesiredDC = (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 						self->resetLocalitySet();
-						vector<Reference<TCTeamInfo>> newBadTeams;
+
 						bool addedNewBadTeam = false;
-						for(auto it : server->teams) {
-							if(!self->satisfiesPolicy(it->servers)) {
-								newBadTeams.push_back(it);
-							}
-						}
 						for(auto it : newBadTeams) {
 							if( self->removeTeam(it) ) {
 								self->addTeam(it->servers, true);
