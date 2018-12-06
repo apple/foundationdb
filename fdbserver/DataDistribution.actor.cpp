@@ -742,8 +742,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			//   tracking is "edge triggered")
 			// SOMEDAY: Account for capacity, load (when shardMetrics load is high)
 
-			// self->teams.size() can be 0 under the following test
-			// -f foundationdb/tests/slow/ConfigureTest.txt -b on -s 780181629
+			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if( !self->teams.size() ) {
 				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
@@ -1085,15 +1084,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
 		bool badTeam = !satisfiesPolicy(teamInfo->servers) || teamInfo->servers.size() != configuration.storageTeamSize;
 
-		teamInfo->tracker = teamTracker( this, teamInfo, badTeam );
+		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
-		if( badTeam ) {
+		if (badTeam) {
 			badTeams.push_back(teamInfo);
 			return;
 		}
 
 		// For a good team, we add it to teams and create machine team for it when necessary
-		teams.push_back( teamInfo );
+		teams.push_back(teamInfo);
 		for (int i = 0; i < newTeamServers.size(); ++i) {
 			newTeamServers[i]->teams.push_back(teamInfo);
 		}
@@ -1200,7 +1199,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("ServerInfo").detail("Size", server_info.size());
 		for (auto& server : server_info) {
-			const UID &uid = server.first;
+			const UID& uid = server.first;
 			TraceEvent("ServerInfo")
 			    .detail("ServerInfoIndex", i++)
 			    .detail("ServerID", server.first.toString())
@@ -1208,7 +1207,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("MachineID", server.second->machine->machineID.contents().toString());
 		}
 		for (auto& server : server_info) {
-			const UID &uid = server.first;
+			const UID& uid = server.first;
 			TraceEvent("ServerStatus", uid)
 			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
@@ -1249,9 +1248,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent("MachineTeamInfo").detail("Size", machineTeams.size());
 		for (auto& team : machineTeams) {
-			TraceEvent("MachineTeamInfo")
-			    .detail("TeamIndex", i++)
-			    .detail("MachineIDs", team->getMachineIDsStr());
+			TraceEvent("MachineTeamInfo").detail("TeamIndex", i++).detail("MachineIDs", team->getMachineIDsStr());
 		}
 	}
 
@@ -1303,7 +1300,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 			Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
 			auto& locality = representativeServer->lastKnownInterface.locality;
-			const LocalityEntry &localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
+			const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->id);
 			machine->second->localityEntry = localityEntry;
 			++numHealthyMachine;
 		}
@@ -1527,7 +1524,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) {
 		if (!chosenServer->machine->machineTeams.empty()) {
 			std::vector<Reference<TCMachineTeamInfo>> machineTeams;
-			for (auto& mt: chosenServer->machine->machineTeams) {
+			for (auto& mt : chosenServer->machine->machineTeams) {
 				if (isMachineTeamHealthy(mt)) {
 					machineTeams.push_back(mt);
 				}
@@ -1600,8 +1597,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
 		int healthyMachineTeamCount = 0;
 		int totalMachineTeamCount = 0;
-		for (auto mt= machineTeams.begin(); mt != machineTeams.end(); ++mt) {
-			ASSERT ((*mt)->machines.size() == configuration.storageTeamSize);
+		for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
+			ASSERT((*mt)->machines.size() == configuration.storageTeamSize);
 
 			if (isMachineTeamHealthy(*mt)) {
 				++healthyMachineTeamCount;
@@ -1619,9 +1616,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
-		int machineTeamsToBuild = std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
+		int machineTeamsToBuild =
+		    std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
 
-		TraceEvent("BuildMachineTeams").detail("TotalHealthyMachine", totalHealthyMachineCount)
+		TraceEvent("BuildMachineTeams")
+		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
 		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
@@ -1664,8 +1663,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						++chosenServerCount;
 					} else {
 						std::vector<Reference<TCServerInfo>> healthyProcesses;
-						for(auto it : machine->serversOnMachine) {
-							if(!server_status.get(it->id).isUnhealthy()) {
+						for (auto it : machine->serversOnMachine) {
+							if (!server_status.get(it->id).isUnhealthy()) {
 								healthyProcesses.push_back(it);
 							}
 						}
@@ -1753,11 +1752,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
 			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER*serverCount;
 
-			//Exclude teams who have members in the wrong configuration, since we don't want these teams
+			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
 			int totalTeamCount = 0;
-			for(int i = 0; i < self->teams.size(); ++i) {
-				if( !self->teams[i]->isWrongConfiguration() ) {
+			for (int i = 0; i < self->teams.size(); ++i) {
+				if (!self->teams[i]->isWrongConfiguration()) {
 					if( self->teams[i]->isHealthy() ) {
 						teamCount++;
 					}
@@ -1773,7 +1772,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
 			state int teamsToBuild = std::min(desiredTeams - teamCount, maxTeams - totalTeamCount);
 
-			if( teamsToBuild > 0 ) {
+			if (teamsToBuild > 0) {
 				std::set<UID> desiredServerSet;
 				for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
 					if (!self->server_status.get(i->first).isUnhealthy()) {
@@ -1826,8 +1825,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
 		return (includedDCs.empty() ||
 		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end() ||
-		        (otherTrackedDCs.present() &&
-		        std::find(otherTrackedDCs.get().begin(), otherTrackedDCs.get().end(), newServer.locality.dcId()) == otherTrackedDCs.get().end()));
+		        (otherTrackedDCs.present() && std::find(otherTrackedDCs.get().begin(), otherTrackedDCs.get().end(),
+		                                                newServer.locality.dcId()) == otherTrackedDCs.get().end()));
 	}
 
 	void addServer( StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut, Version addedVersion ) {
@@ -1915,7 +1914,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			for (int t = 0; t < machineTeams.size(); t++) {
 				auto& machineTeam = machineTeams[t];
 				if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
-							   removedMachineInfo->machineID)) {
+				               removedMachineInfo->machineID)) {
 					machineTeams[t--] = machineTeams.back();
 					machineTeams.pop_back();
 				}
@@ -1925,7 +1924,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
 			if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
-						   removedMachineInfo->machineID)) {
+			               removedMachineInfo->machineID)) {
 				machineTeams[t--] = machineTeams.back();
 				machineTeams.pop_back();
 			}
@@ -1933,8 +1932,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Remove removedMachineInfo from machine's global info
 		machine_info.erase(removedMachineInfo->machineID);
-		TraceEvent("MachineLocalityMapUpdate")
-				.detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
+		TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
 
 		// Update macineLocalityMap when a machine is removed
 		// FIXME: add remove support to localitySet so we do not have to recreate it
@@ -1950,7 +1948,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// Find all servers with which the removedServer shares teams
 		std::set<UID> serversWithAjoiningTeams;
 		auto& sharedTeams = removedServerInfo->teams;
-		for( int i = 0; i < sharedTeams.size(); ++i ) {
+		for (int i = 0; i < sharedTeams.size(); ++i) {
 			auto& teamIds = sharedTeams[i]->getServerIDs();
 			serversWithAjoiningTeams.insert( teamIds.begin(), teamIds.end() );
 		}
@@ -1977,7 +1975,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// Safe even when removedServerInfo is the last one
 				removedMachineInfo->serversOnMachine[i--] = removedMachineInfo->serversOnMachine.back();
 				removedMachineInfo->serversOnMachine.pop_back();
-				if ( i == 0 ) {
+				if (i == 0) {
 					representServerRemoved = true;
 				}
 				break;
@@ -1986,7 +1984,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// Remove machine if no server on it
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
 			removeMachine(removedMachineInfo);
-		} else if (representServerRemoved) { // Update machine's locality if machine uses removed server's locality and machine still has servers
+		} else if (representServerRemoved) {
+			// If the machine uses removedServer's locality and the machine still has servers, update the machine's
+			// representative server
 			updateMachineRepresentativeServer(removedMachineInfo);
 		}
 
@@ -2482,7 +2482,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 	return Void();
 }
 
-
 // Check the status of a storage server.
 // Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
 ACTOR Future<Void> storageServerTracker(
@@ -2627,7 +2626,7 @@ ACTOR Future<Void> storageServerTracker(
 					server->lastKnownInterface = newInterface.first;
 					server->lastKnownClass = newInterface.second;
 					if(localityChanged) {
-						TEST(true); //Server locality changed
+						TEST(true); // Server locality changed
 
 						// The locality change of a server will affect machine teams related to the server.
 						// The START of handling the impact on the machine and machine teams due to the locality change
@@ -2664,7 +2663,7 @@ ACTOR Future<Void> storageServerTracker(
 						// Get the newBadTeams due to the locality change
 						vector<Reference<TCTeamInfo>> newBadTeams;
 						for (auto& serverTeam : server->teams) {
-							if(!self->satisfiesPolicy(serverTeam->servers)) {
+							if (!self->satisfiesPolicy(serverTeam->servers)) {
 								newBadTeams.push_back(serverTeam);
 								continue;
 							}
@@ -2672,7 +2671,10 @@ ACTOR Future<Void> storageServerTracker(
 						}
 						// The END of handling the impact on the machine and machine teams due to the locality change
 
-						server->inDesiredDC = (self->includedDCs.empty() || std::find(self->includedDCs.begin(), self->includedDCs.end(), server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
+						server->inDesiredDC =
+						    (self->includedDCs.empty() ||
+						     std::find(self->includedDCs.begin(), self->includedDCs.end(),
+						               server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
 						self->resetLocalitySet();
 
 						bool addedNewBadTeam = false;
@@ -2683,7 +2685,7 @@ ACTOR Future<Void> storageServerTracker(
 							}
 						}
 						if(addedNewBadTeam && self->badTeamRemover.isReady()) {
-							TEST(true); //Server locality change created bad teams
+							TEST(true); // Server locality change created bad teams
 							self->badTeamRemover = removeBadTeams(self);
 							self->addActor.send(self->badTeamRemover);
 						}
@@ -3299,7 +3301,7 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) )
 	);
 
-	for(int id = 1; id <= processCount; ++id) {
+	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
 		StorageServerInterface interface;
 		interface.uniqueID = uid;
@@ -3339,8 +3341,8 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, IRepPolicyRef policy, 
 		int zone_id = process_id / 10;
 		int machine_id = process_id / 5;
 
-		printf("testMachineTeamCollection: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n",
-				process_id, zone_id, machine_id, interface.address().toString().c_str());
+		printf("testMachineTeamCollection: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n", process_id, zone_id,
+		       machine_id, interface.address().toString().c_str());
 		interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
 		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
@@ -3402,7 +3404,6 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
-
 
 	int result = collection->addTeamsBestOf(200);
 

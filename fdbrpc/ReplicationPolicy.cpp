@@ -291,9 +291,9 @@ bool PolicyAcross::selectReplicas(
 					// Pass only the also array item which are valid for the value
 					if (g_replicationdebug > 5) {
 						// entry is the locality entry info (entryValue) from the to-be-selected team member alsoServer
-						printf("Across !select    key: %-7s value: (%3d) %-10s entry: %s\n",
-								_attribKey.c_str(), value.get()._id, fromServers->valueText(value.get()).c_str(),
-								fromServers->getEntryInfo(alsoServer).c_str());
+						printf("Across !select    key: %-7s value: (%3d) %-10s entry: %s\n", _attribKey.c_str(),
+						       value.get()._id, fromServers->valueText(value.get()).c_str(),
+						       fromServers->getEntryInfo(alsoServer).c_str());
 					}
 					resultsSize = _newResults.size();
 					if (_policy->selectReplicas(_selected, alsoServers, _newResults))
@@ -392,9 +392,9 @@ bool PolicyAcross::selectReplicas(
 						{
 							if (g_replicationdebug > 5) {
 								printf("Across added:%4d key: %-7s value: (%3d) %-10s policy: %-10s => %s needed:%3d\n",
-								    count + 1, _attribKey.c_str(), value.get()._id,
-								    fromServers->valueText(value.get()).c_str(), _policy->name().c_str(),
-								    _policy->info().c_str(), _count);
+								       count + 1, _attribKey.c_str(), value.get()._id,
+								       fromServers->valueText(value.get()).c_str(), _policy->name().c_str(),
+								       _policy->info().c_str(), _count);
 							}
 							count ++;
 							if (count >= _count) break;
