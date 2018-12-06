@@ -2656,6 +2656,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version newOldestVersion = data->storageVersion();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
+
+		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
@@ -2667,6 +2669,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (done) break;
 		}
 
+		// Set the new durable version as part of the outstanding change set, before commit
 		if (startOldestVersion != newOldestVersion)
 			data->storage.makeVersionDurable( newOldestVersion );
 
