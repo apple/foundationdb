@@ -208,7 +208,7 @@ struct KeyRangeRef {
 	};
 
 	std::string toString() const {
-		return "begin:" + begin.toString() + " end:" + end.toString();
+		return "begin:" + begin.printable() + " end:" + end.printable();
 	}
 };
 

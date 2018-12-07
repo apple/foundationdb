@@ -39,6 +39,9 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+bool debug_verbose = false;
+
+
 ////-- Restore code declaration START
 
 std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
@@ -674,14 +677,18 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
- 	TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
- 	printf("ApplyKVOPsToDB num_of_version:%d\n", kvOps.size());
+ 	if ( debug_verbose ) {
+		TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
+		printf("ApplyKVOPsToDB num_of_version:%d\n", kvOps.size());
+ 	}
  	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = kvOps.begin();
  	state int count = 0;
  	for ( ; it != kvOps.end(); ++it ) {
 
- //		TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
- 		printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
+ 		if ( debug_verbose ) {
+			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
+			printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
+ 		}
 
  		state MutationRef m;
  		state int index = 0;
@@ -1584,15 +1591,17 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		printf("%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
-		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
+		if ( debug_verbose ) {
+			printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
+		}
 	}
 
 	// Get the mutation header
 	while (1) {
 		// stop when reach the end of the string
-		if(reader.eof() ) { //|| *reader.rptr == 0xFF
+		if(reader.eof() ) { //|| *reader.rptr == 0xFFCheckRestoreRequestDoneErrorMX
 			printf("Finish decode the value\n");
 			break;
 		}
@@ -1606,14 +1615,18 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 		count_size += 4 * 3 + kLen + vLen;
 
 		if ( kLen < 0 || kLen > val.size() || vLen < 0 || vLen > val.size() ) {
-			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
+			fprintf(stderr, "%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
 		}
 
-		printf("%s---DedoceBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
-			   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+		if ( debug_verbose ) {
+			printf("%s---DedodeBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
+				   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+		}
 
 	}
-	printf("----------------------------------------------------------\n");
+	if ( debug_verbose ) {
+		printf("----------------------------------------------------------\n");
+	}
 }
 
 void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
@@ -1633,7 +1646,7 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		printf("%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
 		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
 	}
@@ -1776,8 +1789,10 @@ void registerBackupMutation(Standalone<StringRef> val_input, Version file_versio
 		//			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
 		//		}
 		//
-		printf("%s---RegisterBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
-			   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+		if ( debug_verbose ) {
+			printf("%s---RegisterBackupMutation: Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
+				   type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+		}
 
 	}
 	//	printf("----------------------------------------------------------\n");
@@ -1880,13 +1895,17 @@ void registerBackupMutationForAll(Version empty) {
 			kvOps.insert(std::make_pair(commitVerison, VectorRef<MutationRef>()));
 		}
 
-		printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", commitVerison);
-		printf("To decode value:%s\n", getHexString(val).c_str());
+		if ( debug_verbose ) {
+			printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", commitVerison);
+			printf("To decode value:%s\n", getHexString(val).c_str());
+		}
 		if ( val_length_decode != (val.size() - 12) ) {
 			//IF we see val.size() == 10000, It means val should be concatenated! The concatenation may fail to copy the data
-			printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n",  val_length_decode, val.size());
+			fprintf(stderr, "[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n",  val_length_decode, val.size());
 		} else {
-			printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
+			if ( debug_verbose ) {
+				printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
+			}
 		}
 
 		// Get the mutation header
@@ -1913,8 +1932,10 @@ void registerBackupMutationForAll(Version empty) {
 			//			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
 			//		}
 			//
-			printf("%s---RegisterBackupMutation: Version:%016lx Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
-				   commitVerison, type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+			if ( debug_verbose ) {
+				printf("%s---RegisterBackupMutation: Version:%016lx Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
+					   commitVerison, type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+			}
 
 		}
 		//	printf("----------------------------------------------------------\n");

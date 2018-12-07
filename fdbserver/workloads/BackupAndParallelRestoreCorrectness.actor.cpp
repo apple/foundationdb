@@ -631,8 +631,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// MX: We should wait on all restore before proceeds
 				printf("Wait for restore to finish\n");
 				state int waitNum = 0;
+				state Transaction tr2(cx);
 				loop {
-					state Transaction tr2(cx);
+					tr2.reset();
 					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
