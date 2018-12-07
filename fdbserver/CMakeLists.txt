@@ -127,6 +127,7 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
+  workloads/PopulateTPCC.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp
@@ -151,6 +152,7 @@ set(FDBSERVER_SRCS
   workloads/ThreadSafety.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/TPCC.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
@@ -375,6 +377,7 @@ add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/SwizzledCycleTest.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/SwizzledDdBalance.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/SwizzledRollbackTimeLapse.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/SwizzledRollbackTimeLapseIncrement.txt)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/TPCC.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/VersionStampBackupToDB.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/VersionStampSwitchover.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/slow/WriteDuringReadAtomicRestore.txt)
