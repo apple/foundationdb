@@ -777,6 +777,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, spec );
 		if( spec.timeout > 0 ) {
+			printf("[INFO] TestSpec, timeout:%d\n", spec.timeout);
 			fTestResults = timeoutError( fTestResults, spec.timeout );
 		}
 		DistributedTestResults _testResults = wait( fTestResults );

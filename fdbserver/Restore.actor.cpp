@@ -448,6 +448,9 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreInterface>(leader.get(), IncludeVersion());
@@ -457,6 +460,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			wait(tr.commit());
 			break;
 		} catch( Error &e ) {
+			printf("restoreWorker select leader error\n");
 			wait( tr.onError(e) );
 		}
 	}
@@ -484,7 +488,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 					if (req.testData + 1 >= 10) {
 						break;
 					}
-				}
+				}o
 			}
 		}
 		 */
