@@ -155,6 +155,7 @@ public:
 		startDelay = 30.0;
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		timeout = g_network->isSimulated() ? 15000 : 1500;
+		timeout = timeout * 20; // MX: increase the timeout to avoid false positive error in test
 		databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
 		runConsistencyCheck = g_network->isSimulated();
 		waitForQuiescenceBegin = true;
