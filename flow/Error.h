@@ -76,7 +76,7 @@ private:
 inline Error actor_cancelled() { return Error( error_code_operation_cancelled ); }
 enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
-extern Error internal_error_impl( const ---RegisterBackupMutationchar* file, int line );
+extern Error internal_error_impl( const char* file, int line );
 #define internal_error() internal_error_impl( __FILE__, __LINE__ )
 
 extern bool isAssertDisabled( int line );

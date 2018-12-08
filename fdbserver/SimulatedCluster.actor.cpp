@@ -1280,6 +1280,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int extraDB = 0;
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
+	state float timeout = 36000.0 * 5; // old default is 5400 seconds
+	state float buggify_timeout = 36000.0 * 10; // old default is 36000 seconds
 	checkExtraDB(testFile, extraDB, minimumReplication, minimumRegions);
 
 	wait( g_simulator.onProcess( g_simulator.newProcess(
@@ -1305,7 +1307,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		std::string clusterFileDir = joinPath( dataFolder, g_random->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
+		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? buggify_timeout : timeout));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}

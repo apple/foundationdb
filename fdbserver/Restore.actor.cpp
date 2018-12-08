@@ -147,10 +147,10 @@ public:
 		}
 
 		std::string toString() const {
-			return "UNSET4TestHardness";
-//			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
-//				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
-//				   + " endVersion:" + std::to_string(endVersion);
+//			return "UNSET4TestHardness";
+			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
+				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
+				   + " endVersion:" + std::to_string(endVersion);
 		}
 	};
 
@@ -597,19 +597,23 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 		// Notify the finish of the restore by cleaning up the restore keys
 		state Transaction tr3(cx);
-		tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			tr3.clear(restoreRequestTriggerKey);
-			tr3.clear(restoreRequestKeys);
-			tr3.set(restoreRequestDoneKey, restoreRequestDoneValue(restoreRequests.size()));
-			TraceEvent("LeaderFinishRestoreRequest");
-			printf("LeaderFinishRestoreRequest\n");
-			wait(tr3.commit());
-		}  catch( Error &e ) {
-			TraceEvent("RestoreAgentLeaderErrorTr3").detail("ErrorCode", e.code()).detail("ErrorName", e.name());
-			wait( tr3.onError(e) );
-		}
+		loop {
+			tr3.reset();
+			tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				tr3.clear(restoreRequestTriggerKey);
+				tr3.clear(restoreRequestKeys);
+				tr3.set(restoreRequestDoneKey, restoreRequestDoneValue(restoreRequests.size()));
+				TraceEvent("LeaderFinishRestoreRequest");
+				printf("LeaderFinishRestoreRequest\n");
+				wait(tr3.commit());
+				break;
+			}  catch( Error &e ) {
+				TraceEvent("RestoreAgentLeaderErrorTr3").detail("ErrorCode", e.code()).detail("ErrorName", e.name());
+				wait( tr3.onError(e) );
+			}
+		};
 
 		printf("MXRestoreEndHere RestoreID:%d\n", restoreId);
 		TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
@@ -687,8 +691,8 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 
  		if ( debug_verbose ) {
 			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
-			printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
  		}
+ 		printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
 
  		state MutationRef m;
  		state int index = 0;
@@ -997,7 +1001,7 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
  				registerBackupMutation(data[i].value, logFile.version);
  */
- 				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
+ //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
  				concatenateBackupMutation(data[i].value, data[i].key);
  //				//TODO: Decode the value to get the mutation type. Use NoOp to distinguish from range kv for now.
  //				MutationRef m(MutationRef::Type::NoOp, data[i].key, data[i].value); //ASSUME: all operation in log file is NoOp.
@@ -1602,7 +1606,7 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 	while (1) {
 		// stop when reach the end of the string
 		if(reader.eof() ) { //|| *reader.rptr == 0xFFCheckRestoreRequestDoneErrorMX
-			printf("Finish decode the value\n");
+			//printf("Finish decode the value\n");
 			break;
 		}
 
@@ -1655,7 +1659,7 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	while (1) {
 		// stop when reach the end of the string
 		if(reader.eof() ) { //|| *reader.rptr == 0xFF
-			printf("Finish decode the value\n");
+			//printf("Finish decode the value\n");
 			break;
 		}
 
@@ -1770,7 +1774,7 @@ void registerBackupMutation(Standalone<StringRef> val_input, Version file_versio
 	while (1) {
 		// stop when reach the end of the string
 		if(reader.eof() ) { //|| *reader.rptr == 0xFF
-			printf("Finish decode the value\n");
+			//printf("Finish decode the value\n");
 			break;
 		}
 
@@ -1813,18 +1817,23 @@ void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<Strin
 		printf("[ERROR]!!! logRangeMutationFirstLength:%d < 0, key_input.size:%d\n", logRangeMutationFirstLength, key_input.size());
 	}
 
-	printf("[DEBUG] Process key_input:%s\n", getHexKey(key_input, logRangeMutationFirstLength).c_str());
+	if ( debug_verbose ) {
+		printf("[DEBUG] Process key_input:%s\n", getHexKey(key_input, logRangeMutationFirstLength).c_str());
+	}
+
 	//PARSE key
 	Standalone<StringRef> id_old = key_input.substr(0, key_input.size() - 4); //Used to sanity check the decoding of key is correct
 	Standalone<StringRef> partStr = key_input.substr(key_input.size() - 4, 4); //part
 	StringRefReaderMX readerPart(partStr, restore_corrupted_data());
 	uint32_t part_direct = readerPart.consumeNetworkUInt32(); //Consume a bigEndian value
-	printf("[DEBUG] Process prefix:%s and partStr:%s part_direct:%08x fromm key_input:%s, size:%d\n",
-		   getHexKey(id_old, logRangeMutationFirstLength).c_str(),
-		   getHexString(partStr).c_str(),
-		   part_direct,
-		   getHexKey(key_input, logRangeMutationFirstLength).c_str(),
-		   key_input.size());
+	if ( debug_verbose  ) {
+		printf("[DEBUG] Process prefix:%s and partStr:%s part_direct:%08x fromm key_input:%s, size:%d\n",
+			   getHexKey(id_old, logRangeMutationFirstLength).c_str(),
+			   getHexString(partStr).c_str(),
+			   part_direct,
+			   getHexKey(key_input, logRangeMutationFirstLength).c_str(),
+			   key_input.size());
+	}
 
 	StringRef longRangeMutationFirst;
 
@@ -1843,11 +1852,13 @@ void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<Strin
 	//Use commitVersion as id
 	Standalone<StringRef> id = StringRef((uint8_t*) &commitVersion, 8);
 
-	printf("[DEBUG] key_input_size:%d longRangeMutationFirst:%s hashValue:%02x commitVersion:%016lx (BigEndian:%016lx) part:%08x (BigEndian:%08x), part_direct:%08x mutationMap.size:%d\n",
-		   key_input.size(), longRangeMutationFirst.printable().c_str(), hashValue,
-		   commitVersion, commitVersionBE,
-		   part, partBE,
-		   part_direct, mutationMap.size());
+	if ( debug_verbose ) {
+		printf("[DEBUG] key_input_size:%d longRangeMutationFirst:%s hashValue:%02x commitVersion:%016lx (BigEndian:%016lx) part:%08x (BigEndian:%08x), part_direct:%08x mutationMap.size:%d\n",
+			   key_input.size(), longRangeMutationFirst.printable().c_str(), hashValue,
+			   commitVersion, commitVersionBE,
+			   part, partBE,
+			   part_direct, mutationMap.size());
+	}
 
 	if ( mutationMap.find(id) == mutationMap.end() ) {
 		mutationMap.insert(std::make_pair(id, val_input));
@@ -1912,7 +1923,7 @@ void registerBackupMutationForAll(Version empty) {
 		while (1) {
 			// stop when reach the end of the string
 			if(reader.eof() ) { //|| *reader.rptr == 0xFF
-				printf("Finish decode the value\n");
+				//printf("Finish decode the value\n");
 				break;
 			}
 
