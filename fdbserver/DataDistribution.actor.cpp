@@ -1874,12 +1874,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return machineInfo;
 	}
 
-	Reference<TCMachineInfo> checkAndCreateMachineByServerID(UID& id) {
-		ASSERT(server_info.find(id) != server_info.end());
-		Reference<TCServerInfo> server = server_info[id];
-		return checkAndCreateMachine(server);
-	}
-
 	// Check if the serverTeam belongs to a machine team; If not, create the machine team
 	Reference<TCMachineTeamInfo> checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam) {
 		std::vector<Standalone<StringRef>> machineIDs;
@@ -2653,8 +2647,9 @@ ACTOR Future<Void> storageServerTracker(
 							for (int i = 0; i < machine->serversOnMachine.size(); ++i) {
 								if (machine->serversOnMachine[i].getPtr() == server) {
 									serverIndex = i;
-									machine->serversOnMachine[i--] = machine->serversOnMachine.back();
+									machine->serversOnMachine[i] = machine->serversOnMachine.back();
 									machine->serversOnMachine.pop_back();
+									break; // Invariant: server only appear on the machine once
 								}
 							}
 							ASSERT(serverIndex != -1);
@@ -2666,7 +2661,7 @@ ACTOR Future<Void> storageServerTracker(
 						// Second handle the impact on the destination machine where the server's new locality is;
 						// If the destination machine is new, create one; otherwise, add server to an existing one
 						// Update server's machine reference to the destination machine
-						Reference<TCMachineInfo> destMachine = self->checkAndCreateMachineByServerID(server->id);
+						Reference<TCMachineInfo> destMachine = self->checkAndCreateMachine(self->server_info[server->id]);
 						ASSERT(destMachine.isValid());
 
 						// Ensure the server's server team belong to a machine team, and
