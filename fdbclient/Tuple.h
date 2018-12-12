@@ -32,7 +32,7 @@ struct Tuple {
 	static Tuple unpack(StringRef const& str);
 
 	Tuple& append(Tuple const& tuple);
-	Tuple& append(StringRef const& str, bool utf8 = false);
+	Tuple& append(StringRef const& str, bool utf8=false);
 	Tuple& append(int64_t);
 	Tuple& appendNull();
 

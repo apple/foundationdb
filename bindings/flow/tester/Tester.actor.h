@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDB_FLOW_TESTER_TESTER_ACTOR_G_H)
-#define FDB_FLOW_TESTER_TESTER_ACTOR_G_H
-#include "Tester.actor.g.h"
+	#define FDB_FLOW_TESTER_TESTER_ACTOR_G_H
+	#include "Tester.actor.g.h"
 #elif !defined(FDB_FLOW_TESTER_TESTER_ACTOR_H)
-#define FDB_FLOW_TESTER_TESTER_ACTOR_H
+	#define FDB_FLOW_TESTER_TESTER_ACTOR_H
 
 #pragma once
 
@@ -33,7 +32,7 @@
 #include "bindings/flow/IDirectory.h"
 #include "bindings/flow/Subspace.h"
 #include "bindings/flow/DirectoryLayer.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define LOG_ALL 0
 #define LOG_INSTRUCTIONS LOG_ALL || 0
@@ -55,13 +54,19 @@ struct FlowTesterStack {
 	uint32_t index;
 	std::vector<StackItem> data;
 
-	void push(Future<Standalone<StringRef>> value) { data.push_back(StackItem(index, value)); }
+	void push(Future<Standalone<StringRef>> value) {
+		data.push_back(StackItem(index, value));
+	}
+	
+	void push(Standalone<StringRef> value) {
+		push(Future<Standalone<StringRef>>(value));
+	}
 
-	void push(Standalone<StringRef> value) { push(Future<Standalone<StringRef>>(value)); }
+	void push(const StackItem& item) {
+		data.push_back(item);
+	}
 
-	void push(const StackItem& item) { data.push_back(item); }
-
-	void pushTuple(StringRef value, bool utf8 = false) {
+	void pushTuple(StringRef value, bool utf8=false) {
 		FDB::Tuple t;
 		t.append(value, utf8);
 		data.push_back(StackItem(index, t.pack()));
@@ -81,42 +86,46 @@ struct FlowTesterStack {
 			items.push_back(data.back());
 			data.pop_back();
 			count--;
-		}
+		}		
 		return items;
 	}
-
+	
 	Future<std::vector<FDB::Tuple>> waitAndPop(int count);
 	Future<FDB::Tuple> waitAndPop();
 
 	void dup() {
-		if (data.empty()) return;
+		if (data.empty())
+			return;
 		data.push_back(data.back());
 	}
 
-	void clear() { data.clear(); }
+	void clear() {
+		data.clear();
+	}
 };
 
 struct InstructionData : public ReferenceCounted<InstructionData> {
 	bool isDatabase;
-	bool isSnapshot;
+	bool isSnapshot;	
 	StringRef instruction;
 	Reference<FDB::Transaction> tr;
 
 	InstructionData(bool _isDatabase, bool _isSnapshot, StringRef _instruction, Reference<FDB::Transaction> _tr)
-	  : isDatabase(_isDatabase), isSnapshot(_isSnapshot), instruction(_instruction), tr(_tr) {}
+		: isDatabase(_isDatabase)
+		, isSnapshot(_isSnapshot)
+		, instruction(_instruction)
+		, tr(_tr) {}
 };
 
 struct FlowTesterData;
 
-struct InstructionFunc
-  : IDispatched<InstructionFunc, std::string,
-                std::function<Future<Void>(Reference<FlowTesterData> data, Reference<InstructionData> instruction)>> {
+struct InstructionFunc : IDispatched<InstructionFunc, std::string, std::function<Future<Void>(Reference<FlowTesterData> data, Reference<InstructionData> instruction)>> {
 	static Future<Void> call(std::string op, Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		ASSERT(data);
 		ASSERT(instruction);
 
 		auto it = dispatches().find(op);
-		if (it == dispatches().end()) {
+		if(it == dispatches().end()) {
 			fprintf(stderr, "Unrecognized instruction: %s\n", op.c_str());
 			ASSERT(false);
 		}
@@ -132,20 +141,24 @@ struct DirectoryOrSubspace {
 
 	DirectoryOrSubspace() {}
 	DirectoryOrSubspace(Reference<FDB::IDirectory> directory) : directory(directory) {}
-	DirectoryOrSubspace(FDB::Subspace* subspace) : subspace(subspace) {}
-	DirectoryOrSubspace(Reference<FDB::DirectorySubspace> dirSubspace)
-	  : directory(dirSubspace), subspace(dirSubspace.getPtr()) {}
+	DirectoryOrSubspace(FDB::Subspace *subspace) : subspace(subspace) {}
+	DirectoryOrSubspace(Reference<FDB::DirectorySubspace> dirSubspace) : directory(dirSubspace), subspace(dirSubspace.getPtr()) {}
 
-	bool valid() { return directory.present() || subspace.present(); }
+	bool valid() {
+		return directory.present() || subspace.present();
+	}
 
 	std::string typeString() {
-		if (directory.present() && subspace.present()) {
+		if(directory.present() && subspace.present()) {
 			return "DirectorySubspace";
-		} else if (directory.present()) {
-			return "IDirectory";
-		} else if (subspace.present()) {
+		}
+		else if(directory.present()) {
+			return "IDirectory";	
+		}
+		else if(subspace.present()) {
 			return "Subspace";
-		} else {
+		}
+		else {
 			return "InvalidDirectory";
 		}
 	}
@@ -156,10 +169,10 @@ struct DirectoryTesterData {
 	int directoryListIndex;
 	int directoryErrorIndex;
 
-	Reference<FDB::IDirectory> directory() {
+	Reference<FDB::IDirectory> directory() { 
 		ASSERT(directoryListIndex < directoryList.size());
 		ASSERT(directoryList[directoryListIndex].directory.present());
-		return directoryList[directoryListIndex].directory.get();
+		return directoryList[directoryListIndex].directory.get(); 
 	}
 
 	FDB::Subspace* subspace() {
@@ -175,8 +188,8 @@ struct DirectoryTesterData {
 	template <class T>
 	void push(T item) {
 		directoryList.push_back(DirectoryOrSubspace(item));
-		if (LOG_DIRS) {
-			printf("Pushed %s at %lu\n", directoryList.back().typeString().c_str(), directoryList.size() - 1);
+		if(LOG_DIRS) {
+			printf("Pushed %s at %lu\n", directoryList.back().typeString().c_str(), directoryList.size()-1);
 			fflush(stdout);
 		}
 	}
@@ -185,7 +198,7 @@ struct DirectoryTesterData {
 };
 
 struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
-	FDB::API* api;
+	FDB::API *api;
 	Reference<FDB::DatabaseContext> db;
 	Standalone<FDB::RangeResultRef> instructions;
 	Standalone<StringRef> trName;
@@ -196,11 +209,12 @@ struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 	std::vector<Future<Void>> subThreads;
 
 	Future<Void> processInstruction(Reference<InstructionData> instruction) {
-		return InstructionFunc::call(instruction->instruction.toString(), Reference<FlowTesterData>::addRef(this),
-		                             instruction);
+		return InstructionFunc::call(instruction->instruction.toString(), Reference<FlowTesterData>::addRef(this), instruction);
 	}
 
-	FlowTesterData(FDB::API* api) { this->api = api; }
+	FlowTesterData(FDB::API *api) {
+		this->api = api;
+	}
 };
 
 std::string tupleToString(FDB::Tuple const& tuple);
@@ -210,14 +224,16 @@ Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionDa
 	loop {
 		try {
 			state decltype(fake<F>()().getValue()) result = wait(func());
-			if (instruction->isDatabase) {
+			if(instruction->isDatabase) {
 				wait(instruction->tr->commit());
 			}
 			return result;
-		} catch (Error& e) {
-			if (instruction->isDatabase) {
+		}
+		catch(Error &e) {
+			if(instruction->isDatabase) {
 				wait(instruction->tr->onError(e));
-			} else {
+			}
+			else {
 				throw;
 			}
 		}

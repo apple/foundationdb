@@ -26,29 +26,31 @@ struct ActorFuzzWorkload : TestWorkload {
 	bool enabled;
 	std::pair<int, int> fuzzResults;
 
-	ActorFuzzWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), fuzzResults(std::make_pair(0, 0)) {
+	ActorFuzzWorkload( WorkloadContext const& wcx )
+		: TestWorkload(wcx), fuzzResults( std::make_pair(0, 0) )
+	{
 		enabled = !clientId; // only do this on the "first" client
 	}
 
 	virtual std::string description() { return "ActorFuzzWorkload"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) {
+	virtual Future<Void> setup( Database const& cx ) { return Void(); }
+	virtual Future<Void> start( Database const& cx ) {
 		if (enabled) {
 			// Only include this test outside of Windows because of MSVC compiler bug
 			fuzzResults.second = 0;
 
 			// Only include this test outside of Windows because of MSVC compiler bug
-#ifndef WIN32
+#ifndef	WIN32
 			fuzzResults = actorFuzzTests();
 #endif
-			if (fuzzResults.second == 0)
+			if( fuzzResults.second == 0 )
 				// if there are no total tests, then mark this as "non-passing"
 				fuzzResults.first = 1;
 		}
 		return Void();
 	}
-	virtual Future<bool> check(Database const& cx) { return fuzzResults.first == fuzzResults.second; }
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual Future<bool> check( Database const& cx ) { return fuzzResults.first == fuzzResults.second; }
+	virtual void getMetrics( vector<PerfMetric>& m ) {}
 };
 
 WorkloadFactory<ActorFuzzWorkload> ActorFuzzWorkloadFactory("ActorFuzz");

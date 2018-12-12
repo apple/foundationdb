@@ -21,47 +21,50 @@
 #include "DirectoryLayer.h"
 
 namespace FDB {
-DirectoryLayer::Node::Node(Reference<DirectoryLayer> const& directoryLayer, Optional<Subspace> const& subspace,
-                           IDirectory::Path const& path, IDirectory::Path const& targetPath)
-  : directoryLayer(directoryLayer), subspace(subspace), path(path), targetPath(targetPath), loadedMetadata(false) {}
+	DirectoryLayer::Node::Node(Reference<DirectoryLayer> const& directoryLayer, Optional<Subspace> const& subspace, IDirectory::Path const& path, IDirectory::Path const& targetPath)
+		: directoryLayer(directoryLayer),
+			subspace(subspace),
+			path(path),
+			targetPath(targetPath),
+			loadedMetadata(false)
+	{ }
 
-bool DirectoryLayer::Node::exists() const {
-	return subspace.present();
-}
+	bool DirectoryLayer::Node::exists() const {
+		return subspace.present();
+	}
 
-ACTOR Future<DirectoryLayer::Node> loadMetadata(DirectoryLayer::Node* n, Reference<Transaction> tr) {
-	if (!n->exists()) {
+	ACTOR Future<DirectoryLayer::Node> loadMetadata(DirectoryLayer::Node *n, Reference<Transaction> tr) {
+		if(!n->exists()){
+			n->loadedMetadata = true;
+			return *n;
+		}
+
+		Optional<FDBStandalone<ValueRef>> layer = wait(tr->get(n->subspace.get().pack(DirectoryLayer::LAYER_KEY)));
+
+		n->layer = layer.present() ? layer.get() : Standalone<StringRef>();
 		n->loadedMetadata = true;
+
 		return *n;
 	}
 
-	Optional<FDBStandalone<ValueRef>> layer = wait(tr->get(n->subspace.get().pack(DirectoryLayer::LAYER_KEY)));
+	//Calls to loadMetadata must keep the Node alive while the future is outstanding
+	Future<DirectoryLayer::Node> DirectoryLayer::Node::loadMetadata(Reference<Transaction> tr) {
+		return FDB::loadMetadata(this, tr);
+	}
 
-	n->layer = layer.present() ? layer.get() : Standalone<StringRef>();
-	n->loadedMetadata = true;
+	bool DirectoryLayer::Node::isInPartition(bool includeEmptySubpath) const {
+		ASSERT(loadedMetadata);
+		return exists() && layer == DirectoryLayer::PARTITION_LAYER && (includeEmptySubpath || targetPath.size() > path.size());
+	}
 
-	return *n;
+	IDirectory::Path DirectoryLayer::Node::getPartitionSubpath() const {
+		return Path(targetPath.begin() + path.size(), targetPath.end());
+	}
+
+	Reference<DirectorySubspace> DirectoryLayer::Node::getContents() const {
+		ASSERT(exists());
+		ASSERT(loadedMetadata);
+
+		return directoryLayer->contentsOfNode(subspace.get(), path, layer);
 }
-
-// Calls to loadMetadata must keep the Node alive while the future is outstanding
-Future<DirectoryLayer::Node> DirectoryLayer::Node::loadMetadata(Reference<Transaction> tr) {
-	return FDB::loadMetadata(this, tr);
 }
-
-bool DirectoryLayer::Node::isInPartition(bool includeEmptySubpath) const {
-	ASSERT(loadedMetadata);
-	return exists() && layer == DirectoryLayer::PARTITION_LAYER &&
-	       (includeEmptySubpath || targetPath.size() > path.size());
-}
-
-IDirectory::Path DirectoryLayer::Node::getPartitionSubpath() const {
-	return Path(targetPath.begin() + path.size(), targetPath.end());
-}
-
-Reference<DirectorySubspace> DirectoryLayer::Node::getContents() const {
-	ASSERT(exists());
-	ASSERT(loadedMetadata);
-
-	return directoryLayer->contentsOfNode(subspace.get(), path, layer);
-}
-} // namespace FDB

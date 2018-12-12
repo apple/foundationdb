@@ -57,8 +57,8 @@ public:
 	enum Type {
 		INVALID_NETWORK_ADDRESSES,
 		SAME_NETWORK_ADDRESSES,
-		NOT_COORDINATORS, // FIXME: not detected
-		DATABASE_UNREACHABLE, // FIXME: not detected
+		NOT_COORDINATORS, //FIXME: not detected
+		DATABASE_UNREACHABLE, //FIXME: not detected
 		BAD_DATABASE_STATE,
 		COORDINATOR_UNREACHABLE,
 		NOT_ENOUGH_MACHINES,
@@ -89,98 +89,81 @@ struct ConfigureAutoResult {
 	int32_t desired_resolvers;
 	int32_t desired_logs;
 
-	ConfigureAutoResult()
-	  : processes(-1), machines(-1), old_proxies(-1), old_resolvers(-1), old_logs(-1),
-	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_proxies(-1), auto_resolvers(-1),
-	    auto_logs(-1), auto_processes_with_transaction(-1), auto_machines_with_transaction(-1), desired_proxies(-1),
-	    desired_resolvers(-1), desired_logs(-1) {}
+	ConfigureAutoResult() : processes(-1), machines(-1),
+		old_proxies(-1), old_resolvers(-1), old_logs(-1), old_processes_with_transaction(-1), old_machines_with_transaction(-1),
+		auto_proxies(-1), auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1), auto_machines_with_transaction(-1),
+		desired_proxies(-1), desired_resolvers(-1), desired_logs(-1) {}
 
 	bool isValid() const { return processes != -1; }
 };
 
-ConfigurationResult::Type buildConfiguration(
-    std::vector<StringRef> const& modeTokens,
-    std::map<std::string, std::string>& outConf); // Accepts a vector of configuration tokens
-ConfigurationResult::Type buildConfiguration(
-    std::string const& modeString,
-    std::map<std::string, std::string>& outConf); // Accepts tokens separated by spaces in a single string
+ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf );  // Accepts a vector of configuration tokens
+ConfigurationResult::Type buildConfiguration( std::string const& modeString, std::map<std::string, std::string>& outConf );				// Accepts tokens separated by spaces in a single string
 
-bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
+bool isCompleteConfiguration( std::map<std::string, std::string> const& options );
 
-// All versions of changeConfig apply the given set of configuration tokens to the database, and return a
-// ConfigurationResult (or error).
-Future<ConfigurationResult::Type> changeConfig(
-    Database const& cx, std::string const& configMode); // Accepts tokens separated by spaces in a single string
+// All versions of changeConfig apply the given set of configuration tokens to the database, and return a ConfigurationResult (or error).
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& configMode );  // Accepts tokens separated by spaces in a single string
 
-ConfigureAutoResult parseConfig(StatusObject const& status);
-Future<ConfigurationResult::Type> changeConfig(
-    Database const& cx, std::vector<StringRef> const& modes,
-    Optional<ConfigureAutoResult> const& conf); // Accepts a vector of configuration tokens
-Future<ConfigurationResult::Type> changeConfig(
-    Database const& cx, std::map<std::string, std::string> const&
-                            m); // Accepts a full configuration in key/value format (from buildConfiguration)
+ConfigureAutoResult parseConfig( StatusObject const& status );
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf );  // Accepts a vector of configuration tokens
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::map<std::string, std::string> const& m );  // Accepts a full configuration in key/value format (from buildConfiguration)
 
-Future<DatabaseConfiguration> getDatabaseConfiguration(Database const& cx);
-Future<Void> waitForFullReplication(Database const& cx);
+Future<DatabaseConfiguration> getDatabaseConfiguration( Database const& cx );
+Future<Void> waitForFullReplication( Database const& cx );
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile>,
-	                                                              CoordinatorsResult::Type&) = 0;
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) = 0;
 	virtual std::string getDesiredClusterKeyName() { return std::string(); }
 };
 
 // Change to use the given set of coordination servers
-Future<CoordinatorsResult::Type> changeQuorum(Database const& cx, Reference<IQuorumChange> const& change);
+Future<CoordinatorsResult::Type> changeQuorum( Database const& cx, Reference<IQuorumChange> const& change );
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const&);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
 
-// Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
-// necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
-// given IP.
-Future<Void> excludeServers(Database const& cx, vector<AddressExclusion> const& servers);
+// Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without necessarily waiting for
+// the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the given IP.
+Future<Void> excludeServers( Database const& cx, vector<AddressExclusion> const& servers );
 
-// Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
-// IP.  A NetworkAddress() means all servers (don't exclude anything)
-Future<Void> includeServers(Database const& cx, vector<AddressExclusion> const& servers);
+// Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
+// all servers (don't exclude anything)
+Future<Void> includeServers( Database const& cx, vector<AddressExclusion> const& servers );
 
-// Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on
-// the given IP.
-Future<Void> setClass(Database const& cx, AddressExclusion const& server, ProcessClass const& processClass);
+// Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on the given IP.
+Future<Void> setClass( Database const& cx, AddressExclusion const& server, ProcessClass const& processClass );
 
 // Get the current list of excluded servers
-Future<vector<AddressExclusion>> getExcludedServers(Database const& cx);
+Future<vector<AddressExclusion>> getExcludedServers( Database const& cx );
 
-// Wait for the given, previously excluded servers to be evacuated (no longer used for state).  Once this returns it is
-// safe to shut down all such machines without impacting fault tolerance, until and unless any of them are explicitly
-// included with includeServers()
-Future<Void> waitForExcludedServers(Database const& cx, vector<AddressExclusion> const& servers);
+// Wait for the given, previously excluded servers to be evacuated (no longer used for state).  Once this returns it is safe to shut down all such
+// machines without impacting fault tolerance, until and unless any of them are explicitly included with includeServers()
+Future<Void> waitForExcludedServers( Database const& cx, vector<AddressExclusion> const& servers );
 
 // Gets a list of all workers in the cluster (excluding testers)
-Future<vector<ProcessData>> getWorkers(Database const& cx);
-Future<vector<ProcessData>> getWorkers(Transaction* const& tr);
+Future<vector<ProcessData>> getWorkers( Database const& cx );
+Future<vector<ProcessData>> getWorkers( Transaction* const& tr );
 
 Future<Void> timeKeeperSetDisable(Database const& cx);
 
-Future<Void> lockDatabase(Transaction* const& tr, UID const& id);
-Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> const& tr, UID const& id);
-Future<Void> lockDatabase(Database const& cx, UID const& id);
+Future<Void> lockDatabase( Transaction* const& tr, UID const& id );
+Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
+Future<Void> lockDatabase( Database const& cx, UID const& id );
 
-Future<Void> unlockDatabase(Transaction* const& tr, UID const& id);
-Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> const& tr, UID const& id);
-Future<Void> unlockDatabase(Database const& cx, UID const& id);
+Future<Void> unlockDatabase( Transaction* const& tr, UID const& id );
+Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
+Future<Void> unlockDatabase( Database const& cx, UID const& id );
 
-Future<Void> checkDatabaseLock(Transaction* const& tr, UID const& id);
-Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> const& tr, UID const& id);
+Future<Void> checkDatabaseLock( Transaction* const& tr, UID const& id );
+Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 
-Future<int> setDDMode(Database const& cx, int const& mode);
+Future<int> setDDMode( Database const& cx, int const& mode );
 
-Future<Void> forceRecovery(Reference<ClusterConnectionFile> const& clusterFile);
+Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
 
 // Gets the cluster connection string
-Future<std::vector<NetworkAddress>> getCoordinators(Database const& cx);
+Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
 #endif

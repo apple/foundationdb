@@ -19,62 +19,67 @@
  */
 
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
-	state int i = 0;
+ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {
+	state int i=0;
 	while (i != all.size()) {
-		bool r = wait(all[i]);
+		bool r = wait( all[i] );
 		if (!r) return false;
 		i++;
 	}
 	return true;
 }
 
-ACTOR Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> input, Reference<AsyncVar<bool>> output) {
+ACTOR Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> input, Reference<AsyncVar<bool>> output ) {
 	loop {
 		bool oneTrue = false;
 		std::vector<Future<Void>> changes;
-		for (auto it : input) {
-			if (it->get()) oneTrue = true;
-			changes.push_back(it->onChange());
+		for(auto it : input) {
+			if( it->get() ) oneTrue = true;
+			changes.push_back( it->onChange() );
 		}
-		output->set(oneTrue);
-		wait(waitForAny(changes));
+		output->set( oneTrue );
+		wait( waitForAny(changes) );
 	}
 }
 
-ACTOR Future<Void> cancelOnly(std::vector<Future<Void>> futures) {
-	// We don't do anything with futures except hold them, we never return, but if we are cancelled we (naturally) drop
-	// the futures
-	wait(Never());
+ACTOR Future<Void> cancelOnly( std::vector<Future<Void>> futures ) {
+	// We don't do anything with futures except hold them, we never return, but if we are cancelled we (naturally) drop the futures
+	wait( Never() );
 	return Void();
 }
 
-ACTOR Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logDelay, const char* context, UID id) {
+ACTOR Future<Void> timeoutWarningCollector( FutureStream<Void> input, double logDelay, const char* context, UID id ) {
 	state uint64_t counter = 0;
-	state Future<Void> end = delay(logDelay);
+	state Future<Void> end = delay( logDelay );
 	loop choose {
-		when(waitNext(input)) { counter++; }
-		when(wait(end)) {
-			if (counter)
+		when ( waitNext( input ) ) {
+			counter++;
+		}
+		when ( wait( end ) ) {
+			if( counter )
 				TraceEvent(SevWarn, context, id).detail("LateProcessCount", counter).detail("LoggingDelay", logDelay);
-			end = delay(logDelay);
+			end = delay( logDelay );
 			counter = 0;
 		}
 	}
 }
 
-ACTOR Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required) {
-	state std::vector<Future<Void>> true_futures;
-	state std::vector<Future<Void>> false_futures;
-	for (int i = 0; i < futures.size(); i++) {
-		true_futures.push_back(onEqual(futures[i], true));
-		false_futures.push_back(onEqual(futures[i], false));
+ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int required ) {
+	state std::vector< Future<Void> > true_futures;
+	state std::vector< Future<Void> > false_futures;
+	for(int i=0; i<futures.size(); i++) {
+		true_futures.push_back( onEqual( futures[i], true ) );
+		false_futures.push_back( onEqual( futures[i], false ) );
 	}
 
 	choose {
-		when(wait(quorum(true_futures, required))) { return true; }
-		when(wait(quorum(false_futures, futures.size() - required + 1))) { return false; }
+		when( wait( quorum( true_futures, required ) ) ) {
+			return true;
+		}
+		when( wait( quorum( false_futures, futures.size() - required + 1 ) ) ) {
+			return false;
+		}
 	}
 }

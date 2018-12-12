@@ -1214,7 +1214,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_RANDOMSEED: {
 				char* end;
-				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
+				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 10);
 				if (*end) {
 					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);

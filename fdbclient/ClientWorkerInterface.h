@@ -30,17 +30,17 @@
 // Streams from WorkerInterface that are safe and useful to call from a client.
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
-	RequestStream<struct RebootRequest> reboot;
-	RequestStream<struct ProfilerRequest> profiler;
+	RequestStream< struct RebootRequest > reboot;
+	RequestStream< struct ProfilerRequest > profiler;
 
-	bool operator==(ClientWorkerInterface const& r) const { return id() == r.id(); }
-	bool operator!=(ClientWorkerInterface const& r) const { return id() != r.id(); }
+	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
 	UID id() const { return reboot.getEndpoint().token; }
 	NetworkAddress address() const { return reboot.getEndpoint().address; }
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& reboot& profiler;
+	void serialize( Ar& ar ) {
+		ar & reboot & profiler;
 	}
 };
 
@@ -48,33 +48,39 @@ struct RebootRequest {
 	bool deleteData;
 	bool checkData;
 
-	explicit RebootRequest(bool deleteData = false, bool checkData = false)
-	  : deleteData(deleteData), checkData(checkData) {}
+	explicit RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& deleteData& checkData;
+		ar & deleteData & checkData;
 	}
 };
 
 struct ProfilerRequest {
 	ReplyPromise<Void> reply;
 
-	enum class Type : std::int8_t { GPROF = 1, FLOW = 2 };
+	enum class Type : std::int8_t {
+		GPROF = 1,
+		FLOW = 2
+	};
 
-	enum class Action : std::int8_t { DISABLE = 0, ENABLE = 1, RUN = 2 };
+	enum class Action : std::int8_t {
+		DISABLE = 0,
+		ENABLE = 1,
+		RUN = 2
+	};
 
 	Type type;
 	Action action;
 	int duration;
 	Standalone<StringRef> outputFile;
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& reply& type& action& duration& outputFile;
+	template<class Ar>
+	void serialize( Ar& ar ) {
+		ar & reply & type & action & duration & outputFile;
 	}
 };
-BINARY_SERIALIZABLE(ProfilerRequest::Type);
-BINARY_SERIALIZABLE(ProfilerRequest::Action);
+BINARY_SERIALIZABLE( ProfilerRequest::Type );
+BINARY_SERIALIZABLE( ProfilerRequest::Action );
 
 #endif

@@ -25,13 +25,14 @@
 
 #include <Windows.h>
 
-BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, LPVOID reserved) {
+BOOL WINAPI DllMain( HINSTANCE dll, DWORD reason, LPVOID reserved ) {
 
-	if (reason == DLL_THREAD_DETACH) releaseAllThreadMagazines();
+	if (reason == DLL_THREAD_DETACH)
+		releaseAllThreadMagazines();
 	return TRUE;
 }
 
-#elif defined(__unixish__)
+#elif defined( __unixish__ )
 
 static pthread_key_t threadDestructorKey;
 
@@ -40,13 +41,13 @@ static void threadDestructor(void*) {
 }
 
 void registerThread() {
-	pthread_setspecific(threadDestructorKey, (const void*)1);
+	pthread_setspecific( threadDestructorKey, (const void*)1 );
 }
 
 static int initThreadDestructorKey() {
 	if (!pthread_key_create(&threadDestructorKey, &threadDestructor)) {
 		registerThread();
-		setFastAllocatorThreadInitFunction(&registerThread);
+		setFastAllocatorThreadInitFunction( &registerThread );
 	}
 
 	return 0;

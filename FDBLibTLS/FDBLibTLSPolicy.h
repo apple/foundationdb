@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-struct FDBLibTLSPolicy : ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
+struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 	FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin);
 	virtual ~FDBLibTLSPolicy();
 
@@ -41,8 +41,7 @@ struct FDBLibTLSPolicy : ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 
 	Reference<FDBLibTLSPlugin> plugin;
 
-	virtual ITLSSession* create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func,
-	                                    void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
+	virtual ITLSSession* create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
 
 	struct stack_st_X509* parse_cert_pem(const uint8_t* cert_pem, size_t cert_pem_len);
 	void parse_verify(std::string input);

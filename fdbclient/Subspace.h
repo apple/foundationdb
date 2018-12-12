@@ -47,7 +47,7 @@ public:
 		return pack(t);
 	}
 
-	Key pack(StringRef const& item, bool utf8 = false) const {
+	Key pack(StringRef const& item, bool utf8=false) const {
 		Tuple t;
 		t.append(item, utf8);
 		return pack(t);
@@ -63,7 +63,7 @@ public:
 		return get(t);
 	}
 
-	Subspace get(StringRef const& item, bool utf8 = false) const {
+	Subspace get(StringRef const& item, bool utf8=false) const {
 		Tuple t;
 		t.append(item, utf8);
 		return get(t);

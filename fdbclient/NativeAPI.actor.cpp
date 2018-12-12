@@ -1323,16 +1323,15 @@ ACTOR Future<Key> getKey(Database cx, KeySelector k, Future<Version> version, Tr
 				g_traceBatch.addEvent(
 				    "TransactionDebug", info.debugID.get().first(),
 				    "NativeAPI.getKey.Before"); //.detail("StartKey",
-				                                // printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+				                                //printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
 			GetKeyReply reply = wait(loadBalance(ssi.second, &StorageServerInterface::getKey,
 			                                     GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false,
 			                                     cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 			if (info.debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", info.debugID.get().first(),
-				    "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset",
-				                               // reply.sel.offset).detail("OrEqual", k.orEqual);
+				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(),
+				                      "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset",
+				                                                 //reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
 				return k.getKey();

@@ -29,30 +29,30 @@
 #include "ClientWorkerInterface.h"
 
 struct ClusterInterface {
-	RequestStream<struct OpenDatabaseRequest> openDatabase;
-	RequestStream<struct FailureMonitoringRequest> failureMonitoring;
-	RequestStream<struct StatusRequest> databaseStatus;
-	RequestStream<ReplyPromise<Void>> ping;
-	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
-	RequestStream<struct ForceRecoveryRequest> forceRecovery;
+	RequestStream< struct OpenDatabaseRequest > openDatabase;
+	RequestStream< struct FailureMonitoringRequest > failureMonitoring;
+	RequestStream< struct StatusRequest > databaseStatus;
+	RequestStream< ReplyPromise<Void> > ping;
+	RequestStream< struct GetClientWorkersRequest > getClientWorkers;
+	RequestStream< struct ForceRecoveryRequest > forceRecovery;
 
-	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
-	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
+	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
+	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().address; }
 
 	void initEndpoints() {
-		openDatabase.getEndpoint(TaskClusterController);
-		failureMonitoring.getEndpoint(TaskFailureMonitor);
-		databaseStatus.getEndpoint(TaskClusterController);
-		ping.getEndpoint(TaskClusterController);
-		getClientWorkers.getEndpoint(TaskClusterController);
-		forceRecovery.getEndpoint(TaskClusterController);
+		openDatabase.getEndpoint( TaskClusterController );
+		failureMonitoring.getEndpoint( TaskFailureMonitor );
+		databaseStatus.getEndpoint( TaskClusterController );
+		ping.getEndpoint( TaskClusterController );
+		getClientWorkers.getEndpoint( TaskClusterController );
+		forceRecovery.getEndpoint( TaskClusterController );
 	}
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& openDatabase& failureMonitoring& databaseStatus& ping& getClientWorkers& forceRecovery;
+	void serialize( Ar& ar ) {
+		ar & openDatabase & failureMonitoring & databaseStatus & ping & getClientWorkers & forceRecovery;
 	}
 };
 
@@ -61,28 +61,28 @@ struct ClientVersionRef {
 	StringRef sourceVersion;
 	StringRef protocolVersion;
 
-	ClientVersionRef() { initUnknown(); }
+	ClientVersionRef() {
+		initUnknown();
+	}
 
-	ClientVersionRef(Arena& arena, ClientVersionRef const& cv)
-	  : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion),
-	    protocolVersion(arena, cv.protocolVersion) {}
+	ClientVersionRef(Arena &arena, ClientVersionRef const& cv) : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion), protocolVersion(arena, cv.protocolVersion) {}
 	ClientVersionRef(std::string versionString) {
 		size_t index = versionString.find(",");
-		if (index == versionString.npos) {
+		if(index == versionString.npos) {
 			initUnknown();
 			return;
 		}
 
 		clientVersion = StringRef((uint8_t*)&versionString[0], index);
 
-		size_t nextIndex = versionString.find(",", index + 1);
-		if (index == versionString.npos) {
+		size_t nextIndex = versionString.find(",", index+1);
+		if(index == versionString.npos) {
 			initUnknown();
 			return;
 		}
 
-		sourceVersion = StringRef((uint8_t*)&versionString[index + 1], nextIndex - (index + 1));
-		protocolVersion = StringRef((uint8_t*)&versionString[nextIndex + 1], versionString.length() - (nextIndex + 1));
+		sourceVersion = StringRef((uint8_t*)&versionString[index+1], nextIndex-(index+1));
+		protocolVersion = StringRef((uint8_t*)&versionString[nextIndex+1], versionString.length()-(nextIndex+1));
 	}
 
 	void initUnknown() {
@@ -93,18 +93,18 @@ struct ClientVersionRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& clientVersion& sourceVersion& protocolVersion;
+		ar & clientVersion & sourceVersion & protocolVersion;
 	}
 
 	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
 
 	bool operator<(const ClientVersionRef& rhs) const {
-		if (protocolVersion != rhs.protocolVersion) {
+		if(protocolVersion != rhs.protocolVersion) {
 			return protocolVersion < rhs.protocolVersion;
 		}
 
 		// These comparisons are arbitrary because they aren't ordered
-		if (clientVersion != rhs.clientVersion) {
+		if(clientVersion != rhs.clientVersion) {
 			return clientVersion < rhs.clientVersion;
 		}
 
@@ -120,12 +120,12 @@ struct OpenDatabaseRequest {
 	StringRef dbName, issues, traceLogGroup;
 	VectorRef<ClientVersionRef> supportedVersions;
 	UID knownClientInfoID;
-	ReplyPromise<struct ClientDBInfo> reply;
+	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT(ar.protocolVersion() >= 0x0FDB00A400040001LL);
-		ar& dbName& issues& supportedVersions& traceLogGroup& knownClientInfoID& reply& arena;
+		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
+		ar & dbName & issues & supportedVersions & traceLogGroup & knownClientInfoID & reply & arena;
 	}
 };
 
@@ -133,19 +133,19 @@ struct SystemFailureStatus {
 	NetworkAddress address;
 	FailureStatus status;
 
-	SystemFailureStatus() : address(0, 0) {}
-	SystemFailureStatus(NetworkAddress const& a, FailureStatus const& s) : address(a), status(s) {}
+	SystemFailureStatus() : address(0,0) {}
+	SystemFailureStatus( NetworkAddress const& a, FailureStatus const& s ) : address(a), status(s) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& address& status;
+		ar & address & status;
 	}
 };
 
 struct FailureMonitoringRequest {
 	// Sent by all participants to the cluster controller reply.clientRequestIntervalMS
 	//   ms after receiving the previous reply.
-	// Provides the controller the self-diagnosed status of the sender, and also
+	// Provides the controller the self-diagnosed status of the sender, and also 
 	//   requests the status of other systems.  Failure to timely send one of these implies
 	//   a failed status.
 	// If !senderStatus.present(), the sender wants to receive the latest failure information
@@ -155,37 +155,34 @@ struct FailureMonitoringRequest {
 
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
-	ReplyPromise<struct FailureMonitoringReply> reply;
+	ReplyPromise< struct FailureMonitoringReply > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& senderStatus& failureInformationVersion& reply;
+		ar & senderStatus & failureInformationVersion & reply;
 	}
 };
 
 struct FailureMonitoringReply {
-	VectorRef<SystemFailureStatus> changes;
+	VectorRef< SystemFailureStatus > changes;
 	Version failureInformationVersion;
-	bool allOthersFailed; // If true, changes are relative to all servers being failed, otherwise to the version given
-	                      // in the request
-	int clientRequestIntervalMS, // after this many milliseconds, send another request
-	    considerServerFailedTimeoutMS; // after this many additional milliseconds, consider the ClusterController itself
-	                                   // to be failed
+	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
+	int clientRequestIntervalMS,        // after this many milliseconds, send another request
+		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
 	Arena arena;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& changes& failureInformationVersion& allOthersFailed& clientRequestIntervalMS& considerServerFailedTimeoutMS&
-		    arena;
+		ar & changes & failureInformationVersion & allOthersFailed & clientRequestIntervalMS & considerServerFailedTimeoutMS & arena;
 	}
 };
 
 struct StatusRequest {
-	ReplyPromise<struct StatusReply> reply;
+	ReplyPromise< struct StatusReply > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& reply;
+		ar & reply;
 	}
 };
 
@@ -194,15 +191,14 @@ struct StatusReply {
 	std::string statusStr;
 
 	StatusReply() {}
-	explicit StatusReply(StatusObject obj)
-	  : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
+	explicit StatusReply(StatusObject obj) : statusObj(obj), statusStr(json_spirit::write_string(json_spirit::mValue(obj))) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& statusStr;
-		if (ar.isDeserializing) {
+		ar & statusStr;
+		if( ar.isDeserializing ) {
 			json_spirit::mValue mv;
-			json_spirit::read_string(statusStr, mv);
+			json_spirit::read_string( statusStr, mv );
 			statusObj = StatusObject(mv.get_obj());
 		}
 	}
@@ -215,7 +211,7 @@ struct GetClientWorkersRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& reply;
+		ar & reply;
 	}
 };
 
@@ -226,7 +222,7 @@ struct ForceRecoveryRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& reply;
+		ar & reply;
 	}
 };
 

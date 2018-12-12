@@ -23,7 +23,7 @@
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct StreamingReadWorkload : TestWorkload {
 	int actorCount, keyBytes, valueBytes, readsPerTransaction, nodeCount;
@@ -38,64 +38,67 @@ struct StreamingReadWorkload : TestWorkload {
 	ContinuousSample<double> latencies;
 
 	StreamingReadWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"),
-	    latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 20);
-		readsPerTransaction = getOption(options, LiteralStringRef("readsPerTransaction"), 10);
-		rangesPerTransaction = getOption(options, LiteralStringRef("rangesPerTransaction"), 1);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100000);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
-		valueBytes = std::max(getOption(options, LiteralStringRef("valueBytes"), 96), 16);
-		std::string valueFormat = "%016llx" + std::string(valueBytes - 16, '.');
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		constantValue = Value(format(valueFormat.c_str(), 42));
-		readSequentially = getOption(options, LiteralStringRef("readSequentially"), false);
+		: TestWorkload(wcx),
+		transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"), latencies( 2000 )
+	{
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		actorCount = getOption( options, LiteralStringRef("actorCount"), 20 );
+		readsPerTransaction = getOption( options, LiteralStringRef("readsPerTransaction"), 10 );
+		rangesPerTransaction = getOption( options, LiteralStringRef("rangesPerTransaction"), 1 );
+		nodeCount = getOption( options, LiteralStringRef("nodeCount"), 100000 );
+		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
+		valueBytes = std::max( getOption( options, LiteralStringRef("valueBytes"), 96 ), 16 );
+		std::string valueFormat = "%016llx" + std::string( valueBytes - 16, '.' );
+		warmingDelay = getOption( options, LiteralStringRef("warmingDelay"), 0.0 );
+		constantValue = Value( format( valueFormat.c_str(), 42 ) );
+		readSequentially = getOption( options, LiteralStringRef("readSequentially"), false);
 	}
 
 	virtual std::string description() { return "StreamingRead"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return bulkSetup(cx, this, nodeCount, Promise<double>(), true, warmingDelay);
+	virtual Future<Void> setup( Database const& cx ) {
+		return bulkSetup( cx, this, nodeCount, Promise<double>(), true, warmingDelay );
 	}
 
-	virtual Future<Void> start(Database const& cx) {
-		for (int c = clientId; c < actorCount; c += clientCount)
-			clients.push_back(timeout(streamingReadClient(cx, this, clientId, c), testDuration, Void()));
-		return waitForAll(clients);
+	virtual Future<Void> start( Database const& cx ) {
+		for(int c = clientId; c < actorCount; c+=clientCount)
+			clients.push_back( timeout( streamingReadClient( cx, this, clientId, c ), testDuration, Void() ) );
+		return waitForAll( clients );
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	virtual Future<bool> check( Database const& cx ) { 
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-		m.push_back(transactions.getMetric());
-		m.push_back(readKeys.getMetric());
-		m.push_back(PerfMetric("Bytes read/sec",
-		                       (readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration, false));
+	virtual void getMetrics( vector<PerfMetric>& m ) {
+		m.push_back( transactions.getMetric() );
+		m.push_back( readKeys.getMetric() );
+		m.push_back( PerfMetric( "Bytes read/sec", 
+			(readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration, false ) );
 
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
+		m.push_back( PerfMetric( "Mean Latency (ms)", 1000 * latencies.mean(), true ) );
+		m.push_back( PerfMetric( "Median Latency (ms, averaged)", 1000 * latencies.median(), true ) );
+		m.push_back( PerfMetric( "90% Latency (ms, averaged)", 1000 * latencies.percentile( 0.90 ), true ) );
+		m.push_back( PerfMetric( "98% Latency (ms, averaged)", 1000 * latencies.percentile( 0.98 ), true ) );
 	}
 
-	Key keyForIndex(uint64_t index) {
-		Key result = makeString(keyBytes);
-		uint8_t* data = mutateString(result);
+	Key keyForIndex( uint64_t index ) {
+		Key result = makeString( keyBytes );
+		uint8_t* data = mutateString( result );
 		memset(data, '.', keyBytes);
 
 		double d = double(index) / nodeCount;
-		emplaceIndex(data, 0, *(int64_t*)&d);
+		emplaceIndex( data, 0, *(int64_t*)&d );
 
 		return result;
 	}
 
-	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(keyForIndex(n), constantValue); }
+	Standalone<KeyValueRef> operator()( int n ) {
+		return KeyValueRef( keyForIndex( n ), constantValue );
+	}
 
-	ACTOR Future<Void> streamingReadClient(Database cx, StreamingReadWorkload* self, int clientId, int actorId) {
+	ACTOR Future<Void> streamingReadClient( Database cx, StreamingReadWorkload *self, int clientId, int actorId )	{
 		state int minIndex = actorId * self->nodeCount / self->actorCount;
 		state int maxIndex = std::min((actorId + 1) * self->nodeCount / self->actorCount, self->nodeCount);
 		state int currentIndex = minIndex;
@@ -105,39 +108,44 @@ struct StreamingReadWorkload : TestWorkload {
 			state Transaction tr(cx);
 			state int rangeSize = (double)self->readsPerTransaction / self->rangesPerTransaction + 0.5;
 			state int range = 0;
-			loop {
-				state int thisRangeSize =
-				    (range < self->rangesPerTransaction - 1)
-				        ? rangeSize
-				        : self->readsPerTransaction - (self->rangesPerTransaction - 1) * rangeSize;
-				if (self->readSequentially && thisRangeSize > maxIndex - minIndex) thisRangeSize = maxIndex - minIndex;
+			loop
+			{
+				state int thisRangeSize = (range < self->rangesPerTransaction - 1) ? rangeSize : self->readsPerTransaction - (self->rangesPerTransaction - 1) * rangeSize;
+				if(self->readSequentially && thisRangeSize > maxIndex - minIndex)
+					thisRangeSize = maxIndex - minIndex;
 				loop {
 					try {
-						if (!self->readSequentially)
-							currentIndex = g_random->randomInt(0, self->nodeCount - thisRangeSize);
-						else if (currentIndex > maxIndex - thisRangeSize)
+						if(!self->readSequentially)
+							currentIndex = g_random->randomInt( 0, self->nodeCount - thisRangeSize );
+						else if(currentIndex > maxIndex - thisRangeSize)
 							currentIndex = minIndex;
 
-						Standalone<RangeResultRef> values = wait(tr.getRange(
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex)),
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)), thisRangeSize));
+						Standalone<RangeResultRef> values = 
+							wait( tr.getRange(
+								firstGreaterOrEqual( self->keyForIndex( currentIndex ) ),
+								firstGreaterOrEqual( self->keyForIndex( currentIndex + thisRangeSize ) ),
+								thisRangeSize ) );
+	
+						for(int i = 0; i < values.size(); i++)
+							self->readValueBytes += values[i].value.size();
 
-						for (int i = 0; i < values.size(); i++) self->readValueBytes += values[i].value.size();
-
-						if (self->readSequentially) currentIndex += values.size();
-
+						if(self->readSequentially)
+							currentIndex += values.size();
+	
 						self->readKeys += values.size();
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						wait( tr.onError(e) );
 					}
 				}
 
-				if (now() - tstart > 3) break;
+				if(now() - tstart > 3)
+					break;
 
-				if (++range == self->rangesPerTransaction) break;
+				if(++range == self->rangesPerTransaction)
+					break;
 			}
-			self->latencies.addSample(now() - tstart);
+			self->latencies.addSample( now() - tstart );
 			++self->transactions;
 		}
 	}

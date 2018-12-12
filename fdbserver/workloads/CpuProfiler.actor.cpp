@@ -22,46 +22,57 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
-// A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
-struct CpuProfilerWorkload : TestWorkload {
+//A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
+struct CpuProfilerWorkload : TestWorkload
+{
 	bool success;
 
-	// How long to run the workload before starting the profiler
+	//How long to run the workload before starting the profiler
 	double initialDelay;
 
-	// How long the profiler should be run; if <= 0 then it will run until the workload's check function is called
+	//How long the profiler should be run; if <= 0 then it will run until the workload's check function is called
 	double duration;
 
-	// What process classes should be profiled as part of this run?
-	// See Locality.h for the list of valid strings to provide.
+	//What process classes should be profiled as part of this run?
+	//See Locality.h for the list of valid strings to provide.
 	vector<std::string> roles;
 
-	// A list of worker interfaces which have had profiling turned on
+	//A list of worker interfaces which have had profiling turned on
 	std::vector<WorkerInterface> profilingWorkers;
 
-	CpuProfilerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	CpuProfilerWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx)
+	{
 		initialDelay = getOption(options, LiteralStringRef("initialDelay"), 0.0);
 		duration = getOption(options, LiteralStringRef("duration"), -1.0);
 		roles = getOption(options, LiteralStringRef("roles"), vector<std::string>());
 		success = true;
 	}
 
-	virtual std::string description() { return "CpuProfiler"; }
+	virtual std::string description()
+	{
+		return "CpuProfiler";
+	}
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	virtual Future<Void> setup(Database const& cx)
+	{
+		return Void();
+	}
 
-	// Turns the profiler on or off
-	ACTOR Future<Void> updateProfiler(bool enabled, Database cx, CpuProfilerWorkload* self) {
-		if (self->clientId == 0) {
-			// If we are turning the profiler on, get a list of workers in the system
-			if (enabled) {
-				vector<std::pair<WorkerInterface, ProcessClass>> _workers = wait(getWorkers(self->dbInfo));
+	//Turns the profiler on or off
+	ACTOR Future<Void> updateProfiler(bool enabled, Database cx, CpuProfilerWorkload *self)
+	{
+		if(self->clientId == 0)
+		{
+			//If we are turning the profiler on, get a list of workers in the system
+			if(enabled)
+			{
+				vector<std::pair<WorkerInterface, ProcessClass>> _workers = wait( getWorkers( self->dbInfo ) );
 				vector<WorkerInterface> workers;
-				for (int i = 0; i < _workers.size(); i++) {
-					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(),
-					                                     _workers[i].second.toString()) != self->roles.cend()) {
+				for(int i = 0; i < _workers.size(); i++) {
+					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].second.toString()) != self->roles.cend()) {
 						workers.push_back(_workers[i].first);
 					}
 				}
@@ -70,26 +81,27 @@ struct CpuProfilerWorkload : TestWorkload {
 
 			state std::vector<Future<ErrorOr<Void>>> replies;
 			state int i;
-			// Send a ProfilerRequest to each worker
-			for (i = 0; i < self->profilingWorkers.size(); i++) {
+			//Send a ProfilerRequest to each worker
+			for(i = 0; i < self->profilingWorkers.size(); i++)
+			{
 				ProfilerRequest req;
 				req.type = ProfilerRequest::Type::FLOW;
 				req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
-				req.duration = 0; // unused
+				req.duration = 0; //unused
 
-				// The profiler output name will be the ip.port.prof
-				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." +
-				                           format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
+				//The profiler output name will be the ip.port.prof
+				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." + format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
 
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}
 
 			wait(waitForAll(replies));
 
-			// Check that all workers succeeded if turning the profiler on
-			if (enabled)
-				for (i = 0; i < replies.size(); i++)
-					if (!replies[i].get().present()) self->success = false;
+			//Check that all workers succeeded if turning the profiler on
+			if(enabled)
+				for(i = 0; i < replies.size(); i++)
+					if(!replies[i].get().present())
+						self->success = false;
 
 			TraceEvent("DoneSignalingProfiler");
 		}
@@ -97,36 +109,52 @@ struct CpuProfilerWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
+	virtual Future<Void> start(Database const& cx)
+	{
+		return _start(cx, this);
+	}
 
-	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
+	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload *self)
+	{
 		wait(delay(self->initialDelay));
-		if (self->clientId == 0) TraceEvent("SignalProfilerOn");
+		if(self->clientId == 0)
+			TraceEvent("SignalProfilerOn");
 		wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
 
-		// If a duration was given, let the duration elapse and then shut the profiler off
-		if (self->duration > 0) {
+		//If a duration was given, let the duration elapse and then shut the profiler off
+		if(self->duration > 0)
+		{
 			wait(delay(self->duration));
-			if (self->clientId == 0) TraceEvent("SignalProfilerOff");
+			if(self->clientId == 0)
+				TraceEvent("SignalProfilerOff");
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
+	virtual Future<bool> check(Database const& cx)
+	{
+		return _check(cx, this);
+	}
 
-	ACTOR Future<bool> _check(Database cx, CpuProfilerWorkload* self) {
-		// If no duration was given, then shut the profiler off now
-		if (self->duration <= 0) {
-			if (self->clientId == 0) TraceEvent("SignalProfilerOff");
+	ACTOR Future<bool> _check(Database cx, CpuProfilerWorkload *self)
+	{
+		//If no duration was given, then shut the profiler off now
+		if(self->duration <= 0)
+		{
+			if(self->clientId == 0)
+				TraceEvent("SignalProfilerOff");
 			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
 		}
 
 		return self->success;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual void getMetrics( vector<PerfMetric>& m )
+	{
+
+	}
 };
 
 WorkloadFactory<CpuProfilerWorkload> CpuProfilerWorkloadFactory("CpuProfiler");

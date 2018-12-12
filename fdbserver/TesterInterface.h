@@ -30,14 +30,14 @@ struct WorkloadInterface {
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
 	RequestStream<ReplyPromise<bool>> check;
-	RequestStream<ReplyPromise<std::vector<PerfMetric>>> metrics;
+	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 
 	UID id() const { return setup.getEndpoint().token; }
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& setup& start& check& metrics& stop;
+	void serialize( Ar& ar ) {
+		ar & setup & start & check & metrics & stop;
 	}
 };
 
@@ -56,20 +56,19 @@ struct WorkloadRequest {
 	//	 Parameter				Description
 	// - testName				the name of the test to run
 	// - testDuration			in seconds
-	// - transactionsPerSecond
-	// - actorsPerClient
+	// - transactionsPerSecond					
+	// - actorsPerClient						
 	// - nodeCount
 
-	VectorRef<VectorRef<KeyValueRef>> options;
+	VectorRef< VectorRef<KeyValueRef> > options;
 
-	int clientId; // the "id" of the client recieving the request (0 indexed)
-	int clientCount; // the total number of test clients participating in the workload
-	ReplyPromise<struct WorkloadInterface> reply;
+	int clientId;				// the "id" of the client recieving the request (0 indexed)
+	int clientCount;			// the total number of test clients participating in the workload
+	ReplyPromise< struct WorkloadInterface > reply;
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& title& database& timeout& databasePingDelay& sharedRandomNumber& options& clientId& clientCount& reply&
-		    arena;
+	void serialize( Ar& ar ) {
+		ar & title & database & timeout & databasePingDelay & sharedRandomNumber & options & clientId & clientCount & reply & arena;
 	}
 };
 
@@ -80,19 +79,15 @@ struct TesterInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& recruitments;
+		ar & recruitments;
 	}
 };
 
-Future<Void> testerServerCore(TesterInterface const& interf, Reference<ClusterConnectionFile> const& ccf,
-                              Reference<AsyncVar<struct ServerDBInfo>> const&, LocalityData const&);
+Future<Void> testerServerCore( TesterInterface const& interf, Reference<ClusterConnectionFile> const& ccf, Reference<AsyncVar<struct ServerDBInfo>> const&, LocalityData const& );
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-Future<Void> runTests(Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun,
-                      test_location_t const& whereToRun, int const& minTestersExpected,
-                      std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(),
-                      LocalityData const& locality = LocalityData());
+Future<Void> runTests( Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun, test_location_t const& whereToRun, int const& minTestersExpected, std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(), LocalityData const& locality = LocalityData() );
 
 #endif

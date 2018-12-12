@@ -36,9 +36,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 #pragma pack(push, 4)
 	typedef struct keyvalue {
-		const void* key;
+		const void *key;
 		int keyLength;
-		const void* value;
+		const void *value;
 		int valueLength;
 	} FDBKeyValue;
 #pragma pack(pop)
@@ -46,104 +46,89 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef int fdb_error_t;
 	typedef int fdb_bool_t;
 
-	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
+	typedef void (*FDBCallback)(FDBFuture *future, void *callback_parameter);
 
-	// Network
+	//Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
-	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const* value, int valueLength);
+	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const *value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	FDBFuture* (*createCluster)(const char* clusterFilePath);
+	FDBFuture* (*createCluster)(const char *clusterFilePath);
 
-	// Cluster
-	FDBFuture* (*clusterCreateDatabase)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
-	fdb_error_t (*clusterSetOption)(FDBCluster* cluster, FDBClusterOptions::Option option, uint8_t const* value,
-	                                int valueLength);
-	void (*clusterDestroy)(FDBCluster* cluster);
+	//Cluster
+	FDBFuture* (*clusterCreateDatabase)(FDBCluster *cluster, uint8_t *dbName, int dbNameLength);
+	fdb_error_t (*clusterSetOption)(FDBCluster *cluster, FDBClusterOptions::Option option, uint8_t const *value, int valueLength);
+	void (*clusterDestroy)(FDBCluster *cluster);
 
-	// Database
-	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
-	fdb_error_t (*databaseSetOption)(FDBDatabase* database, FDBDatabaseOptions::Option option, uint8_t const* value,
-	                                 int valueLength);
-	void (*databaseDestroy)(FDBDatabase* database);
+	//Database
+	fdb_error_t (*databaseCreateTransaction)(FDBDatabase *database, FDBTransaction **tr);
+	fdb_error_t (*databaseSetOption)(FDBDatabase *database, FDBDatabaseOptions::Option option, uint8_t const *value, int valueLength);
+	void (*databaseDestroy)(FDBDatabase *database);	
 
-	// Transaction
-	fdb_error_t (*transactionSetOption)(FDBTransaction* tr, FDBTransactionOptions::Option option, uint8_t const* value,
-	                                    int valueLength);
-	void (*transactionDestroy)(FDBTransaction* tr);
+	//Transaction
+	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
+	void (*transactionDestroy)(FDBTransaction *tr);
 
-	void (*transactionSetReadVersion)(FDBTransaction* tr, int64_t version);
-	FDBFuture* (*transactionGetReadVersion)(FDBTransaction* tr);
-
-	FDBFuture* (*transactionGet)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t snapshot);
-	FDBFuture* (*transactionGetKey)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t orEqual,
-	                                int offset, fdb_bool_t snapshot);
-	FDBFuture* (*transactionGetAddressesForKey)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	FDBFuture* (*transactionGetRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                                  fdb_bool_t beginOrEqual, int beginOffset, uint8_t const* endKeyName,
-	                                  int endKeyNameLength, fdb_bool_t endOrEqual, int endOffset, int limit,
-	                                  int targetBytes, FDBStreamingModes::Option mode, int iteration,
-	                                  fdb_bool_t snapshot, fdb_bool_t reverse);
+	void (*transactionSetReadVersion)(FDBTransaction *tr, int64_t version);
+	FDBFuture* (*transactionGetReadVersion)(FDBTransaction *tr);
+	
+	FDBFuture* (*transactionGet)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength, fdb_bool_t snapshot);
+	FDBFuture* (*transactionGetKey)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength, fdb_bool_t orEqual, int offset, fdb_bool_t snapshot);
+	FDBFuture* (*transactionGetAddressesForKey)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength);
+	FDBFuture* (*transactionGetRange)(FDBTransaction *tr, uint8_t const *beginKeyName, int beginKeyNameLength, fdb_bool_t beginOrEqual, int beginOffset,
+										uint8_t const *endKeyName, int endKeyNameLength, fdb_bool_t endOrEqual, int endOffset, int limit, int targetBytes,
+										FDBStreamingModes::Option mode, int iteration, fdb_bool_t snapshot, fdb_bool_t reverse);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
-	void (*transactionSet)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, uint8_t const* value,
-	                       int valueLength);
-	void (*transactionClear)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	void (*transactionClearRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                              uint8_t const* endKeyName, int endKeyNameLength);
-	void (*transactionAtomicOp)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, uint8_t const* param,
-	                            int paramLength, FDBMutationTypes::Option operationType);
+	void (*transactionSet)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength, uint8_t const *value, int valueLength);
+	void (*transactionClear)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength);
+	void (*transactionClearRange)(FDBTransaction *tr, uint8_t const *beginKeyName, int beginKeyNameLength, uint8_t const *endKeyName, int endKeyNameLength);
+	void (*transactionAtomicOp)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength, uint8_t const *param, int paramLength, FDBMutationTypes::Option operationType);
+	
+	FDBFuture* (*transactionCommit)(FDBTransaction *tr);
+	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction *tr, int64_t *outVersion);
+	FDBFuture* (*transactionWatch)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength);
+	FDBFuture* (*transactionOnError)(FDBTransaction *tr, fdb_error_t error);
+	void (*transactionReset)(FDBTransaction *tr);
+	void (*transactionCancel)(FDBTransaction *tr);
 
-	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
-	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
-	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	FDBFuture* (*transactionOnError)(FDBTransaction* tr, fdb_error_t error);
-	void (*transactionReset)(FDBTransaction* tr);
-	void (*transactionCancel)(FDBTransaction* tr);
+	fdb_error_t (*transactionAddConflictRange)(FDBTransaction *tr, uint8_t const *beginKeyName, int beginKeyNameLength, 
+												uint8_t const *endKeyName, int endKeyNameLength, FDBConflictRangeTypes::Option);
 
-	fdb_error_t (*transactionAddConflictRange)(FDBTransaction* tr, uint8_t const* beginKeyName, int beginKeyNameLength,
-	                                           uint8_t const* endKeyName, int endKeyNameLength,
-	                                           FDBConflictRangeTypes::Option);
-
-	// Future
-	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
-	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);
-	fdb_error_t (*futureGetVersion)(FDBFuture* f, int64_t* outVersion);
-	fdb_error_t (*futureGetError)(FDBFuture* f);
-	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
-	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
-	fdb_error_t (*futureGetStringArray)(FDBFuture* f, const char*** outStrings, int* outCount);
-	fdb_error_t (*futureGetKeyValueArray)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
-	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
-	void (*futureCancel)(FDBFuture* f);
-	void (*futureDestroy)(FDBFuture* f);
+	//Future
+	fdb_error_t (*futureGetCluster)(FDBFuture *f, FDBCluster **outCluster);
+	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
+	fdb_error_t (*futureGetVersion)(FDBFuture *f, int64_t *outVersion);
+	fdb_error_t (*futureGetError)(FDBFuture *f);
+	fdb_error_t (*futureGetKey)(FDBFuture *f, uint8_t const **outKey, int *outKeyLength);
+	fdb_error_t (*futureGetValue)(FDBFuture *f, fdb_bool_t *outPresent, uint8_t const **outValue, int *outValueLength);
+	fdb_error_t (*futureGetStringArray)(FDBFuture *f, const char ***outStrings, int *outCount);
+	fdb_error_t (*futureGetKeyValueArray)(FDBFuture *f, FDBKeyValue const ** outKV, int *outCount, fdb_bool_t *outMore);
+	fdb_error_t (*futureSetCallback)(FDBFuture *f, FDBCallback callback, void *callback_parameter);
+	void (*futureCancel)(FDBFuture *f);
+	void (*futureDestroy)(FDBFuture *f);
 };
 
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
 public:
-	DLTransaction(Reference<FdbCApi> api, FdbCApi::FDBTransaction* tr) : api(api), tr(tr) {}
+	DLTransaction(Reference<FdbCApi> api, FdbCApi::FDBTransaction *tr) : api(api), tr(tr) {}
 	~DLTransaction() { api->transactionDestroy(tr); }
 
 	void cancel();
 	void setVersion(Version v);
 	ThreadFuture<Version> getReadVersion();
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false);
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit,
-	                                                  bool snapshot = false, bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-	                                                  GetRangeLimits limits, bool snapshot = false,
-	                                                  bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot = false,
-	                                                  bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, GetRangeLimits limits,
-	                                                  bool snapshot = false, bool reverse = false);
+	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot=false);
+	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot=false, bool reverse=false);
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key);
 	ThreadFuture<Standalone<StringRef>> getVersionstamp();
-
+ 
 	void addReadConflictRange(const KeyRangeRef& keys);
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType);
@@ -159,7 +144,7 @@ public:
 	ThreadFuture<Void> commit();
 	Version getCommittedVersion();
 
-	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value=Optional<StringRef>());
 
 	ThreadFuture<Void> onError(Error const& e);
 	void reset();
@@ -174,7 +159,7 @@ private:
 
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
-	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase* db) : api(api), db(db) {}
+	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db) {}
 	~DLDatabase() { api->databaseDestroy(db); }
 
 	Reference<ITransaction> createTransaction();
@@ -190,7 +175,7 @@ private:
 
 class DLCluster : public ICluster, ThreadSafeReferenceCounted<DLCluster> {
 public:
-	DLCluster(Reference<FdbCApi> api, FdbCApi::FDBCluster* cluster) : api(api), cluster(cluster) {}
+	DLCluster(Reference<FdbCApi> api, FdbCApi::FDBCluster *cluster) : api(api), cluster(cluster) {}
 	~DLCluster() { api->clusterDestroy(cluster); }
 
 	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
@@ -216,9 +201,9 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char* clusterFilePath);
+	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
 private:
 	const std::string fdbCPath;
@@ -242,20 +227,15 @@ public:
 	void setVersion(Version v);
 	ThreadFuture<Version> getReadVersion();
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false);
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit,
-	                                                  bool snapshot = false, bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end,
-	                                                  GetRangeLimits limits, bool snapshot = false,
-	                                                  bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot = false,
-	                                                  bool reverse = false);
-	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, GetRangeLimits limits,
-	                                                  bool snapshot = false, bool reverse = false);
+	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot=false);
+	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeySelectorRef& begin, const KeySelectorRef& end, GetRangeLimits limits, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange(const KeyRangeRef& keys, int limit, bool snapshot=false, bool reverse=false);
+	ThreadFuture<Standalone<RangeResultRef>> getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot=false, bool reverse=false);
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key);
 	ThreadFuture<Standalone<StringRef>> getVersionstamp();
-
+ 
 	void addReadConflictRange(const KeyRangeRef& keys);
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType);
@@ -271,7 +251,7 @@ public:
 	ThreadFuture<Void> commit();
 	Version getCommittedVersion();
 
-	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value=Optional<StringRef>());
 
 	ThreadFuture<Void> onError(Error const& e);
 	void reset();
@@ -298,8 +278,7 @@ class MultiVersionCluster;
 
 class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db,
-	                     ThreadFuture<Void> changed);
+	MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
 	~MultiVersionDatabase();
 
 	Reference<ITransaction> createTransaction();
@@ -312,14 +291,13 @@ public:
 
 private:
 	struct DatabaseState : ThreadCallback, ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db,
-		              ThreadFuture<Void> changed);
+		DatabaseState(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
 
 		void updateDatabase();
 		void cancelCallbacks();
 
 		bool canFire(int notMadeActive) { return true; }
-		void fire(const Void& unused, int& userParam);
+		void fire(const Void &unused, int& userParam);
 		void error(const Error& e, int& userParam);
 
 		const Reference<MultiVersionCluster> cluster;
@@ -343,16 +321,15 @@ private:
 
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	uint64_t protocolVersion;
-	IClientApi* api;
+	IClientApi *api;
 	std::string libPath;
 	bool external;
 	bool failed;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo() : protocolVersion(0), api(NULL), external(false), failed(true) {}
-	ClientInfo(IClientApi* api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
-	ClientInfo(IClientApi* api, std::string libPath)
-	  : protocolVersion(0), api(api), libPath(libPath), external(true), failed(false) {}
+	ClientInfo(IClientApi *api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
+	ClientInfo(IClientApi *api, std::string libPath) : protocolVersion(0), api(api), libPath(libPath), external(true), failed(false) {}
 
 	void loadProtocolVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -363,7 +340,7 @@ class MultiVersionApi;
 class MultiVersionCluster : public ICluster, ThreadSafeReferenceCounted<MultiVersionCluster> {
 public:
 	MultiVersionCluster() : clusterState(new ClusterState()) {} // Used in testing workloads
-	MultiVersionCluster(MultiVersionApi* api, std::string clusterFilePath, Reference<ICluster> cluster);
+	MultiVersionCluster(MultiVersionApi *api, std::string clusterFilePath, Reference<ICluster> cluster);
 	~MultiVersionCluster();
 
 	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
@@ -376,15 +353,13 @@ private:
 	struct ClusterState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
-		Connector(Reference<ClusterState> clusterState, Reference<ClientInfo> client, std::string clusterFilePath)
-		  : clusterState(clusterState), client(client), clusterFilePath(clusterFilePath), connected(false),
-		    cancelled(false) {}
+		Connector(Reference<ClusterState> clusterState, Reference<ClientInfo> client, std::string clusterFilePath) : clusterState(clusterState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
 
 		void connect();
 		void cancel();
 
 		bool canFire(int notMadeActive) { return true; }
-		void fire(const Void& unused, int& userParam);
+		void fire(const Void &unused, int& userParam);
 		void error(const Error& e, int& userParam);
 
 		const Reference<ClientInfo> client;
@@ -402,9 +377,7 @@ private:
 	};
 
 	struct ClusterState : ThreadSafeReferenceCounted<ClusterState> {
-		ClusterState()
-		  : clusterVar(new ThreadSafeAsyncVar<Reference<ICluster>>(Reference<ICluster>(NULL))), currentClientIndex(-1) {
-		}
+		ClusterState() : clusterVar(new ThreadSafeAsyncVar<Reference<ICluster>>(Reference<ICluster>(NULL))), currentClientIndex(-1) {}
 
 		void stateChanged();
 		void addConnection(Reference<ClientInfo> client, std::string clusterFilePath);
@@ -435,13 +408,13 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char* clusterFilePath);
+	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
-	void runOnExternalClients(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
+	void runOnExternalClients(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients=false);
 
 	void updateSupportedVersions();
 
@@ -476,5 +449,6 @@ private:
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
 };
+
 
 #endif

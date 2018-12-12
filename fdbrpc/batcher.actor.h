@@ -20,42 +20,38 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_BATCHER_ACTOR_G_H)
-#define FLOW_BATCHER_ACTOR_G_H
-#include "batcher.actor.g.h"
+	#define FLOW_BATCHER_ACTOR_G_H
+	#include "batcher.actor.g.h"
 #elif !defined(FLOW_BATCHER_ACTOR_H)
-#define FLOW_BATCHER_ACTOR_H
+	#define FLOW_BATCHER_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Stats.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <class X>
-void logOnReceive(X x) {}
+void logOnReceive(X x) { }
 
 void logOnReceive(CommitTransactionRequest x) {
-	if (x.debugID.present()) g_traceBatch.addEvent("CommitDebug", x.debugID.get().first(), "MasterProxyServer.batcher");
+	if(x.debugID.present())
+		g_traceBatch.addEvent("CommitDebug", x.debugID.get().first(), "MasterProxyServer.batcher");
 }
 
 template <class X>
-bool firstInBatch(X x) {
-	return false;
-}
+bool firstInBatch(X x) { return false; }
 
 bool firstInBatch(CommitTransactionRequest x) {
 	return x.firstInBatch();
 }
 
 ACTOR template <class X>
-Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureStream<X> in, double avgMinDelay,
-                     double* avgMaxDelay, double emptyBatchTimeout, int maxCount, int desiredBytes, int maxBytes,
-                     Optional<PromiseStream<Void>> batchStartedStream, int64_t* commitBatchesMemBytesCount,
-                     int64_t commitBatchesMemBytesLimit, int taskID = TaskDefaultDelay, Counter* counter = 0) {
-	wait(delayJittered(*avgMaxDelay, taskID)); // smooth out
-	// This is set up to deliver even zero-size batches if emptyBatchTimeout elapses, because that's what master proxy
-	// wants.  The source control history contains a version that does not.
+Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int> > out, FutureStream<X> in, double avgMinDelay, double* avgMaxDelay, double emptyBatchTimeout, int maxCount, int desiredBytes, int maxBytes, Optional<PromiseStream<Void>> batchStartedStream, int64_t *commitBatchesMemBytesCount, int64_t commitBatchesMemBytesLimit, int taskID = TaskDefaultDelay, Counter* counter = 0)
+{
+	wait( delayJittered(*avgMaxDelay, taskID) );  // smooth out
+	// This is set up to deliver even zero-size batches if emptyBatchTimeout elapses, because that's what master proxy wants.  The source control history
+	// contains a version that does not.
 
 	state double lastBatch = 0;
 
@@ -64,22 +60,19 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureSt
 		state std::vector<X> batch;
 		state int batchBytes = 0;
 
-		if (emptyBatchTimeout <= 0)
+		if(emptyBatchTimeout <= 0)
 			timeout = Never();
 		else
 			timeout = delayJittered(emptyBatchTimeout, taskID);
 
 		while (!timeout.isReady() && !(batch.size() == maxCount || batchBytes >= desiredBytes)) {
 			choose {
-				when(X x = waitNext(in)) {
+				when ( X x  = waitNext(in) ) {
 					int bytes = getBytes(x);
 					// Drop requests if memory is under severe pressure
 					if (*commitBatchesMemBytesCount + bytes > commitBatchesMemBytesLimit) {
 						x.reply.sendError(proxy_memory_limit_exceeded());
-						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded")
-						    .suppressFor(60)
-						    .detail("CommitBatchesMemBytesCount", *commitBatchesMemBytesCount)
-						    .detail("CommitBatchesMemLimit", commitBatchesMemBytesLimit);
+						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded").suppressFor(60).detail("CommitBatchesMemBytesCount", *commitBatchesMemBytesCount).detail("CommitBatchesMemLimit", commitBatchesMemBytesLimit);
 						continue;
 					}
 
@@ -87,18 +80,20 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureSt
 					if (counter) ++*counter;
 					logOnReceive(x);
 					if (!batch.size()) {
-						if (batchStartedStream.present()) batchStartedStream.get().send(Void());
+						if(batchStartedStream.present())
+							batchStartedStream.get().send(Void());
 						if (now() - lastBatch > *avgMaxDelay)
 							timeout = delayJittered(avgMinDelay, taskID);
 						else
 							timeout = delayJittered(*avgMaxDelay - (now() - lastBatch), taskID);
 					}
 
-					bool first = firstInBatch(x);
-					if ((batchBytes + bytes > maxBytes || first) && batch.size()) {
+					bool first = firstInBatch( x );
+					if((batchBytes + bytes > maxBytes || first) && batch.size()) {
 						out.send({ batch, batchBytes });
 						lastBatch = now();
-						if (batchStartedStream.present()) batchStartedStream.get().send(Void());
+						if(batchStartedStream.present())
+							batchStartedStream.get().send(Void());
 						timeout = delayJittered(*avgMaxDelay, taskID);
 						batch = std::vector<X>();
 						batchBytes = 0;
@@ -108,10 +103,10 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int>> out, FutureSt
 					batchBytes += bytes;
 					*commitBatchesMemBytesCount += bytes;
 				}
-				when(wait(timeout)) {}
+				when ( wait( timeout ) ) {}
 			}
 		}
-		out.send({ std::move(batch), batchBytes });
+		out.send({std::move(batch), batchBytes});
 		lastBatch = now();
 	}
 }

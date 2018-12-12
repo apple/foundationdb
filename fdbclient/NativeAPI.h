@@ -33,10 +33,8 @@
 
 // Incomplete types that are reference counted
 class DatabaseContext;
-template <>
-void addref(DatabaseContext* ptr);
-template <>
-void delref(DatabaseContext* ptr);
+template <> void addref( DatabaseContext* ptr );
+template <> void delref( DatabaseContext* ptr );
 
 void validateOptionValue(Optional<StringRef> value, bool shouldBePresent);
 
@@ -47,30 +45,30 @@ struct NetworkOptions {
 	std::string clusterFile;
 	Optional<std::string> traceDirectory;
 	uint64_t traceRollSize;
-	uint64_t traceMaxLogsSize;
+	uint64_t traceMaxLogsSize;	
 	std::string traceLogGroup;
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
-	NetworkOptions()
-	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
-	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    slowTaskProfilingEnabled(false) {}
+	NetworkOptions() : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()), traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
+	                   slowTaskProfilingEnabled(false)
+	{ }
 };
+
 
 class Database {
 public:
-	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
-	void operator=(Database const& rhs) { db = rhs.db; }
-	Database(Database const& rhs) : db(rhs.db) {}
+	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
+	void operator= ( Database const& rhs ) { db = rhs.db; }
+	Database( Database const& rhs ) : db(rhs.db) {}
 	Database(Database&& r) noexcept(true) : db(std::move(r.db)) {}
-	void operator=(Database&& r) noexcept(true) { db = std::move(r.db); }
+	void operator= (Database&& r) noexcept(true) { db = std::move(r.db); }
 
 	// For internal use by the native client:
 	explicit Database(Reference<DatabaseContext> cx) : db(cx) {}
-	explicit Database(DatabaseContext* cx) : db(cx) {}
+	explicit Database( DatabaseContext* cx ) : db(cx) {}
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
 
@@ -78,7 +76,7 @@ private:
 	Reference<DatabaseContext> db;
 };
 
-void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
 // Configures the global networking machinery
 void setupNetwork(uint64_t transportId = 0, bool useMetrics = false);
@@ -107,12 +105,12 @@ class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
 public:
 	enum { API_VERSION_LATEST = -1 };
 	// Constructs a  Cluster.  This uses the global networking enging configured in setupNetwork()
-	// apiVersion may be set to API_VERSION_LATEST
-	static Reference<Cluster> createCluster(Reference<ClusterConnectionFile> connFile, int apiVersion);
+	// apiVersion may be set to API_VERSION_LATEST 
+	static Reference<Cluster> createCluster( Reference<ClusterConnectionFile> connFile, int apiVersion );
 	static Reference<Cluster> createCluster(std::string connFileName, int apiVersion);
 
 	// See DatabaseContext::createDatabase
-	Future<Database> createDatabase(Standalone<StringRef> dbName, LocalityData locality = LocalityData());
+	Future<Database> createDatabase( Standalone<StringRef> dbName, LocalityData locality = LocalityData() );
 
 	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value);
 
@@ -122,22 +120,18 @@ public:
 
 	int apiVersionAtLeast(int minVersion) { return apiVersion < 0 || apiVersion >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
-	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
 
 	Error deferred_error;
 
-	void checkDeferredError() {
-		if (deferred_error.code() != invalid_error_code) throw deferred_error;
-	}
+	void checkDeferredError() { if (deferred_error.code() != invalid_error_code) throw deferred_error; }
 
-private:
-	friend class ThreadSafeCluster;
-	friend class AtomicOpsApiCorrectnessWorkload; // This is just for testing purposes. It needs to change apiVersion
-	friend class AtomicOpsWorkload; // This is just for testing purposes. It needs to change apiVersion
-	friend class VersionStampWorkload; // This is just for testing purposes. It needs to change apiVersion
+private: friend class ThreadSafeCluster;
+		 friend class AtomicOpsApiCorrectnessWorkload; // This is just for testing purposes. It needs to change apiVersion
+		 friend class AtomicOpsWorkload; // This is just for testing purposes. It needs to change apiVersion
+		 friend class VersionStampWorkload; // This is just for testing purposes. It needs to change apiVersion
 
-	Cluster(Reference<ClusterConnectionFile> connFile, int apiVersion = API_VERSION_LATEST);
+	Cluster( Reference<ClusterConnectionFile> connFile, int apiVersion = API_VERSION_LATEST );
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Future<Void> leaderMon, failMon, connected;
@@ -176,7 +170,7 @@ struct TransactionInfo {
 	Optional<UID> debugID;
 	int taskID;
 
-	explicit TransactionInfo(int taskID) : taskID(taskID) {}
+	explicit TransactionInfo( int taskID ) : taskID( taskID ) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -191,7 +185,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void addLog(const T& event) {
 		ASSERT(logToDatabase || identifier.present());
 
-		if (identifier.present()) {
+		if(identifier.present()) {
 			event.logEvent(identifier.get());
 		}
 
@@ -199,10 +193,9 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 			return;
 		}
 
-		if (logToDatabase) {
+		if(logToDatabase) {
 			logsAdded = true;
-			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value,
-			              "Event should be derived class of FdbClientLogEvents::Event");
+			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
 			trLogWriter << event;
 		}
 	}
@@ -221,79 +214,72 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
 
-	Watch() : watchFuture(Never()), valuePresent(false), setPresent(false) {}
-	Watch(Key key) : key(key), watchFuture(Never()), valuePresent(false), setPresent(false) {}
-	Watch(Key key, Optional<Value> val)
-	  : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) {}
+	Watch() : watchFuture(Never()), valuePresent(false), setPresent(false) { }
+	Watch(Key key) : key(key), watchFuture(Never()), valuePresent(false), setPresent(false) { }
+	Watch(Key key, Optional<Value> val) : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) { }
 
 	void setWatch(Future<Void> watchFuture);
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx);
+	explicit Transaction( Database const& cx );
 	~Transaction();
 
-	void preinitializeOnForeignThread() { committedVersion = invalidVersion; }
+	void preinitializeOnForeignThread() {
+		committedVersion = invalidVersion;
+	}
 
-	void setVersion(Version v);
+	void setVersion( Version v );
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 
-	Future<Optional<Value>> get(const Key& key, bool snapshot = false);
-	Future<Void> watch(Reference<Watch> watch);
-	Future<Key> getKey(const KeySelector& key, bool snapshot = false);
-	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, int limit,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end, GetRangeLimits limits,
-	                                            bool snapshot = false, bool reverse = false);
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, int limit, bool snapshot = false,
-	                                            bool reverse = false) {
-		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
+	Future< Optional<Value> > get( const Key& key, bool snapshot = false );
+	Future< Void > watch( Reference<Watch> watch );
+	Future< Key > getKey( const KeySelector& key, bool snapshot = false );
+	//Future< Optional<KeyValue> > get( const KeySelectorRef& key );
+	Future< Standalone<RangeResultRef> > getRange( const KeySelector& begin, const KeySelector& end, int limit, bool snapshot = false, bool reverse = false );
+	Future< Standalone<RangeResultRef> > getRange( const KeySelector& begin, const KeySelector& end, GetRangeLimits limits, bool snapshot = false, bool reverse = false );
+	Future< Standalone<RangeResultRef> > getRange( const KeyRange& keys, int limit, bool snapshot = false, bool reverse = false ) { 
+		return getRange( KeySelector( firstGreaterOrEqual(keys.begin), keys.arena() ), 
+			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limit, snapshot, reverse ); 
 	}
-	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, GetRangeLimits limits, bool snapshot = false,
-	                                            bool reverse = false) {
-		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
-		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
+	Future< Standalone<RangeResultRef> > getRange( const KeyRange& keys, GetRangeLimits limits, bool snapshot = false, bool reverse = false ) { 
+		return getRange( KeySelector( firstGreaterOrEqual(keys.begin), keys.arena() ),
+			KeySelector( firstGreaterOrEqual(keys.end), keys.arena() ), limits, snapshot, reverse ); 
 	}
 
-	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
+	Future< Standalone<VectorRef< const char*>>> getAddressesForKey (const Key& key );
 
 	void enableCheckWrites();
-	void addReadConflictRange(KeyRangeRef const& keys);
-	void addWriteConflictRange(KeyRangeRef const& keys);
+	void addReadConflictRange( KeyRangeRef const& keys );
+	void addWriteConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting();
 
-	Future<Void> warmRange(Database cx, KeyRange keys);
+	Future< Void > warmRange( Database cx, KeyRange keys );
 
-	Future<StorageMetrics> waitStorageMetrics(KeyRange const& keys, StorageMetrics const& min,
-	                                          StorageMetrics const& max, StorageMetrics const& permittedError,
-	                                          int shardLimit);
-	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys, StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
+	Future< StorageMetrics > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit );
+	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
+	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
-	void set(const KeyRef& key, const ValueRef& value, bool addConflictRange = true);
-	void atomicOp(const KeyRef& key, const ValueRef& value, MutationRef::Type operationType,
-	              bool addConflictRange = true);
-	void clear(const KeyRangeRef& range, bool addConflictRange = true);
-	void clear(const KeyRef& key, bool addConflictRange = true);
+	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
+	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
+	void clear( const KeyRangeRef& range, bool addConflictRange = true );
+	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
 
-	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
-	Version getCommittedVersion() { return committedVersion; } // May be called only after commit() returns success
+	Version getCommittedVersion() { return committedVersion; }   // May be called only after commit() returns success
 	Future<Standalone<StringRef>> getVersionstamp(); // Will be fulfilled only after commit() returns success
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
-	Future<Void> onError(Error const& e);
+	Future<Void> onError( Error const& e );
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info(TaskDefaultEndpoint) {}
+	Transaction() : info( TaskDefaultEndpoint ) {}
 	void operator=(Transaction&& r) noexcept(true);
 
 	void reset();
@@ -314,12 +300,13 @@ public:
 
 	void checkDeferredError();
 
-	Database getDatabase() { return cx; }
+	Database getDatabase(){
+		return cx;
+	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
-
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	void setPriority(uint32_t priorityFlag);
@@ -335,11 +322,10 @@ private:
 	Future<Void> committing;
 };
 
-Future<Version> waitForCommittedVersion(Database const& cx, Version const& version);
+Future<Version> waitForCommittedVersion( Database const& cx, Version const& version );
 
-std::string unprintable(const std::string&);
+std::string unprintable( const std::string& );
 
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(),
-                         int64_t maxValue = std::numeric_limits<int64_t>::max());
+int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
 
 #endif

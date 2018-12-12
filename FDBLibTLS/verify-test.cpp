@@ -34,14 +34,11 @@
 #include "FDBLibTLSPolicy.h"
 
 struct FDBLibTLSVerifyTest {
-	FDBLibTLSVerifyTest(std::string input)
-	  : input(input), valid(false), verify_cert(true), verify_time(true), subject_criteria({}), issuer_criteria({}),
-	    root_criteria({}){};
-	FDBLibTLSVerifyTest(std::string input, bool verify_cert, bool verify_time, std::map<int, Criteria> subject,
-	                    std::map<int, Criteria> issuer, std::map<int, Criteria> root)
-	  : input(input), valid(true), verify_cert(verify_cert), verify_time(verify_time), subject_criteria(subject),
-	    issuer_criteria(issuer), root_criteria(root){};
-	~FDBLibTLSVerifyTest(){};
+	FDBLibTLSVerifyTest(std::string input):
+		input(input), valid(false), verify_cert(true), verify_time(true), subject_criteria({}), issuer_criteria({}), root_criteria({}) {};
+	FDBLibTLSVerifyTest(std::string input, bool verify_cert, bool verify_time, std::map<int, Criteria> subject, std::map<int, Criteria> issuer, std::map<int, Criteria> root):
+		input(input), valid(true), verify_cert(verify_cert), verify_time(verify_time), subject_criteria(subject), issuer_criteria(issuer), root_criteria(root) {};
+	~FDBLibTLSVerifyTest() {};
 
 	int run();
 
@@ -56,11 +53,11 @@ struct FDBLibTLSVerifyTest {
 	std::map<int, Criteria> root_criteria;
 };
 
-static std::string printable(std::string const& val) {
+static std::string printable( std::string const& val ) {
 	static char const digits[] = "0123456789ABCDEF";
 	std::string s;
 
-	for (int i = 0; i < val.size(); i++) {
+	for ( int i = 0; i < val.size(); i++ ) {
 		uint8_t b = val[i];
 		if (b >= 32 && b < 127 && b != '\\')
 			s += (char)b;
@@ -77,21 +74,20 @@ static std::string printable(std::string const& val) {
 
 static std::string criteriaToString(std::map<int, Criteria> const& criteria) {
 	std::string s;
-	for (auto& pair : criteria) {
-		s += "{" + std::to_string(pair.first) + ":(" + printable(pair.second.criteria) + ", " +
-		     boost::lexical_cast<std::string>((int)pair.second.match_type) + ", " +
-		     boost::lexical_cast<std::string>((int)pair.second.location) + ")}";
+	for (auto &pair: criteria) {
+		s += "{" + std::to_string(pair.first) + ":(" + printable(pair.second.criteria) + ", " + boost::lexical_cast<std::string>((int)pair.second.match_type) + ", " + boost::lexical_cast<std::string>((int)pair.second.location) + ")}";
 	}
 	return "{" + s + "}";
 }
 
-static void logf(const char* event, void* uid, bool is_error, ...) {}
+static void logf(const char* event, void* uid, bool is_error, ...) {
+}
 
 int FDBLibTLSVerifyTest::run() {
 	Reference<FDBLibTLSVerify> verify;
 	try {
 		verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(input));
-	} catch (const std::runtime_error& e) {
+	} catch ( const std::runtime_error& e ) {
 		if (valid) {
 			std::cerr << "FAIL: Verify test failed, but should have succeeded - '" << input << "'\n";
 			return 1;
@@ -111,18 +107,15 @@ int FDBLibTLSVerifyTest::run() {
 		return 1;
 	}
 	if (verify->subject_criteria != subject_criteria) {
-		std::cerr << "FAIL: Got subject criteria " << criteriaToString(verify->subject_criteria) << ", want "
-		          << criteriaToString(subject_criteria) << "\n";
+		std::cerr << "FAIL: Got subject criteria " << criteriaToString(verify->subject_criteria) << ", want " << criteriaToString(subject_criteria) << "\n";
 		return 1;
 	}
 	if (verify->issuer_criteria != issuer_criteria) {
-		std::cerr << "FAIL: Got issuer criteria " << criteriaToString(verify->issuer_criteria) << ", want "
-		          << criteriaToString(issuer_criteria) << "\n";
+		std::cerr << "FAIL: Got issuer criteria " << criteriaToString(verify->issuer_criteria) << ", want " << criteriaToString(issuer_criteria) << "\n";
 		return 1;
 	}
 	if (verify->root_criteria != root_criteria) {
-		std::cerr << "FAIL: Got root criteria " << criteriaToString(verify->root_criteria) << ", want "
-		          << criteriaToString(root_criteria) << "\n";
+		std::cerr << "FAIL: Got root criteria " << criteriaToString(verify->root_criteria) << ", want " << criteriaToString(root_criteria) << "\n";
 		return 1;
 	}
 	return 0;
@@ -132,7 +125,7 @@ static int policy_verify_test() {
 	Reference<FDBLibTLSPlugin> plugin = Reference<FDBLibTLSPlugin>(new FDBLibTLSPlugin());
 	Reference<FDBLibTLSPolicy> policy = Reference<FDBLibTLSPolicy>(new FDBLibTLSPolicy(plugin, (ITLSLogFunc)logf));
 
-	const char* verify_peers[] = {
+	const char *verify_peers[] = {
 		"S.CN=abc",
 		"I.CN=def",
 		"R.CN=xyz,Check.Unexpired=0",
@@ -148,7 +141,7 @@ static int policy_verify_test() {
 		Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(std::string(verify_peers[2], verify_peers_len[2]))),
 	};
 
-	if (!policy->set_verify_peers(3, (const uint8_t**)verify_peers, verify_peers_len)) {
+	if (!policy->set_verify_peers(3, (const uint8_t **)verify_peers, verify_peers_len)) {
 		std::cerr << "FAIL: Policy verify test failed, but should have succeeded\n";
 		return 1;
 	}
@@ -158,30 +151,25 @@ static int policy_verify_test() {
 	}
 
 	int i = 0;
-	for (auto& verify_rule : policy->verify_rules) {
+	for (auto &verify_rule: policy->verify_rules) {
 		if (verify_rule->verify_cert != verify_rules[i]->verify_cert) {
-			std::cerr << "FAIL: Got verify cert " << verify_rule->verify_cert << ", want "
-			          << verify_rules[i]->verify_cert << "\n";
+			std::cerr << "FAIL: Got verify cert " << verify_rule->verify_cert << ", want " << verify_rules[i]->verify_cert << "\n";
 			return 1;
 		}
 		if (verify_rule->verify_time != verify_rules[i]->verify_time) {
-			std::cerr << "FAIL: Got verify time " << verify_rule->verify_time << ", want "
-			          << verify_rules[i]->verify_time << "\n";
+			std::cerr << "FAIL: Got verify time " << verify_rule->verify_time << ", want " << verify_rules[i]->verify_time << "\n";
 			return 1;
 		}
 		if (verify_rule->subject_criteria != verify_rules[i]->subject_criteria) {
-			std::cerr << "FAIL: Got subject criteria " << criteriaToString(verify_rule->subject_criteria) << ", want "
-			          << criteriaToString(verify_rules[i]->subject_criteria) << "\n";
+			std::cerr << "FAIL: Got subject criteria " << criteriaToString(verify_rule->subject_criteria) << ", want " << criteriaToString(verify_rules[i]->subject_criteria) << "\n";
 			return 1;
 		}
 		if (verify_rule->issuer_criteria != verify_rules[i]->issuer_criteria) {
-			std::cerr << "FAIL: Got issuer criteria " << criteriaToString(verify_rule->issuer_criteria) << ", want "
-			          << criteriaToString(verify_rules[i]->issuer_criteria) << "\n";
+			std::cerr << "FAIL: Got issuer criteria " << criteriaToString(verify_rule->issuer_criteria) << ", want " << criteriaToString(verify_rules[i]->issuer_criteria) << "\n";
 			return 1;
 		}
 		if (verify_rule->root_criteria != verify_rules[i]->root_criteria) {
-			std::cerr << "FAIL: Got root criteria " << criteriaToString(verify_rule->root_criteria) << ", want "
-			          << criteriaToString(verify_rules[i]->root_criteria) << "\n";
+			std::cerr << "FAIL: Got root criteria " << criteriaToString(verify_rule->root_criteria) << ", want " << criteriaToString(verify_rules[i]->root_criteria) << "\n";
 			return 1;
 		}
 		i++;
@@ -189,7 +177,8 @@ static int policy_verify_test() {
 	return 0;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
 	int failed = 0;
 
 #define EXACT(x) Criteria(x, MatchType::EXACT, X509Location::NAME)
@@ -205,35 +194,28 @@ int main(int argc, char** argv) {
 		FDBLibTLSVerifyTest("Check.Valid=1,Check.Unexpired=0", true, false, {}, {}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,Check.Valid=0", false, false, {}, {}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\\, LLC", true, false,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp, LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\\= LLC", true, false,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp= LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp= LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,R.C=US,C=US,S.O=XYZCorp\\= LLC", true, false,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp= LLC") } }, {},
-		                    { { NID_countryName, EXACT("US") } }),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp= LLC")}}, {}, {{NID_countryName, EXACT("US")}}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp=LLC", true, false,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp=LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp=LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,Check.Unexpired=0,S.O=XYZCorp=LLC", true, false,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp=LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp=LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,S.O=XYZCorp\\, LLC", true, true,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp, LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,S.O=XYZCorp\\, LLC,R.CN=abc", true, true,
-		                    { { NID_countryName, EXACT("US") }, { NID_organizationName, EXACT("XYZCorp, LLC") } },
-		                    { { NID_countryName, EXACT("US") } }, { { NID_commonName, EXACT("abc") } }),
-		FDBLibTLSVerifyTest("C=\\,S=abc", true, true, { { NID_countryName, EXACT(",S=abc") } }, {}, {}),
-		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, { { NID_commonName, EXACT("abc") } }, {}, {}),
-		FDBLibTLSVerifyTest("CN=a\\62c", true, true, { { NID_commonName, EXACT("abc") } }, {}, {}),
-		FDBLibTLSVerifyTest("CN=a\\01c", true, true, { { NID_commonName, EXACT("a\001c") } }, {}, {}),
-		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true,
-		                    { { NID_subject_alt_name, { "XYZCorp", MatchType::EXACT, X509Location::EXTENSION } } }, {},
-		                    {}),
-		FDBLibTLSVerifyTest("S.O>=XYZ", true, true, { { NID_organizationName, PREFIX("XYZ") } }, {}, {}),
-		FDBLibTLSVerifyTest("S.O<=LLC", true, true, { { NID_organizationName, SUFFIX("LLC") } }, {}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}},
+			{{NID_countryName, EXACT("US")}},
+			{{NID_commonName, EXACT("abc")}}),
+		FDBLibTLSVerifyTest("C=\\,S=abc", true, true, {{NID_countryName, EXACT(",S=abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=a\\62c", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=a\\01c", true, true, {{NID_commonName, EXACT("a\001c")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, {"XYZCorp", MatchType::EXACT, X509Location::EXTENSION}}}, {}, {}),
+		FDBLibTLSVerifyTest("S.O>=XYZ", true, true, {{NID_organizationName, PREFIX("XYZ")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.O<=LLC", true, true, {{NID_organizationName, SUFFIX("LLC")}}, {}, {}),
 
 		// Invalid cases.
 		FDBLibTLSVerifyTest("Check.Invalid=0"),
@@ -250,7 +232,8 @@ int main(int argc, char** argv) {
 #undef PREFIX
 #undef SUFFIX
 
-	for (auto& test : tests) failed |= test.run();
+	for (auto &test: tests)
+		failed |= test.run();
 
 	failed |= policy_verify_test();
 

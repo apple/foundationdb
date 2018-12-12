@@ -34,12 +34,10 @@ public:
 	virtual void delref() = 0;
 };
 
-// An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds
-// seconds
+// An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds seconds
 class SpeedLimit : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
-	SpeedLimit(int windowLimit, int windowSeconds)
-	  : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
+	SpeedLimit(int windowLimit, int windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
 		m_budget_max = m_limit * m_seconds;
 		m_last_update = timer();
 	}
@@ -56,13 +54,15 @@ public:
 		m_last_update = ts;
 		m_budget -= n;
 		// If budget is still >= 0 then it's safe to use the allowance right now.
-		if (m_budget >= 0) return Void();
+		if(m_budget >= 0)
+			return Void();
 		// Otherise return the amount of time it will take for the budget to rise to 0.
 		return delay(m_seconds * -m_budget / m_limit);
 	}
 
 	virtual void returnUnused(int n) {
-		if (n < 0) return;
+		if(n < 0)
+			return;
 		m_budget = std::min<int64_t>(m_budget + n, m_budget_max);
 	}
 

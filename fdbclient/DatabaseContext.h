@@ -34,50 +34,38 @@
 
 class LocationInfo : public MultiInterface<StorageServerInterface> {
 public:
-	static Reference<LocationInfo> getInterface(DatabaseContext* cx,
-	                                            std::vector<StorageServerInterface> const& alternatives,
-	                                            LocalityData const& clientLocality);
+	static Reference<LocationInfo> getInterface( DatabaseContext *cx, std::vector<StorageServerInterface> const& alternatives, LocalityData const& clientLocality );
 	void notifyContextDestroyed();
-
+	
 	virtual ~LocationInfo();
 
 private:
-	DatabaseContext* cx;
-	LocationInfo(DatabaseContext* cx, vector<StorageServerInterface> const& shards, LocalityData const& clientLocality)
-	  : cx(cx), MultiInterface(shards, clientLocality) {}
+	DatabaseContext *cx;
+	LocationInfo( DatabaseContext* cx, vector<StorageServerInterface> const& shards, LocalityData const& clientLocality ) : cx(cx), MultiInterface( shards, clientLocality ) {}
 };
 
 class ProxyInfo : public MultiInterface<MasterProxyInterface> {
 public:
-	ProxyInfo(vector<MasterProxyInterface> const& proxies, LocalityData const& clientLocality)
-	  : MultiInterface(proxies, clientLocality, ALWAYS_FRESH) {}
+	ProxyInfo( vector<MasterProxyInterface> const& proxies, LocalityData const& clientLocality ) : MultiInterface( proxies, clientLocality, ALWAYS_FRESH ) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
 public:
-	static Future<Database> createDatabase(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
-	                                       Reference<Cluster> cluster, Standalone<StringRef> dbName,
-	                                       LocalityData const& clientLocality);
-	// static Future< Void > configureDatabase( ZookeeperInterface const& zk, int configScope, int configMode,
-	// Standalone<StringRef> dbName = Standalone<StringRef>() );
+	static Future<Database> createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, Standalone<StringRef> dbName, LocalityData const& clientLocality ); 
+	//static Future< Void > configureDatabase( ZookeeperInterface const& zk, int configScope, int configMode, Standalone<StringRef> dbName = Standalone<StringRef>() );
 
 	// For internal (fdbserver) use only: create a database context for a DB with already known client info
-	static Database create(Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality,
-	                       bool enableLocalityLoadBalance, int taskID = TaskDefaultEndpoint, bool lockAware = false);
+	static Database create( Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID = TaskDefaultEndpoint, bool lockAware = false );
 
 	~DatabaseContext();
 
-	Database clone() const {
-		return Database(new DatabaseContext(clientInfo, cluster, clientInfoMonitor, dbName, dbId, taskID,
-		                                    clientLocality, enableLocalityLoadBalance, lockAware));
-	}
+	Database clone() const { return Database(new DatabaseContext( clientInfo, cluster, clientInfoMonitor, dbName, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware )); }
 
-	pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, bool isBackward = false);
-	bool getCachedLocations(const KeyRangeRef&, vector<std::pair<KeyRange, Reference<LocationInfo>>>&, int limit,
-	                        bool reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, bool isBackward = false);
-	void invalidateCache(const KeyRangeRef&);
+	pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
+	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
+	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
+	void invalidateCache( const KeyRef&, bool isBackward = false );
+	void invalidateCache( const KeyRangeRef& );
 
 	Reference<ProxyInfo> getMasterProxies();
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
@@ -86,21 +74,23 @@ public:
 	// Update the watch counter for the database
 	void addWatch();
 	void removeWatch();
-
-	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
+	
+	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
 
 	Error deferred_error;
 	bool lockAware;
 
 	void checkDeferredError() {
-		if (cluster) cluster->checkDeferredError();
-		if (deferred_error.code() != invalid_error_code) throw deferred_error;
+		if( cluster )
+			cluster->checkDeferredError();
+		if( deferred_error.code() != invalid_error_code )
+			throw deferred_error;
 	}
 
-	// private: friend class ClientInfoMonitorActor;
-	explicit DatabaseContext(Reference<AsyncVar<ClientDBInfo>> clientInfo, Reference<Cluster> cluster,
-	                         Future<Void> clientInfoMonitor, Standalone<StringRef> dbName, Standalone<StringRef> dbId,
-	                         int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware);
+//private: friend class ClientInfoMonitorActor;
+	explicit DatabaseContext( Reference<AsyncVar<ClientDBInfo>> clientInfo, 
+		Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
+		Standalone<StringRef> dbName, Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware );
 
 	// These are reference counted
 	Reference<Cluster> cluster;
@@ -118,7 +108,7 @@ public:
 
 	// Transaction start request batching
 	struct VersionBatcher {
-		PromiseStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> stream;
+		PromiseStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > stream;
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
@@ -133,9 +123,9 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
 
-	std::map<std::vector<UID>, LocationInfo*> ssid_locationInfo;
+	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
 
 	// for logging/debugging (relic of multi-db support)
 	Standalone<StringRef> dbName;
@@ -153,8 +143,7 @@ public:
 	int64_t transactionsNotCommitted;
 	int64_t transactionsMaybeCommitted;
 	int64_t transactionsResourceConstrained;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit;
+	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;

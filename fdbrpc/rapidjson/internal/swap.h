@@ -19,7 +19,7 @@
 
 #if defined(__clang__)
 RAPIDJSON_DIAG_PUSH
-RAPIDJSON_DIAG_OFF(c++ 98 - compat)
+RAPIDJSON_DIAG_OFF(c++98-compat)
 #endif
 
 RAPIDJSON_NAMESPACE_BEGIN
@@ -31,9 +31,9 @@ namespace internal {
 */
 template <typename T>
 inline void Swap(T& a, T& b) RAPIDJSON_NOEXCEPT {
-	T tmp = a;
-	a = b;
-	b = tmp;
+    T tmp = a;
+        a = b;
+        b = tmp;
 }
 
 } // namespace internal

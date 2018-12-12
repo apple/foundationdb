@@ -29,7 +29,8 @@
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
 
-	if (c >= 'a' && c <= 'f') c -= ('a' - 'A');
+	if (c >= 'a' && c <= 'f')
+		c -= ('a' - 'A');
 
 	int value = std::find(digits, digits + 16, c) - digits;
 	if (value >= 16) {
@@ -42,24 +43,24 @@ static int hexValue(char c) {
 static std::string de4514(std::string const& input, int start, int& out_end) {
 	std::string output;
 
-	if (input[start] == '#' || input[start] == ' ') {
+	if(input[start] == '#' || input[start] == ' ') {
 		out_end = start;
 		return output;
 	}
 
 	int space_count = 0;
 
-	for (int p = start; p < input.size();) {
-		switch (input[p]) {
+	for(int p = start; p < input.size();) {
+		switch(input[p]) {
 		case '\\': // Handle escaped sequence
 
 			// Backslash escaping nothing!
-			if (p == input.size() - 1) {
+			if(p == input.size() - 1) {
 				out_end = p;
 				goto FIN;
 			}
 
-			switch (input[p + 1]) {
+			switch(input[p+1]) {
 			case ' ':
 			case '"':
 			case '#':
@@ -71,24 +72,24 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 			case '>':
 			case '|':
 			case '\\':
-				output += input[p + 1];
+				output += input[p+1];
 				p += 2;
 				space_count = 0;
 				continue;
 
 			default:
 				// Backslash escaping pair of hex digits requires two characters
-				if (p == input.size() - 2) {
+				if(p == input.size() - 2) {
 					out_end = p;
 					goto FIN;
 				}
 
 				try {
-					output += hexValue(input[p + 1]) * 16 + hexValue(input[p + 2]);
+					output += hexValue(input[p+1]) * 16 + hexValue(input[p+2]);
 					p += 3;
 					space_count = 0;
 					continue;
-				} catch (...) {
+				} catch( ... ) {
 					out_end = p;
 					goto FIN;
 				}
@@ -108,7 +109,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 		default:
 			// Character is what it is
 			output += input[p];
-			if (input[p] == ' ')
+			if(input[p] == ' ')
 				space_count++;
 			else
 				space_count = 0;
@@ -118,7 +119,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 
 	out_end = input.size();
 
-FIN:
+ FIN:
 	out_end -= space_count;
 	output.resize(output.size() - space_count);
 
@@ -127,19 +128,19 @@ FIN:
 
 static std::pair<std::string, std::string> splitPair(std::string const& input, char c) {
 	int p = input.find_first_of(c);
-	if (p == input.npos) {
+	if(p == input.npos) {
 		throw std::runtime_error("splitPair");
 	}
-	return std::make_pair(input.substr(0, p), input.substr(p + 1, input.size()));
+	return std::make_pair(input.substr(0, p), input.substr(p+1, input.size()));
 }
 
 static NID abbrevToNID(std::string const& sn) {
 	NID nid = NID_undef;
 
-	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" ||
-	    sn == "subjectAltName")
+	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" || sn == "subjectAltName")
 		nid = OBJ_sn2nid(sn.c_str());
-	if (nid == NID_undef) throw std::runtime_error("abbrevToNID");
+	if (nid == NID_undef)
+		throw std::runtime_error("abbrevToNID");
 
 	return nid;
 }
@@ -157,11 +158,13 @@ static X509Location locationForNID(NID nid) {
 	}
 }
 
-FDBLibTLSVerify::FDBLibTLSVerify(std::string verify_config) : verify_cert(true), verify_time(true) {
+FDBLibTLSVerify::FDBLibTLSVerify(std::string verify_config):
+	verify_cert(true), verify_time(true) {
 	parse_verify(verify_config);
 }
 
-FDBLibTLSVerify::~FDBLibTLSVerify() {}
+FDBLibTLSVerify::~FDBLibTLSVerify() {
+}
 
 void FDBLibTLSVerify::parse_verify(std::string input) {
 	int s = 0;
@@ -169,17 +172,21 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 	while (s < input.size()) {
 		int eq = input.find('=', s);
 
-		if (eq == input.npos) throw std::runtime_error("parse_verify");
+		if (eq == input.npos)
+			throw std::runtime_error("parse_verify");
 
 		MatchType mt = MatchType::EXACT;
-		if (input[eq - 1] == '>') mt = MatchType::PREFIX;
-		if (input[eq - 1] == '<') mt = MatchType::SUFFIX;
+		if (input[eq-1] == '>') mt = MatchType::PREFIX;
+		if (input[eq-1] == '<') mt = MatchType::SUFFIX;
 		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 
 		if (term.find("Check.") == 0) {
-			if (eq + 2 > input.size()) throw std::runtime_error("parse_verify");
-			if (eq + 2 != input.size() && input[eq + 2] != ',') throw std::runtime_error("parse_verify");
-			if (mt != MatchType::EXACT) throw std::runtime_error("parse_verify: cannot prefix match Check");
+			if (eq + 2 > input.size())
+				throw std::runtime_error("parse_verify");
+			if (eq + 2 != input.size() && input[eq + 2] != ',')
+				throw std::runtime_error("parse_verify");
+			if (mt != MatchType::EXACT)
+				throw std::runtime_error("parse_verify: cannot prefix match Check");
 
 			bool* flag;
 
@@ -199,7 +206,7 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 
 			s = eq + 3;
 		} else {
-			std::map<int, Criteria>* criteria = &subject_criteria;
+			std::map< int, Criteria >* criteria = &subject_criteria;
 
 			if (term.find('.') != term.npos) {
 				auto scoped = splitPair(term, '.');
@@ -219,13 +226,15 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 			int remain;
 			auto unesc = de4514(input, eq + 1, remain);
 
-			if (remain == eq + 1) throw std::runtime_error("parse_verify");
+			if (remain == eq + 1)
+				throw std::runtime_error("parse_verify");
 
 			NID termNID = abbrevToNID(term);
 			const X509Location loc = locationForNID(termNID);
 			criteria->insert(std::make_pair(termNID, Criteria(unesc, mt, loc)));
 
-			if (remain != input.size() && input[remain] != ',') throw std::runtime_error("parse_verify");
+			if (remain != input.size() && input[remain] != ',')
+				throw std::runtime_error("parse_verify");
 
 			s = remain + 1;
 		}

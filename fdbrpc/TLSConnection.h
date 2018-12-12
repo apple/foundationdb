@@ -40,8 +40,7 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	virtual void addref() { ReferenceCounted<TLSConnection>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSConnection>::delref(); }
 
-	TLSConnection(Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client,
-	              std::string host);
+	TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host);
 	~TLSConnection() {
 		// Here for ordering to make sure we delref the ITLSSession
 		// which has a pointer to this object
@@ -54,9 +53,9 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 
 	virtual Future<Void> onReadable();
 
-	virtual int read(uint8_t* begin, uint8_t* end);
+	virtual int read( uint8_t* begin, uint8_t* end );
 
-	virtual int write(SendBuffer const* buffer, int limit);
+	virtual int write( SendBuffer const* buffer, int limit);
 
 	virtual NetworkAddress getPeerAddress() {
 		NetworkAddress a = conn->getPeerAddress();
@@ -67,31 +66,23 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 };
 
 struct TLSOptions : ReferenceCounted<TLSOptions> {
-	enum {
-		OPT_TLS = 100000,
-		OPT_TLS_PLUGIN,
-		OPT_TLS_CERTIFICATES,
-		OPT_TLS_KEY,
-		OPT_TLS_VERIFY_PEERS,
-		OPT_TLS_CA_FILE,
-		OPT_TLS_PASSWORD
-	};
+	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
 	enum PolicyType { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
 	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {
 #ifndef TLS_DISABLED
-		init_plugin();
+		init_plugin( );
 #endif
 	}
 
-	void set_cert_file(std::string const& cert_file);
-	void set_cert_data(std::string const& cert_data);
+	void set_cert_file( std::string const& cert_file );
+	void set_cert_data( std::string const& cert_data );
 	void set_ca_file(std::string const& ca_file);
 	void set_ca_data(std::string const& ca_data);
 	// If there is a passphrase, this api should be called prior to setting key for the passphrase to be used
-	void set_key_password(std::string const& password);
-	void set_key_file(std::string const& key_file);
-	void set_key_data(std::string const& key_data);
-	void set_verify_peers(std::vector<std::string> const& verify_peers);
+	void set_key_password( std::string const& password );
+	void set_key_file( std::string const& key_file );
+	void set_key_data( std::string const& key_data );
+	void set_verify_peers( std::vector<std::string> const& verify_peers );
 
 	void register_network();
 
@@ -125,7 +116,7 @@ struct TLSListener : IListener, ReferenceCounted<TLSListener> {
 	Reference<IListener> listener;
 	Reference<TLSOptions> options;
 
-	TLSListener(Reference<TLSOptions> options, Reference<IListener> listener) : options(options), listener(listener) {}
+	TLSListener( Reference<TLSOptions> options, Reference<IListener> listener ) : options(options), listener(listener) {}
 
 	virtual void addref() { ReferenceCounted<TLSListener>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSListener>::delref(); }
@@ -136,14 +127,14 @@ struct TLSListener : IListener, ReferenceCounted<TLSListener> {
 };
 
 struct TLSNetworkConnections : INetworkConnections {
-	INetworkConnections* network;
+	INetworkConnections *network;
 
-	explicit TLSNetworkConnections(Reference<TLSOptions> options);
+	explicit TLSNetworkConnections( Reference<TLSOptions> options );
 
-	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr, std::string host);
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service);
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 
-	virtual Reference<IListener> listen(NetworkAddress localAddr);
+	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 private:
 	Reference<TLSOptions> options;
@@ -156,27 +147,27 @@ private:
 #define TLS_CA_FILE_FLAG "--tls_ca_file"
 #define TLS_PASSWORD_FLAG "--tls_password"
 
-#define TLS_OPTION_FLAGS                                                                                               \
-	{ TLSOptions::OPT_TLS_PLUGIN, TLS_PLUGIN_FLAG, SO_REQ_SEP },                                                       \
-	    { TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP },                                   \
-	    { TLSOptions::OPT_TLS_KEY, TLS_KEY_FILE_FLAG, SO_REQ_SEP },                                                    \
-	    { TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG, SO_REQ_SEP },                                       \
-	    { TLSOptions::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP },                                               \
-	    { TLSOptions::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP },
+#define TLS_OPTION_FLAGS \
+	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_PASSWORD,     TLS_PASSWORD_FLAG,         SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_CA_FILE,      TLS_CA_FILE_FLAG,          SO_REQ_SEP },
 
-#define TLS_HELP                                                                                                       \
-	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n"                                                                       \
-	"                 The path of a file containing the TLS certificate and CA\n"                                      \
-	"                 chain.\n"                                                                                        \
-	"  " TLS_CA_FILE_FLAG " CERTAUTHFILE\n"                                                                            \
-	"                 The path of a file containing the CA certificates chain.\n"                                      \
-	"  " TLS_KEY_FILE_FLAG " KEYFILE\n"                                                                                \
-	"                 The path of a file containing the private key corresponding\n"                                   \
-	"                 to the TLS certificate.\n"                                                                       \
-	"  " TLS_PASSWORD_FLAG " PASSCODE\n"                                                                               \
-	"                 The passphrase of encrypted private key\n"                                                       \
-	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n"                                                                        \
-	"                 The constraints by which to validate TLS peers. The contents\n"                                  \
+#define TLS_HELP \
+	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n" \
+	"                 The path of a file containing the TLS certificate and CA\n" \
+	"                 chain.\n"											\
+	"  " TLS_CA_FILE_FLAG " CERTAUTHFILE\n" \
+	"                 The path of a file containing the CA certificates chain.\n"	\
+	"  " TLS_KEY_FILE_FLAG " KEYFILE\n" \
+	"                 The path of a file containing the private key corresponding\n" \
+	"                 to the TLS certificate.\n"						\
+	"  " TLS_PASSWORD_FLAG " PASSCODE\n" \
+	"                 The passphrase of encrypted private key\n" \
+	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n" \
+	"                 The constraints by which to validate TLS peers. The contents\n" \
 	"                 and format of CONSTRAINTS are plugin-specific.\n"
 
 #endif /* FLOW_TLSCONNECTION_H */

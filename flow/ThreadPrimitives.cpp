@@ -32,7 +32,7 @@
 #undef max
 #endif
 
-extern std::string format(const char* form, ...);
+extern std::string format( const char *form, ... );
 
 Event::Event() {
 #ifdef _WIN32
@@ -40,14 +40,12 @@ Event::Event() {
 #elif defined(__linux__)
 	int result = sem_init(&sem, 0, 0);
 	if (result)
-		criticalError(FDB_EXIT_INIT_SEMAPHORE, "UnableToInitializeSemaphore",
-		              format("Could not initialize semaphore - %s", strerror(errno)).c_str());
+		criticalError(FDB_EXIT_INIT_SEMAPHORE, "UnableToInitializeSemaphore", format("Could not initialize semaphore - %s", strerror(errno)).c_str());
 #elif defined(__APPLE__)
 	self = mach_task_self();
 	kern_return_t ret = semaphore_create(self, &sem, SYNC_POLICY_FIFO, 0);
-	if (ret != KERN_SUCCESS)
-		criticalError(FDB_EXIT_INIT_SEMAPHORE, "UnableToInitializeSemaphore",
-		              format("Could not initialize semaphore - %s", strerror(errno)).c_str());
+	if(ret != KERN_SUCCESS)
+		criticalError(FDB_EXIT_INIT_SEMAPHORE, "UnableToInitializeSemaphore", format("Could not initialize semaphore - %s", strerror(errno)).c_str());
 #else
 #error Port me!
 #endif

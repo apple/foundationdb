@@ -20,41 +20,50 @@
 
 #include "workloads.h"
 #include "flow/SignalSafeUnwind.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
 
-	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	SlowTaskWorkload(WorkloadContext const& wcx)
+	: TestWorkload(wcx) {
+	}
 
-	virtual std::string description() { return "SlowTaskWorkload"; }
+	virtual std::string description() {
+		return "SlowTaskWorkload";
+	}
 
-	virtual Future<Void> start(Database const& cx) { return go(); }
+	virtual Future<Void> start(Database const& cx) {
+		return go();
+	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check(Database const& cx) {
+		return true;
+	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual void getMetrics(vector<PerfMetric>& m) {
+	}
 
 	ACTOR static Future<Void> go() {
-		wait(delay(1));
+		wait( delay(1) );
 		int64_t phc = dl_iterate_phdr_calls;
 		int64_t exc = 0;
 		fprintf(stderr, "Slow task starting\n");
-		for (int i = 0; i < 10; i++) {
+		for(int i=0; i<10; i++) {
 			fprintf(stderr, "  %d\n", i);
 			double end = timer() + 1;
-			while (timer() < end) {
+			while( timer() < end ) {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr, "Slow task complete: %lld exceptions; %lld calls to dl_iterate_phdr\n", exc,
-		        dl_iterate_phdr_calls - phc);
+		fprintf(stderr, "Slow task complete: %lld exceptions; %lld calls to dl_iterate_phdr\n", exc, dl_iterate_phdr_calls - phc);
 		return Void();
 	}
 
 	static void do_slow_exception_thing(int64_t* exc_count) {
 		// Has to be a non-actor function so that actual exception unwinding occurs
-		for (int j = 0; j < 1000; j++) try {
+		for(int j=0; j<1000; j++)
+			try {
 				throw success();
 			} catch (Error& e) {
 				++*exc_count;

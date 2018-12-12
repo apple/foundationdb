@@ -34,9 +34,8 @@ struct UnitTestWorkload : TestWorkload {
 	PerfDoubleCounter totalWallTime, totalSimTime;
 
 	UnitTestWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"),
-	    testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"),
-	    totalSimTime("Total flow time (s)") {
+		: TestWorkload(wcx), testsAvailable("Test Cases Available"), testsExecuted("Test Cases Executed"), testsFailed("Test Cases Failed"), totalWallTime("Total wall clock time (s)"), totalSimTime("Total flow time (s)")
+	{
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, LiteralStringRef("testsMatching"), Value()).toString();
 		testRunLimit = getOption(options, LiteralStringRef("maxTestCases"), -1);
@@ -48,7 +47,8 @@ struct UnitTestWorkload : TestWorkload {
 	virtual std::string description() { return "UnitTests"; }
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return runUnitTests(this);
+		if (enabled)
+			return runUnitTests(this);
 		return Void();
 	}
 	virtual Future<bool> check(Database const& cx) { return testsFailed.getValue() == 0; }
@@ -72,7 +72,8 @@ struct UnitTestWorkload : TestWorkload {
 		}
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 		g_random->randomShuffle(tests);
-		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) tests.resize(self->testRunLimit);
+		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) 
+			tests.resize(self->testRunLimit);
 
 		state std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
@@ -85,7 +86,8 @@ struct UnitTestWorkload : TestWorkload {
 
 			try {
 				wait(test->func());
-			} catch (Error& e) {
+			}
+			catch (Error& e) {
 				++self->testsFailed;
 				result = e;
 			}
@@ -98,12 +100,11 @@ struct UnitTestWorkload : TestWorkload {
 
 			auto test = *t;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
-			    .detail("Name", test->name)
-			    .detail("File", test->file)
-			    .detail("Line", test->line)
-			    .detail("WallTime", wallTime)
-			    .detail("FlowTime", simTime);
+				.error(result, true)
+				.detail("Name", test->name)
+				.detail("File", test->file).detail("Line", test->line)
+				.detail("WallTime", wallTime)
+				.detail("FlowTime", simTime);
 		}
 
 		return Void();

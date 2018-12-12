@@ -29,6 +29,7 @@
 #include <string>
 #include <cstring>
 #include <deque>
+#include <random>
 #include "UnitTest.h"
 
 #include <random>

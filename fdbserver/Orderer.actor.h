@@ -20,56 +20,55 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ORDERER_ACTOR_G_H)
-#define FDBSERVER_ORDERER_ACTOR_G_H
-#include "Orderer.actor.g.h"
+	#define FDBSERVER_ORDERER_ACTOR_G_H
+	#include "Orderer.actor.g.h"
 #elif !defined(FDBSERVER_ORDERER_ACTOR_H)
-#define FDBSERVER_ORDERER_ACTOR_H
+	#define FDBSERVER_ORDERER_ACTOR_H
 
 #include "fdbclient/Notified.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <class Seq>
 class Orderer {
 public:
-	explicit Orderer(Seq s) : ready(s), started(false) {}
-	void reset(Seq s) {
+	explicit Orderer( Seq s ) : ready(s), started(false) {}
+	void reset( Seq s ) {
 		ready = NotifiedVersion(s);
 		started = false;
 	}
-	Future<bool> order(Seq s, int taskID = TaskDefaultYield) {
-		if (ready.get() < s)
-			return waitAndOrder(this, s, taskID);
+	Future<bool> order( Seq s, int taskID = TaskDefaultYield ) {
+		if ( ready.get() < s )
+			return waitAndOrder( this, s, taskID );
 		else
 			return dedup(s);
 	}
-	void complete(Seq s) {
-		ASSERT(s == ready.get() && started);
+	void complete( Seq s ) {
+		ASSERT( s == ready.get() && started );
 		started = false;
-		ready.set(s + 1);
+		ready.set(s+1);
 	}
-	Seq getNextSequence() {
-		return ready.get();
-	} // Returns the next sequence number which has *not* been returned from order()
-	Future<Void> whenNextSequenceAtLeast(Seq v) { return ready.whenAtLeast(v); }
-
+	Seq getNextSequence() { return ready.get(); }  // Returns the next sequence number which has *not* been returned from order()
+	Future<Void> whenNextSequenceAtLeast( Seq v ) {
+		return ready.whenAtLeast(v);
+	}
 private:
-	ACTOR static Future<bool> waitAndOrder(Orderer<Seq>* self, Seq s, int taskID) {
-		wait(self->ready.whenAtLeast(s));
-		wait(yield(taskID) || self->shutdown.getFuture());
+	ACTOR static Future<bool> waitAndOrder( Orderer<Seq>* self, Seq s, int taskID ) {
+		wait( self->ready.whenAtLeast(s) );
+		wait( yield( taskID ) || self->shutdown.getFuture() );
 		return self->dedup(s);
 	}
-	bool dedup(Seq s) {
-		if (s != ready.get() || started) return false;
+	bool dedup( Seq s ) {
+		if (s != ready.get() || started)
+			return false;
 		started = true;
 		return true;
 	}
 
 	bool started;
-	NotifiedVersion ready; // FIXME: Notified<Seq>
-	Promise<Void> shutdown; // Never set, only broken on destruction
+	NotifiedVersion ready;   // FIXME: Notified<Seq>
+	Promise<Void> shutdown;  // Never set, only broken on destruction
 };
 
 #include "flow/unactorcompiler.h"

@@ -27,9 +27,8 @@
 
 class RYWIterator {
 public:
-	RYWIterator(SnapshotCache* snapshotCache, WriteMap* writeMap)
-	  : cache(snapshotCache), writes(writeMap), begin_key_cmp(0), end_key_cmp(0) {}
-
+	RYWIterator( SnapshotCache* snapshotCache, WriteMap* writeMap ) : cache(snapshotCache), writes(writeMap), begin_key_cmp(0), end_key_cmp(0) {}
+	
 	enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 	static const SEGMENT_TYPE typeMap[12];
 
@@ -44,30 +43,29 @@ public:
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
 
-	KeyValueRef const& kv(Arena& arena);
+	KeyValueRef const& kv( Arena& arena );
 
 	RYWIterator& operator++();
 
 	RYWIterator& operator--();
 
-	bool operator==(const RYWIterator& r) const;
+	bool operator == ( const RYWIterator& r ) const;
 
-	void skip(KeyRef key);
+	void skip( KeyRef key );
+	
+	void skipContiguous( KeyRef key );
 
-	void skipContiguous(KeyRef key);
-
-	void skipContiguousBack(KeyRef key);
+	void skipContiguousBack( KeyRef key );
 
 	WriteMap::iterator& extractWriteMapIterator();
-	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal
-	// one.  Consider copying the return value if performance isn't critical. If you modify the returned iterator, it
-	// invalidates this iterator until the next call to skip()
+	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal one.  Consider copying the return value if performance isn't critical.
+	// If you modify the returned iterator, it invalidates this iterator until the next call to skip()
 
 	void dbg();
 
 private:
-	int begin_key_cmp; // -1 if cache.beginKey() < writes.beginKey(), 0 if ==, +1 if >
-	int end_key_cmp; //
+	int begin_key_cmp;   // -1 if cache.beginKey() < writes.beginKey(), 0 if ==, +1 if >
+	int end_key_cmp;    // 
 	SnapshotCache::iterator cache;
 	WriteMap::iterator writes;
 	KeyValueRef temp;
@@ -96,8 +94,10 @@ public:
 	static ValueRef getRandomVersionstampKey(Arena& arena) {
 		int idx = g_random->randomInt(0, 100);
 		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1) key += '\x00';
-		if (idx % 3 >= 2) key += '\x00';
+		if (idx % 3 >= 1)
+			key += '\x00';
+		if (idx % 3 >= 2)
+			key += '\x00';
 		int32_t pos = key.size() - g_random->randomInt(0, 3);
 		if (g_random->random01() < 0.01) {
 			pos = 0;
@@ -110,12 +110,16 @@ public:
 		return ValueRef(arena, key);
 	}
 
-	static KeyRef getRandomKey(Arena& arena) { return getKeyForIndex(arena, g_random->randomInt(0, 100)); }
+	static KeyRef getRandomKey(Arena& arena) {
+		return getKeyForIndex(arena, g_random->randomInt(0, 100));
+	}
 
 	static KeyRef getKeyForIndex(Arena& arena, int idx) {
 		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1) key += '\x00';
-		if (idx % 3 >= 2) key += '\x00';
+		if (idx % 3 >= 1)
+			key += '\x00';
+		if (idx % 3 >= 2)
+			key += '\x00';
 		return KeyRef(arena, key);
 	}
 

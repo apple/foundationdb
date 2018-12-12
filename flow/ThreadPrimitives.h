@@ -44,8 +44,8 @@
 
 class ThreadSpinLock {
 public:
-	// #ifdef _WIN32
-	ThreadSpinLock(bool initiallyLocked = false) : isLocked(initiallyLocked) {
+// #ifdef _WIN32
+	ThreadSpinLock(bool initiallyLocked=false) : isLocked(initiallyLocked) {
 #if VALGRIND
 		ANNOTATE_RWLOCK_CREATE(this);
 #endif
@@ -56,25 +56,27 @@ public:
 #endif
 	}
 	void enter() {
-		while (interlockedCompareExchange(&isLocked, 1, 0) == 1) _mm_pause();
+		while (interlockedCompareExchange(&isLocked, 1, 0) == 1)
+			_mm_pause();
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
 #endif
 	}
 	void leave() {
 #if defined(__linux__)
-		__sync_synchronize();
+	__sync_synchronize();
 #endif
 		isLocked = 0;
 #if defined(__linux__)
-		__sync_synchronize();
+	__sync_synchronize();
 #endif
 #if VALGRIND
 		ANNOTATE_RWLOCK_RELEASED(this, true);
 #endif
 	}
-	void assertNotEntered() { ASSERT(!isLocked); }
-
+	void assertNotEntered() {
+		ASSERT( !isLocked );
+	}
 private:
 	ThreadSpinLock(const ThreadSpinLock&);
 	void operator=(const ThreadSpinLock&);
@@ -83,22 +85,13 @@ private:
 
 class ThreadSpinLockHolder {
 	ThreadSpinLock& lock;
-
 public:
-	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
+	ThreadSpinLockHolder( ThreadSpinLock& lock ) : lock(lock) { lock.enter(); }
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
-class ThreadUnsafeSpinLock {
-public:
-	void enter(){};
-	void leave(){};
-	void assertNotEntered(){};
-};
-class ThreadUnsafeSpinLockHolder {
-public:
-	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
-};
+class ThreadUnsafeSpinLock { public: void enter(){}; void leave(){}; void assertNotEntered(){}; };
+class ThreadUnsafeSpinLockHolder { public: ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){}; };
 
 #if FLOW_THREAD_SAFE
 
@@ -129,10 +122,11 @@ private:
 	semaphore_t sem;
 #else
 #error Port me!
-#endif
+#endif	
 };
 
-class Mutex {
+class Mutex
+{
 	// A re-entrant process-local blocking lock (e.g. CRITICAL_SECTION on Windows)
 	// Thread safe even if !FLOW_THREAD_SAFE
 public:
@@ -140,16 +134,14 @@ public:
 	~Mutex();
 	void enter();
 	void leave();
-
 private:
 	void* impl;
 };
 
 class MutexHolder {
 	Mutex& lock;
-
 public:
-	MutexHolder(Mutex& lock) : lock(lock) { lock.enter(); }
+	MutexHolder( Mutex& lock ) : lock(lock) { lock.enter(); }
 	~MutexHolder() { lock.leave(); }
 };
 

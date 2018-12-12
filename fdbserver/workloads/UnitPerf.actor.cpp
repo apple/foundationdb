@@ -24,7 +24,7 @@
 
 ACTOR Future<Void> sleepyActor(double interval, int* counter) {
 	loop {
-		wait(delay(interval));
+		wait( delay( interval ) );
 		++*counter;
 	}
 }
@@ -34,9 +34,10 @@ ACTOR Future<Void> unitPerfTest() {
 
 	state int counter = 0;
 	state vector<Future<Void>> sleepy;
-	for (int i = 0; i < 100000; i++) sleepy.push_back(sleepyActor(.1, &counter));
+	for(int i=0; i<100000; i++)
+		sleepy.push_back( sleepyActor( .1, &counter ) );
 
-	wait(delay(10));
+	wait( delay(10) );
 	sleepy.clear();
 	TraceEvent("Completed").detail("Count", counter);
 	printf("Completed: %d\n", counter);
@@ -48,18 +49,21 @@ ACTOR Future<Void> unitPerfTest() {
 struct UnitPerfWorkload : TestWorkload {
 	bool enabled;
 
-	UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	UnitPerfWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx)
+	{
 		enabled = !clientId; // only do this on the "first" client
 	}
 
 	virtual std::string description() { return "UnitPerfWorkload"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) {
-		if (enabled) return unitPerfTest();
+	virtual Future<Void> setup( Database const& cx ) { return Void(); }
+	virtual Future<Void> start( Database const& cx ) {
+		if (enabled)
+			return unitPerfTest();
 		return Void();
 	}
-	virtual Future<bool> check(Database const& cx) { return true; }
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual Future<bool> check( Database const& cx ) { return true; }
+	virtual void getMetrics( vector<PerfMetric>& m ) {}
 };
 
 WorkloadFactory<UnitPerfWorkload> UnitPerfWorkloadFactory("UnitPerf");

@@ -20,7 +20,7 @@
 
 #include "Subspace.h"
 
-Subspace::Subspace(Tuple const& tuple, StringRef const& rawPrefix) {
+Subspace::Subspace(Tuple const& tuple, StringRef const& rawPrefix){
 	StringRef packed = tuple.pack();
 
 	this->rawPrefix.reserve(this->rawPrefix.arena(), rawPrefix.size() + packed.size());
@@ -34,11 +34,11 @@ Subspace::Subspace(Tuple const& tuple, Standalone<VectorRef<uint8_t>> const& raw
 	this->rawPrefix.append(this->rawPrefix.arena(), tuple.pack().begin(), tuple.pack().size());
 }
 
-Subspace::Subspace(StringRef const& rawPrefix) {
+Subspace::Subspace(StringRef const& rawPrefix){
 	this->rawPrefix.append(this->rawPrefix.arena(), rawPrefix.begin(), rawPrefix.size());
 }
 
-Subspace::~Subspace() {}
+Subspace::~Subspace() { }
 
 Key Subspace::key() const {
 	return StringRef(rawPrefix.begin(), rawPrefix.size());
@@ -72,8 +72,7 @@ KeyRange Subspace::range(Tuple const& tuple) const {
 	end.push_back(keyRange.arena(), uint8_t('\xff'));
 
 	// FIXME: test that this uses the keyRange arena and doesn't create another one
-	keyRange.KeyRangeRef::operator=(
-	    KeyRangeRef(StringRef(begin.begin(), begin.size()), StringRef(end.begin(), end.size())));
+	keyRange.KeyRangeRef::operator=(KeyRangeRef(StringRef(begin.begin(), begin.size()), StringRef(end.begin(), end.size())));
 	return keyRange;
 }
 

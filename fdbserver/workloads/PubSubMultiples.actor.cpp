@@ -22,7 +22,7 @@
 #include "fdbserver/pubsub.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	double testDuration, messagesPerSecond;
@@ -31,81 +31,92 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	vector<Future<Void>> inboxWatchers;
 	PerfIntCounter messages;
 
-	PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		messagesPerSecond = getOption(options, LiteralStringRef("messagesPerSecond"), 500.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), 20);
-		inboxesPerActor = getOption(options, LiteralStringRef("inboxesPerActor"), 20);
+	PubSubMultiplesWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx),
+		messages("Messages")
+	{
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		messagesPerSecond = getOption( options, LiteralStringRef("messagesPerSecond"), 500.0 ) / clientCount;
+		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), 20 );
+		inboxesPerActor = getOption( options, LiteralStringRef("inboxesPerActor"), 20 );
 	}
 
 	virtual std::string description() { return "PubSubMultiplesWorkload"; }
-	virtual Future<Void> setup(Database const& cx) { return createNodes(this, cx); }
-	virtual Future<Void> start(Database const& cx) {
-		Future<Void> _ = startTests(this, cx);
+	virtual Future<Void> setup( Database const& cx ) { 
+		return createNodes( this, cx );
+	}
+	virtual Future<Void> start( Database const& cx ) {
+		Future<Void> _ = startTests( this, cx );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check( Database const& cx ) {
+		return true;
+	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) { m.push_back(messages.getMetric()); }
+	virtual void getMetrics( vector<PerfMetric>& m ) {
+		m.push_back( messages.getMetric() );
+	}
 
-	Key keyForFeed(int i) { return StringRef(format("/PSM/feeds/%d", i)); }
-	Key keyForInbox(int i) { return StringRef(format("/PSM/inbox/%d", i)); }
-	Value valueForUInt(uint64_t i) { return StringRef(format("%llx", i)); }
+	Key keyForFeed( int i ) { return StringRef( format( "/PSM/feeds/%d", i ) ); }
+	Key keyForInbox( int i ) { return StringRef( format( "/PSM/inbox/%d", i ) ); }
+	Value valueForUInt( uint64_t i ) { return StringRef( format( "%llx", i ) ); }
 
-	ACTOR Future<Void> createNodeSwath(PubSubMultiplesWorkload* self, int actor, Database cx) {
+	ACTOR Future<Void> createNodeSwath( PubSubMultiplesWorkload *self, int actor, Database cx ) {
 		state PubSub ps(cx);
 		state vector<uint64_t> feeds;
 		state vector<uint64_t> inboxes;
 		state int idx;
-		for (idx = 0; idx < self->inboxesPerActor; idx++) {
-			uint64_t feedIdx = wait(ps.createFeed(StringRef()));
-			feeds.push_back(feedIdx);
-			uint64_t inboxIdx = wait(ps.createInbox(StringRef()));
-			inboxes.push_back(inboxIdx);
+		for(idx = 0; idx < self->inboxesPerActor; idx++) {
+			uint64_t feedIdx = wait( ps.createFeed( StringRef() ) );
+			feeds.push_back( feedIdx );
+			uint64_t inboxIdx = wait( ps.createInbox( StringRef() ) );
+			inboxes.push_back( inboxIdx );
 		}
 		state Transaction tr(cx);
 		loop {
 			try {
-				for (int idx = 0; idx < self->inboxesPerActor; idx++) {
-					int offset = (self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor) +
-					             (actor * self->actorCount * self->inboxesPerActor) + idx;
-					tr.set(self->keyForFeed(offset), self->valueForUInt(feeds[idx]));
-					tr.set(self->keyForInbox(offset), self->valueForUInt(inboxes[idx]));
+				for(int idx = 0; idx < self->inboxesPerActor; idx++) {
+					int offset = ( self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor ) 
+								+ ( actor * self->actorCount * self->inboxesPerActor ) + idx;
+					tr.set( self->keyForFeed( offset ), self->valueForUInt( feeds[idx] ) );
+					tr.set( self->keyForInbox( offset ), self->valueForUInt( inboxes[idx] ) );
 				}
-				wait(tr.commit());
+				wait( tr.commit() );
 				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			} catch(Error& e) {
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
 	}
 
-	ACTOR Future<Void> createNodes(PubSubMultiplesWorkload* self, Database cx) {
+	ACTOR Future<Void> createNodes( PubSubMultiplesWorkload *self, Database cx ) {
 		state PubSub ps(cx);
 		vector<Future<Void>> actors;
-		for (int i = 0; i < self->actorCount; i++) actors.push_back(self->createNodeSwath(self, i, cx->clone()));
-		wait(waitForAll(actors));
+		for(int i=0; i<self->actorCount; i++)
+			actors.push_back( self->createNodeSwath( self, i, cx->clone() ) );
+		wait( waitForAll( actors ) );
 		TraceEvent("PSMNodesCreated").detail("ClientIdx", self->clientId);
 		return Void();
 	}
 
-	/*ACTOR*/ Future<Void> createSubscriptions(PubSubMultiplesWorkload* self, int actor, Database cx) {
+	/*ACTOR*/ Future<Void> createSubscriptions( PubSubMultiplesWorkload *self, int actor, Database cx ) {
 		// create the "multiples" subscriptions for each owned inbox
 		return Void();
 	}
 
-	/*ACTOR*/ Future<Void> messageSender(PubSubMultiplesWorkload* self, Database cx) {
+	/*ACTOR*/ Future<Void> messageSender( PubSubMultiplesWorkload *self, Database cx ) {
 		// use a possion loop and post messages to feeds
 		return Void();
 	}
 
-	ACTOR Future<Void> startTests(PubSubMultiplesWorkload* self, Database cx) {
+	ACTOR Future<Void> startTests( PubSubMultiplesWorkload *self, Database cx ) {
 		vector<Future<Void>> subscribers;
-		for (int i = 0; i < self->actorCount; i++) subscribers.push_back(self->createSubscriptions(self, i, cx));
-		wait(waitForAll(subscribers));
+		for(int i=0; i<self->actorCount; i++)
+			subscribers.push_back( self->createSubscriptions( self, i, cx ) );
+		wait( waitForAll( subscribers ) );
 
-		state Future<Void> sender = self->messageSender(self, cx);
+		state Future<Void> sender = self->messageSender( self, cx );
 		return Void();
 	}
 };

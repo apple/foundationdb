@@ -19,20 +19,20 @@
  */
 
 #include "flow/flow.h"
-#include "genericactors.actor.h" // Gets genericactors.actor.g.h indirectly
+#include "genericactors.actor.h"	// Gets genericactors.actor.g.h indirectly
 #include "flow/network.h"
 #include "simulator.h"
 #include "flow/actorcompiler.h"
 
-ACTOR void simDeliverDuplicate(Standalone<StringRef> data, Endpoint destination) {
-	wait(delay(g_random->random01() * FLOW_KNOBS->MAX_DELIVER_DUPLICATE_DELAY));
-	FlowTransport::transport().sendUnreliable(SerializeSourceRaw(data), destination);
+ACTOR void simDeliverDuplicate( Standalone<StringRef> data, Endpoint destination ) {
+	wait( delay( g_random->random01() * FLOW_KNOBS->MAX_DELIVER_DUPLICATE_DELAY ) );
+	FlowTransport::transport().sendUnreliable( SerializeSourceRaw(data), destination );
 }
 
-ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
-	wait(delay(time));
+ACTOR Future<Void> disableConnectionFailuresAfter( double time, std::string context ) {
+	wait( delay(time) );
 
-	if (g_network->isSimulated()) {
+	if(g_network->isSimulated()) {
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());

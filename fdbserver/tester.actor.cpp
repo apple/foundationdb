@@ -395,7 +395,7 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 
 ACTOR Future<Void> runWorkloadAsync(Database cx, WorkloadInterface workIface, TestWorkload* workload,
                                     double databasePingDelay) {
-	state unique_ptr<TestWorkload> delw(workload);
+	state std::unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<bool>> checkResult;

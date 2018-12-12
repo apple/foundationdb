@@ -50,45 +50,36 @@
 #include "versions.h"
 #endif
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum {
-	OPT_CONNFILE,
-	OPT_DATABASE,
-	OPT_HELP,
-	OPT_TRACE,
-	OPT_TRACE_DIR,
-	OPT_TIMEOUT,
-	OPT_EXEC,
-	OPT_NO_STATUS,
-	OPT_STATUS_FROM_JSON,
-	OPT_VERSION
-};
+enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION };
 
-CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
-	                                  { OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
-	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
-	                                  { OPT_TRACE, "--log", SO_NONE },
-	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
-	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
-	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
-	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
-	                                  { OPT_HELP, "-?", SO_NONE },
-	                                  { OPT_HELP, "-h", SO_NONE },
-	                                  { OPT_HELP, "--help", SO_NONE },
-	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
-	                                  { OPT_VERSION, "--version", SO_NONE },
-	                                  { OPT_VERSION, "-v", SO_NONE },
+CSimpleOpt::SOption g_rgOptions[] = {
+	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
+	{ OPT_CONNFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_DATABASE, "-d", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	{ OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
+	{ OPT_EXEC, "--exec", SO_REQ_SEP },
+	{ OPT_NO_STATUS, "--no-status", SO_NONE },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
+	{ OPT_VERSION,         "--version",        SO_NONE },
+	{ OPT_VERSION,         "-v",               SO_NONE },
 
 #ifndef TLS_DISABLED
-	                                  TLS_OPTION_FLAGS
+	TLS_OPTION_FLAGS
 #endif
 
-	                                      SO_END_OF_OPTIONS };
+	SO_END_OF_OPTIONS
+};
 
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
@@ -120,7 +111,7 @@ std::string lineWrap(const char* text, int col) {
 			if (!space) space = iter;
 			out += format("%.*s\n", (int)(space - start), start);
 			start = space;
-			if (*start == ' ' /* || *start == '\n'*/) start++;
+			if (*start == ' '/* || *start == '\n'*/) start++;
 			space = NULL;
 		}
 	} while (*iter);
@@ -129,74 +120,78 @@ std::string lineWrap(const char* text, int col) {
 
 class FdbOptions {
 public:
-	// Prints an error and throws invalid_option or invalid_option_value if the option could not be set
-	void setOption(Reference<ReadYourWritesTransaction> tr, StringRef optionStr, bool enabled, Optional<StringRef> arg,
-	               bool intrans) {
+	//Prints an error and throws invalid_option or invalid_option_value if the option could not be set
+	void setOption(Reference<ReadYourWritesTransaction> tr, StringRef optionStr, bool enabled, Optional<StringRef> arg, bool intrans) {
 		auto transactionItr = transactionOptions.legalOptions.find(optionStr.toString());
-		if (transactionItr != transactionOptions.legalOptions.end())
+		if(transactionItr != transactionOptions.legalOptions.end())
 			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
 		else {
-			printf("ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
-			       optionStr.toString().c_str());
+			printf("ERROR: invalid option '%s'. Try `help options' for a list of available options.\n", optionStr.toString().c_str());
 			throw invalid_option();
 		}
 	}
 
-	// Applies all enabled transaction options to the given transaction
+	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
-		for (auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
+		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
 			tr->setOption(itr->first, itr->second.cast_to<StringRef>());
 	}
 
-	// Returns true if any options have been set
-	bool hasAnyOptionsEnabled() { return !transactionOptions.options.empty(); }
+	//Returns true if any options have been set
+	bool hasAnyOptionsEnabled() {
+		return !transactionOptions.options.empty();
+	}
 
-	// Prints a list of enabled options, along with their parameters (if any)
+	//Prints a list of enabled options, along with their parameters (if any)
 	void print() {
 		bool found = false;
 		found = found || transactionOptions.print();
 
-		if (!found) printf("There are no options enabled\n");
+		if(!found)
+			printf("There are no options enabled\n");
 	}
 
-	// Returns a vector of the names of all documented options
-	std::vector<std::string> getValidOptions() { return transactionOptions.getValidOptions(); }
+	//Returns a vector of the names of all documented options
+	std::vector<std::string> getValidOptions() {
+		return transactionOptions.getValidOptions();
+	}
 
-	// Prints the help string obtained by invoking `help options'
-	void printHelpString() { transactionOptions.printHelpString(); }
+	//Prints the help string obtained by invoking `help options'
+	void printHelpString() {
+		transactionOptions.printHelpString();
+	}
 
 private:
-	// Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
-	void setTransactionOption(Reference<ReadYourWritesTransaction> tr, FDBTransactionOptions::Option option,
-	                          bool enabled, Optional<StringRef> arg, bool intrans) {
-		if (enabled && arg.present() != FDBTransactionOptions::optionInfo[option].hasParameter) {
+	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
+	void setTransactionOption(Reference<ReadYourWritesTransaction> tr, FDBTransactionOptions::Option option, bool enabled, Optional<StringRef> arg, bool intrans) {
+		if(enabled && arg.present() != FDBTransactionOptions::optionInfo[option].hasParameter)	{
 			printf("ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
 			throw invalid_option_value();
 		}
 
-		if (intrans) tr->setOption(option, arg);
+		if(intrans)
+			tr->setOption(option, arg);
 
 		transactionOptions.setOption(option, enabled, arg.cast_to<StringRef>());
 	}
 
-	// A group of enabled options (of type T::Option) as well as a legal options map from string to T::Option
+	//A group of enabled options (of type T::Option) as well as a legal options map from string to T::Option
 	template <class T>
 	struct OptionGroup {
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
-		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
+		OptionGroup<T>() { }
+		OptionGroup<T>(OptionGroup<T> &base) : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) { }
 
-		// Enable or disable an option. Returns true if option value changed
+		//Enable or disable an option. Returns true if option value changed
 		bool setOption(typename T::Option option, bool enabled, Optional<StringRef> arg) {
 			auto optionItr = options.find(option);
-			if (enabled && (optionItr == options.end() ||
-			                Optional<Standalone<StringRef>>(optionItr->second).cast_to<StringRef>() != arg)) {
+			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).cast_to< StringRef >() != arg)) {
 				options[option] = arg.cast_to<Standalone<StringRef>>();
 				return true;
-			} else if (!enabled && optionItr != options.end()) {
+			}
+			else if(!enabled && optionItr != options.end()) {
 				options.erase(optionItr);
 				return true;
 			}
@@ -204,14 +199,14 @@ private:
 			return false;
 		}
 
-		// Prints a list of all enabled options in this group
+		//Prints a list of all enabled options in this group
 		bool print() {
 			bool found = false;
 
-			for (auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
+			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
 				auto optionItr = options.find(itr->second);
-				if (optionItr != options.end()) {
-					if (optionItr->second.present())
+				if(optionItr != options.end()) {
+					if(optionItr->second.present())
 						printf("%s: `%s'\n", itr->first.c_str(), formatStringRef(optionItr->second.get()).c_str());
 					else
 						printf("%s\n", itr->first.c_str());
@@ -223,7 +218,7 @@ private:
 			return found;
 		}
 
-		// Returns true if the specified option is documented
+		//Returns true if the specified option is documented
 		bool isDocumented(typename T::Option option) {
 			FDBOptionInfo info = T::optionInfo[option];
 
@@ -231,24 +226,26 @@ private:
 			return !info.comment.empty() && info.comment.substr(0, deprecatedStr.size()) != deprecatedStr;
 		}
 
-		// Returns a vector of the names of all documented options
+		//Returns a vector of the names of all documented options
 		std::vector<std::string> getValidOptions() {
 			std::vector<std::string> ret;
 
 			for (auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr)
-				if (isDocumented(itr->second)) ret.push_back(itr->first);
+				if(isDocumented(itr->second))
+					ret.push_back(itr->first);
 
 			return ret;
 		}
 
-		// Prints a help string for each option in this group. Any options with no comment
-		// are excluded from this help string. Lines are wrapped to 80 characters.
+		//Prints a help string for each option in this group. Any options with no comment
+		//are excluded from this help string. Lines are wrapped to 80 characters.
 		void printHelpString() {
-			for (auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
-				if (isDocumented(itr->second)) {
+			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
+				if(isDocumented(itr->second)) {
 					FDBOptionInfo info = T::optionInfo[itr->second];
 					std::string helpStr = info.name + " - " + info.comment;
-					if (info.hasParameter) helpStr += " " + info.parameterComment;
+					if(info.hasParameter)
+						helpStr += " " + info.parameterComment;
 					helpStr += "\n";
 
 					printAtCol(helpStr.c_str(), 80);
@@ -261,15 +258,15 @@ private:
 
 public:
 	FdbOptions() {
-		for (auto itr = FDBTransactionOptions::optionInfo.begin(); itr != FDBTransactionOptions::optionInfo.end();
-		     ++itr)
+		for(auto itr = FDBTransactionOptions::optionInfo.begin(); itr != FDBTransactionOptions::optionInfo.end(); ++itr)
 			transactionOptions.legalOptions[itr->second.name] = itr->first;
 	}
 
-	FdbOptions(FdbOptions& base) : transactionOptions(base.transactionOptions) {}
+	FdbOptions(FdbOptions &base) : transactionOptions(base.transactionOptions) { }
 };
 
-static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
+static std::string formatStringRef(StringRef item, bool fullEscaping = false)
+{
 	std::string ret;
 
 	for (int i = 0; i < item.size(); i++) {
@@ -288,13 +285,17 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 	return ret;
 }
 
-static bool tokencmp(StringRef token, const char* command) {
-	if (token.size() != strlen(command)) return false;
+static bool tokencmp(StringRef token, const char *command)
+{
+	if (token.size() != strlen(command))
+		return false;
 
 	return !memcmp(token.begin(), command, token.size());
 }
 
-static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial) {
+
+static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& err, bool& partial)
+{
 	err = false;
 	partial = false;
 
@@ -309,69 +310,69 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 	while (i <= line.length()) {
 		switch (line[i]) {
-		case ';':
-			if (!quoted) {
-				if (i > offset || (forcetoken && i == offset))
-					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
-				ret.push_back(std::move(buf));
-				offset = i = line.find_first_not_of(' ', i + 1);
-				forcetoken = false;
-			} else
-				i++;
-			break;
-		case '"':
-			quoted = !quoted;
-			line.erase(i, 1);
-			forcetoken = true;
-			break;
-		case ' ':
-			if (!quoted) {
-				if (i > offset || (forcetoken && i == offset))
-					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
-				offset = i = line.find_first_not_of(' ', i);
-				forcetoken = false;
-			} else
-				i++;
-			break;
-		case '\\':
-			if (i + 2 > line.length()) {
-				err = true;
-				ret.push_back(std::move(buf));
-				return ret;
-			}
-			switch (line[i + 1]) {
-				char ent, save;
-			case '"':
-			case '\\':
-			case ' ':
 			case ';':
+				if (!quoted) {
+					if (i > offset || (forcetoken && i == offset))
+						buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+					ret.push_back(std::move(buf));
+					offset = i = line.find_first_not_of(' ', i+1);
+					forcetoken = false;
+				} else
+					i++;
+				break;
+			case '"':
+				quoted = !quoted;
 				line.erase(i, 1);
+				forcetoken = true;
 				break;
-			case 'x':
-				if (i + 4 > line.length()) {
+			case ' ':
+				if (!quoted) {
+					if (i > offset || (forcetoken && i == offset))
+						buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
+					offset = i = line.find_first_not_of(' ', i);
+					forcetoken = false;
+				} else
+					i++;
+				break;
+			case '\\':
+				if (i + 2 > line.length()) {
 					err = true;
 					ret.push_back(std::move(buf));
 					return ret;
 				}
-				char* pEnd;
-				save = line[i + 4];
-				line[i + 4] = 0;
-				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
-				if (*pEnd) {
-					err = true;
-					ret.push_back(std::move(buf));
-					return ret;
+				switch (line[i+1]) {
+					char ent, save;
+					case '"':
+					case '\\':
+					case ' ':
+					case ';':
+						line.erase(i, 1);
+						break;
+					case 'x':
+						if (i + 4 > line.length()) {
+							err = true;
+							ret.push_back(std::move(buf));
+							return ret;
+						}
+						char *pEnd;
+						save = line[i + 4];
+						line[i + 4] = 0;
+						ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
+						if (*pEnd) {
+							err = true;
+							ret.push_back(std::move(buf));
+							return ret;
+						}
+						line[i + 4] = save;
+						line.replace(i, 4, 1, ent);
+						break;
+					default:
+						err = true;
+						ret.push_back(std::move(buf));
+						return ret;
 				}
-				line[i + 4] = save;
-				line.replace(i, 4, 1, ent);
-				break;
 			default:
-				err = true;
-				ret.push_back(std::move(buf));
-				return ret;
-			}
-		default:
-			i++;
+				i++;
 		}
 	}
 
@@ -381,35 +382,35 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 	ret.push_back(std::move(buf));
 
-	if (quoted) partial = true;
+	if (quoted)
+		partial = true;
 
 	return ret;
 }
 
 static void printProgramUsage(const char* name) {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
-	       "usage: %s [OPTIONS]\n"
-	       "\n",
-	       name);
+		   "usage: %s [OPTIONS]\n"
+		   "\n", name);
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is first the value of the\n"
-	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-	       "                 then `%s'.\n",
-	       platform::getDefaultClusterFilePath().c_str());
+		   "                 FoundationDB cluster. The default is first the value of the\n"
+		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
+		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
-	       "                 unspecified, defaults to the current directory. Has\n"
-	       "                 no effect unless --log is specified.\n"
-	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
-	       "                 and then exits.\n"
-	       "  --no-status    Disables the initial status check done when starting\n"
-	       "                 the CLI.\n"
+		   "  --log-dir PATH Specifes the output directory for trace files. If\n"
+		   "                 unspecified, defaults to the current directory. Has\n"
+		   "                 no effect unless --log is specified.\n"
+		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
+		   "                 and then exits.\n"
+		   "  --no-status    Disables the initial status check done when starting\n"
+		   "                 the CLI.\n"
 #ifndef TLS_DISABLED
-	       TLS_HELP
+		   TLS_HELP
 #endif
-	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
-	       "  -h, --help     Display this help and exit.\n");
+		   "  -v, --version  Print FoundationDB CLI version information and exit.\n"
+		   "  -h, --help     Display this help and exit.\n");
 }
+
 
 struct CommandHelp {
 	std::string usage;
@@ -426,114 +427,93 @@ std::set<std::string> hiddenCommands;
 #define ESCAPINGKV "\n\nFor information on escaping keys and values, type `help escaping'."
 
 void initHelp() {
-	helpMap["begin"] =
-	    CommandHelp("begin", "begin a new transaction",
-	                "By default, the fdbcli operates in autocommit mode. All operations are performed in their own "
-	                "transaction, and are automatically committed for you. By explicitly beginning a transaction, "
-	                "successive operations are all performed as part of a single transaction.\n\nTo commit the "
-	                "transaction, use the commit command. To discard the transaction, use the reset command.");
-	helpMap["commit"] = CommandHelp("commit", "commit the current transaction",
-	                                "Any sets or clears executed after the start of the current transaction will be "
-	                                "committed to the database. On success, the committed version number is displayed. "
-	                                "If commit fails, the error is displayed and the transaction must be retried.");
+	helpMap["begin"] = CommandHelp(
+		"begin",
+		"begin a new transaction",
+		"By default, the fdbcli operates in autocommit mode. All operations are performed in their own transaction, and are automatically committed for you. By explicitly beginning a transaction, successive operations are all performed as part of a single transaction.\n\nTo commit the transaction, use the commit command. To discard the transaction, use the reset command.");
+	helpMap["commit"] = CommandHelp(
+		"commit",
+		"commit the current transaction",
+		"Any sets or clears executed after the start of the current transaction will be committed to the database. On success, the committed version number is displayed. If commit fails, the error is displayed and the transaction must be retried.");
 	helpMap["clear"] = CommandHelp(
-	    "clear <KEY>", "clear a key from the database",
-	    "Clear succeeds even if the specified key is not present, but may fail because of conflicts." ESCAPINGK);
+		"clear <KEY>",
+		"clear a key from the database",
+		"Clear succeeds even if the specified key is not present, but may fail because of conflicts." ESCAPINGK);
 	helpMap["clearrange"] = CommandHelp(
-	    "clearrange <BEGINKEY> <ENDKEY>", "clear a range of keys from the database",
-	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
-	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
+		"clearrange <BEGINKEY> <ENDKEY>",
+		"clear a range of keys from the database",
+		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-	    "configure [new] "
-	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<"
-	    "RESOLVERS>>*",
-	    "change database configuration",
-	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
-	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
-	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
-	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
-	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
-	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
-	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set "
-	    "to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of "
-	    "log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default "
-	    "value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or "
-	    "set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration "
-	    "Guide for more information.");
+		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+		"change database configuration",
+		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
 	helpMap["coordinators"] = CommandHelp(
-	    "coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
-	    "change cluster coordinators or description",
-	    "If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured "
-	    "redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, "
-	    "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by "
-	    "<ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators "
-	    "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
-	    "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
-	helpMap["exclude"] =
-	    CommandHelp("exclude <ADDRESS>*", "exclude servers from the database",
-	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
-	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
-	                "database state has been safely moved away from the specified servers.");
-	helpMap["include"] =
-	    CommandHelp("include all|<ADDRESS>*", "permit previously-excluded servers to rejoin the database",
-	                "If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port "
-	                "pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified "
-	                "IP will match all IP:* exclusion entries)");
-	helpMap["setclass"] =
-	    CommandHelp("setclass <ADDRESS> <unset|storage|transaction|default>", "change the class of a process",
-	                "If no address and class are specified, lists the classes of all servers.\n\nSetting the class to "
-	                "`default' resets the process class to the class specified on the command line.");
-	helpMap["status"] =
-	    CommandHelp("status [minimal] [details] [json]", "get the status of a FoundationDB cluster",
-	                "If the cluster is down, this command will print a diagnostic which may be useful in figuring out "
-	                "what is wrong. If the cluster is running, this command will print cluster "
-	                "statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your "
-	                "database.\n\nSpecifying 'details' will provide load information for individual "
-	                "workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
+		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
+		"change cluster coordinators or description",
+		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
+	helpMap["exclude"] = CommandHelp(
+		"exclude <ADDRESS>*",
+		"exclude servers from the database",
+		"If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all database state has been safely moved away from the specified servers.");
+	helpMap["include"] = CommandHelp(
+		"include all|<ADDRESS>*",
+		"permit previously-excluded servers to rejoin the database",
+		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
+	helpMap["setclass"] = CommandHelp(
+		"setclass <ADDRESS> <unset|storage|transaction|default>",
+		"change the class of a process",
+		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line.");
+	helpMap["status"] = CommandHelp(
+		"status [minimal] [details] [json]",
+		"get the status of a FoundationDB cluster",
+		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your database.\n\nSpecifying 'details' will provide load information for individual workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
 	helpMap["waitopen"] = CommandHelp();
-	helpMap["get"] =
-	    CommandHelp("get <KEY>", "fetch the value for a given key",
-	                "Displays the value of KEY in the database, or `not found' if KEY is not present." ESCAPINGK);
-	helpMap["getrange"] =
-	    CommandHelp("getrange <BEGINKEY> [ENDKEY] [LIMIT]", "fetch key/value pairs in a range of keys",
-	                "Displays up to LIMIT keys and values for keys between BEGINKEY (inclusive) and ENDKEY "
-	                "(exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. "
-	                "LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["get"] = CommandHelp(
+		"get <KEY>",
+		"fetch the value for a given key",
+		"Displays the value of KEY in the database, or `not found' if KEY is not present." ESCAPINGK);
+	helpMap["getrange"] = CommandHelp(
+		"getrange <BEGINKEY> [ENDKEY] [LIMIT]",
+		"fetch key/value pairs in a range of keys",
+		"Displays up to LIMIT keys and values for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
 	helpMap["getrangekeys"] = CommandHelp(
-	    "getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]", "fetch keys in a range of keys",
-	    "Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, "
-	    "then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
-	helpMap["reset"] =
-	    CommandHelp("reset", "reset the current transaction",
-	                "Any sets or clears executed after the start of the active transaction will be discarded.");
-	helpMap["rollback"] = CommandHelp("rollback", "rolls back the current transaction",
-	                                  "The active transaction will be discarded, including any sets or clears executed "
-	                                  "since the transaction was started.");
-	helpMap["set"] = CommandHelp("set <KEY> <VALUE>", "set a value for a given key",
-	                             "If KEY is not already present in the database, it will be created." ESCAPINGKV);
+		"getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]",
+		"fetch keys in a range of keys",
+		"Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["reset"] = CommandHelp(
+		"reset",
+		"reset the current transaction",
+		"Any sets or clears executed after the start of the active transaction will be discarded.");
+	helpMap["rollback"] = CommandHelp(
+		"rollback",
+		"rolls back the current transaction",
+		"The active transaction will be discarded, including any sets or clears executed since the transaction was started.");
+	helpMap["set"] = CommandHelp(
+		"set <KEY> <VALUE>",
+		"set a value for a given key",
+		"If KEY is not already present in the database, it will be created." ESCAPINGKV);
 	helpMap["option"] = CommandHelp(
-	    "option <STATE> <OPTION> <ARG>", "enables or disables an option",
-	    "If STATE is `on', then the option OPTION will be enabled with optional parameter ARG, if required. If STATE "
-	    "is `off', then OPTION will be disabled.\n\nIf there is no active transaction, then the option will be applied "
-	    "to all operations as well as all subsequently created transactions (using `begin').\n\nIf there is an active "
-	    "transaction (one created with `begin'), then enabled options apply only to that transaction. Options cannot "
-	    "be disabled on an active transaction.\n\nCalling `option' with no parameters prints a list of all enabled "
-	    "options.\n\nFor information about specific options that can be set, type `help options'.");
-	helpMap["help"] = CommandHelp("help [<topic>]", "get help about a topic or command", "");
-	helpMap["writemode"] = CommandHelp("writemode <on|off>", "enables or disables sets and clears",
-	                                   "Setting or clearing keys from the CLI is not recommended.");
+		"option <STATE> <OPTION> <ARG>",
+		"enables or disables an option",
+		"If STATE is `on', then the option OPTION will be enabled with optional parameter ARG, if required. If STATE is `off', then OPTION will be disabled.\n\nIf there is no active transaction, then the option will be applied to all operations as well as all subsequently created transactions (using `begin').\n\nIf there is an active transaction (one created with `begin'), then enabled options apply only to that transaction. Options cannot be disabled on an active transaction.\n\nCalling `option' with no parameters prints a list of all enabled options.\n\nFor information about specific options that can be set, type `help options'.");
+	helpMap["help"] = CommandHelp(
+		"help [<topic>]",
+		"get help about a topic or command", "");
+	helpMap["writemode"] = CommandHelp(
+		"writemode <on|off>",
+		"enables or disables sets and clears",
+		"Setting or clearing keys from the CLI is not recommended.");
 	helpMap["kill"] = CommandHelp(
-	    "kill all|list|<ADDRESS>*", "attempts to kill one or more processes in the cluster",
-	    "If no addresses are specified, populates the list of processes which can be killed. Processes cannot be "
-	    "killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known "
-	    "processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is "
-	    "unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
-	helpMap["profile"] = CommandHelp("<type> <action> <ARGS>", "namespace for all the profiling-related commands.",
-	                                 "Different types support different actions.  Run `profile` to get a list of "
-	                                 "types, and iteratively explore the help.\n");
+		"kill all|list|<ADDRESS>*",
+		"attempts to kill one or more processes in the cluster",
+		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+	helpMap["profile"] = CommandHelp(
+		"<type> <action> <ARGS>",
+		"namespace for all the profiling-related commands.",
+		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -549,7 +529,8 @@ void printVersion() {
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
 	for (auto i = helpMap.begin(); i != helpMap.end(); ++i)
-		if (i->second.short_desc.size()) printf(" %s:\n      %s\n", i->first.c_str(), i->second.short_desc.c_str());
+		if (i->second.short_desc.size())
+			printf(" %s:\n      %s\n", i->first.c_str(), i->second.short_desc.c_str());
 	printf("\nFor information on a specific command, type `help <command>'.");
 	printf("\nFor information on escaping keys and values, type `help escaping'.");
 	printf("\nFor information on available options, type `help options'.\n\n");
@@ -560,7 +541,7 @@ void printHelp(StringRef command) {
 	if (i != helpMap.end() && i->second.short_desc.size()) {
 		printf("\n%s\n\n", i->second.usage.c_str());
 		auto cstr = i->second.short_desc.c_str();
-		printf("%c%s.\n", toupper(cstr[0]), cstr + 1);
+		printf("%c%s.\n", toupper(cstr[0]), cstr+1);
 		if (!i->second.long_desc.empty()) {
 			printf("\n");
 			printAtCol(i->second.long_desc.c_str(), 80);
@@ -583,9 +564,9 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 	try {
 		StatusArray coordinatorsArr = statusObj["client.coordinators.coordinators"].get_array();
 		for (StatusObjectReader coor : coordinatorsArr)
-			outputString += format("\n  %s  (%s)", coor["address"].get_str().c_str(),
-			                       coor["reachable"].get_bool() ? "reachable" : "unreachable");
-	} catch (std::runtime_error& e) {
+			outputString += format("\n  %s  (%s)", coor["address"].get_str().c_str(), coor["reachable"].get_bool() ? "reachable" : "unreachable");
+	}
+	catch (std::runtime_error& e){
 		outputString = "\n  Unable to retrieve list of coordination servers";
 	}
 
@@ -606,17 +587,17 @@ std::string getDateInfoString(StatusObjectReader statusObj, std::string key) {
 }
 
 std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::string serverID) {
-	for (auto proc : processesMap.obj()) {
+	for (auto proc : processesMap.obj()){
 		try {
 			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
 			for (StatusObjectReader role : rolesArray) {
 				if (role["id"].get_str().find(serverID) == 0) {
-					// If this next line throws, then we found the serverID but the role has no address, so the role is
-					// skipped.
+					// If this next line throws, then we found the serverID but the role has no address, so the role is skipped.
 					return proc.second.get_obj()["address"].get_str();
 				}
 			}
-		} catch (std::exception& e) {
+		}
+		catch (std::exception &e) {
 			// If an entry in the process map is badly formed then something will throw. Since we are
 			// looking for a positive match, just ignore any read execeptions and move on to the next proc
 		}
@@ -624,14 +605,15 @@ std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::st
 	return "unknown";
 }
 
-std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::string first, std::string second,
-                             bool transactionSection = false) {
-	// Re-point statusObj at either the transactions sub-doc or the operations sub-doc depending on transactionSection
-	// flag
-	if (transactionSection) {
-		if (!statusObj.get("transactions", statusObj)) return "unknown";
-	} else {
-		if (!statusObj.get("operations", statusObj)) return "unknown";
+std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::string first, std::string second, bool transactionSection = false){
+	// Re-point statusObj at either the transactions sub-doc or the operations sub-doc depending on transactionSection flag
+	if (transactionSection){
+		if (!statusObj.get("transactions", statusObj))
+			return "unknown";
+	}
+	else {
+		if (!statusObj.get("operations", statusObj))
+			return "unknown";
 	}
 
 	std::string path = first + "." + second;
@@ -642,20 +624,20 @@ std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::st
 	return "unknown";
 }
 
-void getBackupDRTags(StatusObjectReader& statusObjCluster, const char* context,
-                     std::map<std::string, std::string>& tagMap) {
+void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, std::map<std::string, std::string> &tagMap) {
 	std::string path = format("layers.%s.tags", context);
 	StatusObjectReader tags;
-	if (statusObjCluster.tryGet(path, tags)) {
-		for (auto itr : tags.obj()) {
+	if(statusObjCluster.tryGet(path, tags)) {
+		for(auto itr : tags.obj()) {
 			JSONDoc tag(itr.second);
 			bool running = false;
 			tag.tryGet("running_backup", running);
-			if (running) {
+			if(running) {
 				std::string uid;
-				if (tag.tryGet("mutation_stream_id", uid)) {
+				if(tag.tryGet("mutation_stream_id", uid)) {
 					tagMap[itr.first] = uid;
-				} else {
+				}
+				else {
 					tagMap[itr.first] = "";
 				}
 			}
@@ -663,13 +645,13 @@ void getBackupDRTags(StatusObjectReader& statusObjCluster, const char* context,
 	}
 }
 
-std::string logBackupDR(const char* context, std::map<std::string, std::string> const& tagMap) {
+std::string logBackupDR(const char *context, std::map<std::string, std::string> const& tagMap) {
 	std::string outputString = "";
-	if (tagMap.size() > 0) {
+	if(tagMap.size() > 0) {
 		outputString += format("\n\n%s:", context);
-		for (auto itr : tagMap) {
+		for(auto itr : tagMap) {
 			outputString += format("\n  %-22s", itr.first.c_str());
-			if (itr.second.size() > 0) {
+			if(itr.second.size() > 0) {
 				outputString += format(" - %s", itr.second.c_str());
 			}
 		}
@@ -678,8 +660,7 @@ std::string logBackupDR(const char* context, std::map<std::string, std::string> 
 	return outputString;
 }
 
-void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true,
-                 bool hideErrorMessages = false) {
+void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
 		printf("WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
 	}
@@ -693,8 +674,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader statusObjClient;
 			statusObj.get("client", statusObjClient);
 
-			// The way the output string is assembled is to add new line character before addition to the string rather
-			// than after
+			// The way the output string is assembled is to add new line character before addition to the string rather than after
 			std::string outputString = "";
 			std::string clusterFilePath;
 			if (statusObjClient.get("cluster_file.path", clusterFilePath))
@@ -713,21 +693,22 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			// Check if any coordination servers are unreachable
 			bool quorum_reachable;
-			if (statusObjCoordinators.get("quorum_reachable", quorum_reachable) && !quorum_reachable) {
+			if (statusObjCoordinators.get("quorum_reachable", quorum_reachable) && !quorum_reachable){
 				outputString += "\nCould not communicate with a quorum of coordination servers:";
 				outputString += getCoordinatorsInfoString(statusObj);
 
 				printf("%s\n", outputString.c_str());
 				return;
-			} else {
-				for (StatusObjectReader coor : coordinatorsArr) {
+			}
+			else {
+				for (StatusObjectReader coor : coordinatorsArr){
 					bool reachable;
-					if (coor.get("reachable", reachable) && !reachable) {
+					if (coor.get("reachable", reachable) && !reachable){
 						outputString += "\nCould not communicate with all of the coordination servers."
-						                "\n  The database will remain operational as long as we"
-						                "\n  can connect to a quorum of servers, however the fault"
-						                "\n  tolerance of the system is reduced as long as the"
-						                "\n  servers remain disconnected.\n";
+							"\n  The database will remain operational as long as we"
+							"\n  can connect to a quorum of servers, however the fault"
+							"\n  tolerance of the system is reduced as long as the"
+							"\n  servers remain disconnected.\n";
 						outputString += getCoordinatorsInfoString(statusObj);
 						outputString += "\n";
 						printedCoordinators = true;
@@ -737,45 +718,43 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			}
 
 			// print any client messages
-			if (statusObjClient.has("messages")) {
-				for (StatusObjectReader message : statusObjClient.last().get_array()) {
+			if (statusObjClient.has("messages")){
+				for (StatusObjectReader message : statusObjClient.last().get_array()){
 					std::string desc;
-					if (message.get("description", desc)) outputString += "\n" + lineWrap(desc.c_str(), 80);
+					if (message.get("description", desc))
+						outputString += "\n" + lineWrap(desc.c_str(), 80);
 				}
 			}
 
 			bool fatalRecoveryState = false;
 			StatusObjectReader statusObjCluster;
 			try {
-				if (statusObj.get("cluster", statusObjCluster)) {
+				if (statusObj.get("cluster", statusObjCluster)){
 
 					StatusObjectReader recoveryState;
 					if (statusObjCluster.get("recovery_state", recoveryState)) {
 						std::string name;
 						std::string description;
-						if (recoveryState.get("name", name) && recoveryState.get("description", description) &&
-						    name != "accepting_commits" && name != "all_logs_recruited" &&
-						    name != "storage_recovered" && name != "fully_recovered") {
+						if (recoveryState.get("name", name) &&
+							recoveryState.get("description", description) &&
+							name != "accepting_commits" && name != "all_logs_recruited" && name != "storage_recovered" && name != "fully_recovered")
+						{
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.",
-								                      recoveryState["required_logs"].get_int(),
-								                      recoveryState["required_proxies"].get_int(),
-								                      recoveryState["required_resolvers"].get_int());
+								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
-									description += format("\nHave %d processes on %d machines.",
-									                      statusObjCluster["processes"].get_obj().size(),
-									                      statusObjCluster["machines"].get_obj().size());
-							} else if (name == "locking_old_transaction_servers" &&
-							           recoveryState["missing_logs"].get_str().size()) {
-								description += format("\nNeed one or more of the following log servers: %s",
-								                      recoveryState["missing_logs"].get_str().c_str());
+									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
+								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
 							description = lineWrap(description.c_str(), 80);
-							if (!printedCoordinators &&
-							    (name == "reading_coordinated_state" || name == "locking_coordinated_state" ||
-							     name == "configuration_never_created" || name == "writing_coordinated_state")) {
+							if (!printedCoordinators && (
+								name == "reading_coordinated_state" ||
+								name == "locking_coordinated_state" ||
+								name == "configuration_never_created" ||
+								name == "writing_coordinated_state"))
+							{
 								description += getCoordinatorsInfoString(statusObj);
 								description += "\n";
 								printedCoordinators = true;
@@ -785,17 +764,18 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						}
 					}
 				}
-			} catch (std::runtime_error& e) {
 			}
+			catch (std::runtime_error& e){ }
+
 
 			// Check if cluster controllable is reachable
 			try {
 				// print any cluster messages
-				if (statusObjCluster.has("messages") && statusObjCluster.last().get_array().size()) {
+				if (statusObjCluster.has("messages") && statusObjCluster.last().get_array().size()){
 
 					// any messages we don't want to display
 					std::set<std::string> skipMsgs = { "unreachable_process", "" };
-					if (fatalRecoveryState) {
+					if (fatalRecoveryState){
 						skipMsgs.insert("status_incomplete");
 						skipMsgs.insert("unreadable_configuration");
 						skipMsgs.insert("immediate_priority_transaction_start_probe_timeout");
@@ -805,57 +785,60 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						skipMsgs.insert("commit_probe_timeout");
 					}
 
-					for (StatusObjectReader msgObj : statusObjCluster.last().get_array()) {
+					for (StatusObjectReader msgObj : statusObjCluster.last().get_array()){
 						std::string messageName;
-						if (!msgObj.get("name", messageName)) {
+						if(!msgObj.get("name", messageName)){
 							continue;
 						}
-						if (skipMsgs.count(messageName)) {
+						if (skipMsgs.count(messageName)){
 							continue;
-						} else if (messageName == "client_issues") {
-							if (msgObj.has("issues")) {
-								for (StatusObjectReader issue : msgObj["issues"].get_array()) {
+						}
+						else if (messageName == "client_issues"){
+							if (msgObj.has("issues")){
+								for (StatusObjectReader issue : msgObj["issues"].get_array()){
 									std::string issueName;
-									if (!issue.get("name", issueName)) {
+									if (!issue.get("name", issueName)){
 										continue;
 									}
 
 									std::string description;
-									if (!issue.get("description", description)) {
+									if(!issue.get("description", description)) {
 										description = issueName;
 									}
 
 									std::string countStr;
 									StatusArray addresses;
-									if (!issue.has("addresses")) {
+									if(!issue.has("addresses")) {
 										countStr = "Some client(s)";
-									} else {
+									}
+									else {
 										addresses = issue["addresses"].get_array();
 										countStr = format("%d client(s)", addresses.size());
 									}
-									outputString +=
-									    format("\n%s reported: %s\n", countStr.c_str(), description.c_str());
+									outputString += format("\n%s reported: %s\n", countStr.c_str(), description.c_str());
 
-									if (level == StatusClient::StatusLevel::DETAILED) {
-										for (int i = 0; i < addresses.size() && i < 4; ++i) {
+									if(level == StatusClient::StatusLevel::DETAILED) {
+										for(int i = 0; i < addresses.size() && i < 4; ++i) {
 											outputString += format("  %s\n", addresses[i].get_str().c_str());
 										}
-										if (addresses.size() > 4) {
+										if(addresses.size() > 4) {
 											outputString += "  ...\n";
 										}
 									}
 								}
 							}
-						} else {
+						}
+						else {
 							if (msgObj.has("description"))
 								outputString += "\n" + lineWrap(msgObj.last().get_str().c_str(), 80);
 						}
+
 					}
 				}
-			} catch (std::runtime_error& e) {
 			}
+			catch (std::runtime_error& e){}
 
-			if (fatalRecoveryState) {
+			if (fatalRecoveryState){
 				printf("%s", outputString.c_str());
 				return;
 			}
@@ -864,7 +847,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusArray excludedServersArr;
 
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
-				if (statusObjConfig.has("excluded_servers")) excludedServersArr = statusObjConfig.last().get_array();
+				if (statusObjConfig.has("excluded_servers"))
+					excludedServersArr = statusObjConfig.last().get_array();
 			}
 
 			// If there is a configuration message then there is no configuration information to display
@@ -872,33 +856,31 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			std::string outputStringCache = outputString;
 			try {
 				// Configuration section
-				// FIXME: Should we suppress this if there are cluster messages implying that the database has no
-				// configuration?
+				// FIXME: Should we suppress this if there are cluster messages implying that the database has no configuration?
 
 				outputString += "\n  Redundancy mode        - ";
 				std::string strVal;
 
-				if (statusObjConfig.get("redundancy_mode", strVal)) {
+				if (statusObjConfig.get("redundancy_mode", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
 
 				outputString += "\n  Storage engine         - ";
-				if (statusObjConfig.get("storage_engine", strVal)) {
+				if (statusObjConfig.get("storage_engine", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
 
 				int intVal;
 				outputString += "\n  Coordinators           - ";
-				if (statusObjConfig.get("coordinators_count", intVal)) {
+				if (statusObjConfig.get("coordinators_count", intVal)){
 					outputString += std::to_string(intVal);
 				} else
 					outputString += "unknown";
 
 				if (excludedServersArr.size()) {
-					outputString += format("\n  Exclusions             - %d (type `exclude' for details)",
-					                       excludedServersArr.size());
+					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
 
 				if (statusObjConfig.get("proxies", intVal))
@@ -915,7 +897,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve configuration status";
 			}
@@ -926,8 +909,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
-			// this bool removed code duplication when there's an else (usually due to a missing field) that should
-			// print some error message
+			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message
 			//     which would be the same error message if the catch block was hit
 			bool success = false;
 			try {
@@ -940,13 +922,14 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					int processExclusions = 0;
 					for (auto p : processesMap.obj()) {
 						StatusObjectReader process(p.second);
-						if (process.has("excluded") && process.last().get_bool()) processExclusions++;
-						if (process.has("messages") && process.last().get_array().size()) {
-							errors++;
+						if (process.has("excluded") && process.last().get_bool())
+							processExclusions++;
+						if (process.has("messages") && process.last().get_array().size()){
+							errors ++;
 						}
 					}
 
-					if (errors > 0 || processExclusions) {
+					if (errors > 0 || processExclusions){
 						outputString += format(" (less %d excluded; %d with errors)", processExclusions, errors);
 					}
 
@@ -960,10 +943,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					int machineExclusions = 0;
 					for (auto mach : machinesMap.obj()) {
 						StatusObjectReader machine(mach.second);
-						if (machine.has("excluded") && machine.last().get_bool()) machineExclusions++;
+						if (machine.has("excluded") && machine.last().get_bool())
+							machineExclusions++;
 					}
 
-					if (machineExclusions) {
+					if (machineExclusions){
 						outputString += format(" (less %d excluded)", machineExclusions);
 					}
 
@@ -980,19 +964,18 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						double worstServerGb = minMemoryAvailable / (1024.0 * 1024 * 1024);
 						outputString += "\n  Memory availability    - ";
 						outputString += format("%.1f GB per process on machine with least available", worstServerGb);
-						outputString += minMemoryAvailable < 4294967296
-						                    ? "\n                           >>>>> (WARNING: 4.0 GB recommended) <<<<<"
-						                    : "";
+						outputString += minMemoryAvailable < 4294967296 ? "\n                           >>>>> (WARNING: 4.0 GB recommended) <<<<<" : "";
 					}
 
 					double retransCount = 0;
-					for (auto mach : machinesMap.obj()) {
+					for (auto mach : machinesMap.obj()){
 						StatusObjectReader machine(mach.second);
 						double hz;
-						if (machine.get("network.tcp_segments_retransmitted.hz", hz)) retransCount += hz;
+						if (machine.get("network.tcp_segments_retransmitted.hz", hz))
+							retransCount += hz;
 					}
 
-					if (retransCount > 0) {
+					if (retransCount > 0){
 						outputString += format("\n  Retransmissions rate   - %d Hz", (int)round(retransCount));
 					}
 				} else
@@ -1002,8 +985,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjCluster.get("fault_tolerance", faultTolerance)) {
 					int availLoss, dataLoss;
 
-					if (faultTolerance.get("max_machine_failures_without_losing_availability", availLoss) &&
-					    faultTolerance.get("max_machine_failures_without_losing_data", dataLoss)) {
+					if (faultTolerance.get("max_machine_failures_without_losing_availability", availLoss) && faultTolerance.get("max_machine_failures_without_losing_data", dataLoss)) {
 
 						outputString += "\n  Fault Tolerance        - ";
 
@@ -1013,17 +995,19 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						else
 							outputString += format("%d machines", minLoss);
 
-						if (dataLoss > availLoss) {
+						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
 						}
+
 					}
 				}
 
 				std::string serverTime = getDateInfoString(statusObjCluster, "cluster_controller_timestamp");
-				if (serverTime != "") {
+				if (serverTime != ""){
 					outputString += "\n  Server time            - " + serverTime;
 				}
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve cluster status";
 			}
@@ -1049,32 +1033,36 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				bool healthy;
 				if (statusObjDataState.get("healthy", healthy) && healthy) {
 					outputString += "Healthy" + (description != "" ? " (" + description + ")" : "");
-				} else if (dataState == "missing_data") {
+				}
+				else if (dataState == "missing_data") {
 					outputString += "UNHEALTHY" + (description != "" ? ": " + description : "");
-				} else if (dataState == "healing") {
+				}
+				else if (dataState == "healing") {
 					outputString += "HEALING" + (description != "" ? ": " + description : "");
-				} else if (description != "") {
+				}
+				else if (description != "") {
 					outputString += description;
-				} else {
+				}
+				else {
 					outputString += "unknown";
 				}
 
-				if (statusObjData.has("moving_data")) {
+				if (statusObjData.has("moving_data")){
 					StatusObjectReader movingData = statusObjData.last();
 					double dataInQueue, dataInFlight;
-					if (movingData.get("in_queue_bytes", dataInQueue) &&
-					    movingData.get("in_flight_bytes", dataInFlight))
-						outputString += format("\n  Moving data            - %.3f GB",
-						                       ((double)dataInQueue + (double)dataInFlight) / 1e9);
-				} else if (dataState == "initializing") {
+					if (movingData.get("in_queue_bytes", dataInQueue) && movingData.get("in_flight_bytes", dataInFlight))
+						outputString += format("\n  Moving data            - %.3f GB", ((double)dataInQueue + (double)dataInFlight) / 1e9);
+				}
+				else if (dataState == "initializing") {
 					outputString += "\n  Moving data            - unknown (initializing)";
-				} else {
+				}
+				else {
 					outputString += "\n  Moving data            - unknown";
 				}
 
 				outputString += "\n  Sum of key-value sizes - ";
 
-				if (statusObjData.has("total_kv_size_bytes")) {
+				if (statusObjData.has("total_kv_size_bytes")){
 					double totalDBBytes = statusObjData.last().get_int64();
 
 					if (totalDBBytes >= 1e12)
@@ -1086,13 +1074,14 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					else
 						// no decimal points for MB
 						outputString += format("%d MB", (int)round(totalDBBytes / 1e6));
-				} else {
+				}
+				else {
 					outputString += "unknown";
 				}
 
 				outputString += "\n  Disk space used        - ";
 
-				if (statusObjData.has("total_disk_used_bytes")) {
+				if (statusObjData.has("total_disk_used_bytes")){
 					double totalDiskUsed = statusObjData.last().get_int64();
 
 					if (totalDiskUsed >= 1e12)
@@ -1104,10 +1093,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					else
 						// no decimal points for MB
 						outputString += format("%d MB", (int)round(totalDiskUsed / 1e6));
-				} else
+				}
+				else
 					outputString += "unknown";
 
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
@@ -1118,14 +1109,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			try {
 				int64_t val;
 				if (statusObjData.get("least_operating_space_bytes_storage_server", val))
-					operatingSpaceString += format("\n  Storage server         - %.1f GB free on most full server",
-					                               std::max(val / 1e9, 0.0));
+					operatingSpaceString += format("\n  Storage server         - %.1f GB free on most full server", std::max(val / 1e9, 0.0));
 
 				if (statusObjData.get("least_operating_space_bytes_log_server", val))
-					operatingSpaceString += format("\n  Log server             - %.1f GB free on most full server",
-					                               std::max(val / 1e9, 0.0));
+					operatingSpaceString += format("\n  Log server             - %.1f GB free on most full server", std::max(val / 1e9, 0.0));
 
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e){
 				operatingSpaceString = "";
 			}
 
@@ -1150,20 +1140,18 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				try {
 					StatusObjectReader limit = statusObjCluster["qos.performance_limited_by"];
 					std::string name = limit["name"].get_str();
-					if (name != "workload") {
+					if (name != "workload")
+					{
 						std::string desc = limit["description"].get_str();
 						std::string serverID;
 						limit.get("reason_server_id", serverID);
 						std::string procAddr = getProcessAddressByServerID(processesMap, serverID);
-						performanceLimited = format("\n  Performance limited by %s: %s",
-						                            (procAddr == "unknown")
-						                                ? ("server" + (serverID == "" ? "" : (" " + serverID))).c_str()
-						                                : "process",
-						                            desc.c_str());
+						performanceLimited = format("\n  Performance limited by %s: %s", (procAddr == "unknown") ? ("server" + (serverID == "" ? "" : (" " + serverID))).c_str() : "process", desc.c_str());
 						if (procAddr != "unknown")
 							performanceLimited += format("\n  Most limiting process: %s", procAddr.c_str());
 					}
-				} catch (std::exception& e) {
+				}
+				catch (std::exception &e) {
 					// If anything here throws (such as for an incompatible type) ignore it.
 				}
 
@@ -1186,34 +1174,32 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += unknownRP ? "" : performanceLimited;
 
 				// display any process messages
-				// FIXME:  Above comment is not what this code block does, it actually just looks for a specific message
-				// in the process map, *by description*, and adds process addresses that have it to a vector.  Either
-				// change the comment or the code.
+				// FIXME:  Above comment is not what this code block does, it actually just looks for a specific message in the process
+				// map, *by description*, and adds process addresses that have it to a vector.  Either change the comment or the code.
 				std::vector<std::string> messagesAddrs;
-				for (auto proc : processesMap.obj()) {
+				for (auto proc : processesMap.obj()){
 					StatusObjectReader process(proc.second);
 					if (process.has("messages")) {
 						StatusArray processMessagesArr = process.last().get_array();
-						if (processMessagesArr.size()) {
-							for (StatusObjectReader msg : processMessagesArr) {
+						if (processMessagesArr.size()){
+							for (StatusObjectReader msg : processMessagesArr){
 								std::string desc;
 								std::string addr;
-								if (msg.get("description", desc) && desc == "Unable to update cluster file." &&
-								    process.get("address", addr)) {
+								if (msg.get("description", desc) && desc == "Unable to update cluster file." && process.get("address", addr)){
 									messagesAddrs.push_back(addr);
 								}
 							}
 						}
 					}
 				}
-				if (messagesAddrs.size()) {
-					outputString += format("\n\n%d FoundationDB processes reported unable to update cluster file:",
-					                       messagesAddrs.size());
-					for (auto msg : messagesAddrs) {
+				if (messagesAddrs.size()){
+					outputString += format("\n\n%d FoundationDB processes reported unable to update cluster file:", messagesAddrs.size());
+					for (auto msg : messagesAddrs){
 						outputString += "\n  " + msg;
 					}
 				}
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve workload status";
 			}
@@ -1233,16 +1219,17 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			outputString += format("\n  Running backups        - %d", backupTags.size());
 			outputString += format("\n  Running DRs            - ");
 
-			if (drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
+			if(drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
 				outputString += format("%d", 0);
-			} else {
-				if (drPrimaryTags.size() > 0) {
+			}
+			else {
+				if(drPrimaryTags.size() > 0) {
 					outputString += format("%d as primary", drPrimaryTags.size());
-					if (drSecondaryTags.size() > 0) {
+					if(drSecondaryTags.size() > 0) {
 						outputString += ", ";
 					}
 				}
-				if (drSecondaryTags.size() > 0) {
+				if(drSecondaryTags.size() > 0) {
 					outputString += format("%d as secondary", drSecondaryTags.size());
 				}
 			}
@@ -1258,7 +1245,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				try {
 					// constructs process performance details output
 					std::map<int, std::string> workerDetails;
-					for (auto proc : processesMap.obj()) {
+					for (auto proc : processesMap.obj()){
 						StatusObjectReader procObj(proc.second);
 						std::string address;
 						procObj.get("address", address);
@@ -1270,17 +1257,20 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						int tokens = sscanf(address.c_str(), "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port);
 
 						// If did not get exactly 5 tokens, or one of the integers is too large, address is invalid.
-						if (tokens != 5 || a & ~0xFF || b & ~0xFF || c & ~0xFF || d & ~0xFF || port & ~0xFFFF) {
+						if (tokens != 5 || a & ~0xFF || b & ~0xFF || c & ~0xFF || d & ~0xFF || port & ~0xFFFF)
+						{
 							line = format("  %-22s (invalid IP address or port)", address.c_str());
-							std::string& lastline = workerDetails[std::numeric_limits<int>::max()];
-							if (!lastline.empty()) lastline.append("\n");
+							std::string &lastline = workerDetails[std::numeric_limits<int>::max()];
+							if (!lastline.empty())
+								lastline.append("\n");
 							lastline += line;
 							continue;
 						}
 
 						// Create addrNum as a 48 bit number {A}{B}{C}{D}{PORT}
 						uint64_t addrNum = 0;
-						for (auto i : { a, b, c, d }) addrNum = (addrNum << 8) | i;
+						for (auto i : { a, b, c, d })
+							addrNum = (addrNum << 8) | i;
 						addrNum = (addrNum << 16) | port;
 
 						try {
@@ -1288,7 +1278,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							int64_t processTotalSize;
 
 							// Get the machine for this process
-							// StatusObjectReader mach = machinesMap[procObj["machine_id"].get_str()];
+							//StatusObjectReader mach = machinesMap[procObj["machine_id"].get_str()];
 							StatusObjectReader mach;
 							if (machinesMap.get(procObj["machine_id"].get_str(), mach, false)) {
 								StatusObjectReader machCPU;
@@ -1297,7 +1287,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 									machCPU.get("logical_core_utilization", mCPUUtil);
 
 									StatusObjectReader network;
-									if (mach.get("network", network)) {
+									if (mach.get("network", network)){
 										network.get("megabits_sent.hz", tx);
 										network.get("megabits_received.hz", rx);
 									}
@@ -1322,9 +1312,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							if (procObj.get("disk.busy", diskBusy))
 								line += format("%3.0f%% disk IO;", 100.0 * diskBusy);
 
-							line += processTotalSize != -1
-							            ? format("%4.1f GB", processTotalSize / (1024.0 * 1024 * 1024))
-							            : "";
+							line += processTotalSize != -1 ? format("%4.1f GB", processTotalSize / (1024.0 * 1024 * 1024)) : "";
 
 							double availableBytes;
 							if (procObj.get("memory.available_bytes", availableBytes))
@@ -1332,13 +1320,14 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							else
 								line += "  )";
 
-							if (procObj.has("messages")) {
-								for (StatusObjectReader message : procObj.last().get_array()) {
+							if (procObj.has("messages")){
+								for (StatusObjectReader message : procObj.last().get_array()){
 									std::string desc;
-									if (message.get("description", desc)) {
-										if (message.has("type")) {
+									if(message.get("description", desc)) {
+										if (message.has("type")){
 											line += "\n    Last logged error: " + desc;
-										} else {
+										}
+										else {
 											line += "\n    " + desc;
 										}
 									}
@@ -1353,8 +1342,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							workerDetails[addrNum] = noMetrics;
 						}
 					}
-					for (auto w : workerDetails) outputString += "\n" + format("%s", w.second.c_str());
-				} catch (std::runtime_error& e) {
+					for (auto w : workerDetails)
+						outputString += "\n" + format("%s", w.second.c_str());
+				}
+				catch (std::runtime_error& e){
 					outputString = outputStringCache;
 					outputString += "\n  Unable to retrieve process performance details";
 				}
@@ -1368,7 +1359,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			// client time
 			std::string clientTime = getDateInfoString(statusObjClient, "timestamp");
-			if (clientTime != "") {
+			if (clientTime != ""){
 				outputString += "\n\nClient time: " + clientTime;
 			}
 			printf("%s\n", outputString.c_str());
@@ -1376,9 +1367,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 		// status minimal
 		else if (level == StatusClient::MINIMAL) {
-			// Checking for field exsistence is not necessary here because if a field is missing there is no additional
-			// information that we would be able to display if we continued execution. Instead, any missing fields will
-			// throw and the catch will display the proper message.
+			// Checking for field exsistence is not necessary here because if a field is missing there is no additional information
+			// that we would be able to display if we continued execution. Instead, any missing fields will throw and the catch will display the proper message.
 			try {
 				// If any of these throw, can't get status because the result makes no sense.
 				StatusObjectReader statusObjClient = statusObj["client"].get_obj();
@@ -1387,9 +1377,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				bool available = statusObjClientDatabaseStatus["available"].get_bool();
 
 				// Database unavailable
-				if (!available) {
+				if (!available){
 					printf("%s", "The database is unavailable; type `status' for more information.\n");
-				} else {
+				}
+				else {
 					try {
 						bool healthy = statusObjClientDatabaseStatus["healthy"].get_bool();
 
@@ -1398,19 +1389,22 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							if (displayDatabaseAvailable) {
 								printf("The database is available.\n");
 							}
-						} else { // Database running but with issues
+						}
+						else {  // Database running but with issues
 							printf("The database is available, but has issues (type 'status' for more information).\n");
 						}
-					} catch (std::runtime_error& e) {
+					}
+					catch (std::runtime_error& e){
 						printf("The database is available, but has issues (type 'status' for more information).\n");
 					}
 				}
 
 				bool upToDate;
-				if (!statusObjClient.get("cluster_file.up_to_date", upToDate) || !upToDate) {
+				if (!statusObjClient.get("cluster_file.up_to_date", upToDate) || !upToDate){
 					printf("WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
 				}
-			} catch (std::runtime_error& e) {
+			}
+			catch (std::runtime_error& e){
 				printf("Unable to determine database state, type 'status' for more information.\n");
 			}
 
@@ -1418,27 +1412,29 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 		// status JSON
 		else if (level == StatusClient::JSON) {
-			printf("%s\n", json_spirit::write_string(json_spirit::mValue(statusObj.obj()),
-			                                         json_spirit::Output_options::pretty_print)
-			                   .c_str());
+			printf("%s\n", json_spirit::write_string(json_spirit::mValue(statusObj.obj()), json_spirit::Output_options::pretty_print).c_str());
 		}
-	} catch (Error& e) {
-		if (hideErrorMessages) return;
+	}
+	catch (Error &e){
+		if (hideErrorMessages)
+			return;
 		if (level == StatusClient::MINIMAL) {
 			printf("Unable to determine database state, type 'status' for more information.\n");
-		} else if (level == StatusClient::JSON) {
+		}
+		else if (level == StatusClient::JSON) {
 			printf("Could not retrieve status json.\n\n");
-		} else {
+		}
+		else {
 			printf("Could not retrieve status, type 'status json' for more information.\n");
 		}
 	}
 	return;
 }
 
-int printStatusFromJSON(std::string const& jsonFileName) {
+int printStatusFromJSON( std::string const& jsonFileName ) {
 	try {
 		json_spirit::mValue value;
-		json_spirit::read_string(readFileBytes(jsonFileName, 10000000), value);
+		json_spirit::read_string( readFileBytes( jsonFileName, 10000000 ), value );
 
 		printStatus(value.get_obj(), StatusClient::DETAILED, false, true);
 
@@ -1455,15 +1451,14 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 	}
 }
 
-ACTOR Future<Void> timeWarning(double when, const char* msg) {
-	wait(delay(when));
-	fputs(msg, stderr);
+ACTOR Future<Void> timeWarning( double when, const char* msg ) {
+	wait( delay(when) );
+	fputs( msg, stderr );
 
 	return Void();
 }
 
-ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> clusterFile,
-                               bool displayDatabaseAvailable = true) {
+ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> clusterFile, bool displayDatabaseAvailable = true) {
 	wait(f);
 	StatusObject s = wait(StatusClient::statusFetcher(clusterFile));
 	printf("\n");
@@ -1472,29 +1467,27 @@ ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> 
 	return Void();
 }
 
-ACTOR template <class T>
-Future<T> makeInterruptable(Future<T> f) {
+ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) { return t; }
-		when(wait(interrupt)) {
+		when (T t = wait(f)) { return t; }
+		when (wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
 		}
 	}
 }
 
-ACTOR Future<Database> openDatabase(Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster,
-                                    Standalone<StringRef> name, bool doCheckStatus) {
-	state Database db = wait(cluster->createDatabase(name));
+ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, Standalone<StringRef> name, bool doCheckStatus ) {
+	state Database db = wait( cluster->createDatabase(name) );
 	if (doCheckStatus) {
-		wait(makeInterruptable(checkStatus(Void(), ccf)));
+		wait( makeInterruptable( checkStatus( Void(), ccf )) );
 	}
 	return db;
 }
 
-ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
-	wait(makeInterruptable(tr->commit()));
+ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) {
+	wait( makeInterruptable( tr->commit() ) );
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
 		printf("Committed (%" PRId64 ")\n", ver);
@@ -1503,16 +1496,16 @@ ACTOR Future<Void> commitTransaction(Reference<ReadYourWritesTransaction> tr) {
 	return Void();
 }
 
-ACTOR Future<bool> configure(Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf,
-                             LineNoise* linenoise, Future<Void> warn) {
+ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
 	state ConfigurationResult::Type result;
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
 		state Optional<ConfigureAutoResult> conf;
-		if (tokens[1] == LiteralStringRef("auto")) {
-			StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(ccf)));
-			if (warn.isValid()) warn.cancel();
+		if( tokens[1] == LiteralStringRef("auto") ) {
+			StatusObject s = wait( makeInterruptable(StatusClient::statusFetcher( ccf )) );
+			if(warn.isValid())
+				warn.cancel();
 
 			conf = parseConfig(s);
 
@@ -1522,15 +1515,16 @@ ACTOR Future<bool> configure(Database db, std::vector<StringRef> tokens, Referen
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
-			                 conf.get().old_logs == conf.get().auto_logs &&
-			                 conf.get().old_proxies == conf.get().auto_proxies &&
-			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
-			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
-			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
+				conf.get().old_logs == conf.get().auto_logs &&
+				conf.get().old_proxies == conf.get().auto_proxies &&
+				conf.get().old_resolvers == conf.get().auto_resolvers &&
+				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
+				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
-			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
-			                        conf.get().old_proxies == conf.get().desired_proxies &&
-			                        conf.get().old_resolvers == conf.get().desired_resolvers;
+			bool noDesiredChanges = noChanges &&
+				conf.get().old_logs == conf.get().desired_logs &&
+				conf.get().old_proxies == conf.get().desired_proxies &&
+				conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
 
@@ -1538,61 +1532,44 @@ ACTOR Future<bool> configure(Database db, std::vector<StringRef> tokens, Referen
 			outputString += format("  processes %d\n", conf.get().processes);
 			outputString += format("  machines  %d\n", conf.get().machines);
 
-			if (noDesiredChanges)
-				outputString += "\nConfigure recommends keeping your current configuration:\n\n";
-			else if (noChanges)
-				outputString +=
-				    "\nConfigure cannot modify the configuration because some parameters have been set manually:\n\n";
-			else
-				outputString += "\nConfigure recommends the following changes:\n\n";
-			outputString += " ------------------------------------------------------------------- \n";
-			outputString += "| parameter                   | old              | new              |\n";
-			outputString += " ------------------------------------------------------------------- \n";
-			outputString += format("| replication                 | %16s | %16s |\n",
-			                       conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
-			outputString +=
-			    format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
-			outputString += conf.get().auto_logs != conf.get().desired_logs
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_logs)
-			                    : "\n";
-			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies,
-			                       conf.get().auto_proxies);
-			outputString += conf.get().auto_proxies != conf.get().desired_proxies
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_proxies)
-			                    : "\n";
-			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers,
-			                       conf.get().auto_resolvers);
-			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers)
-			                    : "\n";
-			outputString +=
-			    format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction,
-			           conf.get().auto_processes_with_transaction);
-			outputString += format("| transaction-class machines  | %16d | %16d |\n",
-			                       conf.get().old_machines_with_transaction, conf.get().auto_machines_with_transaction);
-			outputString += " ------------------------------------------------------------------- \n\n";
+			if(noDesiredChanges) outputString += "\nConfigure recommends keeping your current configuration:\n\n";
+			else if(noChanges) outputString += "\nConfigure cannot modify the configuration because some parameters have been set manually:\n\n";
+			else outputString += "\nConfigure recommends the following changes:\n\n";
+			outputString +=        " ------------------------------------------------------------------- \n";
+			outputString +=        "| parameter                   | old              | new              |\n";
+			outputString +=        " ------------------------------------------------------------------- \n";
+			outputString += format("| replication                 | %16s | %16s |\n", conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
+			outputString += format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
+			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
+			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
+			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
+			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers) : "\n";
+			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
+			outputString += format("| transaction-class machines  | %16d | %16d |\n", conf.get().old_machines_with_transaction, conf.get().auto_machines_with_transaction);
+			outputString +=        " ------------------------------------------------------------------- \n\n";
 
 			std::printf("%s", outputString.c_str());
 
-			if (noChanges) return false;
+			if(noChanges)
+				return false;
 
 			// TODO: disable completion
-			Optional<std::string> line = wait(linenoise->read("Would you like to make these changes? [y/n]> "));
+			Optional<std::string> line = wait( linenoise->read("Would you like to make these changes? [y/n]> ") );
 
-			if (!line.present() || (line.get() != "y" && line.get() != "Y")) {
+			if(!line.present() || (line.get() != "y" && line.get() != "Y")) {
 				return false;
 			}
 		}
 
-		ConfigurationResult::Type r =
-		    wait(makeInterruptable(changeConfig(db, std::vector<StringRef>(tokens.begin() + 1, tokens.end()), conf)));
+		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+1,tokens.end()), conf) ) );
 		result = r;
 	}
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
-	switch (result) {
+	switch(result) {
 	case ConfigurationResult::NO_OPTIONS_PROVIDED:
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
@@ -1603,40 +1580,40 @@ ACTOR Future<bool> configure(Database db, std::vector<StringRef> tokens, Referen
 
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
 		printf("ERROR: Database already exists! To change configuration, don't say `new'\n");
-		ret = true;
+		ret=true;
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
-		ret = false;
+		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
-		ret = false;
+		ret=false;
 		break;
 	default:
 		ASSERT(false);
-		ret = true;
+		ret=true;
 	};
 	return ret;
 }
 
 // FIXME: Factor address parsing from coordinators, include, exclude
 
-ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
+ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t)
+	for(auto t = tokens.begin()+1; t != tokens.end(); ++t)
 		if (t->startsWith(nameTokenBegin)) {
 			setName = t->substr(nameTokenBegin.size());
-			std::copy(t + 1, tokens.end(), t);
-			tokens.resize(tokens.size() - 1);
+			std::copy( t+1, tokens.end(), t );
+			tokens.resize( tokens.size()-1 );
 			break;
 		}
 
 	bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
 
 	state Reference<IQuorumChange> change;
-	if (tokens.size() == 1 && setName.size()) {
+	if (tokens.size()==1 && setName.size()) {
 		change = noQuorumChange();
 	} else if (automatic) {
 		// Automatic quorum change
@@ -1644,15 +1621,15 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 	} else {
 		state std::set<NetworkAddress> addresses;
 		state std::vector<StringRef>::iterator t;
-		for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
+		for(t = tokens.begin()+1; t != tokens.end(); ++t) {
 			try {
 				// SOMEDAY: Check for keywords
-				auto const& addr = NetworkAddress::parse(t->toString());
-				if (addr.isTLS() != isClusterTLS) {
+				auto const& addr = NetworkAddress::parse( t->toString() );
+				if( addr.isTLS() != isClusterTLS ) {
 					printf("ERROR: cannot use coordinator with incompatible TLS state: `%s'\n", t->toString().c_str());
 					return true;
 				}
-				if (addresses.count(addr)) {
+				if (addresses.count(addr)){
 					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
 					return true;
 				}
@@ -1667,16 +1644,16 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 		}
 
 		std::vector<NetworkAddress> addressesVec(addresses.begin(), addresses.end());
-		change = specifiedQuorumChange(addressesVec);
+		change = specifiedQuorumChange( addressesVec );
 	}
-	if (setName.size()) change = nameQuorumChange(setName.toString(), change);
+	if(setName.size()) change = nameQuorumChange( setName.toString(), change );
 
-	CoordinatorsResult::Type r = wait(makeInterruptable(changeQuorum(db, change)));
+	CoordinatorsResult::Type r = wait( makeInterruptable( changeQuorum( db, change ) ) );
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool err = true;
-	switch (r) {
+	switch(r) {
 	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
 		printf("ERROR: The specified network addresses are invalid\n");
 		break;
@@ -1698,7 +1675,7 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 		break;
 	case CoordinatorsResult::SUCCESS:
 		printf("Coordination state changed\n");
-		err = false;
+		err=false;
 		break;
 	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
 		printf("ERROR: Too few fdbserver machines to provide coordination at the current redundancy level\n");
@@ -1709,70 +1686,69 @@ ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool
 	return err;
 }
 
-ACTOR Future<bool> include(Database db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 	std::vector<AddressExclusion> addresses;
 	if (tokens.size() == 2 && tokens[1] == LiteralStringRef("all"))
-		addresses.push_back(AddressExclusion());
+		addresses.push_back( AddressExclusion() );
 	else {
-		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-			auto a = AddressExclusion::parse(*t);
+		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
+			auto a = AddressExclusion::parse( *t );
 			if (!a.isValid()) {
 				printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
-				if (t->toString().find(":tls") != std::string::npos)
+				if( t->toString().find(":tls") != std::string::npos )
 					printf("        Do not include the `:tls' suffix when naming a process\n");
 				return true;
 			}
-			addresses.push_back(a);
+			addresses.push_back( a );
 		}
 	}
 
-	wait(makeInterruptable(includeServers(db, addresses)));
+	wait( makeInterruptable(includeServers(db, addresses)) );
 	return false;
 };
 
-ACTOR Future<bool> exclude(Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf,
-                           Future<Void> warn) {
+ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, Future<Void> warn ) {
 	if (tokens.size() <= 1) {
-		vector<AddressExclusion> excl = wait(makeInterruptable(getExcludedServers(db)));
+		vector<AddressExclusion> excl = wait( makeInterruptable(getExcludedServers(db)) );
 		if (!excl.size()) {
 			printf("There are currently no servers excluded from the database.\n"
-			       "To learn how to exclude a server, type `help exclude'.\n");
+				   "To learn how to exclude a server, type `help exclude'.\n");
 			return false;
 		}
 
 		printf("There are currently %zu servers or processes being excluded from the database:\n", excl.size());
-		for (auto& e : excl) printf("  %s\n", e.toString().c_str());
+		for(auto& e : excl)
+			printf("  %s\n", e.toString().c_str());
 
 		printf("To find out whether it is safe to remove one or more of these\n"
-		       "servers from the cluster, type `exclude <addresses>'.\n"
-		       "To return one of these servers to the cluster, type `include <addresses>'.\n");
+			   "servers from the cluster, type `exclude <addresses>'.\n"
+			   "To return one of these servers to the cluster, type `include <addresses>'.\n");
 	} else {
 		state std::vector<AddressExclusion> addresses;
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
-		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-			if (*t == LiteralStringRef("FORCE")) {
+		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
+			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
 			} else {
-				auto a = AddressExclusion::parse(*t);
+				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
 					printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
-					if (t->toString().find(":tls") != std::string::npos)
+					if( t->toString().find(":tls") != std::string::npos )
 						printf("        Do not include the `:tls' suffix when naming a process\n");
 					return true;
 				}
-				addresses.push_back(a);
-				exclusions.insert(a);
+				addresses.push_back( a );
+				exclusions.insert( a );
 			}
 		}
 
-		if (!force) {
-			StatusObject status = wait(makeInterruptable(StatusClient::statusFetcher(ccf)));
+		if(!force) {
+			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
-			state std::string errorString =
-			    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
-			    "Please try the exclude again in 30 seconds.\n"
-			    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
+			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+											"Please try the exclude again in 30 seconds.\n"
+										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);
 
@@ -1792,7 +1768,7 @@ ACTOR Future<bool> exclude(Database db, std::vector<StringRef> tokens, Reference
 			state int ssExcludedCount = 0;
 			state double worstFreeSpaceRatio = 1.0;
 			try {
-				for (auto proc : processesMap.obj()) {
+				for (auto proc : processesMap.obj()){
 					bool storageServer = false;
 					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
 					for (StatusObjectReader role : rolesArray) {
@@ -1802,7 +1778,8 @@ ACTOR Future<bool> exclude(Database db, std::vector<StringRef> tokens, Reference
 						}
 					}
 					// Skip non-storage servers in free space calculation
-					if (!storageServer) continue;
+					if (!storageServer)
+						continue;
 
 					StatusObjectReader process(proc.second);
 					std::string addrStr;
@@ -1811,12 +1788,12 @@ ACTOR Future<bool> exclude(Database db, std::vector<StringRef> tokens, Reference
 						return true;
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
-					bool excluded =
-					    (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
+					bool excluded = (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
 					ssTotalCount++;
-					if (excluded) ssExcludedCount++;
+					if (excluded)
+						ssExcludedCount++;
 
-					if (!excluded) {
+					if(!excluded) {
 						StatusObjectReader disk;
 						if (!process.get("disk", disk)) {
 							printf("%s", errorString.c_str());
@@ -1835,78 +1812,81 @@ ACTOR Future<bool> exclude(Database db, std::vector<StringRef> tokens, Reference
 							return true;
 						}
 
-						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes) / total_bytes);
+						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes)/total_bytes);
 					}
 				}
-			} catch (...) // std::exception
+			}
+			catch (...)  // std::exception
 			{
 				printf("%s", errorString.c_str());
 				return true;
 			}
 
-			if (ssExcludedCount == ssTotalCount ||
-			    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
+			if( ssExcludedCount==ssTotalCount || (1-worstFreeSpaceRatio)*ssTotalCount/(ssTotalCount-ssExcludedCount) > 0.9 ) {
 				printf("ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
-				       "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n");
+					   "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n");
 				return true;
 			}
 		}
 
-		wait(makeInterruptable(excludeServers(db, addresses)));
+		wait( makeInterruptable(excludeServers(db,addresses)) );
 
 		printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
 		printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
 
-		if (warn.isValid()) warn.cancel();
-		wait(makeInterruptable(waitForExcludedServers(db, addresses)));
+		if(warn.isValid())
+			warn.cancel();
+		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
-		std::vector<ProcessData> workers = wait(makeInterruptable(getWorkers(db)));
+		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<uint32_t, std::set<uint16_t>> workerPorts;
-		for (auto addr : workers) workerPorts[addr.address.ip].insert(addr.address.port);
+		for(auto addr : workers)
+			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
 		std::vector<AddressExclusion> absentExclusions;
-		for (auto addr : addresses) {
+		for(auto addr : addresses) {
 			auto worker = workerPorts.find(addr.ip);
-			if (worker == workerPorts.end())
+			if(worker == workerPorts.end())
 				absentExclusions.push_back(addr);
-			else if (addr.port > 0 && worker->second.count(addr.port) == 0)
+			else if(addr.port > 0 && worker->second.count(addr.port) == 0)
 				absentExclusions.push_back(addr);
 		}
 
-		if (!absentExclusions.empty()) {
+		if(!absentExclusions.empty()) {
 			printf("\nWARNING: the following servers were not present in the cluster. Be sure that you\n"
-			       "excluded the correct machines or processes before removing them from the cluster:\n");
-			for (auto addr : absentExclusions) {
-				if (addr.port == 0)
+					"excluded the correct machines or processes before removing them from the cluster:\n");
+			for(auto addr : absentExclusions) {
+				if(addr.port == 0)
 					printf("  %s\n", toIPString(addr.ip).c_str());
 				else
 					printf("  %s\n", addr.toString().c_str());
 			}
 
 			printf("\n");
-		} else
+		}
+		else
 			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
 
 		bool foundCoordinator = false;
-		auto ccs = ClusterConnectionFile(ccf->getFilename()).getConnectionString();
-		for (auto& c : ccs.coordinators()) {
-			if (std::count(addresses.begin(), addresses.end(), AddressExclusion(c.ip, c.port)) ||
-			    std::count(addresses.begin(), addresses.end(), AddressExclusion(c.ip))) {
+		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
+		for( auto& c : ccs.coordinators()) {
+			if (std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip, c.port) ) ||
+					std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip) )) {
 				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
 				foundCoordinator = true;
 			}
 		}
 		if (foundCoordinator)
 			printf("Type `help coordinators' for information on how to change the\n"
-			       "cluster's coordination servers before removing them.\n");
+				   "cluster's coordination servers before removing them.\n");
 	}
 	return false;
 }
 
-ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
-	if (tokens.size() == 1) {
-		vector<ProcessData> _workers = wait(makeInterruptable(getWorkers(db)));
+ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
+	if( tokens.size() == 1 ) {
+		vector<ProcessData> _workers = wait( makeInterruptable(getWorkers(db)) );
 		auto workers = _workers; // strip const
 
 		if (!workers.size()) {
@@ -1917,33 +1897,32 @@ ACTOR Future<bool> setClass(Database db, std::vector<StringRef> tokens) {
 		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
 
 		printf("There are currently %zu processes in the database:\n", workers.size());
-		for (auto& w : workers)
-			printf("  %s: %s (%s)\n", w.address.toString().c_str(), w.processClass.toString().c_str(),
-			       w.processClass.sourceString().c_str());
+		for(auto& w : workers)
+			printf("  %s: %s (%s)\n", w.address.toString().c_str(), w.processClass.toString().c_str(), w.processClass.sourceString().c_str());
 		return false;
 	}
 
-	AddressExclusion addr = AddressExclusion::parse(tokens[1]);
+	AddressExclusion addr = AddressExclusion::parse( tokens[1] );
 	if (!addr.isValid()) {
 		printf("ERROR: '%s' is not a valid network endpoint address\n", tokens[1].toString().c_str());
-		if (tokens[1].toString().find(":tls") != std::string::npos)
+		if( tokens[1].toString().find(":tls") != std::string::npos )
 			printf("        Do not include the `:tls' suffix when naming a process\n");
 		return true;
 	}
 
 	ProcessClass processClass(tokens[2].toString(), ProcessClass::DBSource);
-	if (processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
+	if(processClass.classType() == ProcessClass::InvalidClass && tokens[2] != LiteralStringRef("default")) {
 		printf("ERROR: '%s' is not a valid process class\n", tokens[2].toString().c_str());
 		return true;
 	}
 
-	wait(makeInterruptable(setClass(db, addr, processClass)));
+	wait( makeInterruptable(setClass(db,addr,processClass)) );
 	return false;
 };
 
-Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadYourWritesTransaction>& tr,
-                                                    FdbOptions* options, bool intrans) {
-	if (!tr || !intrans) {
+
+Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadYourWritesTransaction> &tr, FdbOptions *options, bool intrans) {
+	if(!tr || !intrans) {
 		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
 		options->apply(tr);
 	}
@@ -1951,7 +1930,7 @@ Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadY
 	return tr;
 }
 
-std::string new_completion(const char* base, const char* name) {
+std::string new_completion(const char *base, const char *name) {
 	return format("%s%s ", base, name);
 }
 
@@ -1959,14 +1938,14 @@ void comp_generator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = { "escaping", "options", NULL };
+	const char* helpExtra[] = {"escaping", "options", NULL};
 
 	const char** he = helpExtra;
 
 	for (auto iter = helpMap.begin(); iter != helpMap.end(); ++iter) {
 		const char* name = (*iter).first.c_str();
 		if (!strncmp(name, text, len)) {
-			lc.push_back(new_completion(help ? "help " : "", name));
+			lc.push_back( new_completion(help ? "help " : "", name) );
 		}
 	}
 
@@ -1974,7 +1953,8 @@ void comp_generator(const char* text, bool help, std::vector<std::string>& lc) {
 		while (*he) {
 			const char* name = *he;
 			he++;
-			if (!strncmp(name, text, len)) lc.push_back(new_completion("help ", name));
+			if (!strncmp(name, text, len))
+				lc.push_back( new_completion("help ", name) );
 		}
 	}
 }
@@ -1987,18 +1967,18 @@ void help_generator(const char* text, std::vector<std::string>& lc) {
 	comp_generator(text, true, lc);
 }
 
-void option_generator(const char* text, const char* line, std::vector<std::string>& lc) {
+void option_generator(const char* text, const char *line, std::vector<std::string>& lc) {
 	int len = strlen(text);
 
 	for (auto iter = validOptions.begin(); iter != validOptions.end(); ++iter) {
 		const char* name = (*iter).c_str();
 		if (!strncmp(name, text, len)) {
-			lc.push_back(new_completion(line, name));
+			lc.push_back( new_completion(line, name) );
 		}
 	}
 }
 
-void array_generator(const char* text, const char* line, const char** options, std::vector<std::string>& lc) {
+void array_generator(const char* text, const char *line, const char** options, std::vector<std::string>& lc) {
 	const char** iter = options;
 	int len = strlen(text);
 
@@ -2006,29 +1986,28 @@ void array_generator(const char* text, const char* line, const char** options, s
 		const char* name = *iter;
 		iter++;
 		if (!strncmp(name, text, len)) {
-			lc.push_back(new_completion(line, name));
+			lc.push_back( new_completion(line, name) );
 		}
 	}
 }
 
-void onoff_generator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "on", "off", NULL };
+void onoff_generator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"on", "off", NULL};
 	array_generator(text, line, opts, lc);
 }
 
-void configure_generator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "new",   "single", "double", "triple",   "three_data_hall", "three_datacenter", "ssd",
-		                   "ssd-1", "ssd-2",  "memory", "proxies=", "logs=",           "resolvers=",       NULL };
+void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 
-void status_generator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "minimal", "details", "json", NULL };
+void status_generator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"minimal", "details", "json", NULL};
 	array_generator(text, line, opts, lc);
 }
 
-void kill_generator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "all", "list", NULL };
+void kill_generator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"all", "list", NULL};
 	array_generator(text, line, opts, lc);
 }
 
@@ -2036,7 +2015,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 	bool err, partial;
 	std::string whole_line = text;
 	auto parsed = parseLine(whole_line, err, partial);
-	if (err || partial) // If there was an error, or we are partially through a quoted sequence
+	if (err || partial) //If there was an error, or we are partially through a quoted sequence
 		return;
 
 	auto tokens = parsed.back();
@@ -2051,7 +2030,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 	// If there is a token and the input does not end in a space
 	if (count && text.size() > 0 && text[text.size() - 1] != ' ') {
-		count--; // Ignore the last token for purposes of later code
+		count--; //Ignore the last token for purposes of later code
 		ntext = tokens.back().toString();
 		base_input = whole_line.substr(0, whole_line.rfind(ntext));
 	}
@@ -2069,8 +2048,10 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 	}
 
 	if (tokencmp(tokens[0], "option")) {
-		if (count == 1) onoff_generator(ntext.c_str(), base_input.c_str(), lc);
-		if (count == 2) option_generator(ntext.c_str(), base_input.c_str(), lc);
+		if (count == 1)
+			onoff_generator(ntext.c_str(), base_input.c_str(), lc);
+		if (count == 2)
+			option_generator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
 	if (tokencmp(tokens[0], "writemode") && count == 1) {
@@ -2092,9 +2073,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID)
-	    .detail("Command", printable(StringRef(line)))
-	    .detail("Error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
 }
 
 struct CLIOptions {
@@ -2115,9 +2094,14 @@ struct CLIOptions {
 	std::string tlsCAPath;
 	std::string tlsPassword;
 
-	CLIOptions(int argc, char* argv[]) : trace(false), exit_timeout(0), initialStatusCheck(true), exit_code(-1) {
+	CLIOptions( int argc, char* argv[] )
+		: trace(false),
+		 exit_timeout(0),
+		 initialStatusCheck(true),
+		 exit_code(-1)
+	{
 		program_name = argv[0];
-		for (int a = 0; a < argc; a++) {
+		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
 			commandLine += argv[a];
 		}
@@ -2145,67 +2129,67 @@ struct CLIOptions {
 		}
 
 		switch (args.OptionId()) {
-		case OPT_CONNFILE:
-			clusterFile = args.OptionArg();
-			break;
-		case OPT_TRACE:
-			trace = true;
-			break;
-		case OPT_TRACE_DIR:
-			traceDir = args.OptionArg();
-			break;
-		case OPT_TIMEOUT: {
-			char* endptr;
-			exit_timeout = strtoul((char*)args.OptionArg(), &endptr, 10);
-			if (*endptr != '\0') {
-				fprintf(stderr, "ERROR: invalid timeout %s\n", args.OptionArg());
-				return 1;
+			case OPT_CONNFILE:
+				clusterFile = args.OptionArg();
+				break;
+			case OPT_TRACE:
+				trace = true;
+				break;
+			case OPT_TRACE_DIR:
+				traceDir = args.OptionArg();
+				break;
+			case OPT_TIMEOUT: {
+				char *endptr;
+				exit_timeout = strtoul((char*)args.OptionArg(), &endptr, 10);
+				if (*endptr != '\0') {
+					fprintf(stderr, "ERROR: invalid timeout %s\n", args.OptionArg());
+					return 1;
+				}
+				break;
 			}
-			break;
-		}
-		case OPT_EXEC:
-			exec = args.OptionArg();
-			break;
-		case OPT_NO_STATUS:
-			initialStatusCheck = false;
-			break;
+			case OPT_EXEC:
+				exec = args.OptionArg();
+				break;
+			case OPT_NO_STATUS:
+				initialStatusCheck = false;
+				break;
 
 #ifndef TLS_DISABLED
-		// TLS Options
-		case TLSOptions::OPT_TLS_PLUGIN:
-			args.OptionArg();
-			break;
-		case TLSOptions::OPT_TLS_CERTIFICATES:
-			tlsCertPath = args.OptionArg();
-			break;
-		case TLSOptions::OPT_TLS_CA_FILE:
-			tlsCAPath = args.OptionArg();
-			break;
-		case TLSOptions::OPT_TLS_KEY:
-			tlsKeyPath = args.OptionArg();
-			break;
-		case TLSOptions::OPT_TLS_PASSWORD:
-			tlsPassword = args.OptionArg();
-			break;
-		case TLSOptions::OPT_TLS_VERIFY_PEERS:
-			tlsVerifyPeers = args.OptionArg();
-			break;
+			// TLS Options
+			case TLSOptions::OPT_TLS_PLUGIN:
+				args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_CERTIFICATES:
+				tlsCertPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_KEY:
+				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				tlsVerifyPeers = args.OptionArg();
+				break;
 #endif
-		case OPT_HELP:
-			printProgramUsage(program_name.c_str());
-			return 0;
-		case OPT_STATUS_FROM_JSON:
-			return printStatusFromJSON(args.OptionArg());
-		case OPT_VERSION:
-			printVersion();
-			return FDB_EXIT_SUCCESS;
+			case OPT_HELP:
+				printProgramUsage(program_name.c_str());
+				return 0;
+			case OPT_STATUS_FROM_JSON:
+				return printStatusFromJSON(args.OptionArg());
+			case OPT_VERSION:
+				printVersion();
+				return FDB_EXIT_SUCCESS;
 		}
 		return -1;
 	}
 };
 
 ACTOR template <class T>
-Future<T> stopNetworkAfter(Future<T> what) {
+Future<T> stopNetworkAfter( Future<T> what ) {
 	try {
 		T t = wait(what);
 		g_network->stop();
@@ -2229,36 +2213,36 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state bool writeMode = false;
 
 	state std::string clusterConnectString;
-	state std::map<Key, Value> address_interface;
+	state std::map<Key,Value> address_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
 
-	state FdbOptions* options = &globalOptions;
+	state FdbOptions *options = &globalOptions;
 
-	state const char* database = "DB";
+	state const char *database = "DB";
 	state Standalone<StringRef> openDbName = StringRef(database);
 
 	state Reference<ClusterConnectionFile> ccf;
 
-	state std::pair<std::string, bool> resolvedClusterFile =
-	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
+	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
-		ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+		ccf = Reference<ClusterConnectionFile>( new ClusterConnectionFile( resolvedClusterFile.first ) );
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
 	}
 
-	// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are
-	// logged. This thread will eventually run the network, so call it now.
+	// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 	TraceEvent::setNetworkThread();
 
 	try {
 		cluster = Cluster::createCluster(ccf->getFilename().c_str(), -1);
 		connected = true;
-		if (!opt.exec.present()) printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
-	} catch (Error& e) {
+		if (!opt.exec.present())
+			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
+	}
+	catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
 		return 1;
@@ -2266,25 +2250,26 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
-		    .detail("SourceVersion", getHGVersion())
-		    .detail("Version", FDB_VT_VERSION)
-		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-		    .detail("ClusterFile", ccf->getFilename().c_str())
-		    .detail("ConnectionString", ccf->getConnectionString().toString())
-		    .detail("CommandLine", opt.commandLine)
-		    .trackLatest("ProgramStart");
+			.detail("SourceVersion", getHGVersion())
+			.detail("Version", FDB_VT_VERSION)
+			.detail("PackageName", FDB_VT_PACKAGE_NAME)
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detail("ClusterFile", ccf->getFilename().c_str())
+			.detail("ConnectionString", ccf->getConnectionString().toString())
+			.detail("CommandLine", opt.commandLine)
+			.trackLatest("ProgramStart");
 	}
 
 	if (connected && database) {
 		try {
-			Database _db = wait(openDatabase(ccf, cluster, openDbName, !opt.exec.present() && opt.initialStatusCheck));
+			Database _db = wait( openDatabase( ccf, cluster, openDbName, !opt.exec.present() && opt.initialStatusCheck ) );
 			db = _db;
 			tr = Reference<ReadYourWritesTransaction>();
 			opened = true;
-			if (!opt.exec.present() && !opt.initialStatusCheck) printf("\n");
+			if (!opt.exec.present() && !opt.initialStatusCheck)
+				printf("\n");
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) {
+			if(e.code() != error_code_actor_cancelled) {
 				printf("ERROR: %s (%d)\n", e.what(), e.code());
 				printf("Unable to open database `%s'\n", database);
 			}
@@ -2296,34 +2281,37 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		printf("Welcome to the fdbcli. For help, type `help'.\n");
 
 		validOptions = options->getValidOptions();
+
 	}
 
 	state bool is_error = false;
 
 	state Future<Void> warn;
 	loop {
-		if (warn.isValid()) warn.cancel();
+		if (warn.isValid())
+			warn.cancel();
 
 		state std::string line;
 
 		if (opt.exec.present()) {
 			line = opt.exec.get();
 		} else {
-			Optional<std::string> rawline = wait(linenoise.read("fdb> "));
+			Optional<std::string> rawline = wait( linenoise.read("fdb> ") );
 			if (!rawline.present()) {
 				printf("\n");
 				return 0;
 			}
 			line = rawline.get();
 
-			if (!line.size()) continue;
+			if (!line.size())
+				continue;
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
-		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf);
+		warn = checkStatus( timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), ccf );
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
@@ -2337,8 +2325,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (parsed.size() > 0) {
 					// Denote via a special token that the command was a parse failure.
 					auto& last_command = parsed.back();
-					last_command.insert(last_command.begin(),
-					                    StringRef((const uint8_t*)"parse_error", strlen("parse_error")));
+					last_command.insert(last_command.begin(), StringRef((const uint8_t*)"parse_error", strlen("parse_error")));
 				}
 			}
 
@@ -2354,7 +2341,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					break;
 				}
 
-				if (!tokens.size()) continue;
+				if (!tokens.size())
+					continue;
 
 				if (tokencmp(tokens[0], "parse_error")) {
 					printf("ERROR: Command failed to completely parse.\n");
@@ -2390,27 +2378,30 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printHelpOverview();
 					} else if (tokens.size() == 2) {
 						if (tokencmp(tokens[1], "escaping"))
-							printf("\n"
-							       "When parsing commands, fdbcli considers a space to delimit individual tokens.\n"
-							       "To include a space in a single token, you may either enclose the token in\n"
-							       "quotation marks (\"hello world\"), prefix the space with a backslash\n"
-							       "(hello\\ world), or encode the space as a hex byte (hello\\x20world).\n"
-							       "\n"
-							       "To include a literal quotation mark in a token, precede it with a backslash\n"
-							       "(\\\"hello\\ world\\\").\n"
-							       "\n"
-							       "To express a binary value, encode each byte as a two-digit hex byte, preceded\n"
-							       "by \\x (e.g. \\x20 for a space character, or \\x0a\\x00\\x00\\x00 for a\n"
-							       "32-bit, little-endian representation of the integer 10).\n"
-							       "\n"
-							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
-							       "and spaces encoded as two-digit hex bytes.\n\n");
+							printf(
+								"\n"
+								"When parsing commands, fdbcli considers a space to delimit individual tokens.\n"
+								"To include a space in a single token, you may either enclose the token in\n"
+								"quotation marks (\"hello world\"), prefix the space with a backslash\n"
+								"(hello\\ world), or encode the space as a hex byte (hello\\x20world).\n"
+								"\n"
+								"To include a literal quotation mark in a token, precede it with a backslash\n"
+								"(\\\"hello\\ world\\\").\n"
+								"\n"
+								"To express a binary value, encode each byte as a two-digit hex byte, preceded\n"
+								"by \\x (e.g. \\x20 for a space character, or \\x0a\\x00\\x00\\x00 for a\n"
+								"32-bit, little-endian representation of the integer 10).\n"
+								"\n"
+								"All keys and values are displayed by the fdbcli with non-printable characters\n"
+								"and spaces encoded as two-digit hex bytes.\n\n");
 						else if (tokencmp(tokens[1], "options")) {
-							printf("\n"
-							       "The following options are available to be set using the `option' command:\n"
-							       "\n");
+							printf(
+								"\n"
+								"The following options are available to be set using the `option' command:\n"
+								"\n");
 							options->printHelpString();
-						} else if (tokencmp(tokens[1], "help"))
+						}
+						else if (tokencmp(tokens[1], "help"))
 							printHelpOverview();
 						else
 							printHelp(tokens[1]);
@@ -2426,19 +2417,18 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitconnected")) {
-					wait(makeInterruptable(cluster->onConnected()));
+					wait( makeInterruptable( cluster->onConnected() ) );
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "waitopen")) {
-					Version _ = wait(getTransaction(db, tr, options, intrans)->getReadVersion());
+				if( tokencmp(tokens[0], "waitopen")) {
+					Version _ = wait( getTransaction(db,tr,options,intrans)->getReadVersion() );
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "status")) {
-					// Warn at 7 seconds since status will spend as long as 5 seconds trying to read/write from the
-					// database
-					warn = timeWarning(7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n");
+					// Warn at 7 seconds since status will spend as long as 5 seconds trying to read/write from the database
+					warn = timeWarning( 7.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n" );
 
 					state StatusClient::StatusLevel level;
 					if (tokens.size() == 1)
@@ -2455,7 +2445,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 
-					StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(ccf)));
+					StatusObject s = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);
@@ -2464,27 +2454,26 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool err = wait(configure(db, tokens, ccf, &linenoise, warn));
+					bool err = wait( configure( db, tokens, ccf, &linenoise, warn ) );
 					if (err) is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile(ccf->getFilename()).getConnectionString();
+					auto cs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
-						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(),
-						       describe(cs.coordinators()).c_str());
+						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
 						printf("Type `help coordinators' to learn how to change this information.\n");
 					} else {
-						bool err = wait(coordinators(db, tokens, cs.coordinators()[0].isTLS()));
+						bool err = wait( coordinators( db, tokens, cs.coordinators()[0].isTLS() ) );
 						if (err) is_error = true;
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "exclude")) {
-					bool err = wait(exclude(db, tokens, ccf, warn));
+					bool err = wait( exclude(db, tokens, ccf, warn ) );
 					if (err) is_error = true;
 					continue;
 				}
@@ -2494,7 +2483,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait(include(db, tokens));
+						bool err = wait( include(db,tokens) );
 						if (err) is_error = true;
 					}
 					continue;
@@ -2505,7 +2494,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait(setClass(db, tokens));
+						bool err = wait( setClass(db, tokens) );
 						if (err) is_error = true;
 					}
 					continue;
@@ -2542,7 +2531,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						wait(commitTransaction(tr));
+						wait( commitTransaction( tr ) );
 						intrans = false;
 						options = &globalOptions;
 					}
@@ -2568,7 +2557,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "rollback")) {
-					if (tokens.size() != 1) {
+					if(tokens.size() != 1) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
@@ -2587,11 +2576,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(getTransaction(db, tr, options, intrans)->get(tokens[1])));
+						Optional<Standalone<StringRef>> v = wait( makeInterruptable( getTransaction(db,tr,options,intrans)->get(tokens[1]) ) );
 
 						if (v.present())
-							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
+							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(),
+								   printable(v.get()).c_str());
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
 					}
@@ -2601,50 +2590,44 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-						                                               LiteralStringRef("\xff\xff\xff")),
-						                                   1)));
-						for (auto it : kvs) {
-							auto ip_port = it.key.endsWith(LiteralStringRef(":tls"))
-							                   ? it.key.removeSuffix(LiteralStringRef(":tls"))
-							                   : it.key;
+						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						for( auto it : kvs ) {
+							auto ip_port = it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
 							address_interface[ip_port] = it.value;
 						}
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-						if (address_interface.size() == 0) {
+						if(address_interface.size() == 0) {
 							printf("\nNo addresses can be killed.\n");
-						} else if (address_interface.size() == 1) {
+						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be killed:\n");
 						} else {
 							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
 						}
-						for (auto it : address_interface) {
+						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
 						}
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
-						for (auto it : address_interface) {
+						for( auto it : address_interface ) {
 							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
 						}
 						if (address_interface.size() == 0) {
-							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill "
-							       "all’.\n");
+							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
 						} else {
 							printf("Attempted to kill %zu processes\n", address_interface.size());
 						}
 					} else {
-						for (int i = 1; i < tokens.size(); i++) {
-							if (!address_interface.count(tokens[i])) {
+						for(int i = 1; i < tokens.size(); i++) {
+							if(!address_interface.count(tokens[i])) {
 								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 								is_error = true;
 								break;
 							}
 						}
 
-						if (!is_error) {
-							for (int i = 1; i < tokens.size(); i++) {
+						if(!is_error) {
+							for(int i = 1; i < tokens.size(); i++) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]]);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
@@ -2654,11 +2637,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
-					if (tokens.size() != 1) {
+					if(tokens.size() != 1) {
 						printUsage(tokens[0]);
 						is_error = true;
 					}
-					wait(makeInterruptable(forceRecovery(ccf)));
+					wait( makeInterruptable( forceRecovery( ccf ) ) );
 					continue;
 				}
 
@@ -2682,28 +2665,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								is_error = true;
 								continue;
 							}
-							state Future<Optional<Standalone<StringRef>>> sampleRateFuture =
-							    tr->get(fdbClientInfoTxnSampleRate);
-							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture =
-							    tr->get(fdbClientInfoTxnSizeLimit);
+							state Future<Optional<Standalone<StringRef>>> sampleRateFuture = tr->get(fdbClientInfoTxnSampleRate);
+							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture = tr->get(fdbClientInfoTxnSizeLimit);
 							wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
 							std::string sampleRateStr = "default", sizeLimitStr = "default";
 							if (sampleRateFuture.get().present()) {
-								const double sampleRateDbl =
-								    BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
+								const double sampleRateDbl = BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
 								if (!std::isinf(sampleRateDbl)) {
 									sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
 								}
 							}
 							if (sizeLimitFuture.get().present()) {
-								const int64_t sizeLimit =
-								    BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
+								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
 								if (sizeLimit != -1) {
 									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 								}
 							}
-							printf("Client profiling rate is set to %s and size limit is set to %s.\n",
-							       sampleRateStr.c_str(), sizeLimitStr.c_str());
+							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
 							continue;
 						}
 						if (tokencmp(tokens[2], "set")) {
@@ -2740,7 +2718,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
 							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
 							if (!intrans) {
-								wait(commitTransaction(tr));
+								wait( commitTransaction( tr ) );
 							}
 							continue;
 						}
@@ -2755,14 +2733,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-						                                               LiteralStringRef("\xff\xff\xff")),
-						                                   1)));
+						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+						                             LiteralStringRef("\xff\xff\xff")),
+						                 1)));
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls"))
-							                   ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-							                   : pair.key;
+							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
 							printf("%s\n", printable(ip_port).c_str());
 						}
 						continue;
@@ -2784,7 +2760,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
 							                             LiteralStringRef("\xff\xff\xff")),
 							                 1)));
-							char* duration_end;
+							char *duration_end;
 							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
 							if (!std::isspace(*duration_end)) {
 								printf("ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
@@ -2795,11 +2771,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							state std::vector<Key> all_profiler_addresses;
 							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
-								auto ip_port = pair.key.endsWith(LiteralStringRef(":tls"))
-								                   ? pair.key.removeSuffix(LiteralStringRef(":tls"))
-								                   : pair.key;
-								interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(
-								                                pair.value, IncludeVersion()));
+								auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+								interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 							}
 							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
 								for (const auto& pair : interfaces) {
@@ -2815,8 +2788,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
 									auto element = interfaces.find(tokens[tokenidx]);
 									if (element == interfaces.end()) {
-										printf("ERROR: process '%s' not recognized.\n",
-										       printable(tokens[tokenidx]).c_str());
+										printf("ERROR: process '%s' not recognized.\n", printable(tokens[tokenidx]).c_str());
 										is_error = true;
 									}
 								}
@@ -2828,8 +2800,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 										profileRequest.duration = duration;
 										profileRequest.outputFile = tokens[4];
 										all_profiler_addresses.push_back(tokens[tokenidx]);
-										all_profiler_responses.push_back(
-										    interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
+										all_profiler_responses.push_back(interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
 									}
 								}
 							}
@@ -2838,8 +2809,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (int i = 0; i < all_profiler_responses.size(); i++) {
 									const ErrorOr<Void>& err = all_profiler_responses[i].get();
 									if (err.isError()) {
-										printf("ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(),
-										       err.getError().name(), err.getError().what());
+										printf("ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(), err.getError().name(), err.getError().what());
 									}
 								}
 							}
@@ -2856,49 +2826,44 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait(
-						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-						                                               LiteralStringRef("\xff\xff\xff")),
-						                                   1)));
-						for (auto it : kvs) {
+						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						for( auto it : kvs ) {
 							address_interface[it.key] = it.value;
 						}
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-						if (address_interface.size() == 0) {
+						if(address_interface.size() == 0) {
 							printf("\nNo addresses can be checked.\n");
-						} else if (address_interface.size() == 1) {
+						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be checked:\n");
 						} else {
 							printf("\nThe following %zu addresses can be checked:\n", address_interface.size());
 						}
-						for (auto it : address_interface) {
+						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
 						}
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
-						for (auto it : address_interface) {
+						for( auto it : address_interface ) {
 							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second);
 						}
 						if (address_interface.size() == 0) {
-							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command "
-							       "before running `expensive_data_check all’.\n");
+							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
 						} else {
 							printf("Attempted to kill and check %zu processes\n", address_interface.size());
 						}
 					} else {
-						for (int i = 1; i < tokens.size(); i++) {
-							if (!address_interface.count(tokens[i])) {
+						for(int i = 1; i < tokens.size(); i++) {
+							if(!address_interface.count(tokens[i])) {
 								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 								is_error = true;
 								break;
 							}
 						}
 
-						if (!is_error) {
-							for (int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
-								        address_interface[tokens[i]]);
+						if(!is_error) {
+							for(int i = 1; i < tokens.size(); i++) {
+								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]]);
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
@@ -2906,8 +2871,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "getrange") ||
-				    tokencmp(tokens[0], "getrangekeys")) { // FIXME: support byte limits, and reverse range reads
+				if (tokencmp(tokens[0], "getrange") || tokencmp(tokens[0], "getrangekeys")) { //FIXME: support byte limits, and reverse range reads
 					if (tokens.size() < 2 || tokens.size() > 4) {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -2928,7 +2892,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							limit = 0;
 							int place = 1;
 							for (int i = tokens[3].size(); i > 0; i--) {
-								int val = int(tokens[3][i - 1]) - int('0');
+								int val = int(tokens[3][i-1]) - int('0');
 								if (val < 0 || val > 9) {
 									valid = false;
 									break;
@@ -2948,26 +2912,30 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						Standalone<StringRef> endKey;
 						if (tokens.size() >= 3) {
 							endKey = tokens[2];
-						} else if (tokens[1].size() == 0) {
+						}
+						else if(tokens[1].size() == 0) {
 							endKey = normalKeys.end;
-						} else if (tokens[1] == systemKeys.begin) {
+						}
+						else if(tokens[1] == systemKeys.begin) {
 							endKey = systemKeys.end;
-						} else if (tokens[1] >= allKeys.end) {
+						}
+						else if(tokens[1] >= allKeys.end) {
 							throw key_outside_legal_range();
-						} else {
+						}
+						else {
 							endKey = strinc(tokens[1]);
 						}
 
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit)));
+						Standalone<RangeResultRef> kvs = wait( makeInterruptable( getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit) ) );
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
 							if (tokencmp(tokens[0], "getrangekeys"))
 								printf("`%s'\n", printable((*iter).key).c_str());
 							else
-								printf("`%s' is `%s'\n", printable((*iter).key).c_str(),
-								       printable((*iter).value).c_str());
+								printf("`%s' is `%s'\n",
+									printable((*iter).key).c_str(),
+									printable((*iter).value).c_str());
 						}
 						printf("\n");
 					}
@@ -2979,9 +2947,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (tokencmp(tokens[1], "on")) {
+						if(tokencmp(tokens[1], "on")) {
 							writeMode = true;
-						} else if (tokencmp(tokens[1], "off")) {
+						} else if(tokencmp(tokens[1], "off")) {
 							writeMode = false;
 						} else {
 							printUsage(tokens[0]);
@@ -2992,7 +2960,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "set")) {
-					if (!writeMode) {
+					if(!writeMode) {
 						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
@@ -3006,14 +2974,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "clear")) {
-					if (!writeMode) {
+					if(!writeMode) {
 						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
@@ -3027,14 +2995,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->clear(tokens[1]);
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "clearrange")) {
-					if (!writeMode) {
+					if(!writeMode) {
 						printf("ERROR: writemode must be enabled to set or clear keys in the database.\n");
 						is_error = true;
 						continue;
@@ -3048,7 +3016,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
-							wait(commitTransaction(tr));
+							wait( commitTransaction( tr ) );
 						}
 					}
 					continue;
@@ -3059,10 +3027,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("Usage: datadistribution <on|off>\n");
 						is_error = true;
 					} else {
-						if (tokencmp(tokens[1], "on")) {
+						if(tokencmp(tokens[1], "on")) {
 							int _ = wait(setDDMode(db, 1));
 							printf("Data distribution is enabled\n");
-						} else if (tokencmp(tokens[1], "off")) {
+						} else if(tokencmp(tokens[1], "off")) {
 							int _ = wait(setDDMode(db, 0));
 							printf("Data distribution is disabled\n");
 						} else {
@@ -3078,35 +3046,37 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (tokens.size() == 1) {
-							if (options->hasAnyOptionsEnabled()) {
+						if(tokens.size() == 1) {
+							if(options->hasAnyOptionsEnabled()) {
 								printf("\nCurrently enabled options:\n\n");
 								options->print();
 								printf("\n");
-							} else
+							}
+							else
 								printf("There are no options enabled\n");
 
 							continue;
 						}
 						bool isOn;
-						if (tokencmp(tokens[1], "on")) {
+						if(tokencmp(tokens[1], "on")) {
 							isOn = true;
-						} else if (tokencmp(tokens[1], "off")) {
-							if (intrans) {
+						}
+						else if(tokencmp(tokens[1], "off")) {
+							if(intrans) {
 								printf("ERROR: Cannot turn option off when using a transaction created with `begin'\n");
 								is_error = true;
 								continue;
 							}
-							if (tokens.size() > 3) {
+							if(tokens.size() > 3) {
 								printf("ERROR: Cannot specify option argument when turning option off\n");
 								is_error = true;
 								continue;
 							}
 
 							isOn = false;
-						} else {
-							printf("ERROR: Invalid option state `%s': option must be turned `on' or `off'\n",
-							       formatStringRef(tokens[1]).c_str());
+						}
+						else {
+							printf("ERROR: Invalid option state `%s': option must be turned `on' or `off'\n", formatStringRef(tokens[1]).c_str());
 							is_error = true;
 							continue;
 						}
@@ -3115,10 +3085,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						try {
 							options->setOption(tr, tokens[2], isOn, arg, intrans);
-							printf("Option %s for %s\n", isOn ? "enabled" : "disabled",
-							       intrans ? "current transaction" : "all transactions");
-						} catch (Error& e) {
-							// options->setOption() prints error message
+							printf("Option %s for %s\n", isOn ? "enabled" : "disabled", intrans ? "current transaction" : "all transactions");
+						}
+						catch(Error &e) {
+							//options->setOption() prints error message
 							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", printable(tokens[2]));
 							is_error = true;
 						}
@@ -3131,12 +3101,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID)
-			    .detail("Command", printable(StringRef(line)))
-			    .detail("IsError", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
 
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled) printf("ERROR: %s (%d)\n", e.what(), e.code());
+			if(e.code() != error_code_actor_cancelled)
+				printf("ERROR: %s (%d)\n", e.what(), e.code());
 			is_error = true;
 			if (connected && opened) {
 				if (intrans) {
@@ -3156,30 +3125,32 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 ACTOR Future<int> runCli(CLIOptions opt) {
 	state LineNoise linenoise(
-	    [](std::string const& line, std::vector<std::string>& completions) { fdbcli_comp_cmd(line, completions); },
-	    [](std::string const& line) -> LineNoise::Hint { return LineNoise::Hint(); }, 1000, false);
+		[](std::string const& line, std::vector<std::string>& completions) {
+			fdbcli_comp_cmd(line, completions);
+		},
+		[](std::string const& line)->LineNoise::Hint {
+			return LineNoise::Hint();
+		},
+		1000,
+		false);
 
 	state std::string historyFilename;
 	try {
 		historyFilename = joinPath(getUserHomeDirectory(), ".fdbcli_history");
 		linenoise.historyLoad(historyFilename);
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory")
-		    .error(e)
-		    .detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename)
-		    .GetLastError();
+	}
+	catch(Error &e) {
+		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory").error(e).detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename).GetLastError();
 	}
 
 	state int result = wait(cli(opt, &linenoise));
 
-	if (!historyFilename.empty()) {
+	if(!historyFilename.empty()) {
 		try {
 			linenoise.historySave(historyFilename);
-		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory")
-			    .error(e)
-			    .detail("Filename", historyFilename)
-			    .GetLastError();
+		}
+		catch(Error &e) {
+			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory").error(e).detail("Filename", historyFilename).GetLastError();
 		}
 	}
 
@@ -3192,13 +3163,13 @@ ACTOR Future<Void> timeExit(double duration) {
 	return Void();
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 	platformInit();
 	initSignalSafeUnwind();
 	Error::init();
-	std::set_new_handler(&platform::outOfMemory);
+	std::set_new_handler( &platform::outOfMemory );
 	uint64_t memLimit = 8LL << 30;
-	setMemoryQuota(memLimit);
+	setMemoryQuota( memLimit );
 
 	registerCrashHandler();
 
@@ -3206,17 +3177,18 @@ int main(int argc, char** argv) {
 	struct sigaction act;
 
 	// We don't want ctrl-c to quit
-	sigemptyset(&act.sa_mask);
+	sigemptyset( &act.sa_mask );
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
 	sigaction(SIGINT, &act, NULL);
 #endif
 
 	CLIOptions opt(argc, argv);
-	if (opt.exit_code != -1) return opt.exit_code;
+	if (opt.exit_code != -1)
+		return opt.exit_code;
 
-	if (opt.trace) {
-		if (opt.traceDir.empty())
+	if(opt.trace) {
+		if(opt.traceDir.empty())
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
 		else
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(opt.traceDir));
@@ -3227,10 +3199,10 @@ int main(int argc, char** argv) {
 	initHelp();
 
 	// deferred TLS options
-	if (opt.tlsCertPath.size()) {
+	if ( opt.tlsCertPath.size() ) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, opt.tlsCertPath);
-		} catch (Error& e) {
+		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS certificate path to `%s' (%s)\n", opt.tlsCertPath.c_str(), e.what());
 			return 1;
 		}
@@ -3239,34 +3211,36 @@ int main(int argc, char** argv) {
 	if (opt.tlsCAPath.size()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
-		} catch (Error& e) {
+		}
+		catch (Error& e) {
 			fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", opt.tlsCAPath.c_str(), e.what());
 			return 1;
 		}
 	}
-	if (opt.tlsKeyPath.size()) {
+	if ( opt.tlsKeyPath.size() ) {
 		try {
-			if (opt.tlsPassword.size()) setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
+			if (opt.tlsPassword.size())
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
-		} catch (Error& e) {
+		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", opt.tlsKeyPath.c_str(), e.what());
 			return 1;
 		}
 	}
-	if (opt.tlsVerifyPeers.size()) {
+	if ( opt.tlsVerifyPeers.size() ) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, opt.tlsVerifyPeers);
-		} catch (Error& e) {
-			fprintf(stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", opt.tlsVerifyPeers.c_str(),
-			        e.what());
+		} catch( Error& e ) {
+			fprintf(stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", opt.tlsVerifyPeers.c_str(), e.what());
 			return 1;
 		}
 	}
 
 	try {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
-	} catch (Error& e) {
+	}
+	catch (Error& e) {
 		fprintf(stderr, "ERROR: cannot disable logging client related information (%s)\n", e.what());
 		return 1;
 	}
@@ -3275,12 +3249,13 @@ int main(int argc, char** argv) {
 		setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
-		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
+		auto f = stopNetworkAfter( success(cliFuture) || timeoutFuture );
 		runNetwork();
 
-		if (cliFuture.isReady()) {
+		if(cliFuture.isReady()) {
 			return cliFuture.get();
-		} else {
+		}
+		else {
 			return 1;
 		}
 	} catch (Error& e) {

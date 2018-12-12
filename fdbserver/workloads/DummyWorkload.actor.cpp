@@ -19,19 +19,22 @@
  */
 
 #include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
 	bool displayWorkers;
 	double displayDelay;
 
-	DummyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	DummyWorkload(WorkloadContext const& wcx)
+	: TestWorkload(wcx) {
 		displayWorkers = getOption(options, LiteralStringRef("displayWorkers"), true);
 		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
 	}
 
-	virtual std::string description() { return "DummyWorkload"; }
+	virtual std::string description() {
+		return "DummyWorkload";
+	}
 
 	virtual Future<Void> start(Database const& cx) {
 		if ((clientId == 0) && (displayWorkers)) {
@@ -40,15 +43,19 @@ struct DummyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(DummyWorkload* self, Database cx) {
-		if (self->displayDelay > 0.0) wait(delay(self->displayDelay));
+	ACTOR static Future<Void> _start( DummyWorkload* self, Database cx) {
+		if (self->displayDelay > 0.0)
+			wait(delay(self->displayDelay));
 		g_simulator.displayWorkers();
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check(Database const& cx) {
+		return true;
+	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual void getMetrics(vector<PerfMetric>& m) {
+	}
 };
 
 WorkloadFactory<DummyWorkload> DummyWorkloadFactory("DummyWorkload");

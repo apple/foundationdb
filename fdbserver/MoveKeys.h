@@ -30,47 +30,59 @@
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& prevOwner& myOwner& prevWrite;
-	}
+	void serialize(Ar& ar) { ar & prevOwner & myOwner & prevWrite; }
 };
 
-Future<MoveKeysLock> takeMoveKeysLock(Database const& cx, UID const& masterId);
+Future<MoveKeysLock> takeMoveKeysLock( Database const& cx, UID const& masterId );
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
 // has been executed by a different locker since takeMoveKeysLock().
 // takeMoveKeysLock itself is a read-only operation - it does not conflict with other
 // attempts to take the lock.
 
-Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock);
+Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock );
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
 
-void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
+void seedShardServers(
+	Arena& trArena,
+	CommitTransactionRef &tr,
+	vector<StorageServerInterface> servers );
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
-Future<Void> moveKeys(Database const& occ, KeyRange const& keys, vector<UID> const& destinationTeam,
-                      vector<UID> const& healthyDestinations, MoveKeysLock const& lock,
-                      Promise<Void> const& dataMovementComplete, FlowLock* const& startMoveKeysParallelismLock,
-                      FlowLock* const& finishMoveKeysParallelismLock, Version const& recoveryVersion,
-                      bool const& hasRemote,
-                      UID const& relocationIntervalId); // for logging only
+Future<Void> moveKeys(
+	Database const& occ,
+	KeyRange const& keys,
+	vector<UID> const& destinationTeam,
+	vector<UID> const& healthyDestinations,
+	MoveKeysLock const& lock,
+	Promise<Void> const& dataMovementComplete,
+	FlowLock* const& startMoveKeysParallelismLock,
+	FlowLock* const& finishMoveKeysParallelismLock,
+	Version const& recoveryVersion,
+	bool const& hasRemote,
+	UID const& relocationIntervalId); // for logging only
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before
 // it returns (since it needs to execute the finishMoveKeys transaction).
 
-Future<std::pair<Version, Tag>> addStorageServer(Database const& cx, StorageServerInterface const& server);
+Future<std::pair<Version,Tag>> addStorageServer(
+	Database const& cx,
+	StorageServerInterface const& server );
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)
 // Returns a Version in which the storage server is in the database
 // This doesn't need to be called for the "seed" storage servers (see seedShardServers above)
 
-Future<Void> removeStorageServer(Database const& cx, UID const& serverID, MoveKeysLock const& lock);
+Future<Void> removeStorageServer(
+	Database const& cx,
+	UID const& serverID,
+	MoveKeysLock const& lock );
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
 // (though a new storage server with a new unique ID may be recruited from the same fdbserver).
 
-Future<bool> canRemoveStorageServer(Transaction* const& tr, UID const& serverID);
+Future<bool> canRemoveStorageServer( Transaction* const& tr, UID const& serverID );
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
 

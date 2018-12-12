@@ -35,9 +35,8 @@ struct SystemMonitorMachineState {
 
 	SystemMonitorMachineState() : monitorStartTime(0) {}
 	SystemMonitorMachineState(uint32_t ip) : ip(ip), monitorStartTime(0) {}
-	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> zoneId,
-	                          Optional<Standalone<StringRef>> machineId, uint32_t ip)
-	  : folder(folder), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
+	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId, uint32_t ip) 
+		: folder(folder), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
 };
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);
@@ -79,10 +78,11 @@ struct NetworkData {
 	int64_t countConnClosedWithoutError;
 
 	void init() {
-		auto getValue = [](StringRef name) -> int64_t {
+		auto getValue = [] (StringRef name) -> int64_t {
 			Reference<Int64Metric> r = Int64Metric::getOrCreateInstance(name);
 			int64_t v = 0;
-			if (r) v = r->getValue();
+			if(r)
+				v = r->getValue();
 			return v;
 		};
 
@@ -124,7 +124,7 @@ struct NetworkData {
 };
 
 struct StatisticsState {
-	SystemStatisticsState* systemState;
+	SystemStatisticsState *systemState;
 	NetworkData networkState;
 	NetworkMetrics networkMetricsState;
 
@@ -132,6 +132,6 @@ struct StatisticsState {
 };
 
 void systemMonitor();
-SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* statState, bool machineMetrics = false);
+SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics = false);
 
 #endif /* FLOW_SYSTEM_MONITOR_H */
