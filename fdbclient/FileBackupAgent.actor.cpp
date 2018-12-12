@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
-#include "BackupContainer.h"
-#include "DatabaseContext.h"
-#include "ManagementAPI.h"
-#include "Status.h"
-#include "KeyBackedTypes.h"
+#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 #include <ctime>
 #include <climits>
@@ -808,7 +808,7 @@ namespace fileBackup {
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 
 		state BackupConfig config(current.first);
-		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
@@ -1004,6 +1004,7 @@ namespace fileBackup {
 
 					// Update the range bytes written in the backup config
 					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
+					backup.snapshotRangeFileCount().atomicOp(tr, 1, MutationRef::AddValue);
 
 					// See if there is already a file for this key which has an earlier begin, update the map if not.
 					Optional<BackupConfig::RangeSlice> s = wait(backup.snapshotRangeFileMap().get(tr, range.end));
@@ -1129,11 +1130,31 @@ namespace fileBackup {
 					if(done)
 						return Void();
 
-					// Start writing a new file 
+					// Start writing a new file after verifying this task should keep running as of a new read version (which must be >= outVersion)
 					outVersion = values.second;
 					// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
 					state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
-					Reference<IBackupFile> f = wait(bc->writeRangeFile(outVersion, blockSize));
+					state Version snapshotBeginVersion;
+					state int64_t snapshotRangeFileCount;
+
+					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+					loop {
+						try {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+							wait(taskBucket->keepRunning(tr, task)
+								&& storeOrThrow(backup.snapshotBeginVersion().get(tr), snapshotBeginVersion)
+								&& store(backup.snapshotRangeFileCount().getD(tr), snapshotRangeFileCount)
+							);
+
+							break;
+						} catch(Error &e) {
+							wait(tr->onError(e));
+						}
+					}
+
+					Reference<IBackupFile> f = wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 					outFile = f;
 
 					// Initialize range file writer and write begin key
@@ -2813,7 +2834,7 @@ namespace fileBackup {
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
 			if(!addingToExistingBatch && beginVersion > 0) {
-				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
+				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion + 1));
 			}
 
 			// The applyLag must be retrieved AFTER potentially updating the apply end version.
@@ -3377,7 +3398,7 @@ public:
 				}
 
 				state BackupConfig config(oldUidAndAborted.get().first);
-				state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+				state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 				// Break, if no longer runnable
 				if (!FileBackupAgent::isRunnable(status)) {
@@ -3412,7 +3433,7 @@ public:
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 		if (uidAndAbortedFlag.present()) {
 			state BackupConfig prevConfig(uidAndAbortedFlag.get().first);
-			state EBackupState prevBackupStatus = wait(prevConfig.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+			state EBackupState prevBackupStatus = wait(prevConfig.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 			if (FileBackupAgent::isRunnable(prevBackupStatus)) {
 				throw backup_duplicate();
 			}
@@ -3619,7 +3640,7 @@ public:
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
-		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
@@ -3670,7 +3691,7 @@ public:
 
 		state BackupConfig config(current.first);
 		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
@@ -3709,7 +3730,7 @@ public:
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
-					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+					EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
 

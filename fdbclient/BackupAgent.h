@@ -23,14 +23,14 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "NativeAPI.h"
-#include "TaskBucket.h"
-#include "Notified.h"
-#include <fdbrpc/IAsyncFile.h>
-#include "KeyBackedTypes.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/TaskBucket.h"
+#include "fdbclient/Notified.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include <ctime>
 #include <climits>
-#include "BackupContainer.h"
+#include "fdbclient/BackupContainer.h"
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -428,7 +428,6 @@ Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
 void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t& mutationSize, StringRef value, StringRef addPrefix = StringRef(), StringRef removePrefix = StringRef());
-Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> const& tr, Key const& keyErrors, std::string const& message);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
@@ -616,6 +615,15 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Number of kv range files that were both committed to persistent storage AND inserted into
+	// the snapshotRangeFileMap.  Note that since insertions could replace 1 or more existing
+	// map entries this is not necessarily the number of entries currently in the map.
+	// This value exists to help with sizing of kv range folders for BackupContainers that 
+	// require it.
+	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
 	RangeDispatchMapT snapshotRangeDispatchMap() {
@@ -672,6 +680,7 @@ public:
 			
 			copy.snapshotBeginVersion().set(tr, beginVersion.get());
 			copy.snapshotTargetEndVersion().set(tr, endVersion);
+			copy.snapshotRangeFileCount().set(tr, 0);
 
 			return Void();
 		});
@@ -730,8 +739,8 @@ public:
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
 		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() >= firstSnapshot.get().get()) {
-				return lastLog.get().get();
+			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
+				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});

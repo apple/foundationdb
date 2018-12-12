@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "RYWIterator.h"
-#include "KeyRangeMap.h"
+#include "fdbclient/RYWIterator.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "flow/UnitTest.h"
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = { 
@@ -354,7 +354,7 @@ static int getWriteMapCount(WriteMap *p) {
 	return count;
 }
 
-TEST_CASE("fdbclient/WriteMap/emptiness") {
+TEST_CASE("/fdbclient/WriteMap/emptiness") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -363,7 +363,7 @@ TEST_CASE("fdbclient/WriteMap/emptiness") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/clear") {
+TEST_CASE("/fdbclient/WriteMap/clear") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -380,7 +380,7 @@ TEST_CASE("fdbclient/WriteMap/clear") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
+TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -453,7 +453,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
+TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -526,7 +526,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/addValue") {
+TEST_CASE("/fdbclient/WriteMap/addValue") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -541,7 +541,7 @@ TEST_CASE("fdbclient/WriteMap/addValue") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/random") {
+TEST_CASE("/fdbclient/WriteMap/random") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());

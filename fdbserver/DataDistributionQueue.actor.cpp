@@ -25,10 +25,10 @@
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
-#include "DataDistribution.h"
+#include "fdbserver/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
-#include "MoveKeys.h"
-#include "Knobs.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -345,7 +345,7 @@ struct DDQueueData {
 
 	int activeRelocations;
 	int queuedRelocations;
-	int bytesWritten;
+	int64_t bytesWritten;
 	int teamSize;
 
 	std::map<UID, Busyness> busymap;
@@ -1031,6 +1031,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send( rd );
 					return Void();
 				} else {
@@ -1271,7 +1272,7 @@ ACTOR Future<Void> dataDistributionQueue(
 						.detail( "HighPriorityRelocations", highPriorityRelocations )
 						.detail( "HighestPriority", highestPriorityRelocation )
 						.detail( "BytesWritten", self.bytesWritten )
-						.trackLatest( format("%s/MovingData", printable(cx->dbName).c_str() ).c_str() );
+						.trackLatest( "MovingData" );
 				}
 				when ( wait( self.error.getFuture() ) ) {}  // Propagate errors from dataDistributionRelocator
 				when ( wait(waitForAll( balancingFutures ) )) {}

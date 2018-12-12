@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
@@ -50,7 +50,7 @@ Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
 	return uncancellable(zeroRangeHelper(Reference<IAsyncFile>::addRef(this), offset, length, 0));
 }
 
-TEST_CASE( "fileio/zero" ) {
+TEST_CASE("/fileio/zero" ) {
 	state std::string filename = "/tmp/__ZEROJUNK__";
 	state Reference<IAsyncFile> f =
 		wait(IAsyncFileSystem::filesystem()->open(
@@ -115,7 +115,7 @@ Future<Void> IAsyncFileSystem::incrementalDeleteFile( std::string filename, bool
 		FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
 }
 
-TEST_CASE( "fileio/incrementalDelete" ) {
+TEST_CASE("/fileio/incrementalDelete" ) {
 	//about 5GB
 	state int64_t fileSize = 5e9;
 	state std::string filename = "/tmp/__JUNK__";

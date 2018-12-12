@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "MonitorLeader.h"
-#include "CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
@@ -59,8 +59,9 @@ std::string ClusterConnectionFile::getErrorString( std::pair<std::string, bool> 
 }
 
 ClusterConnectionFile::ClusterConnectionFile( std::string const& filename ) {
-	if( !fileExists( filename ) )
+	if( !fileExists( filename ) ) {
 		throw no_cluster_file_found();
+	}
 
 	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
 	this->filename = filename;
@@ -186,7 +187,7 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 		throw connection_string_invalid();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 	std::string input;
 
 	{
@@ -215,7 +216,7 @@ TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/fuzz") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	// For a static connection string, add in fuzzed comments and whitespace
 	// SOMEDAY: create a series of random connection strings, rather than the one we started with
 	std::string connectionString = "0xxdeadbeef:100100100@1.1.1.1:34534,5.1.5.3:23443";
@@ -311,7 +312,7 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
+		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
 
 		if (li != *info) {
 			*info = li;

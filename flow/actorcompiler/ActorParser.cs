@@ -263,7 +263,7 @@ namespace actorcompiler
                     int end;
                     var descr = ParseDescr(i, out end);
                     int lines;
-                    new DescrCompiler(descr, sourceFile, inBlocks == 0, tokens[i].BraceDepth).Write(writer, out lines);
+                    new DescrCompiler(descr, tokens[i].BraceDepth).Write(writer, out lines);
                     i = end;
                     outLine += lines;
                     if (i != tokens.Length && LineNumbersEnabled)
@@ -855,8 +855,12 @@ namespace actorcompiler
             var body = range(heading.End+1, tokens.Length)
                 .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
+            bool warnOnNoWait = false;
             if (head_token.Value == "ACTOR")
+            {
                 ParseActorHeading(actor, heading);
+                warnOnNoWait = true;
+            }
             else if (head_token.Value == "TEST_CASE")
                 ParseTestCaseHeading(actor, heading);
             else
@@ -864,7 +868,7 @@ namespace actorcompiler
 
             actor.body = ParseCodeBlock(body);
 
-            if (!actor.body.containsWait())
+            if (!actor.body.containsWait() && warnOnNoWait)
                 Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
 
             end = body.End + 1;

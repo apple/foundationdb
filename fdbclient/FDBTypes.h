@@ -22,7 +22,7 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include "flow/flow.h"
-#include "Knobs.h"
+#include "fdbclient/Knobs.h"
 
 using std::vector;
 using std::pair;
@@ -89,6 +89,11 @@ static std::string describe( const Tag item ) {
 
 static std::string describe( const int item ) {
 	return format("%d", item);
+}
+
+template <class T>
+static std::string describe( Reference<T> const& item ) {
+	return item->toString();
 }
 
 template <class T>
@@ -475,6 +480,7 @@ struct KeyValueStoreType {
 		SSD_BTREE_V1,
 		MEMORY,
 		SSD_BTREE_V2,
+		SSD_REDWOOD_V1,
 		END
 	};
 
@@ -492,6 +498,7 @@ struct KeyValueStoreType {
 		switch( type ) {
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
+			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
 			default: return "unknown";
 		}

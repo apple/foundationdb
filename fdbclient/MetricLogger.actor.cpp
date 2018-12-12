@@ -398,7 +398,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 	return Void();
 }
 
-TEST_CASE("fdbserver/metrics/TraceEvents") {
+TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	auto getenv2 = [](const char *s) -> const char * {s = getenv(s); return s ? s : ""; };
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");
@@ -408,9 +408,9 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Reference<Cluster> metricsCluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
+	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
-	state Future<Void> metrics = runMetrics(metricsCluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;

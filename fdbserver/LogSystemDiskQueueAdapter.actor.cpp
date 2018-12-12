@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "IDiskQueue.h"
-#include "LogSystem.h"
-#include "LogSystemDiskQueueAdapter.h"
-#include "Knobs.h"
+#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/Knobs.h"
 
 class LogSystemDiskQueueAdapterImpl {
 public:
@@ -35,7 +35,27 @@ public:
 			}
 
 			if(!self->cursor->hasMessage()) {
-				wait( self->cursor->getMore() );
+				loop {
+					choose {
+						when( wait( self->cursor->getMore() ) ) {
+							break;
+						}
+						when( wait( self->localityChanged ) ) {
+							self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().first : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().second : invalidVersion );
+							self->localityChanged = self->peekLocality->onChange();
+						}
+						when( wait( delay(self->peekTypeSwitches==0 ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME)) ) {
+							self->peekTypeSwitches++;
+							if(self->peekTypeSwitches%2==1) {
+								self->cursor = self->logSystem->peek( UID(), self->recoveryLoc, self->tag, true );
+								self->localityChanged = Never();
+							} else {
+								self->cursor = self->logSystem->peekSpecial( UID(), self->recoveryLoc, self->tag, self->peekLocality ? self->peekLocality->get().first : tagLocalityInvalid, self->peekLocality ? self->peekLocality->get().second : invalidVersion );
+								self->localityChanged = self->peekLocality->onChange();
+							}
+						}
+					}
+				}
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;
@@ -144,6 +164,6 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 	return pcm.getFuture();
 }
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag ) {
-	return new LogSystemDiskQueueAdapter( logSystem, tag );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality ) {
+	return new LogSystemDiskQueueAdapter( logSystem, tag, peekLocality );
 }

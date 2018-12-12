@@ -20,13 +20,12 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
-#define FLOW_GENERICACTORS_ACTOR_G_H
-#include "flow/genericactors.actor.g.h"
+	#define FLOW_GENERICACTORS_ACTOR_G_H
+	#include "flow/genericactors.actor.g.h"
 #elif !defined(GENERICACTORS_ACTOR_H)
-#define GENERICACTORS_ACTOR_H
+	#define GENERICACTORS_ACTOR_H
 
 #include <list>
 
@@ -297,6 +296,16 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 template<class T>
 Future<Void> store(Future<T> what, T &out) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });
+}
+
+template<class T>
+Future<Void> storeOrThrow(Future<Optional<T>> what, T &out, Error e = key_not_found()) {
+	return map(what, [&out,e](Optional<T> const &o) {
+		if(!o.present())
+			throw e;
+		out = o.get();
+		return Void();
+	});
 }
 
 //Waits for a future to be ready, and then applies an asynchronous function to it.

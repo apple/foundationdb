@@ -203,17 +203,11 @@ namespace actorcompiler
     class DescrCompiler
     {
         Descr descr;
-        string sourceFile;
-        bool isTopLevel;
-       
         string memberIndentStr;
 
-        public DescrCompiler(Descr descr, string sourceFile, bool isTopLevel, int braceDepth)
+        public DescrCompiler(Descr descr, int braceDepth)
         {
             this.descr = descr;
-            this.sourceFile = sourceFile;
-            this.isTopLevel = isTopLevel;
-
             this.memberIndentStr = new string('\t', braceDepth);
         }
         public void Write(TextWriter writer, out int lines)

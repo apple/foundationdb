@@ -23,9 +23,9 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FailureMonitor.h"
-#include "Locality.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include <random>
 #include "fdbrpc/ReplicationPolicy.h"
@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -149,8 +149,8 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
@@ -159,7 +159,7 @@ public:
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
-		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("Roles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
+		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
 	}
 
 	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
@@ -169,16 +169,16 @@ public:
 			if (rolesIt != addressIt->second.end()) {
 				if (rolesIt->second > 1) {
 					rolesIt->second --;
-					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
+					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
 				}
 				else {
 					addressIt->second.erase(rolesIt);
 					if (addressIt->second.size()) {
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
 					}
 					else {
 						roleAddresses.erase(addressIt);
-						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", 0).detail("Value", 0).detail("Result", "Removed Address");
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("NumRoles", 0).detail("Value", 0).detail("Result", "Removed Address");
 					}
 				}
 			}
@@ -285,6 +285,7 @@ public:
 	int32_t usableRegions;
 	std::string disablePrimary;
 	std::string disableRemote;
+	std::string originalRegions;
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;

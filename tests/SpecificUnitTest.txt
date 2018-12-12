@@ -3,4 +3,4 @@ testName=UnitTests
 startDelay=0
 useDB=false
 maxTestCases=0
-testsMatching=fdbserver/status/schema
+testsMatching=/status/json/builder

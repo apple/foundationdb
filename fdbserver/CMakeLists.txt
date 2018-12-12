@@ -18,6 +18,7 @@ set(FDBSERVER_SRCS
   fdbserver.actor.cpp
   IDiskQueue.h
   IKeyValueStore.h
+  IndirectShadowPager.actor.cpp
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
@@ -35,6 +36,7 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
+  MemoryPager.actor.cpp
   MoveKeys.actor.cpp
   MoveKeys.h
   networktest.actor.cpp
@@ -50,6 +52,7 @@ set(FDBSERVER_SRCS
   RecoveryState.h
   Resolver.actor.cpp
   ResolverInterface.h
+  Restore.actor.cpp
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
@@ -72,6 +75,7 @@ set(FDBSERVER_SRCS
   TesterInterface.h
   TLogInterface.h
   TLogServer.actor.cpp
+  VersionedBTree.actor.cpp
   VFSAsync.cpp
   WaitFailure.actor.cpp
   WaitFailure.h
@@ -117,6 +121,7 @@ set(FDBSERVER_SRCS
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
   workloads/KVStoreTest.actor.cpp
+  workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
@@ -261,6 +266,7 @@ add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/KVStoreTest.txt UNIT)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/KVStoreTestRead.txt UNIT)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/KVStoreTestWrite.txt UNIT)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/KVStoreValueSize.txt UNIT)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/KillRegionCycle.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/LayerStatusMerge.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/PureNetwork.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/RRW2500.txt)
@@ -268,6 +274,8 @@ add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/RandomRead.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/RandomReadWrite.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/ReadAbsent.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/ReadHalfAbsent.txt)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/RedwoodCorrectness.txt UNIT)
+add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/RedwoodPerfTest.txt UNIT)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/SlowTask.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/SpecificUnitTest.txt)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/StreamingWrite.txt)

@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;

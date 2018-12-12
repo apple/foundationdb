@@ -9,14 +9,17 @@ Administration
    :hidden:
    :titlesonly:
 
+   configuration
    moving-a-cluster
    tls
-   
+
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
 .. note:: In FoundationDB, a "cluster" refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.
 
 To administer an externally accessible cluster, you need to understand basic system tasks. You should begin with how to :ref:`start and stop the database <administration-running-foundationdb>`. Next, you should review management of a cluster, including :ref:`adding <adding-machines-to-a-cluster>` and :ref:`removing <removing-machines-from-a-cluster>` machines, and monitoring :ref:`cluster status <administration-monitoring-cluster-status>` and the basic :ref:`server processes <administration_fdbmonitor>`. You should be familiar with :ref:`managing trace files <administration-managing-trace-files>` and :ref:`other administrative concerns <administration-other-administrative-concerns>`. Finally, you should know how to :ref:`uninstall <administration-removing>` or :ref:`upgrade <upgrading-foundationdb>` the database.
+
+FoundationDB also provides a number of different :doc:`configuration <configuration>` options which you should know about when setting up a FoundationDB database.
 
 .. _administration-running-foundationdb:
 
@@ -547,11 +550,20 @@ Virtual machines
 Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the ``locality_machineid`` parameter in :ref:`foundationdb.conf <foundationdb-conf>`. All processes on VMs that share hardware should specify the same ``locality_machineid``.
 
 Datacenters
-------------
+-----------
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
 If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+
+(Re)creating a database
+-----------------------
+
+Installing FoundationDB packages usually creates a new database on the cluster automatically. However, if a cluster does not have a database configured (because the package installation failed to create it, you deleted your data files, or you did not install from the packages, etc.), then you may need to create it manually using the ``configure new`` command in ``fdbcli`` with the desired redundancy mode and storage engine::
+
+    > configure new single memory
+
+.. warning:: In a cluster that hasn't been configured, running ``configure new`` will cause the processes in the cluster to delete all data files in their data directories. If a process is reusing an existing data directory, be sure to backup any files that you want to keep. Do not use ``configure new`` to fix a previously working cluster that reports itself missing unless you are certain any necessary data files are safe.
 
 .. _administration-removing:
 

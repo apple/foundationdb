@@ -146,7 +146,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester fdb_c_tests
 
 Makefiles: $(MK_GENERATED)
 
@@ -201,13 +201,16 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@rm -r .libstdc++
 
 docpreview: javadoc
-	TARGETS= $(MAKE) -C documentation docpreview
+	@echo "Generating     docpreview"
+	@TARGETS= $(MAKE) -C documentation docpreview
 
 docpreview_clean:
-	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
+	@echo "Cleaning       docpreview"
+	@CLEAN_TARGETS= $(MAKE) -C documentation -s --no-print-directory docpreview_clean
 
 packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc
-	TARGETS= $(MAKE) -C documentation docpackage
+	@echo "Packaging      documentation"
+	@TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
 	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
 	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION).tar.gz

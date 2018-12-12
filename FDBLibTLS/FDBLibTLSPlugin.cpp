@@ -20,9 +20,9 @@
 
 #include "boost/config.hpp"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSPolicy.h"
-#include "Trace.h"
+#include "FDBLibTLS/FDBLibTLSPlugin.h"
+#include "FDBLibTLS/FDBLibTLSPolicy.h"
+#include "flow/Trace.h"
 
 #include <string.h>
 

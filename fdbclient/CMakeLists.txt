@@ -1,10 +1,13 @@
 set(FDBCLIENT_SRCS
+  AsyncFileBlobStore.actor.h
+  AsyncFileBlobStore.actor.cpp
   Atomic.h
   AutoPublicAddress.cpp
   BackupAgent.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
+  BlobStore.actor.cpp
   ClientDBInfo.h
   ClientLogEvents.h
   ClientWorkerInterface.h
@@ -21,7 +24,9 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  HTTP.actor.cpp
   IClientApi.h
+  JsonBuilder.cpp
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
@@ -46,6 +51,7 @@ set(FDBCLIENT_SRCS
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
+  Schemas.cpp
   SnapshotCache.h
   Status.h
   StatusClient.actor.cpp
@@ -64,11 +70,17 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   WriteMap.h
+  # libraries
   json_spirit/json_spirit_error_position.h
   json_spirit/json_spirit_reader_template.h
   json_spirit/json_spirit_value.h
   json_spirit/json_spirit_writer_options.h
   json_spirit/json_spirit_writer_template.h
+  libb64/cdecode.c
+  libb64/cencode.c
+  md5/md5.c
+  sha1/SHA1.cpp
+  #options
   ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 

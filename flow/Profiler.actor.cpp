@@ -31,7 +31,7 @@
 #include <sys/syscall.h>
 #include <link.h>
 
-#include "Platform.h"
+#include "flow/Platform.h"
 
 extern volatile int profilingEnabled;
 
@@ -58,6 +58,10 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 		f = fopen(filename.c_str(), "wb");
 	}
 
+	virtual bool isOpen() {
+		return f != nullptr;
+	}
+
 	virtual void addref() { ReferenceCounted<SyncFileForSim>::addref(); }
 	virtual void delref() { ReferenceCounted<SyncFileForSim>::delref(); }
 
@@ -69,6 +73,7 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 	}
 
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+		ASSERT(isOpen());
 		fseek(f, offset, SEEK_SET);
 		if (fwrite(data, 1, length, f) != length)
 			throw io_error();
@@ -81,6 +86,7 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 	}
 
 	virtual Future<Void> flush() {
+		ASSERT(isOpen());
 		fflush(f);
 		return Void();
 	}
@@ -125,15 +131,19 @@ struct Profiler {
 	static Profiler* active_profiler;
 	BinaryWriter environmentInfoWriter;
 	INetwork* network;
-	timer_t periodic_timer;
+	timer_t periodicTimer;
+	bool timerInitialized;
 
-	Profiler(int period, std::string const& outfn, INetwork* network) : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network) {
+	Profiler(int period, std::string const& outfn, INetwork* network) : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network), timerInitialized(false) {
 		actor = profile(this, period, outfn);
 	}
 
 	~Profiler() {
 		enableSignal(false);
-		timer_delete(periodic_timer);
+
+		if(timerInitialized) {
+			timer_delete(periodicTimer);
+		}
 	}
 
 	void signal_handler() {  // async signal safe!
@@ -173,6 +183,13 @@ struct Profiler {
 	}
 
 	ACTOR static Future<Void> profile(Profiler* self, int period, std::string outfn) {
+		// Open and truncate output file
+		state Reference<SyncFileForSim> outFile = Reference<SyncFileForSim>(new SyncFileForSim(outfn));
+		if(!outFile->isOpen()) {
+			TraceEvent(SevWarn, "FailedToOpenProfilingOutputFile").detail("Filename", outfn).GetLastError();
+			return Void();
+		}
+
 		// According to folk wisdom, calling this once before setting up the signal handler makes
 		// it async signal safe in practice :-/
 		platform::raw_backtrace(self->addresses, MAX_STACK_DEPTH);
@@ -201,34 +218,28 @@ struct Profiler {
 		sigaction( SIGPROF, &act, NULL );
 
 		// Set up periodic profiling timer
-		if (0) {
-			itimerval tv;
-			sigevent sev;
-			setitimer( ITIMER_PROF, &tv, NULL );
-			tv.it_interval.tv_sec = 0;
-			tv.it_interval.tv_usec = period;
-			tv.it_value.tv_sec = 0;
-			tv.it_value.tv_usec = g_nondeterministic_random->randomInt(period/2,period+1);
-			setitimer( ITIMER_PROF, &tv, NULL );
-		} else {
-			int period_ns = period * 1000;
-			itimerspec tv;
-			tv.it_interval.tv_sec = 0;
-			tv.it_interval.tv_nsec = period_ns;
-			tv.it_value.tv_sec = 0;
-			tv.it_value.tv_nsec = g_nondeterministic_random->randomInt(period_ns/2,period_ns+1);
+		int period_ns = period * 1000;
+		itimerspec tv;
+		tv.it_interval.tv_sec = 0;
+		tv.it_interval.tv_nsec = period_ns;
+		tv.it_value.tv_sec = 0;
+		tv.it_value.tv_nsec = g_nondeterministic_random->randomInt(period_ns/2,period_ns+1);
 
-			sigevent sev;
-			sev.sigev_notify = SIGEV_THREAD_ID;
-			sev.sigev_signo = SIGPROF;
-			sev.sigev_value.sival_ptr = &(self->signalClosure);
-			sev._sigev_un._tid = gettid();
-			timer_create( CLOCK_THREAD_CPUTIME_ID, &sev, &self->periodic_timer );
-			timer_settime( self->periodic_timer, 0, &tv, NULL );
+		sigevent sev;
+		sev.sigev_notify = SIGEV_THREAD_ID;
+		sev.sigev_signo = SIGPROF;
+		sev.sigev_value.sival_ptr = &(self->signalClosure);
+		sev._sigev_un._tid = gettid();
+		if(timer_create( CLOCK_THREAD_CPUTIME_ID, &sev, &self->periodicTimer ) != 0) {
+			TraceEvent(SevWarn, "FailedToCreateProfilingTimer").GetLastError();
+			return Void();
+		}
+		self->timerInitialized = true;
+		if(timer_settime( self->periodicTimer, 0, &tv, NULL ) != 0) {
+			TraceEvent(SevWarn, "FailedToSetProfilingTimer").GetLastError();
+			return Void();
 		}
 
-		// Open and truncate output file
-		state Reference<SyncFileForSim> outFile =  Reference<SyncFileForSim>(new SyncFileForSim(outfn));
 		state int64_t outOffset = 0;
 		wait( outFile->truncate(outOffset) );
 

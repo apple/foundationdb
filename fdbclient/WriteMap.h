@@ -22,10 +22,10 @@
 #define FDBCLIENT_WRITEMAP_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "VersionedMap.h"
-#include "SnapshotCache.h"
-#include "Atomic.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/VersionedMap.h"
+#include "fdbclient/SnapshotCache.h"
+#include "fdbclient/Atomic.h"
 
 struct RYWMutation {
 	Optional<ValueRef> value;

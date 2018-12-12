@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "ReadYourWrites.h"
-#include "Atomic.h"
-#include "DatabaseContext.h"
-#include "StatusClient.h"
-#include "MonitorLeader.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Atomic.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/StatusClient.h"
+#include "fdbclient/MonitorLeader.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -1159,8 +1159,8 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	TEST(true);
 	
 	if (key == LiteralStringRef("\xff\xff/status/json")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->cluster && tr.getDatabase()->cluster->getConnectionFile()) {
-			return getJSON(tr.getDatabase()->cluster->getConnectionFile());
+		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+			return getJSON(tr.getDatabase()->getConnectionFile());
 		}
 		else {
 			return Optional<Value>();
@@ -1169,8 +1169,8 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	
 	if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
 		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->cluster && tr.getDatabase()->cluster->getConnectionFile()) {
-				Optional<Value> output = StringRef(tr.getDatabase()->cluster->getConnectionFile()->getFilename());
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
 				return output;
 			}
 		}
@@ -1182,8 +1182,8 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 
 	if (key == LiteralStringRef("\xff\xff/connection_string")){
 		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->cluster && tr.getDatabase()->cluster->getConnectionFile()) {
-				Reference<ClusterConnectionFile> f = tr.getDatabase()->cluster->getConnectionFile();
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
 				Optional<Value> output = StringRef(f->getConnectionString().toString());
 				return output;
 			}
@@ -1237,8 +1237,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->cluster && tr.getDatabase()->cluster->getConnectionFile()) {
-			return getWorkerInterfaces(tr.getDatabase()->cluster->getConnectionFile());
+		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+			return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
 		}
 		else {
 			return Standalone<RangeResultRef>();
@@ -1789,7 +1789,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	reading = std::move( r.reading );
 	resetPromise = std::move( r.resetPromise );
 	r.resetPromise = Promise<Void>();
-	deferred_error = std::move( r.deferred_error );
+	deferredError = std::move( r.deferredError );
 	retries = r.retries;
 	timeoutActor = r.timeoutActor;
 	creationTime = r.creationTime;
@@ -1807,7 +1807,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	reading( std::move(r.reading) ),
 	retries( r.retries ), 
 	creationTime( r.creationTime ), 
-	deferred_error( std::move(r.deferred_error) ), 
+	deferredError( std::move(r.deferredError) ), 
 	timeoutActor( std::move(r.timeoutActor) ),
 	resetPromise( std::move(r.resetPromise) ),
 	commitStarted( r.commitStarted ),
@@ -1839,7 +1839,7 @@ void ReadYourWritesTransaction::resetRyow() {
 	reading = AndFuture();
 	commitStarted = false;
 
-	deferred_error = Error();
+	deferredError = Error();
 
 	if(tr.apiVersionAtLeast(16)) {
 		options.reset(tr);

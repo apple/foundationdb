@@ -24,11 +24,11 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILEKAIO_ACTOR_G_H)
 	#define FLOW_ASYNCFILEKAIO_ACTOR_G_H
-	#include "AsyncFileKAIO.actor.g.h"
+	#include "fdbrpc/AsyncFileKAIO.actor.g.h"
 #elif !defined(FLOW_ASYNCFILEKAIO_ACTOR_H)
 	#define FLOW_ASYNCFILEKAIO_ACTOR_H
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/eventfd.h>
@@ -793,7 +793,7 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 	return Void();
 }
 
-TEST_CASE("fdbrpc/AsyncFileKAIO/RequestList") {
+TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 	if(!g_network->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
 		try {
 			state Reference<IAsyncFile> f = wait(AsyncFileKAIO::open("/tmp/__KAIO_TEST_FILE__", IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, nullptr));

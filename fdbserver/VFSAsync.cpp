@@ -24,7 +24,7 @@
 #include <vector>
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "CoroFlow.h"
+#include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 
@@ -32,7 +32,7 @@
 #include <string.h>
 
 #ifdef WIN32
-#include "Windows.h"
+#include <Windows.h>
 #endif
 
 #ifdef __unixish__

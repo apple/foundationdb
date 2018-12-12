@@ -30,11 +30,11 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
-
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/BlobStore.h"
+#include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+
+#include "fdbrpc/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1081,8 +1081,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			backupTagUids.push_back(config.getUid());
 
 			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
 			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
@@ -2621,13 +2621,19 @@ int main(int argc, char* argv[]) {
 			commandLine += argv[a];
 		}
 
+		delete FLOW_KNOBS;
+		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FLOW_KNOBS = flowKnobs;
+
 		delete CLIENT_KNOBS;
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
-				if (!clientKnobs->setKnob( k->first, k->second )) {
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second )) 
+				{
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -2666,13 +2672,10 @@ int main(int argc, char* argv[]) {
 				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
 
 
-		Reference<Cluster> cluster;
 		Reference<ClusterConnectionFile> ccf;
 		Database db;
-		Reference<Cluster> source_cluster;
-		Reference<ClusterConnectionFile> source_ccf;
-		Database source_db;
-		const KeyRef databaseKey = LiteralStringRef("DB");
+		Reference<ClusterConnectionFile> sourceCcf;
+		Database sourceDb;
 		FileBackupAgent ba;
 		Key tag;
 		Future<Optional<Void>> f;
@@ -2686,6 +2689,15 @@ int main(int argc, char* argv[]) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
 		}
+
+		TraceEvent("ProgramStart")
+			.detail("SourceVersion", getHGVersion())
+			.detail("Version", FDB_VT_VERSION )
+			.detail("PackageName", FDB_VT_PACKAGE_NAME)
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detail("CommandLine", commandLine)
+			.detail("MemoryLimit", memLimit)
+			.trackLatest("ProgramStart");
 
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread(); 
@@ -2729,7 +2741,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				cluster = Cluster::createCluster(ccf, -1);
+				db = Database::createDatabase(ccf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -2737,23 +2749,13 @@ int main(int argc, char* argv[]) {
 				return false;
 			}
 
-			TraceEvent("ProgramStart")
-				.detail("SourceVersion", getHGVersion())
-				.detail("Version", FDB_VT_VERSION )
-				.detail("PackageName", FDB_VT_PACKAGE_NAME)
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-				.detail("CommandLine", commandLine)
-				.detail("MemoryLimit", memLimit)
-				.trackLatest("ProgramStart");
-
-			db = cluster->createDatabase(databaseKey, localities).get();
 			return true;
 		};
 
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
-				source_ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
+				sourceCcf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
 			}
 			catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
@@ -2761,15 +2763,13 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				source_cluster = Cluster::createCluster(source_ccf, -1);
+				sourceDb = Database::createDatabase(ccf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
-				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", source_ccf->getFilename().c_str());
+				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", sourceCcf->getFilename().c_str());
 				return FDB_EXIT_ERROR;
 			}
-
-			source_db = source_cluster->createDatabase(databaseKey, localities).get();
 		}
 
 		switch (programExe)
@@ -2899,7 +2899,7 @@ int main(int argc, char* argv[]) {
 		case EXE_DR_AGENT:
 			if(!initCluster())
 				return FDB_EXIT_ERROR;
-			f = stopAfter( runDBAgent(source_db, db) );
+			f = stopAfter( runDBAgent(sourceDb, db) );
 			break;
 		case EXE_DB_BACKUP:
 			if(!initCluster())
@@ -2907,22 +2907,22 @@ int main(int argc, char* argv[]) {
 			switch (dbType)
 			{
 			case DB_START:
-				f = stopAfter( submitDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter( submitDBBackup(sourceDb, db, backupKeys, tagName) );
 				break;
 			case DB_STATUS:
-				f = stopAfter( statusDBBackup(source_db, db, tagName, maxErrors) );
+				f = stopAfter( statusDBBackup(sourceDb, db, tagName, maxErrors) );
 				break;
 			case DB_SWITCH:
-				f = stopAfter( switchDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName) );
 				break;
 			case DB_ABORT:
-				f = stopAfter( abortDBBackup(source_db, db, tagName, partial) );
+				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial) );
 				break;
 			case DB_PAUSE:
-				f = stopAfter( changeDBBackupResumed(source_db, db, true) );
+				f = stopAfter( changeDBBackupResumed(sourceDb, db, true) );
 				break;
 			case DB_RESUME:
-				f = stopAfter( changeDBBackupResumed(source_db, db, false) );
+				f = stopAfter( changeDBBackupResumed(sourceDb, db, false) );
 				break;
 			case DB_UNDEFINED:
 			default:

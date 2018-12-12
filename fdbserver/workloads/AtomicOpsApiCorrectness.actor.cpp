@@ -21,7 +21,7 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
@@ -30,11 +30,11 @@ struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 
 private:
 	static int getApiVersion(const Database &cx) {
-		return cx->cluster->apiVersion;
+		return cx->apiVersion;
 	}
 
 	static void setApiVersion(Database *cx, int version) {
-		(*cx)->cluster->apiVersion = version;
+		(*cx)->apiVersion = version;
 	}
 
 	Key getTestKey(std::string prefix) {

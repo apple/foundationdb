@@ -24,7 +24,7 @@
 // version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_THREADHELPER_ACTOR_G_H)
 		#define FLOW_THREADHELPER_ACTOR_G_H
-		#include "ThreadHelper.actor.g.h"
+		#include "flow/ThreadHelper.actor.g.h"
 #elif !defined(FLOW_THREADHELPER_ACTOR_H)
 		#define FLOW_THREADHELPER_ACTOR_H
 

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "SystemData.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
@@ -258,6 +258,29 @@ int decodeDatacenterReplicasValue( ValueRef const& value ) {
 	return s;
 }
 
+//    "\xff\x02/tLogDatacenters/[[datacenterID]]"
+extern const KeyRangeRef tLogDatacentersKeys;
+extern const KeyRef tLogDatacentersPrefix;
+const Key tLogDatacentersKeyFor( Optional<Value> dcID );
+
+const KeyRangeRef tLogDatacentersKeys(
+	LiteralStringRef("\xff\x02/tLogDatacenters/"),
+	LiteralStringRef("\xff\x02/tLogDatacenters0") );
+const KeyRef tLogDatacentersPrefix = tLogDatacentersKeys.begin;
+
+const Key tLogDatacentersKeyFor( Optional<Value> dcID ) {
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	wr.serializeBytes( tLogDatacentersKeys.begin );
+	wr << dcID;
+	return wr.toStringRef();
+}
+Optional<Value> decodeTLogDatacentersKey( KeyRef const& key ) {
+	Optional<Value> dcID;
+	BinaryReader rd( key.removePrefix(tLogDatacentersKeys.begin), AssumeVersion(currentProtocolVersion) );
+	rd >> dcID;
+	return dcID;
+}
+
 const KeyRef primaryDatacenterKey = LiteralStringRef("\xff/primaryDatacenter");
 
 // serverListKeys.contains(k) iff k.startsWith( serverListKeys.begin ) because '/'+1 == '0'
@@ -395,6 +418,8 @@ const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCom
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
 const KeyRef lastEpochEndPrivateKey = LiteralStringRef("\xff\xff/globals/lastEpochEnd");
+const KeyRef rebootWhenDurableKey = LiteralStringRef("\xff/globals/rebootWhenDurable");
+const KeyRef rebootWhenDurablePrivateKey = LiteralStringRef("\xff\xff/globals/rebootWhenDurable");
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
@@ -559,3 +584,21 @@ const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
+
+const KeyRangeRef monitorConfKeys(
+	LiteralStringRef("\xff\x02/monitorConf/"),
+	LiteralStringRef("\xff\x02/monitorConf0")
+);
+
+const KeyRef restoreLeaderKey = LiteralStringRef("\xff\x02/restoreLeader");
+const KeyRangeRef restoreWorkersKeys(
+	LiteralStringRef("\xff\x02/restoreWorkers/"),
+	LiteralStringRef("\xff\x02/restoreWorkers0")
+);
+
+const Key restoreWorkerKeyFor( UID const& agentID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreWorkersKeys.begin );
+	wr << agentID;
+	return wr.toStringRef();
+}

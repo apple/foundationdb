@@ -25,7 +25,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef FLOW_ACOMPILER_STATE
@@ -161,6 +161,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if(g_random->coinflip()) {
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 

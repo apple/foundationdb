@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "FailureMonitorClient.h"
+#include "fdbclient/FailureMonitorClient.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "ClusterInterface.h"
+#include "fdbclient/ClusterInterface.h"
 
 struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	std::set<NetworkAddress> knownAddrs;

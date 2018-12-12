@@ -23,7 +23,7 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_VERSIONEDMAP_ACTOR_G_H)
 	#define FDBCLIENT_VERSIONEDMAP_ACTOR_G_H
-	#include "VersionedMap.actor.g.h"
+	#include "fdbclient/VersionedMap.actor.g.h"
 #elif !defined(FDBCLIENT_VERSIONEDMAP_ACTOR_H)
 	#define FDBCLIENT_VERSIONEDMAP_ACTOR_H
 

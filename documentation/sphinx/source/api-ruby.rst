@@ -78,7 +78,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 600
+    FDB.api_version 610
     db = FDB.open
 
 .. function:: open( cluster_file=nil, db_name="DB" ) -> Database
@@ -870,7 +870,7 @@ All future objects are a subclass of the :class:`Future` type.
 
             |future-cancel-blurb|
 
-        .. classmethod:: Future.wait_for_any(*futures) -> Fixnum
+        .. classmethod:: Future.wait_for_any(\*futures) -> Fixnum
 
             Does not return until at least one of the given future objects is ready. Returns the index in the parameter list of a ready future object.
 
@@ -983,8 +983,8 @@ In the FoundationDB Ruby API, a tuple is an :class:`Enumerable` of elements of t
 | Unicode string       | Any value ``v`` where ``v.kind_of? String == true`` and ``v.encoding`` is   | ``String`` with encoding ``Encoding::UTF_8``                                 |
 |                      | ``Encoding::UTF_8``                                                         |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
-| 64-bit signed integer| Any value ``v`` where ``v.kind_of? Integer == true`` and ``-2**64+1 <= v <= | ``Fixnum`` or ``Bignum`` (depending on the magnitude of the value)           |
-|                      | 2**64-1``                                                                   |                                                                              |
+| Integer              | Any value ``v`` where ``v.kind_of? Integer == true`` and                    | ``Integer``                                                                  |
+|                      | ``-2**2040+1 <= v <= 2**2040-1``                                            |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
 | Floating point number| Any value ``v`` where ``v.kind_of? FDB::Tuple::SingleFloat`` where          | :class:`FDB::Tuple::SingleFloat`                                             |
 | (single-precision)   | ``v.value.kind_of? Float`` and ``v.value`` fits inside an IEEE 754 32-bit   |                                                                              |

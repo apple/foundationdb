@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "FastAlloc.h"
+#include "flow/FastAlloc.h"
 
-#include "ThreadPrimitives.h"
-#include "Trace.h"
-#include "Error.h"
+#include "flow/ThreadPrimitives.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -374,7 +374,10 @@ void FastAllocator<Size>::getMagazine() {
 	ASSERT( block == desiredBlock );
 #endif
 #else
-	block = (void **)::allocate(magazine_size * Size, true);
+	// FIXME: We should be able to allocate larger magazine sizes here if we
+	// detect that the underlying system supports hugepages.  Using hugepages
+	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
+	block = (void **)::allocate(magazine_size * Size, false);
 #endif
 
 	//void** block = new void*[ magazine_size * PSize ];

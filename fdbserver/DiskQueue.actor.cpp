@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "IDiskQueue.h"
+#include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -111,8 +111,8 @@ private:
 
 class RawDiskQueue_TwoFiles {
 public:
-	RawDiskQueue_TwoFiles( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
-		: basename(basename), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
+	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
+		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
@@ -180,7 +180,8 @@ public:
 	File files[2];  // After readFirstAndLastPages(), files[0] is logically before files[1] (pushes are always into files[1])
 
 	std::string basename;
-	std::string filename(int i) const { return basename + format("%d.fdq", i); }
+	std::string fileExtension;
+	std::string filename(int i) const { return basename + format("%d.%s", i, fileExtension.c_str()); }
 
 	UID dbgid;
 	int64_t dbg_file0BeginSeq;
@@ -642,8 +643,8 @@ public:
 
 class DiskQueue : public IDiskQueue {
 public:
-	DiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid,fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
+		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
 		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), lastCommittedSeq(0), warnAlwaysForMemory(true)
 	{
 	}
@@ -1035,7 +1036,7 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, dbgid, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
+	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, fileExtension, dbgid, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
 	Future<Void> getError() { return queue->getError(); }
@@ -1103,6 +1104,6 @@ private:
 	}
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) {
-	return new DiskQueue_PopUncommitted( basename, dbgid, fileSizeWarningLimit );
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit ) {
+	return new DiskQueue_PopUncommitted( basename, ext, dbgid, fileSizeWarningLimit );
 }

@@ -22,13 +22,13 @@
 #define FDBSERVER_WORKERINTERFACE_H
 #pragma once
 
-#include "MasterInterface.h"
-#include "TLogInterface.h"
-#include "ResolverInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "TesterInterface.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "LogSystemConfig.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
@@ -44,7 +44,6 @@ struct WorkerInterface {
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
 
-	RequestStream< struct DebugQueryRequest > debugQuery;
 	RequestStream< struct LoadedPingRequest > debugPing;
 	RequestStream< struct CoordinationPingMessage > coordinationPing;
 	RequestStream< ReplyPromise<Void> > waitFailure;
@@ -63,7 +62,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & logRouter & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & testerInterface & diskStoreRequest;
+		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & logRouter & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & testerInterface & diskStoreRequest;
 	}
 };
 
@@ -239,16 +238,6 @@ struct EventLogRequest {
 	}
 };
 
-struct DebugQueryRequest {
-	Standalone<StringRef> search;
-	ReplyPromise< Standalone< VectorRef<struct DebugEntryRef> > > reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar & search & reply;
-	}
-};
-
 struct DebugEntryRef {
 	double time;
 	NetworkAddress address;
@@ -281,8 +270,37 @@ struct DiskStoreRequest {
 	}
 };
 
-void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, std::string> details = std::map<std::string, std::string>(), std::string origination = "Recruited");
-void endRole(UID id, std::string as, std::string reason, bool ok = true, Error e = Error());
+struct Role {
+	static const Role WORKER;
+	static const Role STORAGE_SERVER;
+	static const Role TRANSACTION_LOG;
+	static const Role SHARED_TRANSACTION_LOG;
+	static const Role MASTER_PROXY;
+	static const Role MASTER;
+	static const Role RESOLVER;
+	static const Role CLUSTER_CONTROLLER;
+	static const Role TESTER;
+	static const Role LOG_ROUTER;
+
+	std::string roleName;
+	std::string abbreviation;
+	bool includeInTraceRoles;
+
+	bool operator==(const Role &r) const {
+		return roleName == r.roleName;
+	}
+	bool operator!=(const Role &r) const {
+		return !(*this == r);
+	}
+
+private:
+	Role(std::string roleName, std::string abbreviation, bool includeInTraceRoles=true) : roleName(roleName), abbreviation(abbreviation), includeInTraceRoles(includeInTraceRoles) {
+		ASSERT(abbreviation.size() == 2); // Having a fixed size makes log queries more straightforward
+	}
+};
+
+void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details = std::map<std::string, std::string>(), std::string origination = "Recruited");
+void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error e = Error());
 
 struct ServerDBInfo;
 
@@ -290,8 +308,7 @@ class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int 
 Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& a, Reference<AsyncVar<Optional<struct ClusterInterface>>> const& b );
 
 Future<Void> fdbd( Reference<ClusterConnectionFile> const&, LocalityData const& localities, ProcessClass const& processClass, std::string const& dataFolder, std::string const& coordFolder, int64_t const& memoryLimit, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix, Promise<Void> const& recoveredDiskFiles );
-Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, Future<Void> const& recoveredDiskFiles );
+Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, Future<Void> const& recoveredDiskFiles, LocalityData const& locality );
 
 // These servers are started by workerServer
 Future<Void> storageServer(
@@ -310,7 +327,6 @@ Future<Void> storageServer(
 Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
 Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
 Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
-Future<Void> debugQueryServer( DebugQueryRequest const& req );
 Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& ccInterface, Reference<ClusterConnectionFile> const&, LocalityData const&, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> resolver( ResolverInterface const& proxy, InitializeResolverRequest const&, Reference<AsyncVar<ServerDBInfo>> const& db );
 Future<Void> logRouter( TLogInterface const& interf, InitializeLogRouterRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db );

@@ -20,8 +20,8 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -69,8 +69,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-		extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start");
 	}

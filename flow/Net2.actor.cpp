@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <algorithm>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -26,15 +26,15 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "network.h"
-#include "IThreadPool.h"
+#include "flow/network.h"
+#include "flow/IThreadPool.h"
 #include "boost/range.hpp"
 
-#include "ActorCollection.h"
-#include "ThreadSafeQueue.h"
-#include "ThreadHelper.actor.h"
-#include "TDMetric.actor.h"
-#include "AsioReactor.h"
+#include "flow/ActorCollection.h"
+#include "flow/ThreadSafeQueue.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 
 #ifdef WIN32
@@ -55,7 +55,7 @@ using namespace boost::asio::ip;
 //
 //                                                       xyzdev
 //                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061000001LL;
+const uint64_t currentProtocolVersion        = 0x0FDB00B061020001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -164,7 +164,6 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
-	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -484,7 +483,6 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
-	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -841,11 +839,13 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	Promise<std::vector<NetworkAddress>> result;
+	state tcp::resolver tcpResolver(self->reactor.ios);
+	Promise<std::vector<NetworkAddress>> promise;
+	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+	tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {
-			result.sendError(lookup_failed());
+			promise.sendError(lookup_failed());
 			return;
 		}
 
@@ -853,18 +853,27 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		
 		tcp::resolver::iterator end;
 		while(iter != end) {
-			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
-			// endpoint::to_string doesn't exist but operator<< does.
-			std::stringstream s;
-			s << iter->endpoint();
-			addrs.push_back(NetworkAddress::parse(s.str()));
+			auto endpoint = iter->endpoint();
+			// Currently only ipv4 is supported by NetworkAddress
+			auto addr = endpoint.address();
+			if(addr.is_v4()) {
+				addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+			}
 			++iter;
 		}
-		result.send(addrs);
+
+		if(addrs.empty()) {
+			promise.sendError(lookup_failed());
+		}
+		else {
+			promise.send(addrs);
+		}
 	});
 
-	std::vector<NetworkAddress> addresses = wait(result.getFuture());
-	return addresses;
+	wait(ready(result));
+	tcpResolver.cancel();
+
+	return result.get();
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {

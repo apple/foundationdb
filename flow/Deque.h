@@ -22,7 +22,7 @@
 #define FLOW_DEQUE_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdexcept>
 
 template <class T>

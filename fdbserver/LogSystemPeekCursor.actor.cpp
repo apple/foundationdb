@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "LogSystem.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/ReplicationUtils.h"
 
 #undef FLOW_ACOMPILER_STATE
@@ -800,7 +800,11 @@ Version ILogSystem::SetPeekCursor::popped() {
 	return poppedVersion;
 }
 
-ILogSystem::MultiCursor::MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds ) : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {}
+ILogSystem::MultiCursor::MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds ) : cursors(cursors), epochEnds(epochEnds), poppedVersion(0) {
+	for(int i = 0; i < std::min<int>(cursors.size(),SERVER_KNOBS->MULTI_CURSOR_PRE_FETCH_LIMIT); i++) {
+		cursors[cursors.size()-i-1]->getMore();
+	}
+}
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::MultiCursor::cloneNoMore() {
 	return cursors.back()->cloneNoMore();
@@ -848,10 +852,14 @@ void ILogSystem::MultiCursor::advanceTo(LogMessageVersion n) {
 }
 
 Future<Void> ILogSystem::MultiCursor::getMore(int taskID) {
+	LogMessageVersion startVersion = cursors.back()->version();
 	while( cursors.size() > 1 && cursors.back()->version() >= epochEnds.back() ) {
 		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
 		cursors.pop_back();
 		epochEnds.pop_back();
+	}
+	if(cursors.back()->version() > startVersion) {
+		return Void();
 	}
 	return cursors.back()->getMore(taskID);
 }

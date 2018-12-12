@@ -22,7 +22,7 @@
 #define FLOW_IRANDOM_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
 #include <ext/hash_map>

@@ -18,27 +18,20 @@
  * limitations under the License.
  */
 
-#include "simulator.h"
+#include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
-#include "IAsyncFile.h"
-#include "AsyncFileCached.actor.h"
-#include "AsyncFileNonDurable.actor.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/Hash3.h"
-#include "TraceFileIO.h"
+#include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
-#include "Net2FileSystem.h"
-#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "AsyncFileWriteChecker.h"
-
-
-using std::min;
-using std::max;
-using std::pair;
-using std::make_pair;
+#include "fdbrpc/AsyncFileWriteChecker.h"
 
 bool simulator_should_inject_fault( const char* context, const char* file, int line, int error_code ) {
 	if (!g_network->isSimulated()) return false;
@@ -125,7 +118,7 @@ struct SimClogging {
 	}
 
 	double getRecvDelay( NetworkAddress from, NetworkAddress to ) {
-		auto pair = make_pair( from.ip, to.ip );
+		auto pair = std::make_pair( from.ip, to.ip );
 
 		double tnow = now();
 		double t = tnow + halfLatency();
@@ -142,7 +135,7 @@ struct SimClogging {
 	}
 
 	void clogPairFor( uint32_t from, uint32_t to, double t ) {
-		auto& u = clogPairUntil[ make_pair( from, to ) ];
+		auto& u = clogPairUntil[ std::make_pair( from, to ) ];
 		u = std::max(u, now() + t);
 	}
 	void clogSendFor( uint32_t from, double t ) {
@@ -154,9 +147,9 @@ struct SimClogging {
 		u = std::max(u, now() + t);
 	}
 	double setPairLatencyIfNotSet( uint32_t from, uint32_t to, double t ) {
-		auto i = clogPairLatency.find( make_pair(from,to) );
+		auto i = clogPairLatency.find( std::make_pair(from,to) );
 		if (i == clogPairLatency.end())
-			i = clogPairLatency.insert( make_pair( make_pair(from,to), t ) ).first;
+			i = clogPairLatency.insert( std::make_pair( std::make_pair(from,to), t ) ).first;
 		return i->second;
 	}
 private:
@@ -1195,12 +1188,12 @@ public:
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
-			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", describe(*machine)).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", describe(*machine)).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = g_random->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
@@ -1279,7 +1272,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
@@ -1315,19 +1308,19 @@ public:
 			else if ((kt == KillInstantly) || (kt == InjectFaults)) {
 				TraceEvent("DeadMachine").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 				for (auto process : processesLeft) {
-					TraceEvent("DeadMachineSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+					TraceEvent("DeadMachineSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", process->toString());
 				}
 				for (auto process : processesDead) {
-					TraceEvent("DeadMachineVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+					TraceEvent("DeadMachineVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", process->toString());
 				}
 			}
 			else {
 				TraceEvent("ClearMachine").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("ProcessesPerMachine", processesPerMachine).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 				for (auto process : processesLeft) {
-					TraceEvent("ClearMachineSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+					TraceEvent("ClearMachineSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", process->toString());
 				}
 				for (auto process : processesDead) {
-					TraceEvent("ClearMachineVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+					TraceEvent("ClearMachineVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", process->toString());
 				}
 			}
 		}
@@ -1377,7 +1370,7 @@ public:
 		return true;
 	}
 
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal) {
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill, KillType* ktFinal) {
 		auto ktOrig = kt;
 		auto processes = getAllProcesses();
 		std::map<Optional<Standalone<StringRef>>, int>	datacenterZones;
@@ -1392,7 +1385,7 @@ public:
 				if ((kt != Reboot) && (protectedAddresses.count(procRecord->address))) {
 					kt = Reboot;
 					TraceEvent(SevWarn, "DcKillChanged").detailext("DataCenter", dcId).detail("KillType", kt).detail("OrigKillType", ktOrig)
-						.detail("Reason", "Datacenter has protected process").detail("ProcessAddress", procRecord->address).detail("Failed", procRecord->failed).detail("Rebooting", procRecord->rebooting).detail("Excluded", procRecord->excluded).detail("Cleared", procRecord->cleared).detail("Process", describe(*procRecord));
+						.detail("Reason", "Datacenter has protected process").detail("ProcessAddress", procRecord->address).detail("Failed", procRecord->failed).detail("Rebooting", procRecord->rebooting).detail("Excluded", procRecord->excluded).detail("Cleared", procRecord->cleared).detail("Process", procRecord->toString());
 				}
 				datacenterZones[processZoneId.get()] ++;
 				dcProcesses ++;
@@ -1400,7 +1393,7 @@ public:
 		}
 
 		// Check if machine can be removed, if requested
-		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
+		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete)))
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
@@ -1422,11 +1415,11 @@ public:
 				TraceEvent("DeadDataCenter").detailext("DataCenter", dcId).detail("KillType", kt).detail("DcZones", datacenterZones.size()).detail("DcProcesses", dcProcesses).detail("ProcessesDead", processesDead.size()).detail("ProcessesLeft", processesLeft.size()).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info());
 				for (auto process : processesLeft) {
 					auto zoneId = process->locality.zoneId();
-					TraceEvent("DeadDcSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+					TraceEvent("DeadDcSurvivors").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", process->toString());
 				}
 				for (auto process : processesDead) {
 					auto zoneId = process->locality.zoneId();
-					TraceEvent("DeadDcVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+					TraceEvent("DeadDcVictims").detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", process->toString());
 				}
 			}
 		}
@@ -1612,7 +1605,6 @@ public:
 	std::map<Optional<Standalone<StringRef>>, MachineInfo > machines;
 	std::map<NetworkAddress, ProcessInfo*> addressMap;
 	std::map<ProcessInfo*, Promise<Void>> filesDeadMap;
-	std::set<AddressExclusion>	exclusionSet;
 
 	//tasks is guarded by ISimulator::mutex
 	std::priority_queue<Task, std::vector<Task>> tasks;

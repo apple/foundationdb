@@ -19,9 +19,9 @@
  */
 
 #include "fdbclient/NativeAPI.h"
-#include "ClusterRecruitmentInterface.h"
-#include "MoveKeys.h"
-#include "LogSystem.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/MoveKeys.h"
+#include "fdbserver/LogSystem.h"
 
 struct RelocateShard {
 	KeyRange keys;
@@ -154,9 +154,14 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
-	vector<Team> getTeamsFor( KeyRangeRef keys );
+
+	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
+	//The second element of the pair is all previous sources for in-flight shards
+	std::pair<vector<Team>,vector<Team>> getTeamsFor( KeyRangeRef keys );
+
 	void defineShard( KeyRangeRef keys );
 	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
+	void finishMove( KeyRangeRef keys );
 	void check();
 private:
 	struct OrderByTeamKey {
@@ -167,7 +172,7 @@ private:
 		}
 	};
 
-	KeyRangeMap< vector<Team> > shard_teams;	// A shard can be affected by the failure of multiple teams if it is a queued merge
+	KeyRangeMap< std::pair<vector<Team>,vector<Team>> > shard_teams;	// A shard can be affected by the failure of multiple teams if it is a queued merge, or when usable_regions > 1
 	std::set< std::pair<Team,KeyRange>, OrderByTeamKey > team_shards;
 	std::map< UID, int > storageServerShards;
 

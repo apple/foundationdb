@@ -18,11 +18,10 @@
  * limitations under the License.
  */
 
-#include "HTTP.h"
-#include "md5/md5.h"
-#include "libb64/encode.h"
+#include "fdbclient/HTTP.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
 #include <cctype>
-#include "xml2json.hpp"
 
 namespace HTTP {
 
@@ -58,15 +57,6 @@ namespace HTTP {
 			return i->second == content_sum.get();
 		}
 		return !fail_if_header_missing;
-	}
-
-	void Response::convertToJSONifXML() {
-		auto i = headers.find("Content-Type");
-		if (i != headers.end() && i->second == "application/xml") {
-			content = xml2json(content.c_str());
-			contentLen = content.length();
-			headers["Content-Type"] = "application/json";
-		}
 	}
 
 	std::string Response::toString() {

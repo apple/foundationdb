@@ -132,7 +132,7 @@ ACTOR template <class T> Future<Void> broadcast( Future<T> input, std::vector<Re
 
 
 // Needed for the call to endpointNotFound()
-#include "FailureMonitor.h"
+#include "fdbrpc/FailureMonitor.h"
 
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>

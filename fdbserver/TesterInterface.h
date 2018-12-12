@@ -44,10 +44,10 @@ struct WorkloadInterface {
 struct WorkloadRequest {
 	Arena arena;
 	StringRef title;
-	StringRef database;
 	int timeout;
 	double databasePingDelay;
 	int64_t sharedRandomNumber;
+	bool useDatabase;
 
 	// The vector of option lists are to construct compound workloads.  If there
 	//  is only one workload to be run...pass just one list of options!
@@ -68,7 +68,7 @@ struct WorkloadRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & title & database & timeout & databasePingDelay & sharedRandomNumber & options & clientId & clientCount & reply & arena;
+		ar & title & timeout & databasePingDelay & sharedRandomNumber & useDatabase & options & clientId & clientCount & reply & arena;
 	}
 };
 

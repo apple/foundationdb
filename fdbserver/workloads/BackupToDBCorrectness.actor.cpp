@@ -20,8 +20,8 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of backup and restore process
@@ -104,8 +104,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 
 		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-		extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}

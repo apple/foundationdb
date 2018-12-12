@@ -22,7 +22,7 @@
 #define FLOW_KNOBS_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 
 #include <map>
 #include <string>
@@ -91,6 +91,7 @@ public:
 	int64_t BUGGIFY_SIM_PAGE_CACHE_4K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_64K;
 	int MAX_EVICT_ATTEMPTS;
+	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
 
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;

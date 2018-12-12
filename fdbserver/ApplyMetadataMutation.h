@@ -26,9 +26,9 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/Notified.h"
-#include "IKeyValueStore.h"
-#include "LogSystem.h"
-#include "LogProtocolMessage.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/LogProtocolMessage.h"
 
 static bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by applyMetadataMutations

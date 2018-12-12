@@ -23,8 +23,8 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "Locality.h"
-#include "ReplicationPolicy.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/ReplicationPolicy.h"
 
 struct LocalitySet : public ReferenceCounted<LocalitySet> {
 public:

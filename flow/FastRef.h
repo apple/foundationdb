@@ -24,7 +24,7 @@
 
 #include <cstdint>
 
-#include "Platform.h"
+#include "flow/Platform.h"
 
 #if VALGRIND
 #include <drd.h>
@@ -57,6 +57,7 @@ public:
 	}
 	void setrefCountUnsafe(int32_t count) const { referenceCount = count; }
 	int32_t debugGetReferenceCount() const { return referenceCount; }	// Never use in production code, only for tracing
+	bool isSoleOwnerUnsafe() const { return referenceCount == 1; }
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;

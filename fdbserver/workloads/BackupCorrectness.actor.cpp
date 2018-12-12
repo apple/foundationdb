@@ -21,8 +21,8 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 
@@ -381,6 +381,22 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				// restore database
 				TraceEvent("BARW_Restore", randomID).detail("LastBackupContainer", lastBackupContainer->getURL()).detail("RestoreAfter", self->restoreAfter).detail("BackupTag", printable(self->backupTag));
 				
+				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
+				BackupDescription desc = wait( container->describeBackup() );
+
+				Version targetVersion = -1;
+				if(desc.maxRestorableVersion.present()) {
+					if( g_random->random01() < 0.1 ) {
+						targetVersion = desc.minRestorableVersion.get();
+					}
+					else if( g_random->random01() < 0.1 ) {
+						targetVersion = desc.maxRestorableVersion.get();
+					}
+					else if( g_random->random01() < 0.5 ) {
+						targetVersion = g_random->randomInt64(desc.minRestorableVersion.get(), desc.contiguousLogEnd.get());
+					}
+				}
+
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
 				state int restoreIndex;
@@ -389,7 +405,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					auto range = self->backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
-					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, -1, true, range, Key(), Key(), self->locked));
+					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
 				}
 				
 				// Sometimes kill and restart the restore

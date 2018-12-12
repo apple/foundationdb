@@ -21,7 +21,7 @@
 #include "flow/IRandom.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
@@ -985,7 +985,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			if(bytesReadInRange > 0) {
-				TraceEvent("ConsistencyCheck_ReadRange").detail("Range", printable(range)).detail("BytesRead", bytesReadInRange);
+				TraceEvent("ConsistencyCheck_ReadRange").suppressFor(1.0).detail("Range", printable(range)).detail("BytesRead", bytesReadInRange);
 			}
 		}
 

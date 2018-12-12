@@ -19,42 +19,27 @@
  */
 
 
-#include "Trace.h"
-#include "FileTraceLogWriter.h"
-#include "XmlTraceLogFormatter.h"
-#include "JsonTraceLogFormatter.h"
-#include "flow.h"
-#include "DeterministicRandom.h"
+#include "flow/Trace.h"
+#include "flow/FileTraceLogWriter.h"
+#include "flow/XmlTraceLogFormatter.h"
+#include "flow/flow.h"
+#include "flow/DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
-#include <cctype>
 #include <time.h>
 
-#include "IThreadPool.h"
-#include "ThreadHelper.actor.h"
-#include "FastRef.h"
-#include "EventTypes.actor.h"
-#include "TDMetric.actor.h"
-#include "MetricSample.h"
+#include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/FastRef.h"
+#include "flow/EventTypes.actor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/MetricSample.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #undef max
 #undef min
 #endif
-
-Reference<ITraceLogFormatter> createLogFormatter() {
-	auto f = FLOW_KNOBS->TRACE_FORMAT;
-	std::transform(f.begin(), f.end(), f.begin(), ::tolower);
-	if (f == "json") {
-		return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
-	} else if (f == "xml") {
-		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
-	} else {
-		ASSERT(false);
-		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
-	}
-}
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -163,6 +148,34 @@ private:
 	EventMetricHandle<TraceEventNameID> SevInfoNames;
 	EventMetricHandle<TraceEventNameID> SevDebugNames;
 
+	struct RoleInfo {
+		std::map<std::string, int> roles;
+		std::string rolesString;
+
+		void refreshRolesString() {
+			rolesString = "";
+			for(auto itr : roles) {
+				if(!rolesString.empty()) {
+					rolesString += ",";
+				}
+				rolesString += itr.first;
+			}
+		}
+	};
+
+	RoleInfo roleInfo;
+	std::map<NetworkAddress, RoleInfo> roleInfoMap;
+
+	RoleInfo& mutateRoleInfo() {
+		ASSERT(g_network);
+
+		if(g_network->isSimulated()) {
+			return roleInfoMap[g_network->getLocalAddress()];
+		}
+		
+		return roleInfo;
+	}
+
 public:
 	bool logTraceEventMetrics;
 
@@ -267,14 +280,7 @@ public:
 		}
 	};
 
-	TraceLog()
-		: bufferLength(0)
-		, loggedLength(0)
-		, opened(false)
-		, preopenOverflowCount(0)
-		, barriers(new BarrierList)
-		, logTraceEventMetrics(false)
-		, formatter(createLogFormatter()) {}
+	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
 
 	bool isOpen() const { return opened; }
 
@@ -329,6 +335,11 @@ public:
 		}
 
 		fields.addField("LogGroup", logGroup);
+
+		RoleInfo const& r = mutateRoleInfo();
+		if(r.rolesString.size() > 0) {
+			fields.addField("Roles", r.rolesString);
+		}
 	}
 
 	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
@@ -458,6 +469,28 @@ public:
 		}
 	}
 
+	void addRole(std::string role) {
+		MutexHolder holder(mutex);
+
+		RoleInfo &r = mutateRoleInfo();
+		++r.roles[role];
+		r.refreshRolesString();
+	}
+
+	void removeRole(std::string role) {
+		MutexHolder holder(mutex);
+
+		RoleInfo &r = mutateRoleInfo();
+
+		auto itr = r.roles.find(role);
+		ASSERT(itr != r.roles.end() || (g_network->isSimulated() && g_network->getLocalAddress() == NetworkAddress()));
+
+		if(itr != r.roles.end() && --(*itr).second == 0) {
+			r.roles.erase(itr);
+			r.refreshRolesString();
+		}
+	}
+
 	~TraceLog() {
 		close();
 		if (writer) writer->addref(); // FIXME: We are not shutting down the writer thread at all, because the ThreadPool shutdown mechanism is blocking (necessarily waits for current work items to finish) and we might not be able to finish everything.
@@ -572,6 +605,14 @@ bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
 }
 
+void addTraceRole(std::string role) {
+	g_traceLog.addRole(role);
+}
+
+void removeTraceRole(std::string role) {
+	g_traceLog.removeRole(role);
+}
+
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id), type(type), severity(severity), initialized(false), enabled(true) {}
 TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(interval.severity), initialized(false), enabled(true) {
@@ -667,9 +708,6 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 				detail("Error", error.name());
 				detail("ErrorDescription", error.what());
 				detail("ErrorCode", error.code());
-				if (error.callSite() != nullptr) {
-					detail("ErrorConstructedAt", error.callSite());
-				}
 			}
 		} else {
 			if (initialized) {

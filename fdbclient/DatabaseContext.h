@@ -22,44 +22,39 @@
 #define DatabaseContext_h
 #pragma once
 
-#include "NativeAPI.h"
-#include "KeyRangeMap.h"
-#include "MasterProxyInterface.h"
-#include "ClientDBInfo.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/ClientDBInfo.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "EventTypes.actor.h"
+#include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 
-class LocationInfo : public MultiInterface<StorageServerInterface> {
+class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
-	static Reference<LocationInfo> getInterface( DatabaseContext *cx, std::vector<StorageServerInterface> const& alternatives, LocalityData const& clientLocality );
+	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
 	void notifyContextDestroyed();
-	
-	virtual ~LocationInfo();
 
+	virtual ~StorageServerInfo();
 private:
 	DatabaseContext *cx;
-	LocationInfo( DatabaseContext* cx, vector<StorageServerInterface> const& shards, LocalityData const& clientLocality ) : cx(cx), MultiInterface( shards, clientLocality ) {}
+	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-class ProxyInfo : public MultiInterface<MasterProxyInterface> {
-public:
-	ProxyInfo( vector<MasterProxyInterface> const& proxies, LocalityData const& clientLocality ) : MultiInterface( proxies, clientLocality, ALWAYS_FRESH ) {}
-};
+typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
+typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
 public:
-	static Future<Database> createDatabase( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<Cluster> cluster, Standalone<StringRef> dbName, LocalityData const& clientLocality ); 
-	//static Future< Void > configureDatabase( ZookeeperInterface const& zk, int configScope, int configMode, Standalone<StringRef> dbName = Standalone<StringRef>() );
-
-	// For internal (fdbserver) use only: create a database context for a DB with already known client info
-	static Database create( Reference<AsyncVar<ClientDBInfo>> info, Future<Void> dependency, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID = TaskDefaultEndpoint, bool lockAware = false );
+	// For internal (fdbserver) use only
+	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
+	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
 
 	~DatabaseContext();
 
-	Database clone() const { return Database(new DatabaseContext( clientInfo, cluster, clientInfoMonitor, dbName, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware )); }
+	Database clone() const { return Database(new DatabaseContext( cluster, clientInfo, clientInfoMonitor, dbId, taskID, clientLocality, enableLocalityLoadBalance, lockAware, apiVersion )); }
 
 	pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
@@ -77,27 +72,26 @@ public:
 	
 	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value );
 
-	Error deferred_error;
+	Error deferredError;
 	bool lockAware;
 
 	void checkDeferredError() {
-		if( cluster )
-			cluster->checkDeferredError();
-		if( deferred_error.code() != invalid_error_code )
-			throw deferred_error;
+		if( deferredError.code() != invalid_error_code ) {
+			throw deferredError;
+		}
 	}
 
-//private: friend class ClientInfoMonitorActor;
-	explicit DatabaseContext( Reference<AsyncVar<ClientDBInfo>> clientInfo, 
-		Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
-		Standalone<StringRef> dbName, Standalone<StringRef> dbId, int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware );
+	int apiVersionAtLeast(int minVersion) { return apiVersion < 0 || apiVersion >= minVersion; }
 
-	// These are reference counted
-	Reference<Cluster> cluster;
-	Future<Void> clientInfoMonitor; // or sometimes an outside dependency that does the same thing!
+	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
+	Reference<ClusterConnectionFile> getConnectionFile();
+
+//private: 
+	explicit DatabaseContext( Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
+		Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, int taskID, LocalityData const& clientLocality, 
+		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
 
 	// Key DB-specific information
-	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
@@ -125,10 +119,8 @@ public:
 	int locationCacheSize;
 	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
 
-	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
+	std::map< UID, StorageServerInfo* > server_interf;
 
-	// for logging/debugging (relic of multi-db support)
-	Standalone<StringRef> dbName;
 	Standalone<StringRef> dbId;
 
 	int64_t transactionReadVersions;
@@ -154,6 +146,13 @@ public:
 
 	Int64MetricHandle getValueSubmitted;
 	EventMetricHandle<GetValueComplete> getValueCompleted;
+
+	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	Future<Void> clientInfoMonitor;
+
+	Reference<Cluster> cluster;
+
+	int apiVersion;
 };
 
 #endif

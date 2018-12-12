@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "AsyncFileBlobStore.actor.h"
-#include "AsyncFileReadAhead.actor.h"
+#include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/UnitTest.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() {
@@ -47,7 +47,7 @@ ACTOR Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
 	return Void();
 }
 
-TEST_CASE("backup/throttling") {
+TEST_CASE("/backup/throttling") {
 	// Test will not work in simulation.
 	if(g_network->isSimulated())
 		return Void();

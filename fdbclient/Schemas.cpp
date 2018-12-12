@@ -1,25 +1,48 @@
-{  
-   "cluster":{  
-      "layers":{  
+/*
+ * Schemas.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fdbclient/Schemas.h"
+
+const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
+{
+   "cluster":{
+      "layers":{
          "_valid":true,
          "_error":"some error description"
       },
-      "processes":{  
-         "$map":{  
+      "processes":{
+         "$map":{
             "version":"3.0.0",
             "machine_id":"0ccb4e0feddb5583010f6b77d9d10ece",
             "locality":{
                 "$map":"value"
             },
-            "class_source":{  
-               "$enum":[  
+            "class_source":{
+               "$enum":[
                   "command_line",
                   "configure_auto",
                   "set_class"
                ]
             },
-            "class_type":{  
-               "$enum":[  
+            "class_type":{
+               "$enum":[
                   "unset",
                   "storage",
                   "transaction",
@@ -29,10 +52,10 @@
                   "test"
                ]
             },
-            "roles":[  
-               {  
+            "roles":[
+               {
                   "query_queue_max":0,
-                  "input_bytes":{  
+                  "input_bytes":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -42,7 +65,7 @@
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
-                  "durable_bytes":{  
+                  "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -51,8 +74,8 @@
                   "queue_disk_available_bytes":12341234,
                   "queue_disk_free_bytes":12341234,
                   "queue_disk_total_bytes":12341234,
-                  "role":{  
-                     "$enum":[  
+                  "role":{
+                     "$enum":[
                         "master",
                         "proxy",
                         "log",
@@ -62,12 +85,42 @@
                      ]
                   },
                   "data_version":12341234,
+                  "durable_version":12341234,
                   "data_lag": {
                      "seconds":5.0,
                      "versions":12341234
                   },
+                  "durability_lag": {
+                     "seconds":5.0,
+                     "versions":12341234
+                  },
                   "id":"eb84471d68c12d1d26f692a50000003f",
-                  "finished_queries":{  
+                  "total_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "finished_queries":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "bytes_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "keys_queried":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutation_bytes":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "mutations":{
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
@@ -75,18 +128,18 @@
                }
             ],
             "command_line":"-r simulation",
-            "memory":{  
+            "memory":{
                "available_bytes":0,
                "limit_bytes":0,
                "unused_allocated_memory":0,
                "used_bytes":0
             },
-            "messages":[  
-               {  
+            "messages":[
+               {
                   "time":12345.12312,
                   "type":"x",
-                  "name":{  
-                     "$enum":[  
+                  "name":{
+                     "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
                         "process_error",
@@ -104,15 +157,15 @@
             "fault_domain":"0ccb4e0fdbdb5583010f6b77d9d10ece",
             "excluded":false,
             "address":"1.2.3.4:1234",
-            "disk":{  
+            "disk":{
                "free_bytes":3451233456234,
-               "reads":{  
+               "reads":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
                },
                "busy":0.0,
-               "writes":{  
+               "writes":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
@@ -120,7 +173,7 @@
                "total_bytes":123412341234
             },
             "uptime_seconds":1234.2345,
-            "cpu":{  
+            "cpu":{
                "usage_cores":0.0
             },
             "network":{
@@ -134,10 +187,10 @@
                "connection_errors":{
                    "hz":0.0
                },
-               "megabits_sent":{  
+               "megabits_sent":{
                   "hz":0.0
                },
-               "megabits_received":{  
+               "megabits_received":{
                   "hz":0.0
                }
             }
@@ -162,17 +215,17 @@
             "satellite_log_fault_tolerance":2
          }
       ],
-      "fault_tolerance":{  
+      "fault_tolerance":{
          "max_machine_failures_without_losing_availability":0,
          "max_machine_failures_without_losing_data":0
       },
-      "qos":{  
+      "qos":{
          "worst_queue_bytes_log_server":460,
-         "performance_limited_by":{  
+         "performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
-			"reason_id":0,
-            "name":{  
-               "$enum":[  
+            "reason_id":0,
+            "name":{
+               "$enum":[
                   "workload",
                   "storage_server_write_queue_size",
                   "storage_server_write_bandwidth_mvcc",
@@ -187,34 +240,34 @@
             },
             "description":"The database is not being saturated by the workload."
          },
-		 "transactions_per_second_limit":0,
-		 "released_transactions_per_second":0,
-		 "limiting_queue_bytes_storage_server":0,
+         "transactions_per_second_limit":0,
+         "released_transactions_per_second":0,
+         "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-		 "limiting_version_lag_storage_server":0,
-		 "worst_version_lag_storage_server":0
+         "limiting_version_lag_storage_server":0,
+         "worst_version_lag_storage_server":0
       },
-      "incompatible_connections":[  
+      "incompatible_connections":[
 
       ],
       "datacenter_version_difference":0,
       "database_available":true,
       "database_locked":false,
       "generation":2,
-      "latency_probe":{  
+      "latency_probe":{
          "read_seconds":7,
-		 "immediate_priority_transaction_start_seconds":0.0,
-		 "batch_priority_transaction_start_seconds":0.0,
+         "immediate_priority_transaction_start_seconds":0.0,
+         "batch_priority_transaction_start_seconds":0.0,
          "transaction_start_seconds":0.0,
          "commit_seconds":0.02
       },
-      "clients":{  
+      "clients":{
          "count":1,
-         "supported_versions":[  
-             {  
+         "supported_versions":[
+             {
                  "client_version":"3.0.0",
-                 "connected_clients":[  
-                     {  
+                 "connected_clients":[
+                     {
                          "address":"127.0.0.1:9898",
                          "log_group":"default"
                      }
@@ -225,20 +278,20 @@
              }
          ]
       },
-      "messages":[  
-         {  
-            "reasons":[  
-               {  
+      "messages":[
+         {
+            "reasons":[
+               {
                   "description":"Blah."
                }
             ],
-            "unreachable_processes":[  
-               {  
+            "unreachable_processes":[
+               {
                   "address":"1.2.3.4:1234"
                }
             ],
-            "name":{  
-               "$enum":[  
+            "name":{
+               "$enum":[
                   "unreachable_master_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
@@ -255,10 +308,10 @@
                   "database_availability_timeout"
                ]
             },
-            "issues":[  
-               {  
-                  "name":{  
-                     "$enum":[  
+            "issues":[
+               {
+                  "name":{
+                     "$enum":[
                         "incorrect_cluster_file_contents"
                      ]
                   },
@@ -268,11 +321,12 @@
             "description":"abc"
          }
       ],
-      "recovery_state":{  
+)statusSchema" R"statusSchema(
+      "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
-         "name":{  
-            "$enum":[  
+         "name":{
+            "$enum":[
                "reading_coordinated_state",
                "locking_coordinated_state",
                "locking_old_transaction_servers",
@@ -294,21 +348,26 @@
          "missing_logs":"7f8d623d0cb9966e",
          "description":"Recovery complete."
       },
-      "workload":{  
-         "operations":{  
-            "writes":{  
+      "workload":{
+         "operations":{
+            "writes":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             },
-            "reads":{  
+            "reads":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "read_requests":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             }
          },
-         "bytes":{  
-            "written":{  
+         "bytes":{
+            "written":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -326,18 +385,18 @@
                "roughness":0.0
             }
          },
-         "transactions":{  
-            "started":{  
+         "transactions":{
+            "started":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             },
-            "conflicted":{  
+            "conflicted":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             },
-            "committed":{  
+            "committed":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -352,21 +411,43 @@
          "log_anti_quorum":0,
          "log_replicas":2,
          "log_replication_policy":"(zoneid^3x1)",
-         "redundancy_mode":"single",
+         "redundancy_mode":{
+         "$enum":[
+             "single",
+             "double",
+             "triple",
+             "three_datacenter",
+             "three_datacenter_fallback",
+             "three_data_hall"
+         ]},
          "regions":[{
-            "datacenters":[{
-               "id":"mr",
-               "priority":1,
-               "satellite":1
-            }],
-            "satellite_redundancy_mode":"one_satellite_single",
-            "satellite_log_replicas":1,
-            "satellite_usable_dcs":1,
-            "satellite_anti_quorum":0,
-            "satellite_log_policy":"(zoneid^3x1)",
-            "satellite_logs":2
+         "datacenters":[{
+             "id":"mr",
+             "priority":1,
+             "satellite":1
          }],
-         "remote_redundancy_mode":"remote_single",
+         "satellite_redundancy_mode":{
+         "$enum":[
+             "one_satellite_single",
+             "one_satellite_double",
+             "one_satellite_triple",
+             "two_satellite_safe",
+             "two_satellite_fast"
+         ]},
+         "satellite_log_replicas":1,
+         "satellite_usable_dcs":1,
+         "satellite_anti_quorum":0,
+         "satellite_log_policy":"(zoneid^3x1)",
+         "satellite_logs":2
+         }],
+         "remote_redundancy_mode":{
+         "$enum":[
+             "remote_default",
+             "remote_single",
+             "remote_double",
+             "remote_triple",
+             "remote_three_data_hall"
+         ]},
          "remote_log_replicas":3,
          "remote_logs":5,
          "log_routers":10,
@@ -376,18 +457,17 @@
          "resolvers":1,
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
-         "storage_engine":{  
-            "$enum":[  
-               "ssd",
-               "ssd-1",
-               "ssd-2",
-               "memory",
-               "custom"
-            ]
-         },
+         "storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-experimental",
+             "memory"
+         ]},
          "coordinators_count":1,
-         "excluded_servers":[  
-            {  
+         "excluded_servers":[
+            {
                "address":"10.0.4.1"
             }
          ],
@@ -396,14 +476,14 @@
          "auto_logs":3,
          "proxies":5
       },
-      "data":{  
+      "data":{
          "least_operating_space_bytes_log_server":0,
          "average_partition_size_bytes":0,
-         "state":{  
+         "state":{
             "healthy":true,
             "min_replicas_remaining":0,
-            "name":{  
-               "$enum":[  
+            "name":{
+               "$enum":[
                   "initializing",
                   "missing_data",
                   "healing",
@@ -452,20 +532,20 @@
          "least_operating_space_bytes_storage_server":0,
          "max_machine_failures_without_losing_data":0
       },
-      "machines":{  
-         "$map":{  
-            "network":{  
-               "megabits_sent":{  
+      "machines":{
+         "$map":{
+            "network":{
+               "megabits_sent":{
                   "hz":0.0
                },
-               "megabits_received":{  
+               "megabits_received":{
                   "hz":0.0
                },
-               "tcp_segments_retransmitted":{  
+               "tcp_segments_retransmitted":{
                   "hz":0.0
                }
             },
-            "memory":{  
+            "memory":{
                "free_bytes":0,
                "committed_bytes":0,
                "total_bytes":0
@@ -478,30 +558,30 @@
             "locality":{
                 "$map":"value"
             },
-            "cpu":{  
+            "cpu":{
                "logical_core_utilization":0.4
             }
          }
       }
    },
-   "client":{  
-      "coordinators":{  
-         "coordinators":[  
-            {  
+   "client":{
+      "coordinators":{
+         "coordinators":[
+            {
                "reachable":true,
                "address":"127.0.0.1:4701"
             }
          ],
          "quorum_reachable":true
       },
-      "database_status":{  
+      "database_status":{
          "available":true,
          "healthy":true
       },
-      "messages":[  
-         {  
-            "name":{  
-               "$enum":[  
+      "messages":[
+         {
+            "name":{
+               "$enum":[
                   "inconsistent_cluster_file",
                   "unreachable_cluster_controller",
                   "no_cluster_controller",
@@ -517,9 +597,77 @@
          }
       ],
       "timestamp":1415650089,
-      "cluster_file":{  
+      "cluster_file":{
          "path":"/etc/foundationdb/fdb.cluster",
          "up_to_date":true
       }
    }
-}
+})statusSchema");
+
+const KeyRef JSONSchemas::configurationSchema = LiteralStringRef(R"configSchema(
+{
+    "create":{
+    "$enum":[
+        "new"
+    ]},
+    "log_anti_quorum":0,
+    "log_replicas":2,
+    "log_replication_policy":"(zoneid^3x1)",
+    "redundancy_mode":{
+    "$enum":[
+        "single",
+        "double",
+        "triple",
+        "three_datacenter",
+        "three_datacenter_fallback",
+        "three_data_hall"
+    ]},
+    "regions":[{
+        "datacenters":[{
+            "id":"mr",
+            "priority":1,
+            "satellite":1
+        }],
+        "satellite_redundancy_mode":{
+        "$enum":[
+            "one_satellite_single",
+            "one_satellite_double",
+            "one_satellite_triple",
+            "two_satellite_safe",
+            "two_satellite_fast"
+        ]},
+        "satellite_log_replicas":1,
+        "satellite_usable_dcs":1,
+        "satellite_anti_quorum":0,
+        "satellite_log_policy":"(zoneid^3x1)",
+        "satellite_logs":2
+    }],
+    "remote_redundancy_mode":{
+    "$enum":[
+        "remote_default",
+        "remote_single",
+        "remote_double",
+        "remote_triple",
+        "remote_three_data_hall"
+    ]},
+    "remote_log_replicas":3,
+    "remote_logs":5,
+    "log_routers":10,
+    "usable_regions":1,
+    "repopulate_anti_quorum":1,
+    "storage_replicas":1,
+    "resolvers":1,
+    "storage_replication_policy":"(zoneid^3x1)",
+    "logs":2,
+    "storage_engine":{
+    "$enum":[
+        "ssd",
+        "ssd-1",
+        "ssd-2",
+        "memory"
+    ]},
+    "auto_proxies":3,
+    "auto_resolvers":1,
+    "auto_logs":3,
+    "proxies":5
+})configSchema");

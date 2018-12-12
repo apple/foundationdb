@@ -22,7 +22,7 @@
 #define FDBCLIENT_COORDINATIONINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 
@@ -81,7 +81,7 @@ public:
 	bool writeFile();
 	void setConnectionString( ClusterConnectionString const& );
 	std::string const& getFilename() const { ASSERT( filename.size() ); return filename; }
-	bool canGetFilename() { return filename.size() != 0; }
+	bool canGetFilename() const { return filename.size() != 0; }
 	bool fileContentsUpToDate() const;
 	bool fileContentsUpToDate(ClusterConnectionString &fileConnectionString) const;
 	void notifyConnected();

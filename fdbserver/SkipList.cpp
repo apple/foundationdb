@@ -37,7 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 
 #define PARALLEL_THREAD_COUNT 0	// FIXME: When >1, program execution (e.g. random numbers) is/was nondeterministic.  Why?
 
@@ -921,7 +921,7 @@ StringRef setK( Arena& arena, int i ) {
 	return StringRef( (const uint8_t*)ss, keySize );
 }
 
-#include "ConflictSet.h"
+#include "fdbserver/ConflictSet.h"
 
 struct ConflictSet {
 	ConflictSet() : oldestVersion(0) {

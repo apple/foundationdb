@@ -24,8 +24,8 @@
 
 #include <string>
 #include <stdint.h>
-#include "serialize.h"
-#include "IRandom.h"
+#include "flow/serialize.h"
+#include "flow/IRandom.h"
 
 enum {
 	TaskMaxPriority = 1000000,

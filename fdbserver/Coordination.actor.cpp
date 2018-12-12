@@ -19,9 +19,9 @@
  */
 
 #include "fdbserver/CoordinationInterface.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -161,7 +161,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 	}
 };
 
-TEST_CASE("fdbserver/Coordination/localGenerationReg/simple") {
+TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
 		g_random->randomUniqueID());

@@ -22,10 +22,10 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
-#include "ClusterRecruitmentInterface.h"
-#include "MasterInterface.h"
-#include "LogSystemConfig.h"
-#include "RecoveryState.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/RecoveryState.h"
 
 struct ServerDBInfo {
 	// This structure contains transient information which is broadcast to all workers for a database,
@@ -37,7 +37,6 @@ struct ServerDBInfo {
 	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
 	vector<ResolverInterface> resolvers;
-	Standalone<StringRef> dbName;
 	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;
 	LifetimeToken masterLifetime;  // Used by masterserver to detect not being the currently chosen master
@@ -45,15 +44,14 @@ struct ServerDBInfo {
 	LogSystemConfig logSystemConfig;
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
 
-	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
-	explicit ServerDBInfo(StringRef const& dbName) : dbName(dbName), recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
+	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & clusterInterface & client & master & resolvers & dbName & recoveryCount & masterLifetime & logSystemConfig & priorCommittedLogServers & recoveryState;
+		ar & id & clusterInterface & client & master & resolvers & recoveryCount & masterLifetime & logSystemConfig & priorCommittedLogServers & recoveryState;
 	}
 };
 

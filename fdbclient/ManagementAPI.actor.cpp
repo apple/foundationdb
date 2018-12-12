@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "ManagementAPI.h"
+#include "fdbclient/ManagementAPI.h"
 
-#include "SystemData.h"
-#include "NativeAPI.h"
-#include "CoordinationInterface.h"
-#include "DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
-#include "StatusClient.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -86,6 +86,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		storeType= KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
+	} else if (mode == "ssd-redwood-experimental") {
+		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "memory") {
 		storeType= KeyValueStoreType::MEMORY;
 	}
@@ -250,26 +252,174 @@ bool isCompleteConfiguration( std::map<std::string, std::string> const& options 
 			options.count( p+"storage_engine" ) == 1;
 }
 
-ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m ) {
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
+			DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) res);
+			return config;
+		} catch( Error &e ) {
+			wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
 
-	if (!m.size())
+	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
+	}
 
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
 	if (creating) {
 		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
-		if (!isCompleteConfiguration(m))
+		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
+		}
 	}
 
+	state Future<Void> tooLong = delay(4.5);
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+			if(!creating && !force) {
+				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
+				wait( success(fConfig) || tooLong );
+
+				if(!fConfig.isReady()) {
+					return ConfigurationResult::DATABASE_UNAVAILABLE;
+				}
+
+				if(fConfig.isReady()) {
+					ASSERT( fConfig.get().size() < CLIENT_KNOBS->TOO_MANY );
+					state DatabaseConfiguration oldConfig;
+					oldConfig.fromKeyValues((VectorRef<KeyValueRef>) fConfig.get());
+					state DatabaseConfiguration newConfig = oldConfig;
+					for(auto kv : m) {
+						newConfig.set(kv.first, kv.second);
+					}
+					if(!newConfig.isValid()) {
+						return ConfigurationResult::INVALID_CONFIGURATION;
+					}
+
+					if(oldConfig.usableRegions != newConfig.usableRegions) {
+						//cannot change region configuration
+						std::map<Key,int32_t> dcId_priority;
+						for(auto& it : newConfig.regions) {
+							dcId_priority[it.dcId] = it.priority;
+						}
+						for(auto& it : oldConfig.regions) {
+							if(!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
+								return ConfigurationResult::REGIONS_CHANGED;
+							}
+						}
+
+						//must only have one region with priority >= 0
+						int activeRegionCount = 0;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								activeRegionCount++;
+							}
+						}
+						if(activeRegionCount > 1) {
+							return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
+						}
+					}
+
+					state Future<Standalone<RangeResultRef>> fServerList = (newConfig.regions.size()) ? tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) : Future<Standalone<RangeResultRef>>();
+
+					if(newConfig.usableRegions==2) {
+						//all regions with priority >= 0 must be fully replicated
+						state std::vector<Future<Optional<Value>>> replicasFutures;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
+							}
+						}
+						wait( waitForAll(replicasFutures) || tooLong );
+
+						for(auto& it : replicasFutures) {
+							if(!it.isReady()) {
+								return ConfigurationResult::DATABASE_UNAVAILABLE;
+							}
+							if(!it.get().present()) {
+								return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+							}
+						}
+					}
+
+					if(newConfig.regions.size()) {
+						//all storage servers must be in one of the regions
+						wait( success(fServerList) || tooLong );
+						if(!fServerList.isReady()) {
+							return ConfigurationResult::DATABASE_UNAVAILABLE;
+						}
+						Standalone<RangeResultRef> serverList = fServerList.get();
+						ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+						std::set<Key> newDcIds;
+						for(auto& it : newConfig.regions) {
+							newDcIds.insert(it.dcId);
+						}
+						for(auto& s : serverList) {
+							auto ssi = decodeServerListValue( s.value );
+							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
+								return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
+							}
+						}
+					}
+
+					wait( success(fWorkers) || tooLong );
+					if(!fWorkers.isReady()) {
+						return ConfigurationResult::DATABASE_UNAVAILABLE;
+					}
+
+					if(newConfig.regions.size()) {
+						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
+							}
+						}
+						for(auto& region : newConfig.regions) {
+							if(dcId_zoneIds[region.dcId].size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+								return ConfigurationResult::NOT_ENOUGH_WORKERS;
+							}
+							if(region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
+								int totalSatelliteProcesses = 0;
+								for(auto& sat : region.satellites) {
+									totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
+								}
+								if(totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
+									return ConfigurationResult::NOT_ENOUGH_WORKERS;
+								}
+							}
+						}
+					} else {
+						std::set<Optional<Key>> zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								zoneIds.insert(it.locality.zoneId());
+							}
+						}
+						if(zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+							return ConfigurationResult::NOT_ENOUGH_WORKERS;
+						}
+					}
+				}
+			}
+
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
@@ -605,7 +755,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force ) {
 	if( modes.size() && modes[0] == LiteralStringRef("auto") && conf.present() ) {
 		return autoConfig(cx, conf.get());
 	}
@@ -614,16 +764,16 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes, bool force ) {
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string,std::string> m;
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
 ACTOR Future<vector<ProcessData>> getWorkers( Transaction* tr ) {
@@ -699,7 +849,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone deleted this key entirely?
 
 			state ClusterConnectionString old( currentKey.get().toString() );
-			if ( cx->cluster && old.clusterKeyName().toString() != cx->cluster->getConnectionFile()->getConnectionString().clusterKeyName() )
+			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
 			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
@@ -1172,23 +1322,6 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 	}
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
-			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>) res);
-			return config;
-		} catch( Error &e ) {
-			wait( tr.onError(e) );
-		}
-	}
-
-}
-
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
 	state ReadYourWritesTransaction tr(cx);
 	loop {
@@ -1375,17 +1508,171 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
-	loop{
-		choose {
-			when( wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().forceRecovery.getReply( ForceRecoveryRequest() ) ) : Never() ) ) {
+	while(!clusterInterface->get().present()) {
+		wait(clusterInterface->onChange());
+	}
+
+	ErrorOr<Void> _ = wait(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() ));
+	return Void();
+}
+
+ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
+	state ReadYourWritesTransaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res = wait( tr.get(primaryDatacenterKey) );
+			if(res.present() && res.get() == dcId) {
 				return Void();
 			}
-			when( wait(clusterInterface->onChange()) ) {}
+
+			state Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
+			wait(tr.commit());
+			wait(watchFuture);
+			tr.reset();
+		} catch (Error& e) {
+			wait( tr.onError(e) );
 		}
 	}
 }
 
-TEST_CASE("ManagementAPI/AutoQuorumChange/checkLocality") {
+json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
+	if (type == json_spirit::int_type)
+		return json_spirit::real_type;
+	return type;
+}
+
+void schemaCoverage( std::string const& spath, bool covered ) {
+	static std::map<bool, std::set<std::string>> coveredSchemaPaths;
+
+	if( coveredSchemaPaths[covered].insert(spath).second ) {
+		TraceEvent ev(SevInfo, "CodeCoverage");
+		ev.detail("File", "documentation/StatusSchema.json/" + spath).detail("Line", 0);
+		if (!covered)
+			ev.detail("Covered", 0);
+	}
+}
+
+bool schemaMatch( StatusObject const schema, StatusObject const result, std::string& errorStr, Severity sev, bool checkCoverage, std::string path, std::string schema_path ) {
+	// Returns true if everything in `result` is permitted by `schema`
+
+	// Really this should recurse on "values" rather than "objects"?
+
+	bool ok = true;
+
+	try {
+		for(auto& rkv : result) {
+			auto& key = rkv.first;
+			auto& rv = rkv.second;
+			std::string kpath = path + "." + key;
+			std::string spath = schema_path + "." + key;
+
+			if(checkCoverage) schemaCoverage(spath);
+
+			if (!schema.count(key)) {
+				errorStr += format("ERROR: Unknown key `%s'\n", kpath.c_str());
+				TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaPath", spath);
+				ok = false;
+				continue;
+			}
+			auto& sv = schema.at(key);
+
+			if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$enum")) {
+				auto& enum_values = sv.get_obj().at("$enum").get_array();
+
+				bool any_match = false;
+				for(auto& enum_item : enum_values)
+					if (enum_item == rv) {
+						any_match = true;
+						if(checkCoverage) schemaCoverage(spath + ".$enum." + enum_item.get_str());
+						break;
+					}
+				if (!any_match) {
+					errorStr += format("ERROR: Unknown value `%s' for key `%s'\n", json_spirit::write_string(rv).c_str(), kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaEnumItems", enum_values.size()).detail("Value", json_spirit::write_string(rv));
+					if(checkCoverage) schemaCoverage(spath + ".$enum." + json_spirit::write_string(rv));
+					ok = false;
+				}
+			} else if (sv.type() == json_spirit::obj_type && sv.get_obj().count("$map")) {
+				if (rv.type() != json_spirit::obj_type) {
+					errorStr += format("ERROR: Expected an object as the value for key `%s'\n", kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+					ok = false;
+					continue;
+				}
+				if(sv.get_obj().at("$map").type() != json_spirit::obj_type) {
+					continue;
+				}
+				auto& schema_obj = sv.get_obj().at("$map").get_obj();
+				auto& value_obj = rv.get_obj();
+
+				if(checkCoverage) schemaCoverage(spath + ".$map");
+
+				for(auto& value_pair : value_obj) {
+					auto vpath = kpath + "[" + value_pair.first + "]";
+					auto upath = spath + ".$map";
+					if (value_pair.second.type() != json_spirit::obj_type) {
+						errorStr += format("ERROR: Expected an object for `%s'\n", vpath.c_str());
+						TraceEvent(sev, "SchemaMismatch").detail("Path", vpath).detail("ValueType", value_pair.second.type());
+						ok = false;
+						continue;
+					}
+					if (!schemaMatch(schema_obj, value_pair.second.get_obj(), errorStr, sev, checkCoverage, vpath, upath))
+						ok = false;
+				}
+			} else {
+				// The schema entry isn't an operator, so it asserts a type and (depending on the type) recursive schema definition
+				if (normJSONType(sv.type()) != normJSONType(rv.type())) {
+					errorStr += format("ERROR: Incorrect value type for key `%s'\n", kpath.c_str());
+					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaType", sv.type()).detail("ValueType", rv.type());
+					ok = false;
+					continue;
+				}
+				if (rv.type() == json_spirit::array_type) {
+					auto& value_array = rv.get_array();
+					auto& schema_array = sv.get_array();
+					if (!schema_array.size()) {
+						// An empty schema array means that the value array is required to be empty
+						if (value_array.size()) {
+							errorStr += format("ERROR: Expected an empty array for key `%s'\n", kpath.c_str());
+							TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaSize", schema_array.size()).detail("ValueSize", value_array.size());
+							ok = false;
+							continue;
+						}
+					} else if (schema_array.size() == 1 && schema_array[0].type() == json_spirit::obj_type) {
+						// A one item schema array means that all items in the value must match the first item in the schema
+						auto& schema_obj = schema_array[0].get_obj();
+						int index = 0;
+						for(auto &value_item : value_array) {
+							if (value_item.type() != json_spirit::obj_type) {
+								errorStr += format("ERROR: Expected all array elements to be objects for key `%s'\n", kpath.c_str());
+								TraceEvent(sev, "SchemaMismatch").detail("Path", kpath + format("[%d]",index)).detail("ValueType", value_item.type());
+								ok = false;
+								continue;
+							}
+							if (!schemaMatch(schema_obj, value_item.get_obj(), errorStr, sev, checkCoverage, kpath + format("[%d]", index), spath + "[0]"))
+								ok = false;
+							index++;
+						}
+					} else
+						ASSERT(false);  // Schema doesn't make sense
+				} else if (rv.type() == json_spirit::obj_type) {
+					auto& schema_obj = sv.get_obj();
+					auto& value_obj = rv.get_obj();
+					if (!schemaMatch(schema_obj, value_obj, errorStr, sev, checkCoverage, kpath, spath))
+						ok = false;
+				}
+			}
+		}
+		return ok;
+	} catch (std::exception& e) {
+		TraceEvent(SevError, "SchemaMatchException").detail("What", e.what()).detail("Path", path).detail("SchemaPath", schema_path);
+		throw unknown_error();
+	}
+}
+
+TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	wait(Future<Void>(Void()));
 
 	std::vector<ProcessData> workers;
