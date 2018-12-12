@@ -686,7 +686,7 @@ For example, suppose you have a polling loop that checks keys for changes once a
             value = read_keys(db)
             for k in keys:
                 if cache[k] != value[k]:
-                    yield value[k]
+                    yield (k, value[k])
                     cache[k] = value[k]
             time.sleep(1)
 
@@ -707,7 +707,7 @@ With watches, you can eliminate the sleep and perform new reads only after a cha
             value, watches = watch_keys(db)
             for k in keys:
                 if cache[k] != value[k]:
-                    yield value[k]
+                    yield (k, value[k])
                     cache[k] = value[k]
             fdb.Future.wait_for_any(*watches)
 
