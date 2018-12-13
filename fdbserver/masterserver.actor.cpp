@@ -911,6 +911,16 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> provideRecoveryInfo( Reference<MasterData> self ) {
+	loop choose {
+		when( GetRecoveryInfoRequest req = waitNext(self->myInterface.getRecoveryInfo.getFuture()) ) {
+			TraceEvent("MasterGetRecoveryInfo", self->dbgid).detail("ReqID", req.reqId);
+			GetRecoveryInfoReply reply(self->recoveryTransactionVersion, self->configuration);
+			req.reply.send( reply );
+		}
+	}
+}
+
 std::pair<KeyRangeRef, bool> findRange( CoalescedKeyRangeMap<int>& key_resolver, Standalone<VectorRef<ResolverMoveRef>>& movedRanges, int src, int dest ) {
 	auto ranges = key_resolver.ranges();
 	auto prev = ranges.begin();
@@ -1031,7 +1041,6 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert( error_code_no_more_servers );
 		s.insert( error_code_master_recovery_failed );
 		s.insert( error_code_coordinated_state_conflict );
-		s.insert( error_code_movekeys_conflict );
 		s.insert( error_code_master_max_versions_in_flight );
 		s.insert( error_code_worker_removed );
 		s.insert( error_code_new_coordinators_timed_out );
@@ -1349,13 +1358,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
 
-	// Now that the master is recovered we can start auxiliary services that happen to run here
-	{
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
-		state double lastLimited = 0;
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, remoteRecovered.getFuture() ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
-		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
-	}
+	self->addActor.send( provideRecoveryInfo(self) );
 
 	if( self->resolvers.size() > 1 )
 		self->addActor.send( resolutionBalancing(self) );

@@ -200,17 +200,6 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	vector<DDShardInfo> shards;
 };
 
-Future<Void> dataDistribution(
-	Reference<AsyncVar<struct ServerDBInfo>> const& db,
-	MasterInterface const& mi, DatabaseConfiguration const& configuration,
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
-	Reference<ILogSystem> const& logSystem,
-	Version const& recoveryCommitVersion,
-	std::vector<Optional<Key>> const& primaryDcId,
-	std::vector<Optional<Key>> const& remoteDcIds,
-	double* const& lastLimited,
-	Future<Void> const& remoteRecovered);
-
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
@@ -220,7 +209,7 @@ Future<Void> dataDistributionTracker(
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
 	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
-	UID const& masterId);
+	UID const& distributorId);
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,
@@ -232,7 +221,7 @@ Future<Void> dataDistributionQueue(
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
-	MasterInterface const& mi,
+	UID const& distributorId,
 	int const& teamSize,
 	double* const& lastLimited,
 	Version const& recoveryVersion);

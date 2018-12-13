@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/TLogInterface.h"
 
 typedef uint64_t DBRecoveryCount;
@@ -32,10 +33,10 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	LocalityData locality;
 	RequestStream< ReplyPromise<Void> > waitFailure;
-	RequestStream< struct GetRateInfoRequest > getRateInfo;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream< struct GetRecoveryInfoRequest > getRecoveryInfo;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().address; }
 
@@ -43,35 +44,11 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, locality, waitFailure, getRateInfo, tlogRejoin, changeCoordinators, getCommitVersion);
+		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, getRecoveryInfo);
 	}
 
 	void initEndpoints() {
 		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
-	}
-};
-
-struct GetRateInfoRequest {
-	UID requesterID;
-	int64_t totalReleasedTransactions;
-	ReplyPromise<struct GetRateInfoReply> reply;
-
-	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply);
-	}
-};
-
-struct GetRateInfoReply {
-	double transactionRate;
-	double leaseDuration;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration);
 	}
 };
 
@@ -154,6 +131,31 @@ struct GetCommitVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
+	}
+};
+
+struct GetRecoveryInfoReply {
+	Version recoveryTransactionVersion;
+	DatabaseConfiguration configuration;
+
+	GetRecoveryInfoReply() : recoveryTransactionVersion(invalidVersion) {}
+	explicit GetRecoveryInfoReply(Version v, DatabaseConfiguration c) : recoveryTransactionVersion(v), configuration(c) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryTransactionVersion, configuration);
+	}
+};
+
+struct GetRecoveryInfoRequest {
+	UID reqId;
+	ReplyPromise<GetRecoveryInfoReply> reply;
+
+	GetRecoveryInfoRequest() {}
+	explicit GetRecoveryInfoRequest(UID id) : reqId(id) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
 	}
 };
 

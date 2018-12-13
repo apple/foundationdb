@@ -148,6 +148,30 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::DataDistributor:
+		// TODO: understand all the fitnesses and choose from them.
+		switch( _class ) {
+			case ProcessClass::DataDistributorClass:
+				return ProcessClass::BestFit;
+			case ProcessClass::StatelessClass:
+				return ProcessClass::GoodFit;
+			case ProcessClass::MasterClass:
+				return ProcessClass::OkayFit;
+			case ProcessClass::ResolutionClass:
+				return ProcessClass::OkayFit;
+			case ProcessClass::TransactionClass:
+				return ProcessClass::OkayFit;
+			case ProcessClass::ProxyClass:
+				return ProcessClass::OkayFit;
+			case ProcessClass::LogRouterClass:
+				return ProcessClass::OkayFit;
+			case ProcessClass::UnsetClass:
+				return ProcessClass::UnsetFit;
+			case ProcessClass::TesterClass:
+				return ProcessClass::NeverAssign;
+			default:
+				return ProcessClass::WorstFit;
+		}
 	default:
 		return ProcessClass::NeverAssign;
 	}

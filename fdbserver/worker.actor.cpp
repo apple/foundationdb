@@ -31,6 +31,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
@@ -703,7 +704,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				startRole( Role::MASTER, recruited.id(), interf.id() );
 
 				DUMPTOKEN( recruited.waitFailure );
-				DUMPTOKEN( recruited.getRateInfo );
 				DUMPTOKEN( recruited.tlogRejoin );
 				DUMPTOKEN( recruited.changeCoordinators );
 				DUMPTOKEN( recruited.getCommitVersion );
@@ -711,6 +711,16 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				//printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER, recruited.id(), masterProcess )) );
+				req.reply.send(recruited);
+			}
+			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
+				DataDistributorInterface recruited;
+				recruited.id = req.reqId;
+				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address()).detail("WorkerId", interf.id());
+				startRole( Role::DATA_DISTRIBUTOR, req.reqId, interf.id());
+
+				Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
+				errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, req.reqId, dataDistributorProcess ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
@@ -1086,3 +1096,4 @@ const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
 const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
+const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");

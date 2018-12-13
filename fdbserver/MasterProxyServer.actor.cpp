@@ -87,28 +87,63 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 
 int getBytes(Promise<Version> const& r) { return 0; }
 
-ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransactionCount, double* outTransactionRate) {
-	state Future<Void> nextRequestTimer = Void();
+ACTOR Future<Void> monitorDataDistributor(UID myID, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<DataDistributorInterface>> dataDistributor) {
+	state Future<Void> distributorFailure = Never();
+	state Future<GetDistributorInterfaceReply> reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
+
+	loop choose {
+		when ( GetDistributorInterfaceReply r = wait( reply ) ) {
+			reply = Never();
+			dataDistributor->set( r.distributorInterface );
+			distributorFailure = waitFailureClient( dataDistributor->get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			TraceEvent("Proxy", myID).detail("DataDistributorChangedID", dataDistributor->get().id)
+				.detail("Endpoint", dataDistributor->get().waitFailure.getEndpoint().token);
+		}
+		when ( wait( db->onChange() ) ) {
+			distributorFailure = Never();
+			reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
+		}
+		when ( wait( distributorFailure ) ) {
+			distributorFailure = Never();
+			TraceEvent("Proxy", myID)
+				.detail("CC", db->get().clusterInterface.id())
+				.detail("DataDistributorFailed", dataDistributor->get().id)
+				.detail("Token", dataDistributor->get().waitFailure.getEndpoint().token);
+			wait( delay(0.001) );
+			reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
+		}
+	}
+}
+
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate, Reference<AsyncVar<DataDistributorInterface>> dataDistributor) {
+	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
-	state Future<GetRateInfoReply> reply;
+	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
-	loop choose{
-		when(wait(nextRequestTimer)) {
-			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(master.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+	loop choose {
+		when ( wait( dataDistributor->onChange() ) ) {
+			if ( dataDistributor->get().isValid() ) {
+				nextRequestTimer = Void();  // trigger GetRate request
+			} else {
+				nextRequestTimer = Never();
+			}
 		}
-		when(GetRateInfoReply rep = wait(reply)) {
+		when ( wait( nextRequestTimer ) ) {
+			nextRequestTimer = Never();
+			reply = brokenPromiseToNever(dataDistributor->get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+		}
+		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
 		}
-		when(wait(leaseTimeout)) {
+		when ( wait(leaseTimeout ) ) {
 			*outTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
+			TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
@@ -1079,7 +1114,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 ACTOR static Future<Void> transactionStarter(
 	MasterProxyInterface proxy,
-	MasterInterface master,
 	Reference<AsyncVar<ServerDBInfo>> db,
 	PromiseStream<Future<Void>> addActor,
 	ProxyCommitData* commitData
@@ -1096,7 +1130,6 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), master, &transactionCount, &transactionRate));
 	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1106,6 +1139,9 @@ ACTOR static Future<Void> transactionStarter(
 		if (mp != proxy)
 			otherProxies.push_back(mp);
 	}
+	state Reference<AsyncVar<DataDistributorInterface>> dataDistributor( new AsyncVar<DataDistributorInterface>(DataDistributorInterface()) );
+	addActor.send( getRate(proxy.id(), db, &transactionCount, &transactionRate, dataDistributor) );  // do this after correct CC is obtained.
+	addActor.send( monitorDataDistributor(proxy.id(), db, dataDistributor) );
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
 
@@ -1413,7 +1449,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData, db));
-	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
+	addActor.send(transactionStarter(proxy, db, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, &commitData));
 
 	// wait for txnStateStore recovery

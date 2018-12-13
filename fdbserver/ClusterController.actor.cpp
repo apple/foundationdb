@@ -22,6 +22,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbserver/WorkerInterface.h"
@@ -1017,6 +1018,7 @@ public:
 	Optional<double> remoteStartTime;
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
+	AsyncVar<DataDistributorInterface> dataDistributorInterface;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
@@ -1332,7 +1334,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 					checkOutstandingRequests( cluster );
 				}
 			}
-			when( wait( failed ) ) {  // remove workers that have failed
+			when( wait( failed ) ) {  // remote workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.priorityInfo) );
@@ -2216,6 +2218,112 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
+ACTOR Future<Void> clusterGetDistributorInterface( ClusterControllerData *self, UID reqId, ReplyPromise<GetDistributorInterfaceReply> reqReply ) {
+	TraceEvent("CCGetDistributorInterfaceRequest", reqId);
+	state Future<Void> distributorOnchange = Never();
+
+	while ( !self->dataDistributorInterface.get().isValid() ) {
+		wait( self->dataDistributorInterface.onChange() );
+		TraceEvent("CCGetDistributorInterfaceID", self->dataDistributorInterface.get().id)
+		.detail("Endpoint", self->dataDistributorInterface.get().waitFailure.getEndpoint().token);
+	}
+
+	GetDistributorInterfaceReply reply(self->dataDistributorInterface.get());
+	TraceEvent("CCGetDistributorInterfaceReply", reqId)
+		.detail("DataDistributorId", reply.distributorInterface.id)
+		.detail("Endpoint", reply.distributorInterface.waitFailure.getEndpoint().token);
+	reqReply.send( reply );
+	return Void();
+}
+
+ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
+	state Optional<Key> dcId = self->clusterControllerDcId;
+	while ( !dcId.present() || !self->masterProcessId.present() ) {
+		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+		dcId = self->clusterControllerDcId;
+	}
+	ASSERT(dcId.present());
+
+	loop {
+		std::map<Optional<Standalone<StringRef>>, int> id_used;
+		id_used[self->clusterControllerProcessId]++;
+		id_used[self->masterProcessId]++;
+		state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+		state InitializeDataDistributorRequest req;
+		req.reqId = g_random->randomUniqueID();
+		TraceEvent("DataDistributor", req.reqId).detail("Recruit", data_distributor.worker.first.address());
+
+		choose {
+			when ( DataDistributorInterface dataDistributor = wait( data_distributor.worker.first.dataDistributor.getReply(req) ) ) {
+				TraceEvent("DataDistributor", req.reqId).detail("Recruited", data_distributor.worker.first.address());
+				return dataDistributor;
+			}
+			when ( wait ( delay(SERVER_KNOBS->WORKER_FAILURE_TIME) ) ) {}
+		}
+	}
+}
+
+ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterControllerFullInterface *clusterInterface ) {
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection( addActor.getFuture() );
+	state Future<DataDistributorInterface> newDistributor = Never();
+	state Future<Void> distributorFailed = Never();
+
+	// wait for a while to see if existing data distributor will join.
+	loop choose {
+		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
+			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinID", req.dataDistributor.id);
+			self->dataDistributorInterface.set( req.dataDistributor );
+			distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			req.reply.send(true);
+			break;
+		}
+		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) ) ) { break; }
+	}
+
+	if ( !self->dataDistributorInterface.get().isValid() ) {  // No rejoin happened
+		newDistributor = startDataDistributor( self );
+	}
+
+	// Wait on failures and restart it.
+	loop choose {
+		when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
+			TraceEvent ev("ClusterController", self->id);
+			const UID myDdId = self->dataDistributorInterface.get().id;
+			if ( myDdId == UID() ) {
+				ev.detail("NewDataDistributorID", distributorInterf.id);
+				self->dataDistributorInterface.set( distributorInterf );
+				distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			} else {
+				ev.detail("MyDataDistributorID", myDdId).detail("DiscardDataDistributorID", distributorInterf.id);
+			}
+			newDistributor = Never();
+		}
+		when ( wait( distributorFailed ) ) {
+			distributorFailed = Never();
+			TraceEvent("ClusterController", self->id).detail("DataDistributorFailed", self->dataDistributorInterface.get().id)
+			.detail("Endpoint", self->dataDistributorInterface.get().waitFailure.getEndpoint().token);
+			self->dataDistributorInterface.set( DataDistributorInterface() );  // clear the ID
+			newDistributor = startDataDistributor( self );
+		}
+		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
+			if ( !self->dataDistributorInterface.get().isValid() ) {
+				self->dataDistributorInterface.set( req.dataDistributor );
+				distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+				TraceEvent("ClusterController", self->id).detail("DataDistributorRejoined", req.dataDistributor.id);
+			} else {
+				const UID myDdId = self->dataDistributorInterface.get().id;
+				const bool success = myDdId == req.dataDistributor.id;
+				req.reply.send(success);
+				TraceEvent("ClusterController", self->id)
+					.detail("DataDistributorRejoin", success ? "OK" : "Failed")
+					.detail("OldDataDistributorID", myDdId)
+					.detail("ReqID", req.dataDistributor.id);
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -2223,7 +2331,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	state PromiseStream<Future<Void>> addActor;
 	state Future<ErrorOr<Void>> error = errorOr( actorCollection( addActor.getFuture() ) );
 
-	auto pSelf = &self;
 	addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
 	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	addActor.send( self.updateWorkerList.init( self.db.db ) );
@@ -2235,6 +2342,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( updatedChangingDatacenters(&self) );
 	addActor.send( updatedChangedDatacenters(&self) );
 	addActor.send( updateDatacenterVersionDifference(&self) );
+	addActor.send( waitDDRejoinOrStartDD(&self, &interf) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
@@ -2321,6 +2429,9 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		}
 		when( ReplyPromise<Void> ping = waitNext( interf.clientInterface.ping.getFuture() ) ) {
 			ping.send( Void() );
+		}
+		when ( GetDistributorInterfaceRequest req = waitNext( interf.getDistributorInterface.getFuture() ) ) {
+			addActor.send( clusterGetDistributorInterface( &self, req.reqId, req.reply ) );
 		}
 	}
 }
