@@ -18,6 +18,8 @@ set(FLOW_SRCS
   FastRef.h
   FaultInjection.cpp
   FaultInjection.h
+  FileTraceLogWriter.cpp
+  FileTraceLogWriter.h
   Hash3.c
   Hash3.h
   IDispatched.h
@@ -55,6 +57,8 @@ set(FLOW_SRCS
   Trace.h
   UnitTest.cpp
   UnitTest.h
+  XmlTraceLogFormatter.h
+  XmlTraceLogFormatter.cpp
   actorcompiler.h
   boost.cpp
   error_definitions.h

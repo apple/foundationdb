@@ -26,6 +26,8 @@ set(FDBCLIENT_SRCS
   FileBackupAgent.actor.cpp
   HTTP.actor.cpp
   IClientApi.h
+  JsonBuilder.cpp
+  JsonBuilder.h
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
   KeyRangeMap.h
@@ -50,6 +52,8 @@ set(FDBCLIENT_SRCS
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
+  Schemas.cpp
+  Schemas.h
   SnapshotCache.h
   Status.h
   StatusClient.actor.cpp
@@ -76,7 +80,7 @@ set(FDBCLIENT_SRCS
   libb64/cdecode.c
   libb64/cencode.c
   md5/md5.c
-	sha1/SHA1.cpp
+  sha1/SHA1.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 

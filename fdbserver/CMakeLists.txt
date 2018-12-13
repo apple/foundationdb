@@ -18,6 +18,10 @@ set(FDBSERVER_SRCS
   fdbserver.actor.cpp
   IDiskQueue.h
   IKeyValueStore.h
+  IPager.h
+  IVersionedStore.h
+  IndirectShadowPager.actor.cpp
+  IndirectShadowPager.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
@@ -35,6 +39,8 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
+  MemoryPager.actor.cpp
+  MemoryPager.h
   MoveKeys.actor.cpp
   MoveKeys.h
   networktest.actor.cpp
@@ -48,6 +54,8 @@ set(FDBSERVER_SRCS
   Ratekeeper.actor.cpp
   Ratekeeper.h
   RecoveryState.h
+  Restore.actor.cpp
+  RestoreInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h
@@ -72,6 +80,7 @@ set(FDBSERVER_SRCS
   TesterInterface.h
   TLogInterface.h
   TLogServer.actor.cpp
+  VersionedBTree.actor.cpp
   VFSAsync.cpp
   WaitFailure.actor.cpp
   WaitFailure.h

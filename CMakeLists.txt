@@ -152,6 +152,7 @@ add_compile_options(-Wno-error=format
   -fvisibility=hidden
   -Wreturn-type
   -fdiagnostics-color=always
+  -DTLS_DISABLED=1  # TODO: Add TLS support.
   -fPIC)
 
 if(CMAKE_COMPILER_IS_GNUCXX)
