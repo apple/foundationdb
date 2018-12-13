@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
-#include "Platform.h"
+#include "fdbrpc/Platform.h"
 #include <algorithm>
 #include "flow/ActorCollection.h"
 #include "flow/FaultInjection.h"
+
 
 #ifdef _WIN32
 #include <windows.h>
@@ -85,33 +86,36 @@ int __eraseDirectoryRecurseiveCount;
 int eraseDirectoryRecursive(std::string const& dir) {
 	__eraseDirectoryRecurseiveCount = 0;
 #ifdef _WIN32
-	system(("rd /s /q \"" + dir + "\"").c_str());
+	system( ("rd /s /q \"" + dir + "\"").c_str() );
 #elif defined(__linux__) || defined(__APPLE__)
-	int error = nftw(dir.c_str(),
-	                 [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
-		                 int r = remove(fpath);
-		                 if (r == 0) ++__eraseDirectoryRecurseiveCount;
-		                 return r;
-	                 },
-	                 64, FTW_DEPTH | FTW_PHYS);
+	int error =
+		nftw(dir.c_str(),
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
+				int r = remove(fpath);
+				if(r == 0)
+					++__eraseDirectoryRecurseiveCount;
+				return r;
+			},
+			64, FTW_DEPTH | FTW_PHYS);
 	/* Looks like calling code expects this to continue silently if
 	   the directory we're deleting doesn't exist in the first
 	   place */
 	if (error && errno != ENOENT) {
-		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		throw e;
 	}
 #else
 #error Port me!
 #endif
-	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+	//INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
 	return __eraseDirectoryRecurseiveCount;
 }
 
 std::string getDefaultConfigPath() {
 #ifdef _WIN32
 	TCHAR szPath[MAX_PATH];
-	if (SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath) != S_OK) {
+	if( SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath)  != S_OK ) {
 		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
 		throw platform_error();
 	}
@@ -122,11 +126,12 @@ std::string getDefaultConfigPath() {
 #elif defined(__APPLE__)
 	return "/usr/local/etc/foundationdb";
 #else
-#error Port me!
+	#error Port me!
 #endif
 }
 
-bool isSse42Supported() {
+bool isSse42Supported()
+{
 #if defined(_WIN32)
 	int info[4];
 	__cpuid(info, 1);
@@ -136,7 +141,7 @@ bool isSse42Supported() {
 	__cpuid_count(level, count, eax, ebx, ecx, edx);
 	return ((ecx >> 20) & 1) != 0;
 #else
-#error Port me!
+	#error Port me!
 #endif
 }
 

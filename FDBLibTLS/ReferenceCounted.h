@@ -28,11 +28,7 @@
 template <class T>
 struct ReferenceCounted {
 	void addref() { ++referenceCount; }
-	void delref() {
-		if (--referenceCount == 0) {
-			delete (T*)this;
-		}
-	}
+	void delref() { if (--referenceCount == 0) { delete (T*)this; } }
 
 	ReferenceCounted() : referenceCount(1) {}
 
@@ -43,40 +39,25 @@ private:
 };
 
 template <class P>
-void addref(P* ptr) {
-	ptr->addref();
-}
+void addref(P* ptr) { ptr->addref(); }
 template <class P>
-void delref(P* ptr) {
-	ptr->delref();
-}
+void delref(P* ptr) { ptr->delref(); }
 
 template <class P>
 struct Reference {
 	Reference() : ptr(NULL) {}
-	explicit Reference(P* ptr) : ptr(ptr) {}
-	static Reference<P> addRef(P* ptr) {
-		ptr->addref();
-		return Reference(ptr);
-	}
+	explicit Reference( P* ptr ) : ptr(ptr) {}
+	static Reference<P> addRef( P* ptr ) { ptr->addref(); return Reference(ptr); }
 
-	Reference(const Reference& r) : ptr(r.getPtr()) {
-		if (ptr) addref(ptr);
-	}
-	Reference(Reference&& r) : ptr(r.getPtr()) { r.ptr = NULL; }
+	Reference(const Reference& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
+	Reference(Reference && r) : ptr(r.getPtr()) { r.ptr = NULL; }
 
 	template <class Q>
-	Reference(const Reference<Q>& r) : ptr(r.getPtr()) {
-		if (ptr) addref(ptr);
-	}
+	Reference(const Reference<Q>& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
 	template <class Q>
-	Reference(Reference<Q>&& r) : ptr(r.getPtr()) {
-		r.setPtrUnsafe(NULL);
-	}
+	Reference(Reference<Q> && r) : ptr(r.getPtr()) { r.setPtrUnsafe(NULL); }
 
-	~Reference() {
-		if (ptr) delref(ptr);
-	}
+	~Reference() { if (ptr) delref(ptr); }
 	Reference& operator=(const Reference& r) {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
@@ -110,22 +91,17 @@ struct Reference {
 	P& operator*() const { return *ptr; }
 	P* getPtr() const { return ptr; }
 
-	void setPtrUnsafe(P* p) { ptr = p; }
+	void setPtrUnsafe( P* p ) { ptr = p; }
 
-	P* extractPtr() {
-		auto* p = ptr;
-		ptr = NULL;
-		return p;
-	}
+	P* extractPtr() { auto *p = ptr; ptr = NULL; return p; }
 
 	bool boolean_test() const { return ptr != 0; }
-
 private:
-	P* ptr;
+	P *ptr;
 };
 
-template <class P>
-bool operator==(const Reference<P>& lhs, const Reference<P>& rhs) {
+template <class P> 
+bool operator==( const Reference<P>& lhs, const Reference<P>& rhs ) {
 	return lhs.getPtr() == rhs.getPtr();
 }
 

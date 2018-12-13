@@ -41,8 +41,8 @@
 #ifdef __cplusplus
 #define EXTERNC extern "C"
 
-#include <cstdint>
 #include <cstdlib>
+#include <cstdint>
 #include <stdio.h>
 
 #ifdef __unixish__
@@ -54,34 +54,29 @@
 #endif
 
 #if defined(__linux__)
-#if defined(__clang__)
-#if ((__clang_major__ * 100 + __clang_minor__) < 303)
-#error Clang 3.3 or later is required on this platform
-#endif
-#elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
-#error GCC 4.5.0 or later required on this platform
-#endif
+#  if defined(__clang__)
+#    if ((__clang_major__ * 100 + __clang_minor__) < 303)
+#      error Clang 3.3 or later is required on this platform
+#    endif
+#  elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
+#    error GCC 4.5.0 or later required on this platform
+#  endif
 #endif
 
 #if defined(_WIN32) && (_MSC_VER < 1600)
 #error Visual Studio 2010 required on this platform
 #endif
 
-#if defined(__APPLE__) &&                                                      \
-  (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 +           \
-                           __GNUC_PATCHLEVEL__) > 40800)))
+#if defined(__APPLE__) && (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40800)))
 #error Either Clang or GCC 4.8.0 or later required on this platform
 #endif
 
 #if (__clang__ == 1)
-#define DISABLE_ZERO_DIVISION_FLAG                                             \
-    _Pragma("GCC diagnostic ignored \"-Wdivision-by-zero\"")
+#define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdivision-by-zero\"")
 #elif defined(_MSC_VER)
-#define DISABLE_ZERO_DIVISION_FLAG                                             \
-    __pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
+#define DISABLE_ZERO_DIVISION_FLAG __pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #else
-#define DISABLE_ZERO_DIVISION_FLAG                                             \
-    _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
+#define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #endif
 
 /*
@@ -130,11 +125,7 @@
  */
 #ifndef _MSC_VER
 #if defined(__GNUG__)
-#define __assume(cond)                                                         \
-    do {                                                                       \
-        if (!(cond))                                                           \
-            __builtin_unreachable();                                           \
-    } while (0)
+#define __assume(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
 #else
 #define __assume(cond)
 #endif
@@ -143,28 +134,26 @@
 #ifdef __unixish__
 #include <pthread.h>
 #define CRITICAL_SECTION pthread_mutex_t
-#define InitializeCriticalSection(m)                                           \
-    do {                                                                       \
-        pthread_mutexattr_t mta;                                               \
-        pthread_mutexattr_init(&mta);                                          \
-        pthread_mutexattr_settype(&mta, PTHREAD_MUTEX_RECURSIVE);              \
-        pthread_mutex_init(m, &mta);                                           \
-        pthread_mutexattr_destroy(&mta);                                       \
-    } while (0)
+#define InitializeCriticalSection(m) \
+do { \
+	pthread_mutexattr_t mta; \
+	pthread_mutexattr_init(&mta); \
+	pthread_mutexattr_settype(&mta, PTHREAD_MUTEX_RECURSIVE); \
+	pthread_mutex_init(m, &mta); \
+	pthread_mutexattr_destroy(&mta); \
+	} while (0)
 #define DeleteCriticalSection(m) pthread_mutex_destroy(m)
 #define EnterCriticalSection(m) pthread_mutex_lock(m)
 #define LeaveCriticalSection(m) pthread_mutex_unlock(m)
 #endif
 
 #if (defined(__GNUG__))
-#include <functional>
 #include <memory>
+#include <functional>
 #endif
 
-// fake<T>() is for use in decltype expressions only - there is no
-// implementation
-template <class T>
-T fake();
+// fake<T>() is for use in decltype expressions only - there is no implementation
+template <class T> T fake();
 
 // g++ requires that non-dependent names have to be looked up at
 // template definition, which makes circular dependencies a royal
@@ -174,9 +163,7 @@ T fake();
 // out that it's simple to force a name to be dependent, which is what
 // we'll do for now.
 template <class Ignore, class T>
-inline static T &makeDependent(T &value) {
-    return value;
-}
+inline static T& makeDependent(T& value) { return value; }
 
 #include <string>
 #include <vector>
@@ -186,13 +173,13 @@ inline static T &makeDependent(T &value) {
 #define THREAD_FUNC static void __cdecl
 #define THREAD_FUNC_RETURN void
 #define THREAD_HANDLE void *
-THREAD_HANDLE startThread(void(func)(void *), void *arg);
+THREAD_HANDLE startThread(void (func) (void *), void *arg);
 #define THREAD_RETURN return
 #elif defined(__unixish__)
 #define THREAD_FUNC static void *
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
-THREAD_HANDLE startThread(void *(func)(void *), void *arg);
+THREAD_HANDLE startThread(void *(func) (void *), void *arg);
 #define THREAD_RETURN return NULL
 #else
 #error How do I start a new thread on this platform?
@@ -226,61 +213,39 @@ void deprioritizeThread();
 std::string removeWhitespace(const std::string &t);
 
 struct SystemStatistics {
-    bool initialized;
-    double elapsed;
-    double processCPUSeconds, mainThreadCPUSeconds;
-    uint64_t processMemory;
-    uint64_t processResidentMemory;
-    uint64_t processDiskTotalBytes;
-    uint64_t processDiskFreeBytes;
-    double processDiskQueueDepth;
-    double processDiskIdleSeconds;
-    double processDiskRead;
-    double processDiskWrite;
-    uint64_t processDiskReadCount;
-    uint64_t processDiskWriteCount;
-    double processDiskWriteSectors;
-    double processDiskReadSectors;
-    double machineMegabitsSent;
-    double machineMegabitsReceived;
-    uint64_t machineOutSegs;
-    uint64_t machineRetransSegs;
-    double machineCPUSeconds;
-    int64_t machineTotalRAM;
-    int64_t machineCommittedRAM;
-    int64_t machineAvailableRAM;
+	bool initialized;
+	double elapsed;
+	double processCPUSeconds, mainThreadCPUSeconds;
+	uint64_t processMemory;
+	uint64_t processResidentMemory;
+	uint64_t processDiskTotalBytes;
+	uint64_t processDiskFreeBytes;
+	double processDiskQueueDepth;
+	double processDiskIdleSeconds;
+	double processDiskRead;
+	double processDiskWrite;
+	uint64_t processDiskReadCount;
+	uint64_t processDiskWriteCount;
+	double processDiskWriteSectors;
+	double processDiskReadSectors;
+	double machineMegabitsSent;
+	double machineMegabitsReceived;
+	uint64_t machineOutSegs;
+	uint64_t machineRetransSegs;
+	double machineCPUSeconds;
+	int64_t machineTotalRAM;
+	int64_t machineCommittedRAM;
+	int64_t machineAvailableRAM;
 
-    SystemStatistics()
-        : initialized(false)
-        , elapsed(0)
-        , processCPUSeconds(0)
-        , mainThreadCPUSeconds(0)
-        , processMemory(0)
-        , processResidentMemory(0)
-        , processDiskTotalBytes(0)
-        , processDiskFreeBytes(0)
-        , processDiskQueueDepth(0)
-        , processDiskIdleSeconds(0)
-        , processDiskRead(0)
-        , processDiskWrite(0)
-        , processDiskReadCount(0)
-        , processDiskWriteCount(0)
-        , processDiskWriteSectors(0)
-        , processDiskReadSectors(0)
-        , machineMegabitsSent(0)
-        , machineMegabitsReceived(0)
-        , machineOutSegs(0)
-        , machineRetransSegs(0)
-        , machineCPUSeconds(0)
-        , machineTotalRAM(0)
-        , machineCommittedRAM(0)
-        , machineAvailableRAM(0) {}
+	SystemStatistics() : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
+		processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0), processDiskIdleSeconds(0), processDiskRead(0), processDiskWrite(0),
+		processDiskReadCount(0), processDiskWriteCount(0), processDiskWriteSectors(0), processDiskReadSectors(0), machineMegabitsSent(0), machineMegabitsReceived(0), machineOutSegs(0),
+		machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0), machineCommittedRAM(0), machineAvailableRAM(0) {}
 };
 
 struct SystemStatisticsState;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip,
-                                     SystemStatisticsState **statState);
+SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, SystemStatisticsState **statState);
 
 double getProcessorTimeThread();
 
@@ -291,30 +256,25 @@ uint64_t getMemoryUsage();
 uint64_t getResidentMemoryUsage();
 
 struct MachineRAMInfo {
-    int64_t total;
-    int64_t committed;
-    int64_t available;
+	int64_t total;
+	int64_t committed;
+	int64_t available;
 };
 
-void getMachineRAMInfo(MachineRAMInfo &memInfo);
+void getMachineRAMInfo(MachineRAMInfo& memInfo);
 
-void getDiskBytes(std::string const &directory, int64_t &free, int64_t &total);
+void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total);
 
-void getNetworkTraffic(uint64_t &bytesSent, uint64_t &bytesReceived,
-                       uint64_t &outSegs, uint64_t &retransSegs);
+void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+					   uint64_t& retransSegs);
 
-void getDiskStatistics(std::string const &directory, uint64_t &currentIOs,
-                       uint64_t &busyTicks, uint64_t &reads, uint64_t &writes,
-                       uint64_t &writeSectors);
+void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors);
 
-void getMachineLoad(uint64_t &idleTime, uint64_t &totalTime);
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime);
 
-double timer(); // Returns the system real time clock with high precision.  May
-                // jump around when system time is adjusted!
-double timer_monotonic(); // Returns a high precision monotonic clock which is
-                          // adjusted to be kind of similar to timer() at
-                          // startup, but might not be a globally accurate time.
-uint64_t timer_int();     // Return timer as uint64_t
+double timer();  // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
+double timer_monotonic();  // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer() at startup, but might not be a globally accurate time.
+uint64_t timer_int(); // Return timer as uint64_t
 
 void getLocalTime(const time_t *timep, struct tm *result);
 
@@ -324,89 +284,82 @@ void *allocate(size_t length, bool allowLargePages);
 
 void setAffinity(int proc);
 
-void threadSleep(double seconds);
+void threadSleep( double seconds );
 
-void threadYield(); // Attempt to yield to other processes or threads
+void threadYield();  // Attempt to yield to other processes or threads
 
 // Returns true iff the file exists
-bool fileExists(std::string const &filename);
+bool fileExists(std::string const& filename);
 
 // Returns size of file in bytes
-int64_t fileSize(std::string const &filename);
+int64_t fileSize(std::string const& filename);
 
-// Returns true if file is deleted, false if it was not found, throws
-// platform_error() otherwise Consider using
-// IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need
-// durability!
-bool deleteFile(std::string const &filename);
+// Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
+// Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
+bool deleteFile( std::string const& filename );
 
 // Renames the given file.  Does not fsync the directory.
-void renameFile(std::string const &fromPath, std::string const &toPath);
+void renameFile( std::string const& fromPath, std::string const& toPath );
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace(std::string const &path, std::string const &content,
-                   bool textmode = true);
+void atomicReplace( std::string const& path, std::string const& content, bool textmode = true );
 
 // Read a file into memory
-std::string readFileBytes(std::string const &filename, int maxSize);
+std::string readFileBytes( std::string const& filename, int maxSize );
 
 // Write data buffer into file
-void writeFileBytes(std::string const &filename, const char *data,
-                    size_t count);
+void writeFileBytes(std::string const& filename, const char* data, size_t count);
 
 // Write text into file
-void writeFile(std::string const &filename, std::string const &content);
+void writeFile(std::string const& filename, std::string const& content);
 
-std::string joinPath(std::string const &directory, std::string const &filename);
+std::string joinPath( std::string const& directory, std::string const& filename );
 
 // Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
-std::string abspath(std::string const &filename);
+std::string abspath( std::string const& filename );
 
-// Returns the portion of the path following the last path separator (e.g. the
-// filename or directory name)
-std::string basename(std::string const &filename);
+// Returns the portion of the path following the last path separator (e.g. the filename or directory name)
+std::string basename( std::string const& filename );
 
 // Returns the parent directory of the given file or directory
-std::string parentDirectory(std::string const &filename);
+std::string parentDirectory( std::string const& filename );
 
 // Returns the home directory of the current user
 std::string getUserHomeDirectory();
 
 namespace platform {
 
-// Returns true if directory was created, false if it existed, throws
-// platform_error() otherwise
-bool createDirectory(std::string const &directory);
+// Returns true if directory was created, false if it existed, throws platform_error() otherwise
+bool createDirectory( std::string const& directory );
 
 // e.g. extension==".fdb", returns filenames relative to directory
-std::vector<std::string> listFiles(std::string const &directory,
-                                   std::string const &extension = "");
+std::vector<std::string> listFiles( std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-std::vector<std::string> listDirectories(std::string const &directory);
+std::vector<std::string> listDirectories( std::string const& directory );
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
-void makeTemporary(const char *filename);
+void makeTemporary( const char* filename );
 
 // Logs an out of memory error and exits the program
 void outOfMemory();
 
 int getRandomSeed();
 
-bool getEnvironmentVar(const char *name, std::string &value);
+bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char *name, const char *value, int overwrite);
 
 std::string getWorkingDirectory();
 
 // Returns the ... something something figure out plugin locations
-std::string getDefaultPluginPath(const char *plugin_name);
+std::string getDefaultPluginPath( const char* plugin_name );
 
 void *getImageOffset();
 
 // Places the frame pointers in a string formatted as parameters for addr2line.
-size_t raw_backtrace(void **addresses, int maxStackDepth);
+size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
@@ -414,152 +367,85 @@ std::string format_backtrace(void **addresses, int numAddresses);
 
 #ifdef __linux__
 typedef struct {
-    double timestamp;
-    size_t length;
-    void *frames[];
+	double timestamp;
+	size_t length;
+	void* frames[];
 } ProfilingSample;
 
 dev_t getDeviceId(std::string path);
 #endif
 
 #ifdef __linux__
+#include <x86intrin.h>
 #include <features.h>
 #include <sys/stat.h>
-#include <x86intrin.h>
 #endif
 
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #ifdef __APPLE__
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t __rdtsc() {
-    uint64_t lo, hi;
-    asm("rdtsc" : "=a"(lo), "=d"(hi));
-    return (lo | (hi << 32));
+	uint64_t lo, hi;
+	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
+	return( lo | (hi << 32) );
 }
 #endif
 #endif
 
 #ifdef _WIN32
 #include <intrin.h>
-inline static int32_t interlockedIncrement(volatile int32_t *a) {
-    return _InterlockedIncrement((long *)a);
-}
-inline static int64_t interlockedIncrement64(volatile int64_t *a) {
-    return _InterlockedIncrement64(a);
-}
-inline static int32_t interlockedDecrement(volatile int32_t *a) {
-    return _InterlockedDecrement((long *)a);
-}
-inline static int64_t interlockedDecrement64(volatile int64_t *a) {
-    return _InterlockedDecrement64(a);
-}
-inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b,
-                                                 int32_t c) {
-    return _InterlockedCompareExchange((long *)a, (long)b, (long)c);
-}
-inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) {
-    return _InterlockedExchangeAdd64(a, b);
-}
-inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) {
-    return _InterlockedExchange64(a, b);
-}
-inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) {
-    return _InterlockedOr64(a, b);
-}
+inline static int32_t interlockedIncrement(volatile int32_t *a) { return _InterlockedIncrement((long*)a); }
+inline static int64_t interlockedIncrement64(volatile int64_t *a) { return _InterlockedIncrement64(a); }
+inline static int32_t interlockedDecrement(volatile int32_t *a) { return _InterlockedDecrement((long*)a); }
+inline static int64_t interlockedDecrement64(volatile int64_t *a) { return _InterlockedDecrement64(a); }
+inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b, int32_t c) { return _InterlockedCompareExchange((long*)a, (long)b, (long)c); }
+inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) { return _InterlockedExchangeAdd64(a, b); }
+inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) { return _InterlockedExchange64(a, b); }
+inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return _InterlockedOr64(a, b); }
 #elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
 #include <xmmintrin.h>
-inline static int32_t interlockedIncrement(volatile int32_t *a) {
-    return __sync_add_and_fetch(a, 1);
-}
-inline static int64_t interlockedIncrement64(volatile int64_t *a) {
-    return __sync_add_and_fetch(a, 1);
-}
-inline static int32_t interlockedDecrement(volatile int32_t *a) {
-    return __sync_add_and_fetch(a, -1);
-}
-inline static int64_t interlockedDecrement64(volatile int64_t *a) {
-    return __sync_add_and_fetch(a, -1);
-}
-inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b,
-                                                 int32_t c) {
-    return __sync_val_compare_and_swap(a, c, b);
-}
-inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) {
-    return __sync_fetch_and_add(a, b);
-}
+inline static int32_t interlockedIncrement(volatile int32_t *a) { return __sync_add_and_fetch(a, 1); }
+inline static int64_t interlockedIncrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, 1); }
+inline static int32_t interlockedDecrement(volatile int32_t *a) { return __sync_add_and_fetch(a, -1); }
+inline static int64_t interlockedDecrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, -1); }
+inline static int32_t interlockedCompareExchange(volatile int32_t *a, int32_t b, int32_t c) { return __sync_val_compare_and_swap(a, c, b); }
+inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) { return __sync_fetch_and_add(a, b); }
 inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) {
-    __sync_synchronize();
-    return __sync_lock_test_and_set(a, b);
+	__sync_synchronize();
+	return __sync_lock_test_and_set(a, b);
 }
-inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) {
-    return __sync_fetch_and_or(a, b);
-}
+inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return __sync_fetch_and_or(a, b); }
 #else
 #error No implementation of atomic instructions
 #endif
 
-template <class T>
-inline static T *interlockedExchangePtr(T *volatile *a, T *b) {
-    static_assert(sizeof(T *) == sizeof(int64_t), "Port me!");
-    return (T *)interlockedExchange64((volatile int64_t *)a, (int64_t)b);
-}
+template <class T> inline static T* interlockedExchangePtr(T*volatile*a, T*b) { static_assert(sizeof(T*)==sizeof(int64_t),"Port me!"); return (T*)interlockedExchange64((volatile int64_t*)a, (int64_t)b); }
 
 #if FLOW_THREAD_SAFE
 #define thread_volatile volatile
-inline static int64_t flowInterlockedExchangeAdd64(volatile int64_t *p,
-                                                   int64_t a) {
-    return interlockedExchangeAdd64(p, a);
-}
-inline static int64_t flowInterlockedIncrement64(volatile int64_t *p) {
-    return interlockedIncrement64(p);
-}
-inline static int64_t flowInterlockedDecrement64(volatile int64_t *p) {
-    return interlockedDecrement64(p);
-}
-inline static int64_t flowInterlockedExchange64(volatile int64_t *p,
-                                                int64_t a) {
-    return interlockedExchange64(p, a);
-}
-inline static int64_t flowInterlockedOr64(volatile int64_t *p, int64_t a) {
-    return interlockedOr64(p, a);
-}
-inline static int64_t flowInterlockedAnd64(volatile int64_t *p, int64_t a) {
-    return interlockedAnd64(p, a);
-}
+inline static int64_t flowInterlockedExchangeAdd64( volatile int64_t* p, int64_t a ) { return interlockedExchangeAdd64(p, a); }
+inline static int64_t flowInterlockedIncrement64( volatile int64_t* p ) { return interlockedIncrement64(p); }
+inline static int64_t flowInterlockedDecrement64( volatile int64_t* p ) { return interlockedDecrement64(p); }
+inline static int64_t flowInterlockedExchange64( volatile int64_t* p, int64_t a ) { return interlockedExchange64(p, a); }
+inline static int64_t flowInterlockedOr64( volatile int64_t* p, int64_t a ) { return interlockedOr64(p, a); }
+inline static int64_t flowInterlockedAnd64( volatile int64_t* p, int64_t a ) { return interlockedAnd64(p, a); }
 #else
 #define thread_volatile
-inline static int64_t flowInterlockedExchangeAdd64(int64_t *p, int64_t a) {
-    auto old = *p;
-    *p += a;
-    return old;
-}
-inline static int64_t flowInterlockedIncrement64(int64_t *p) { return ++*p; }
-inline static int64_t flowInterlockedDecrement64(int64_t *p) { return --*p; }
-inline static int64_t flowInterlockedExchange64(int64_t *p, int64_t a) {
-    auto old = *p;
-    *p       = a;
-    return old;
-}
-inline static int64_t flowInterlockedOr64(int64_t *p, int64_t a) {
-    auto old = *p;
-    *p |= a;
-    return old;
-}
-inline static int64_t flowInterlockedAnd64(int64_t *p, int64_t a) {
-    auto old = *p;
-    *p &= a;
-    return old;
-}
+inline static int64_t flowInterlockedExchangeAdd64( int64_t* p, int64_t a ) { auto old=*p; *p+=a; return old; }
+inline static int64_t flowInterlockedIncrement64( int64_t* p ) { return ++*p; }
+inline static int64_t flowInterlockedDecrement64( int64_t* p ) { return --*p; }
+inline static int64_t flowInterlockedExchange64( int64_t* p, int64_t a ) { auto old=*p; *p=a; return old; }
+inline static int64_t flowInterlockedOr64( int64_t* p, int64_t a ) { auto old=*p; *p |= a; return old; }
+inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*p; *p &= a; return old; }
 #endif
 
-// We only run on little-endian system, so conversion to/from bigEndian64 is
-// always a byte swap
+// We only run on little-endian system, so conversion to/from bigEndian64 is always a byte swap
 #ifdef _MSC_VER
 #define bigEndian16(value) uint16_t(_byteswap_ushort(value))
 #define bigEndian32(value) uint32_t(_byteswap_ulong(value))
 #define bigEndian64(value) uint64_t(_byteswap_uint64(value))
 #elif __GNUG__
-#define bigEndian16(value) uint16_t((value >> 8) | (value << 8))
+#define bigEndian16(value) uint16_t((value>>8)|(value<<8))
 #define bigEndian32(value) uint32_t(__builtin_bswap32(value))
 #define bigEndian64(value) uint64_t(__builtin_bswap64(value))
 #else
@@ -578,69 +464,80 @@ inline static void flushOutputStreams() { fflush(NULL); }
 #error Missing flush output stream
 #endif
 
+
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
 #elif defined(__GNUG__)
-#define DLLEXPORT __attribute__((visibility("default")))
+#define DLLEXPORT __attribute__ ((visibility ("default")))
 #else
 #error Missing symbol export
 #endif
 
-#define crashAndDie() (*(volatile int *)0 = 0)
+#define crashAndDie() (*(volatile int*)0 = 0)
+
+#ifdef _WIN32
+#define strcasecmp stricmp
+#endif
 
 #if defined(__GNUG__)
-#define DEFAULT_CONSTRUCTORS(X)                                                \
-    X(X const &rhs) = default;                                                 \
-    X &operator=(X const &rhs) = default;
+#define DEFAULT_CONSTRUCTORS(X) \
+	X( X const& rhs ) = default; \
+	X& operator=( X const& rhs ) = default;
 #else
 #define DEFAULT_CONSTRUCTORS(X)
 #endif
+
 
 #if defined(_WIN32)
 #define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
 #endif
 
 #if defined(_MSC_VER)
-inline static void *aligned_alloc(size_t alignment, size_t size) {
-    return _aligned_malloc(size, alignment);
-}
-inline static void aligned_free(void *ptr) { _aligned_free(ptr); }
+inline static void* aligned_alloc(size_t alignment, size_t size) { return _aligned_malloc(size, alignment); }
+inline static void aligned_free(void* ptr) { _aligned_free(ptr); }
 #elif defined(__linux__)
 #include <malloc.h>
-inline static void aligned_free(void *ptr) { free(ptr); }
+inline static void aligned_free(void* ptr) { free(ptr); }
 #if (!defined(_ISOC11_SOURCE)) // old libc versions
-inline static void *aligned_alloc(size_t alignment, size_t size) {
-    return memalign(alignment, size);
-}
+inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
 #include <cstdlib>
-inline static void *aligned_alloc(size_t alignment, size_t size) {
-    // Linux's aligned_alloc() requires alignment to be a power of 2.  While
-    // posix_memalign() also requires this, in addition it requires alignment to
-    // be a multiple of sizeof(void *). Rather than add this requirement to the
-    // platform::aligned_alloc() interface we will simply upgrade powers of 2
-    // which are less than sizeof(void *) to be exactly sizeof(void *).  Non
-    // powers of 2 of any size will fail as they would on other platforms.  This
-    // change does not break the platform::aligned_alloc() contract as all
-    // addresses which are aligned to sizeof(void *) are also aligned to any
-    // power of 2 less than sizeof(void *).
-    if (alignment != 0 && alignment < sizeof(void *) &&
-        (alignment & (alignment - 1)) == 0) {
-        alignment = sizeof(void *);
-    }
-    void *ptr = nullptr;
-    posix_memalign(&ptr, alignment, size);
-    return ptr;
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
+	// also requires this, in addition it requires alignment to be a multiple of sizeof(void *).
+	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
+	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
+	// powers of 2 of any size will fail as they would on other platforms.  This change does not
+	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
+	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
+	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
+		alignment = sizeof(void *);
+	}
+	void* ptr = nullptr;
+	posix_memalign(&ptr, alignment, size);
+	return ptr;
 }
-inline static void aligned_free(void *ptr) { free(ptr); }
+inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
 // lib_path may be a relative or absolute path or a name to be
 // resolved by whatever linker is hanging around on this system
-bool isLibraryLoaded(const char *lib_path);
-void *loadLibrary(const char *lib_path);
-void *loadFunction(void *lib, const char *func_name);
+bool isLibraryLoaded(const char* lib_path);
+void* loadLibrary(const char* lib_path);
+void* loadFunction(void* lib, const char* func_name);
+
+#ifdef _WIN32
+inline static int ctzll( uint64_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward64( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+#else
+#define ctzll __builtin_ctzll
+#endif
 
 // MSVC not support noexcept yet
 #ifndef __GNUG__
@@ -668,8 +565,7 @@ void *loadFunction(void *lib, const char *func_name);
 EXTERNC void criticalError(int exitCode, const char *type, const char *message);
 EXTERNC void flushAndExit(int exitCode);
 
-// Initilization code that's run at the beginning of every entry point (except
-// fdbmonitor)
+// Initilization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
 void registerCrashHandler();
@@ -677,11 +573,10 @@ void setupSlowTaskProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()
-#define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [== == ]
+#define CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY() [====]
 #define exit CALLS_TO_EXIT_ARE_FORBIDDEN_BY_POLICY(0)
 
-#if defined(FDB_CLEAN_BUILD) &&                                                \
-  !(defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG))
+#if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
 #error Clean builds must define NDEBUG, and not define various debug macros
 #endif
 

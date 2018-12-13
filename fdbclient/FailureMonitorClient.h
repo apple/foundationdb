@@ -26,7 +26,6 @@
 
 // Communicates with the given cluster controller to reassure it about this machine's status
 //   and to obtain status information about other machines, which is sent to g_network->failureMonitor()
-Future<Void> failureMonitorClient(Reference<AsyncVar<Optional<struct ClusterInterface>>> const&,
-                                  bool const& trackMyStatus);
+Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> const&, bool const& trackMyStatus );
 
 #endif

@@ -34,8 +34,8 @@
     This function will use the hardware if available and fall back to fast software implementation.
 */
 extern "C" uint32_t crc32c_append(
-    uint32_t crc, // initial CRC, typically 0, may be used to accumulate CRC from multiple buffers
-    const uint8_t* input, // data to be put through the CRC algorithm
-    size_t length); // length of the data in the input buffer
+    uint32_t crc,               // initial CRC, typically 0, may be used to accumulate CRC from multiple buffers
+    const uint8_t *input,       // data to be put through the CRC algorithm
+    size_t length);             // length of the data in the input buffer
 
 #endif

@@ -23,26 +23,24 @@
 
 #pragma once
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPolicy.h"
-#include "FDBLibTLSVerify.h"
-#include "IRandom.h"
+#include "FDBLibTLS/FDBLibTLSPolicy.h"
+#include "FDBLibTLS/FDBLibTLSVerify.h"
+#include "flow/IRandom.h"
 
 #include <tls.h>
 
 struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
-	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername,
-	                 TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx,
-	                 void* uid);
+	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
 	virtual ~FDBLibTLSSession();
 
 	virtual void addref() { ReferenceCounted<FDBLibTLSSession>::addref(); }
 	virtual void delref() { ReferenceCounted<FDBLibTLSSession>::delref(); }
 
 	bool verify_peer();
-	std::tuple<bool, std::string> check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509* certs);
+	std::tuple<bool,std::string> check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs);
 
 	virtual int handshake();
 	virtual int read(uint8_t* data, int length);
@@ -52,8 +50,8 @@ struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
 
 	bool is_client;
 
-	struct tls* tls_ctx;
-	struct tls* tls_sctx;
+	struct tls *tls_ctx;
+	struct tls *tls_sctx;
 
 	TLSSendCallbackFunc send_func;
 	void* send_ctx;

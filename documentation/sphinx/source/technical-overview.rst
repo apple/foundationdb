@@ -26,6 +26,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`testing`: FoundationDB uses a combined regime of robust simulation, live performance testing, and hardware-based failure testing to meet exacting standards of correctness and performance.
 
+* :doc:`kv-architecture` provides a description of every major role a process in FoundationDB can fulfill.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -42,3 +44,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    fault-tolerance
    flow
    testing
+   kv-architecture

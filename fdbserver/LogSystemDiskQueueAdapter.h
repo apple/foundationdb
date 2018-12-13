@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "IDiskQueue.h"
+#include "fdbserver/IDiskQueue.h"
 
 class LogSystemDiskQueueAdapter : public IDiskQueue {
 public:
@@ -34,28 +34,28 @@ public:
 
 	// Because the transaction subsystem will need to control the actual pushing of
 	// committed information to the ILogSystem, commit() in this interface doesn't directly
-	// call ILogSystem::push().  Instead it makes a commit message available through
+	// call ILogSystem::push().  Instead it makes a commit message available through 
 	// getCommitMessage(), and doesn't return until its acknowledge promise is set.
 	// The caller is responsible for calling ILogSystem::push() and ILogSystem::pop() with the results.
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter(Reference<ILogSystem> logSystem, Tag tag, bool recover = true)
-	  : logSystem(logSystem), tag(tag), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0),
-	    nextCommit(1), recoveryQueueDataSize(0) {
-		if (enableRecovery) cursor = logSystem->peek(UID(), 0, tag, true);
+	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality, bool recover=true ) : logSystem(logSystem), tag(tag), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0) {
+		if (enableRecovery) {
+			localityChanged = peekLocality ? peekLocality->onChange() : Never();
+			cursor = logSystem->peekSpecial( UID(), 1, tag, peekLocality ? peekLocality->get().first : tagLocalityInvalid, peekLocality ? peekLocality->get().second : invalidVersion );
+		}
 	}
 
 	struct CommitMessage {
-		Standalone<VectorRef<VectorRef<uint8_t>>> messages; // push this into the logSystem with `tag`
-		Version popTo; // pop this from the logSystem with `tag`
-		Promise<Void> acknowledge; // then send Void to this, so commit() can return
+		Standalone<VectorRef<VectorRef<uint8_t>>> messages;    // push this into the logSystem with `tag`
+		Version popTo;                                         // pop this from the logSystem with `tag`
+		Promise<Void> acknowledge;                             // then send Void to this, so commit() can return
 	};
 
 	// Set the version of the next push or commit (or a lower version)
-	// If lower, locations returned by the IDiskQueue interface will be conservative, so things that could be popped
-	// might not be
-	void setNextVersion(Version next) { nextCommit = next; }
+	// If lower, locations returned by the IDiskQueue interface will be conservative, so things that could be popped might not be
+	void setNextVersion( Version next ) { nextCommit = next; }
 
 	// Return the next commit message resulting from a call to commit().
 	Future<CommitMessage> getCommitMessage();
@@ -67,19 +67,19 @@ public:
 	virtual void close();
 
 	// IDiskQueue interface
-	virtual Future<Standalone<StringRef>> readNext(int bytes);
+	virtual Future<Standalone<StringRef>> readNext( int bytes );
 	virtual IDiskQueue::location getNextReadLocation();
-	virtual IDiskQueue::location push(StringRef contents);
-	virtual void pop(IDiskQueue::location upTo);
+	virtual IDiskQueue::location push( StringRef contents );
+	virtual void pop( IDiskQueue::location upTo );
 	virtual Future<Void> commit();
-	virtual StorageBytes getStorageBytes() {
-		ASSERT(false);
-		throw internal_error();
-	}
-	virtual int getCommitOverhead() { return 0; } // SOMEDAY: could this be more accurate?
+	virtual StorageBytes getStorageBytes() { ASSERT(false); throw internal_error(); }
+	virtual int getCommitOverhead() { return 0; } //SOMEDAY: could this be more accurate?
 
 private:
+	Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality;
+	Future<Void> localityChanged;
 	Reference<ILogSystem::IPeekCursor> cursor;
+	int peekTypeSwitches;
 	Tag tag;
 
 	// Recovery state (used while readNext() is being called repeatedly)
@@ -90,14 +90,14 @@ private:
 	int recoveryQueueDataSize;
 
 	// State for next commit() call
-	Standalone<VectorRef<VectorRef<uint8_t>>> pushedData; // SOMEDAY: better representation?
+	Standalone<VectorRef<VectorRef<uint8_t>>> pushedData;  // SOMEDAY: better representation?
 	Version poppedUpTo;
-	std::deque<Promise<CommitMessage>> commitMessages;
+	std::deque< Promise<CommitMessage> > commitMessages;
 	Version nextCommit;
 
 	friend class LogSystemDiskQueueAdapterImpl;
 };
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<ILogSystem> logSystem, Tag tag);
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality );
 
 #endif

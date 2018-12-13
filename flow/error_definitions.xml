@@ -53,6 +53,7 @@
     <Error name="external_client_already_loaded" code="1040" description="External client has already been loaded"/>
     <Error name="lookup_failed" code="1041" description="DNS lookup failed"/>
     <Error name="proxy_memory_limit_exceeded" code="1042" description="Proxy commit memory limit exceeded"/>
+    <Error name="shutdown_in_progress" code="1043" description="Operation no longer supported due to shutdown"/>
 
     <Error name="broken_promise" code="1100" description="Broken promise"/>
     <Error name="operation_cancelled" code="1101" description="Asynchronous operation cancelled"/>
@@ -190,6 +191,8 @@
     <Error name="task_interrupted" code="2382" description="Task execution stopped due to timeout, abort, or completion by another worker"/>
 
     <Error name="key_not_found" code="2400" description="Expected key is missing"/>
+    <Error name="json_malformed" code="2401" description="JSON string was malformed"/>
+    <Error name="json_eof_expected" code="2402" description="JSON string did not terminate where expected"/>
   </Category>
 
   <Category name="Internal">

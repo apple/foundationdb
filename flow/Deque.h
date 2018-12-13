@@ -22,7 +22,7 @@
 #define FLOW_DEQUE_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdexcept>
 
 template <class T>
@@ -95,10 +95,10 @@ public:
 		end++;
 	}
 
-	template <class... U>
-	reference emplace_back(U&&... val) {
+	template <class U>
+	reference emplace_back(U&& val) {
 		if (full()) grow();
-		new (&arr[end & mask]) T(std::forward<U>(val)...);
+		new (&arr[end & mask]) T(std::forward<U>(val));
 		reference result = arr[end & mask];
 		end++;
 		return result;

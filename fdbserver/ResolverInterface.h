@@ -26,44 +26,46 @@
 
 struct ResolverInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
+
 	LocalityData locality;
 	UID uniqueID;
-	RequestStream<struct ResolveTransactionBatchRequest> resolve;
-	RequestStream<struct ResolutionMetricsRequest> metrics;
-	RequestStream<struct ResolutionSplitRequest> split;
+	RequestStream< struct ResolveTransactionBatchRequest > resolve;
+	RequestStream< struct ResolutionMetricsRequest > metrics;
+	RequestStream< struct ResolutionSplitRequest > split;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID(g_random->randomUniqueID()) {}
+	ResolverInterface() : uniqueID( g_random->randomUniqueID() ) {}
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	bool operator==(ResolverInterface const& r) const { return id() == r.id(); }
-	bool operator!=(ResolverInterface const& r) const { return id() != r.id(); }
+	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }
+	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().address; }
 	void initEndpoints() {
-		metrics.getEndpoint(TaskResolutionMetrics);
-		split.getEndpoint(TaskResolutionMetrics);
+		metrics.getEndpoint( TaskResolutionMetrics );
+		split.getEndpoint( TaskResolutionMetrics );
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& uniqueID& locality& resolve& metrics& split& waitFailure;
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		ar & uniqueID & locality & resolve & metrics & split & waitFailure;
 	}
 };
 
 struct StateTransactionRef {
 	StateTransactionRef() {}
-	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations)
-	  : committed(committed), mutations(mutations) {}
-	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
-	  : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
+	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations) : committed(committed), mutations(mutations) {}
+	StateTransactionRef(Arena &p, const StateTransactionRef &toCopy) : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
 	bool committed;
 	VectorRef<MutationRef> mutations;
-	size_t expectedSize() const { return mutations.expectedSize(); }
+	size_t expectedSize() const {
+		return mutations.expectedSize();
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& committed& mutations;
+		ar & committed & mutations;
 	}
 };
 
@@ -71,29 +73,29 @@ struct ResolveTransactionBatchReply {
 	Arena arena;
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
-	VectorRef<VectorRef<StateTransactionRef>> stateMutations; // [version][transaction#] -> (committed, [mutation#])
+	VectorRef<VectorRef<StateTransactionRef>> stateMutations;  // [version][transaction#] -> (committed, [mutation#])
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& committed& stateMutations& arena& debugID;
+		ar & committed & stateMutations & arena & debugID;
 	}
+
 };
 
 struct ResolveTransactionBatchRequest {
 	Arena arena;
 
 	Version prevVersion;
-	Version version; // FIXME: ?
+	Version version;   // FIXME: ?
 	Version lastReceivedVersion;
 	VectorRef<CommitTransactionRef> transactions;
-	VectorRef<int>
-	    txnStateTransactions; // Offsets of elements of transactions that have (transaction subsystem state) mutations
+	VectorRef<int> txnStateTransactions;   // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& prevVersion& version& lastReceivedVersion& transactions& txnStateTransactions& reply& arena& debugID;
+		ar & prevVersion & version & lastReceivedVersion & transactions & txnStateTransactions & reply & arena & debugID;
 	}
 };
 
@@ -102,7 +104,7 @@ struct ResolutionMetricsRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& reply;
+		ar & reply;
 	}
 };
 
@@ -111,8 +113,9 @@ struct ResolutionSplitReply {
 	int64_t used;
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& key& used;
+		ar & key & used;
 	}
+
 };
 
 struct ResolutionSplitRequest {
@@ -123,7 +126,7 @@ struct ResolutionSplitRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar& range& offset& front& reply;
+		ar & range & offset & front & reply;
 	}
 };
 

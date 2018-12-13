@@ -24,56 +24,61 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricsRule {
-	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
-	  : enabled(enabled), minLevel(minLevel), namePattern(name) {}
+	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const &name = StringRef()) : enabled(enabled), minLevel(minLevel), namePattern(name) {}
 
 	Standalone<StringRef> typePattern;
 	Standalone<StringRef> namePattern;
 	Standalone<StringRef> addressPattern;
 	Standalone<StringRef> idPattern;
-
+	
 	bool enabled;
 	int minLevel;
 
 	Tuple pack() const {
-		return Tuple()
-		    .append(namePattern)
-		    .append(typePattern)
-		    .append(addressPattern)
-		    .append(idPattern)
-		    .append(enabled ? 1 : 0)
-		    .append(minLevel);
+		return Tuple().append(namePattern).append(typePattern).append(addressPattern).append(idPattern).append(enabled ? 1 : 0).append(minLevel);
 	}
 
-	static inline MetricsRule unpack(Tuple const& t) {
+	static inline MetricsRule unpack(Tuple const &t) {
 		MetricsRule r;
 		int i = 0;
-		if (i < t.size()) r.namePattern = t.getString(i++);
-		if (i < t.size()) r.typePattern = t.getString(i++);
-		if (i < t.size()) r.addressPattern = t.getString(i++);
-		if (i < t.size()) r.idPattern = t.getString(i++);
-		if (i < t.size()) r.enabled = t.getInt(i++) != 0;
-		if (i < t.size()) r.minLevel = (int)t.getInt(i++);
+		if(i < t.size())
+			r.namePattern = t.getString(i++);
+		if(i < t.size())
+			r.typePattern = t.getString(i++);
+		if(i < t.size())
+			r.addressPattern = t.getString(i++);
+		if(i < t.size())
+			r.idPattern = t.getString(i++);
+		if(i < t.size())
+			r.enabled = t.getInt(i++) != 0;
+		if(i < t.size())
+			r.minLevel = (int)t.getInt(i++);
 		return r;
 	}
 
 	// For now this just returns true if pat is in subject.  Returns true if pat is empty.
 	// TODO:  Support more complex patterns?
-	static inline bool patternMatch(StringRef const& pat, StringRef const& subject) {
-		if (pat.size() == 0) return true;
-		for (int i = 0, iend = subject.size() - pat.size() + 1; i < iend; ++i)
-			if (subject.substr(i, pat.size()) == pat) return true;
+	static inline bool patternMatch(StringRef const &pat, StringRef const &subject) {
+		if(pat.size() == 0)
+			return true;
+		for(int i = 0, iend = subject.size() - pat.size() + 1; i < iend; ++i)
+			if(subject.substr(i, pat.size()) == pat)
+				return true;
 		return false;
 	}
-
-	bool applyTo(BaseMetric* m, StringRef const& address) const {
-		if (!patternMatch(addressPattern, address)) return false;
-		if (!patternMatch(namePattern, m->metricName.name)) return false;
-		if (!patternMatch(typePattern, m->metricName.type)) return false;
-		if (!patternMatch(idPattern, m->metricName.id)) return false;
+	
+	bool applyTo(BaseMetric *m, StringRef const &address) const {
+		if(!patternMatch(addressPattern, address))
+			return false;
+		if(!patternMatch(namePattern, m->metricName.name))
+			return false;
+		if(!patternMatch(typePattern, m->metricName.type))
+			return false;
+		if(!patternMatch(idPattern, m->metricName.id))
+			return false;
 
 		m->setConfig(enabled, minLevel);
 		return true;
@@ -82,12 +87,15 @@ struct MetricsRule {
 
 struct MetricsConfig {
 	MetricsConfig(Key prefix = KeyRef())
-	  : space(prefix), ruleMap(space.get(LiteralStringRef("Rules")).key()),
-	    addressMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("Address")).key()),
-	    nameAndTypeMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("NameType")).key()),
-	    ruleChangeKey(space.get(LiteralStringRef("RulesChanged")).key()),
-	    enumsChangeKey(space.get(LiteralStringRef("EnumsChanged")).key()),
-	    fieldChangeKey(space.get(LiteralStringRef("FieldsChanged")).key()) {}
+	 :	space(prefix), 
+		ruleMap(space.get(LiteralStringRef("Rules")).key()),
+		addressMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("Address")).key()),
+		nameAndTypeMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("NameType")).key()),
+		ruleChangeKey(space.get(LiteralStringRef("RulesChanged")).key()),
+		enumsChangeKey(space.get(LiteralStringRef("EnumsChanged")).key()),
+		fieldChangeKey(space.get(LiteralStringRef("FieldsChanged")).key())
+	{
+	}
 
 	Subspace space;
 
@@ -112,11 +120,11 @@ struct MetricsConfig {
       Disable the metric
       For each rule in reverse order, apply the rule to the metric and stop if it returns true
     Wait for rule change, repeat.
-
+    
   If this gets too slow, yields can be added but at the cost of potentially missing a few data points
   because a metric was disabled and not yet re-enabled before it was logged.
-
-  Or, rules and metrics can be stored for more efficient matching and rule updates can be applied
+  
+  Or, rules and metrics can be stored for more efficient matching and rule updates can be applied 
   differentially.
     Read all rules, store latest version
     Clear all configs for each registered metric
@@ -131,7 +139,7 @@ struct MetricsConfig {
         Efficiently select matching metrics and set config
       Go back to wait for rule change
 */
-ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
+ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig *config, TDMetricCollection *collection) {
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
@@ -141,10 +149,11 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			MetricsConfig::RuleMapT::PairsType rules = wait(config->ruleMap.getRange(tr, 0, {}, 1e6));
 
-			for (auto& it : collection->metricMap) {
+			for(auto &it : collection->metricMap) {
 				it.value->setConfig(false);
-				for (auto i = rules.rbegin(); !(i == rules.rend()); ++i)
-					if (i->second.applyTo(it.value.getPtr(), collection->address)) break;
+				for(auto i = rules.rbegin(); !(i == rules.rend()); ++i)
+					if(i->second.applyTo(it.value.getPtr(), collection->address))
+						break;
 			}
 			config->rules = std::move(rules);
 
@@ -153,7 +162,7 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 			wait(rulesChanged || newMetric);
 			tr->reset();
 
-		} catch (Error& e) {
+		} catch(Error &e) {
 			wait(tr->onError(e));
 		}
 	}
@@ -162,25 +171,25 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 // Implementation of IMetricDB
 class MetricDB : public IMetricDB {
 public:
-	MetricDB(ReadYourWritesTransaction* tr = NULL) : tr(tr) {}
+	MetricDB(ReadYourWritesTransaction *tr = NULL) : tr(tr) {}
 	~MetricDB() {}
 
 	// levelKey is the prefix for the entire level, no timestamp at the end
-	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction* tr,
-	                                                                       Standalone<StringRef> levelKey) {
+	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction *tr, Standalone<StringRef> levelKey) {
 		Standalone<RangeResultRef> results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, true, true));
-		if (results.size() == 1) return results[0].value;
+		if(results.size() == 1)
+			return results[0].value;
 		return Optional<Standalone<StringRef>>();
 	}
 
 	Future<Optional<Standalone<StringRef>>> getLastBlock(Standalone<StringRef> key) {
 		return getLastBlock_impl(tr, key);
 	}
-
-	ReadYourWritesTransaction* tr;
+	
+	ReadYourWritesTransaction *tr;
 };
 
-ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
+ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig *config, TDMetricCollection *collection) {
 	state MetricUpdateBatch batch;
 	state Standalone<MetricKeyRef> mk;
 	ASSERT(collection != nullptr);
@@ -190,101 +199,102 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 	loop {
 		batch.clear();
 		uint64_t rollTime = std::numeric_limits<uint64_t>::max();
-		if (collection->rollTimes.size()) {
+		if(collection->rollTimes.size()) {
 			rollTime = collection->rollTimes.front();
 			collection->rollTimes.pop_front();
 		}
 
 		// Are any metrics enabled?
 		state bool enabled = false;
-
+		
 		// Flush data for each metric, track if any are enabled.
-		for (auto& it : collection->metricMap) {
+		for( auto &it : collection->metricMap) {
 			// If this metric was ever enabled at all then flush it
-			if (it.value->pCollection != nullptr) {
+			if(it.value->pCollection != nullptr) {
 				mk.name = it.value->metricName;
 				it.value->flushData(mk, rollTime, batch);
 			}
 			enabled = enabled || it.value->enabled;
 		}
 
-		if (rollTime == std::numeric_limits<uint64_t>::max()) {
+		if(rollTime == std::numeric_limits<uint64_t>::max()) {
 			collection->currentTimeBytes = 0;
 		}
 
 		state ReadYourWritesTransaction cbtr(cx);
 		state MetricDB mdb(&cbtr);
-
+		
 		state std::map<int, Future<Void>> results;
 		// Call all of the callbacks, map each index to its resulting future
-		for (int i = 0, iend = batch.callbacks.size(); i < iend; ++i) results[i] = batch.callbacks[i](&mdb, &batch);
+		for(int i = 0, iend = batch.callbacks.size(); i < iend; ++i)
+			results[i] = batch.callbacks[i](&mdb, &batch);
 
 		loop {
 			state std::map<int, Future<Void>>::iterator cb = results.begin();
 			// Wait for each future, return the ones that succeeded
 			state Error lastError;
-			while (cb != results.end()) {
+			while(cb != results.end()) {
 				try {
 					wait(cb->second);
 					cb = results.erase(cb);
-				} catch (Error& e) {
+				} catch(Error &e) {
 					++cb;
 					lastError = e;
 				}
 			}
 
 			// If all the callbacks completed then we're done.
-			if (results.empty()) break;
+			if(results.empty())
+				break;
 
 			// Otherwise, wait to retry
 			wait(cbtr.onError(lastError));
-			for (auto& cb : results) cb.second = batch.callbacks[cb.first](&mdb, &batch);
+			for(auto &cb : results)
+				cb.second = batch.callbacks[cb.first](&mdb, &batch);
 		}
 
 		// If there are more rolltimes then next dump is now, otherwise if no metrics are enabled then it is
 		// whenever the next metric is enabled but if there are metrics enabled then it is in 1 second.
 		state Future<Void> nextDump;
-		if (collection->rollTimes.size() > 0)
+		if(collection->rollTimes.size() > 0)
 			nextDump = Void();
 		else {
 			nextDump = collection->metricEnabled.onTrigger();
-			if (enabled) nextDump = nextDump || delay(1.0);
+			if(enabled)
+				nextDump = nextDump || delay(1.0);
 		}
 
-		state Transaction tr(cx);
+		state Transaction tr( cx );
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				for (auto& i : batch.inserts) {
-					// fprintf(stderr, "%s: dump insert: %s\n", collection->address.toString().c_str(),
-					// printable(allInsertions[i].key).c_str());
-					tr.set(i.key, i.value());
+				for(auto &i : batch.inserts) {
+					//fprintf(stderr, "%s: dump insert: %s\n", collection->address.toString().c_str(), printable(allInsertions[i].key).c_str());
+					tr.set(i.key, i.value() );
 				}
-
-				for (auto& a : batch.appends) {
-					// fprintf(stderr, "%s: dump append: %s\n", collection->address.toString().c_str(),
-					// printable(allAppends[i].key).c_str());
+				
+				for(auto &a : batch.appends) {
+					//fprintf(stderr, "%s: dump append: %s\n", collection->address.toString().c_str(), printable(allAppends[i].key).c_str());
 					tr.atomicOp(a.key, a.value(), MutationRef::AppendIfFits);
 				}
-
-				for (auto& u : batch.updates) {
-					// fprintf(stderr, "%s: dump update: %s\n", collection->address.toString().c_str(),
-					// printable(allUpdates[i].first).c_str());
+					
+				for(auto &u : batch.updates) {
+					//fprintf(stderr, "%s: dump update: %s\n", collection->address.toString().c_str(), printable(allUpdates[i].first).c_str());
 					tr.set(u.first, u.second);
 				}
 
-				wait(tr.commit());
+				wait( tr.commit() );
 				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			} catch( Error &e ) {
+				wait(  tr.onError( e ) );
 			}
 		}
-		wait(nextDump);
+		wait( nextDump );
 	}
 }
 
 // Push metric field registrations to database.
-ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
+ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig *config, TDMetricCollection *collection) {
 	state Standalone<MetricKeyRef> mk;
 	mk.prefix = StringRef(mk.arena(), config->space.key());
 	mk.address = StringRef(mk.arena(), collection->address);
@@ -297,17 +307,16 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 		state vector<Standalone<StringRef>> keys;
 		state bool fieldsChanged = false;
 		state bool enumsChanged = false;
-
+		
 		// Register each metric that isn't already registered
-		for (auto& it : collection->metricMap) {
-			if (!it.value->registered) {
+		for( auto &it : collection->metricMap) {
+			if(!it.value->registered) {
 				// Register metric so it can create its field keys
 				mk.name = it.value->metricName;
 				it.value->registerFields(mk, keys);
 
 				// Also set keys for the metric's (name,type) pair in the type-and-name map
-				keys.push_back(
-				    config->nameAndTypeMap.getProperty({ it.value->metricName.name, it.value->metricName.type }).key);
+				keys.push_back(config->nameAndTypeMap.getProperty({it.value->metricName.name, it.value->metricName.type}).key);
 
 				it.value->registered = true;
 				fieldsChanged = true;
@@ -316,31 +325,31 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 		}
 
 		// Set a key for this collection's address in the address map if it hasn't been done.
-		if (!addressRegistered) {
+		if(!addressRegistered) {
 			keys.push_back(config->addressMap.getProperty(collection->address).key);
 			addressRegistered = true;
 			enumsChanged = true;
 		}
 
-		if (enumsChanged) keys.push_back(config->enumsChangeKey);
-		if (fieldsChanged) keys.push_back(config->fieldChangeKey);
+		if(enumsChanged)
+			keys.push_back(config->enumsChangeKey);
+		if(fieldsChanged)
+			keys.push_back(config->fieldChangeKey);
 
 		// Write keys collected to database
 		state Transaction tr(cx);
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				Value timestamp =
-				    BinaryWriter::toValue(CompressedInt<int64_t>(now()), AssumeVersion(currentProtocolVersion));
-				for (auto& key : keys) {
-					// fprintf(stderr, "%s: register: %s\n", collection->address.toString().c_str(),
-					// printable(key).c_str());
+				Value timestamp = BinaryWriter::toValue(CompressedInt<int64_t>(now()), AssumeVersion(currentProtocolVersion));
+				for(auto &key : keys) {
+					//fprintf(stderr, "%s: register: %s\n", collection->address.toString().c_str(), printable(key).c_str());
 					tr.set(key, timestamp);
 				}
 
 				wait(tr.commit());
 				break;
-			} catch (Error& e) {
+			} catch(Error &e) {
 				wait(tr.onError(e));
 			}
 		}
@@ -350,60 +359,58 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 	}
 }
 
-ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
+ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 	// Never log to an empty prefix, it's pretty much always a bad idea.
-	if (prefix.size() == 0) {
+	if(prefix.size() == 0) {
 		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix");
 		return Void();
 	}
 
 	// Wait until the collection has been created and initialized.
-	state TDMetricCollection* metrics = nullptr;
+	state TDMetricCollection *metrics = nullptr;
 	loop {
 		metrics = TDMetricCollection::getTDMetrics();
-		if (metrics != nullptr)
-			if (metrics->init()) break;
+		if(metrics != nullptr)
+			if(metrics->init())
+				break;
 		wait(delay(1.0));
 	}
 
 	state MetricsConfig config(prefix);
 
 	try {
-		Database cx = wait(fcx);
+		Database cx = wait( fcx );
 		Future<Void> conf = metricRuleUpdater(cx, &config, metrics);
 		Future<Void> dump = dumpMetrics(cx, &config, metrics);
 		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
 
-		wait(conf || dump || reg);
-	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
+		wait( conf || dump || reg);
+	} catch( Error &e ) {
+		if( e.code() != error_code_actor_cancelled ) {
 			// Disable all metrics
-			for (auto& it : metrics->metricMap) it.value->setConfig(false);
+			for( auto &it : metrics->metricMap)
+				it.value->setConfig(false);
 		}
-
+		
 		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
 		throw e;
 	}
 	return Void();
 }
 
-TEST_CASE("fdbserver/metrics/TraceEvents") {
-	auto getenv2 = [](const char* s) -> const char* {
-		s = getenv(s);
-		return s ? s : "";
-	};
+TEST_CASE("/fdbserver/metrics/TraceEvents") {
+	auto getenv2 = [](const char *s) -> const char * {s = getenv(s); return s ? s : ""; };
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");
-	if (metricsConnFile == "") {
+	if(metricsConnFile == "") {
 		fprintf(stdout, "Metrics cluster file must be specified in environment variable METRICS_CONNFILE\n");
 		return Void();
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Reference<Cluster> metricsCluster = Cluster::createCluster(metricsConnFile, Cluster::API_VERSION_LATEST);
+	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
-	state Future<Void> metrics =
-	    runMetrics(metricsCluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;
@@ -424,62 +431,64 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 	state Int64MetricHandle intMetric = Int64MetricHandle(LiteralStringRef("DummyInt"));
 	state BoolMetricHandle boolMetric = BoolMetricHandle(LiteralStringRef("DummyBool"));
 	state StringMetricHandle stringMetric = StringMetricHandle(LiteralStringRef("DummyString"));
-
-	static const char* dStrings[] = { "one", "two", "" };
-	state const char** d = dStrings;
+	
+	static const char * dStrings[] = {"one", "two", ""};
+	state const char **d = dStrings;
 	state Arena arena;
-
+	
 	loop {
 		double sstart = x;
-		for (int i = 0; i < chunk; ++i, ++x) {
+		for(int i = 0; i < chunk; ++i, ++x) {
 			intMetric = x;
 			boolMetric = (x % 2) > 0;
-			const char* s = d[x % 3];
+			const char *s = d[x % 3];
 			// s doesn't actually require an arena
-			stringMetric = Standalone<StringRef>(StringRef((uint8_t*)s, strlen(s)), arena);
+			stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
 
 			TraceEvent("Dummy")
-			    .detail("A", x)
-			    .detail("X", 1.5 * x)
-			    .detail("D", s)
-			    .detail("J", sin(2.0 * x))
-			    .detail("K", sin(3.0 * x))
-			    .detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("D", s)
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
 		}
 		wait(delay(w));
 
 		double sstart = x;
-		for (int i = 0; i < chunk; ++i, ++x) {
+		for(int i = 0; i < chunk; ++i, ++x) {
 			intMetric = x;
 			boolMetric = x % 2 > 0;
 			TraceEvent("Dummy")
-			    .detail("A", x)
-			    .detail("X", 1.5 * x)
-			    .detail("B", x * 2)
-			    .detail("Y", 3.0 * x)
-			    .detail("D", d[x % 3])
-			    .detail("J", sin(2.0 * x))
-			    .detail("K", sin(3.0 * x))
-			    .detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("B", x*2)
+				.detail("Y", 3.0 * x)
+				.detail("D", d[x % 3])
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
 		}
 		wait(delay(w));
 
 		double sstart = x;
-		for (int i = 0; i < chunk; ++i, ++x) {
+		for(int i = 0; i < chunk; ++i, ++x) {
 			intMetric = x;
 			boolMetric = x % 2 > 0;
 			TraceEvent("Dummy")
-			    .detail("A", x)
-			    .detail("X", 1.5 * x)
-			    .detail("C", x * 3)
-			    .detail("Z", 4.5 * x)
-			    .detail("D", d[x % 3])
-			    .detail("J", sin(2.0 * x))
-			    .detail("K", sin(3.0 * x))
-			    .detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("C", x*3)
+				.detail("Z", 4.5 * x)
+				.detail("D", d[x % 3])
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
 		}
 		wait(delay(w));
 
-		if (x >= total) return Void();
+		if(x >= total)
+			return Void();
 	}
 }
+

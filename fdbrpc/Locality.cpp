@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Locality.h"
+#include "fdbrpc/Locality.h"
 
 const UID LocalityData::UNSET_ID = UID(0x0ccb4e0feddb5583, 0x010f6b77d9d10ece);
 const StringRef LocalityData::keyProcessId = LiteralStringRef("processid");
@@ -27,10 +27,10 @@ const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
 const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
 const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
 
-ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
-	switch (role) {
+ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) const {
+	switch( role ) {
 	case ProcessClass::Storage:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::StorageClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::UnsetClass:
@@ -45,7 +45,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::NeverAssign;
 		}
 	case ProcessClass::TLog:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::LogClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::TransactionClass:
@@ -60,7 +60,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::NeverAssign;
 		}
 	case ProcessClass::Proxy:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::ProxyClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -77,7 +77,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::Master:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::MasterClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -94,7 +94,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::Resolver:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -109,7 +109,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::LogRouter:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -126,7 +126,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::WorstFit;
 		}
 	case ProcessClass::ClusterController:
-		switch (_class) {
+		switch( _class ) {
 		case ProcessClass::ClusterControllerClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
@@ -134,6 +134,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ProxyClass:
 			return ProcessClass::OkayFit;
@@ -151,12 +153,14 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 	}
 }
 
-LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2) {
-	if (loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId()) return LBDistance::SAME_MACHINE;
+LBDistance::Type loadBalanceDistance( LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2 ) {
+	if ( loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() )
+		return LBDistance::SAME_MACHINE;
 
-	// FIXME: add this back in when load balancing works with local requests
-	// if ( g_network->isAddressOnThisHost( addr2 ) )
+	//FIXME: add this back in when load balancing works with local requests
+	//if ( g_network->isAddressOnThisHost( addr2 ) )
 	//	return LBDistance::SAME_MACHINE;
-	if (loc1.dcId().present() && loc1.dcId() == loc2.dcId()) return LBDistance::SAME_DC;
+	if ( loc1.dcId().present() && loc1.dcId() == loc2.dcId() )
+		return LBDistance::SAME_DC;
 	return LBDistance::DISTANT;
 }

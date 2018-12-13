@@ -20,12 +20,12 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
-// A workload which test the correctness of upgrading DR from 5.1 to 5.2
+//A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {
 	double backupAfter, stopDifferentialAfter;
 	Key backupTag, restoreTag, backupPrefix, extraPrefix;
@@ -49,58 +49,58 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		KeyRef beginRange;
 		KeyRef endRange;
 
-		if (backupRangesCount <= 0) {
-			backupRanges.push_back_deep(backupRanges.arena(),
-			                            KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
+		if(backupRangesCount <= 0) {
+			backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
 		} else {
 			// Add backup ranges
-			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++) {
+			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++)
+			{
 				// Get a random range of a random sizes
-				beginRange = KeyRef(backupRanges.arena(),
-				                    g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
-				endRange = KeyRef(backupRanges.arena(),
-				                  g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
+				beginRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
+				endRange = KeyRef(backupRanges.arena(), g_random->randomAlphaNumeric(g_random->randomInt(1, backupRangeLengthMax + 1)));
 
 				// Add the range to the array
-				backupRanges.push_back_deep(backupRanges.arena(), (beginRange < endRange)
-				                                                      ? KeyRangeRef(beginRange, endRange)
-				                                                      : KeyRangeRef(endRange, beginRange));
+				backupRanges.push_back_deep(backupRanges.arena(), (beginRange < endRange) ? KeyRangeRef(beginRange, endRange) : KeyRangeRef(endRange, beginRange));
 
 				// Track the added range
-				TraceEvent("DRU_BackupRange")
-				    .detail("RangeBegin", (beginRange < endRange) ? printable(beginRange) : printable(endRange))
-				    .detail("RangeEnd", (beginRange < endRange) ? printable(endRange) : printable(beginRange));
+				TraceEvent("DRU_BackupRange").detail("RangeBegin", (beginRange < endRange) ? printable(beginRange) : printable(endRange))
+					.detail("RangeEnd", (beginRange < endRange) ? printable(endRange) : printable(beginRange));
 			}
 		}
 
 		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-		extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start");
 	}
 
-	virtual std::string description() { return "BackupToDBUpgrade"; }
+	virtual std::string description() {
+		return "BackupToDBUpgrade";
+	}
 
 	virtual Future<Void> setup(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _setup(cx, this);
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0) return Void();
+		if (clientId != 0)
+			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check(Database const& cx) {
+		return true;
+	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual void getMetrics(vector<PerfMetric>& m) {
+	}
 
-	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx,
-	                                   Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx, Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->extraDB));
-			loop {
+			loop{
 				try {
 					for (auto r : self->backupRanges) {
 						if (!r.empty()) {
@@ -113,26 +113,25 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(backupAgent->submitBackup(tr, tag, backupRanges, false, self->backupPrefix, StringRef()));
 					wait(tr->commit());
 					break;
-				} catch (Error& e) {
+				} catch (Error &e) {
 					wait(tr->onError(e));
 				}
 			}
 
 			TraceEvent("DRU_DoBackupInDifferentialMode").detail("Tag", printable(tag));
-		} catch (Error& e) {
+		} catch (Error &e) {
 			TraceEvent("DRU_DoBackupSubmitBackupError").error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) {
 				throw e;
 			}
 		}
 
-		int _ = wait(backupAgent->waitBackup(self->extraDB, tag, false));
+		int _ = wait( backupAgent->waitBackup(self->extraDB, tag, false) );
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag,
-	                                    DatabaseBackupAgent* backupAgent) {
+	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent) {
 		state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
 		state Key backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, destUid);
 		state Key backupLatestVersionsPath = uidPrefixKey(backupLatestVersionsPrefix, destUid);
@@ -154,31 +153,25 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				// We have to wait for the list to empty since an abort and get status
 				// can leave extra tasks in the queue
 				TraceEvent("DRU_CheckLeftovertasks").detail("BackupTag", printable(tag));
-				state int64_t taskCount = wait(backupAgent->getTaskCount(tr));
+				state int64_t taskCount = wait( backupAgent->getTaskCount(tr) );
 				state int waitCycles = 0;
 
 				if ((taskCount) && (0)) {
-					TraceEvent("DRU_EndingNonzeroTaskCount")
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
+					TraceEvent("DRU_EndingNonzeroTaskCount").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
+					printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
 					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
 				}
 
 				loop {
-					waitCycles++;
+					waitCycles ++;
 
-					TraceEvent("DRU_NonzeroTaskWait")
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("%.6f Wait #%4d for %lld tasks to end\n", now(), waitCycles, (long long)taskCount);
+					TraceEvent("DRU_NonzeroTaskWait").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
+					printf("%.6f Wait #%4d for %lld tasks to end\n", now(), waitCycles, (long long) taskCount);
 
 					wait(delay(20.0));
 					tr->commit();
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
-					int64_t _taskCount = wait(backupAgent->getTaskCount(tr));
+					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
 					taskCount = _taskCount;
 
 					if (!taskCount) {
@@ -187,77 +180,58 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				}
 
 				if (taskCount) {
-					displaySystemKeys++;
-					TraceEvent(SevError, "DRU_NonzeroTaskCount")
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long)taskCount);
+					displaySystemKeys ++;
+					TraceEvent(SevError, "DRU_NonzeroTaskCount").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
+					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long) taskCount);
 				}
 
-				Standalone<RangeResultRef> agentValues =
-				    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
+				Standalone<RangeResultRef> agentValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 				// Error if the system keyspace for the backup tag is not empty
 				if (agentValues.size() > 0) {
 					displaySystemKeys++;
-					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n", agentValues.size(),
-					       printable(backupAgentKey).c_str());
-					TraceEvent(SevError, "BackupCorrectnessLeftoverMutationKeys")
-					    .detail("BackupTag", printable(tag))
-					    .detail("LeftoverKeys", agentValues.size())
-					    .detail("KeySpace", printable(backupAgentKey));
-					for (auto& s : agentValues) {
-						TraceEvent("DRU_LeftoverKey")
-						    .detail("Key", printable(StringRef(s.key.toString())))
-						    .detail("Value", printable(StringRef(s.value.toString())));
-						printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(),
-						       printable(StringRef(s.value.toString())).c_str());
+					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n", agentValues.size(), printable(backupAgentKey).c_str());
+					TraceEvent(SevError, "BackupCorrectnessLeftoverMutationKeys").detail("BackupTag", printable(tag))
+						.detail("LeftoverKeys", agentValues.size()).detail("KeySpace", printable(backupAgentKey));
+					for (auto & s : agentValues) {
+						TraceEvent("DRU_LeftoverKey").detail("Key", printable(StringRef(s.key.toString()))).detail("Value", printable(StringRef(s.value.toString())));
+						printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
 					}
-				} else {
+				}
+				else {
 					printf("No left over backup agent configuration keys\n");
 				}
 
 				Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
 				if (latestVersion.present()) {
-					TraceEvent(SevError, "BackupCorrectnessLeftoverVersionKey")
-					    .detail("BackupTag", printable(tag))
-					    .detail("Key", backupLatestVersionsKey.printable())
-					    .detail("Value", BinaryReader::fromStringRef<Version>(latestVersion.get(), Unversioned()));
+					TraceEvent(SevError, "BackupCorrectnessLeftoverVersionKey").detail("BackupTag", printable(tag)).detail("Key", backupLatestVersionsKey.printable()).detail("Value", BinaryReader::fromStringRef<Version>(latestVersion.get(), Unversioned()));
 				} else {
 					printf("No left over backup version key\n");
 				}
 
-				Standalone<RangeResultRef> versions = wait(
-				    tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
+				Standalone<RangeResultRef> versions = wait(tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 				if (!versions.size()) {
-					Standalone<RangeResultRef> logValues =
-					    wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
+					Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
 					if (logValues.size() > 0) {
 						displaySystemKeys++;
-						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n", logValues.size(),
-						       printable(backupLogValuesKey).c_str());
-						TraceEvent(SevError, "BackupCorrectnessLeftoverLogKeys")
-						    .detail("BackupTag", printable(tag))
-						    .detail("LeftoverKeys", logValues.size())
-						    .detail("KeySpace", printable(backupLogValuesKey))
-						    .detail("Version", decodeBKMutationLogKey(logValues[0].key).first);
-						for (auto& s : logValues) {
-							TraceEvent("DRU_LeftoverKey")
-							    .detail("Key", printable(StringRef(s.key.toString())))
-							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(),
-							       printable(StringRef(s.value.toString())).c_str());
+						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
+						TraceEvent(SevError, "BackupCorrectnessLeftoverLogKeys").detail("BackupTag", printable(tag))
+							.detail("LeftoverKeys", logValues.size()).detail("KeySpace", printable(backupLogValuesKey)).detail("Version", decodeBKMutationLogKey(logValues[0].key).first);
+						for (auto & s : logValues) {
+							TraceEvent("DRU_LeftoverKey").detail("Key", printable(StringRef(s.key.toString()))).detail("Value", printable(StringRef(s.value.toString())));
+							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
 						}
-					} else {
+					}
+					else {
 						printf("No left over backup log keys\n");
 					}
 				}
 
 				break;
-			} catch (Error& e) {
+			}
+			catch (Error &e) {
 				TraceEvent("DRU_CheckError").error(e);
 				wait(tr->onError(e));
 			}
@@ -273,7 +247,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 
-		try {
+		try{
 			wait(delay(self->backupAfter));
 
 			TraceEvent("DRU_DoBackup").detail("Tag", printable(self->backupTag));
@@ -282,7 +256,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent("DRU_DoBackupWait").detail("BackupTag", printable(self->backupTag));
 			wait(b);
 			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
-		} catch (Error& e) {
+		}
+		catch (Error& e) {
 			TraceEvent(SevError, "BackupToDBUpgradeSetuEerror").error(e);
 			throw;
 		}
@@ -290,13 +265,12 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix,
-	                                     Database src, Database dest) {
+	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix, Database src, Database dest) {
 		state int rangeIndex;
 		for (rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
 			state KeyRangeRef range = ranges[rangeIndex];
 			state Key begin = range.begin;
-			if (range.empty()) {
+			if(range.empty()) {
 				continue;
 			}
 			loop {
@@ -306,10 +280,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					loop {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						state Future<Standalone<RangeResultRef>> srcFuture =
-						    tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<Standalone<RangeResultRef>> bkpFuture =
-						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
+						state Future<Standalone<RangeResultRef>> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<Standalone<RangeResultRef>> bkpFuture = tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
 						wait(success(srcFuture) && success(bkpFuture));
 
 						auto src = srcFuture.get().begin();
@@ -318,45 +290,33 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
 							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
 							if (src->key != bkpKey && src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchKeyAndValue")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
-							} else if (src->key != bkpKey) {
-								TraceEvent(SevError, "MismatchKey")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
-							} else if (src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchValue")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
+								TraceEvent(SevError, "MismatchKeyAndValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
+							}
+							else if (src->key != bkpKey) {
+								TraceEvent(SevError, "MismatchKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
+							}
+							else if (src->value != bkp->value) {
+								TraceEvent(SevError, "MismatchValue").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value)).detail("BkpKey", printable(bkpKey)).detail("BkpVal", printable(bkp->value));
 							}
 							begin = std::min(src->key, bkpKey);
 							if (src->key == bkpKey) {
 								++src;
 								++bkp;
-							} else if (src->key < bkpKey) {
+							}
+							else if (src->key < bkpKey) {
 								++src;
-							} else {
+							}
+							else {
 								++bkp;
 							}
 						}
 						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
-							TraceEvent(SevError, "MissingBkpKey")
-							    .detail("SrcKey", printable(src->key))
-							    .detail("SrcVal", printable(src->value));
+							TraceEvent(SevError, "MissingBkpKey").detail("SrcKey", printable(src->key)).detail("SrcVal", printable(src->value));
 							begin = src->key;
 							++src;
 						}
 						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
-							TraceEvent(SevError, "MissingSrcKey")
-							    .detail("BkpKey", printable(bkp->key.substr(backupPrefix.size())))
-							    .detail("BkpVal", printable(bkp->value));
+							TraceEvent(SevError, "MissingSrcKey").detail("BkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("BkpVal", printable(bkp->value));
 							begin = bkp->key;
 							++bkp;
 						}
@@ -369,7 +329,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					}
 
 					break;
-				} catch (Error& e) {
+				}
+				catch (Error &e) {
 					wait(tr.onError(e));
 				}
 			}
@@ -400,21 +361,19 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					UID _logUid = wait(backupAgent.getLogUid(tr, self->backupTag));
 					logUid = _logUid;
 
-					Optional<Key> backupKeysPacked =
-					    wait(tr->get(backupAgent.config.get(BinaryWriter::toValue(logUid, Unversioned()))
-					                     .pack(BackupAgentBase::keyConfigBackupRanges)));
+					Optional<Key> backupKeysPacked = wait(tr->get(backupAgent.config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyConfigBackupRanges)));
 					ASSERT(backupKeysPacked.present());
 
 					BinaryReader br(backupKeysPacked.get(), IncludeVersion());
 					prevBackupRanges = Standalone<VectorRef<KeyRangeRef>>();
 					br >> prevBackupRanges;
-					wait(lockDatabase(tr, logUid));
+					wait( lockDatabase(tr, logUid) );
 					tr->addWriteConflictRange(singleKeyRange(StringRef()));
-					wait(tr->commit());
+					wait( tr->commit() );
 					commitVersion = tr->getCommittedVersion();
 					break;
-				} catch (Error& e) {
-					wait(tr->onError(e));
+				} catch( Error &e ) {
+					wait( tr->onError(e) );
 				}
 			}
 
@@ -426,68 +385,64 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				try {
 					versionCheckTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					versionCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Optional<Value> v = wait(versionCheckTr.get(
-					    BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
-					TraceEvent("DRU_Applied")
-					    .detail("AppliedVersion",
-					            v.present() ? BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) : -1);
-					if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= commitVersion)
+					Optional<Value> v = wait(versionCheckTr.get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
+					TraceEvent("DRU_Applied").detail("AppliedVersion", v.present() ? BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) : -1);
+					if( v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= commitVersion)
 						break;
 
-					state Future<Void> versionWatch = versionCheckTr.watch(
-					    BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
+					state Future<Void> versionWatch = versionCheckTr.watch(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
 					wait(versionCheckTr.commit());
 					wait(versionWatch);
 					versionCheckTr.reset();
-				} catch (Error& e) {
+				} catch( Error &e ) {
 					wait(versionCheckTr.onError(e));
 				}
 			}
 
 			TraceEvent("DRU_DiffRanges");
-			wait(diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB));
+			wait( diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB ) );
 
 			// abort backup
 			TraceEvent("DRU_AbortBackup").detail("Tag", printable(self->backupTag));
 			wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
-			wait(unlockDatabase(self->extraDB, logUid));
+			wait( unlockDatabase(self->extraDB, logUid) );
 
 			// restore database
 			TraceEvent("DRU_PrepareRestore").detail("RestoreTag", printable(self->restoreTag));
 			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-			loop {
-				try {
+			loop{
+				try{
 					tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 					for (auto r : prevBackupRanges) {
-						if (!r.empty()) {
+						if(!r.empty()) {
 							std::cout << "r: " << r.begin.printable() << " - " << r.end.printable() << std::endl;
 							tr2->addReadConflictRange(r);
 							tr2->clear(r);
 						}
 					}
-					wait(tr2->commit());
+					wait( tr2->commit() );
 					break;
-				} catch (Error& e) {
+				} catch( Error &e ) {
 					TraceEvent("DRU_RestoreSetupError").error(e, true);
-					wait(tr2->onError(e));
+					wait( tr2->onError(e) );
 				}
 			}
 
 			state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 			for (auto r : prevBackupRanges) {
-				restoreRanges.push_back_deep(restoreRanges.arena(), KeyRangeRef(r.begin.withPrefix(self->backupPrefix),
-				                                                                r.end.withPrefix(self->backupPrefix)));
+				restoreRanges.push_back_deep(restoreRanges.arena(), KeyRangeRef( r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix) ) );
 			}
 
 			// start restoring db
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
-				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(),
-				                               self->backupPrefix));
-			} catch (Error& e) {
+				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
+			}
+			catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+					throw;
 			}
 
 			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));

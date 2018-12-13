@@ -18,4 +18,4 @@
  * limitations under the License.
  */
 
-#include "LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.actor.h"

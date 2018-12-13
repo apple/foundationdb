@@ -21,10 +21,10 @@
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
 	uint64_t nodeCount;
@@ -40,7 +40,9 @@ struct VersionStampWorkload : TestWorkload {
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> key_commit;
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> versionStampKey_commit;
 
-	VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	VersionStampWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx)
+	{
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0);
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)10000);
@@ -63,16 +65,20 @@ struct VersionStampWorkload : TestWorkload {
 		int apiVersion;
 		if (choice < 0.1) {
 			apiVersion = 500;
-		} else if (choice < 0.2) {
+		}
+		else if (choice < 0.2) {
 			apiVersion = 510;
-		} else if (choice < 0.3) {
+		}
+		else if (choice < 0.3) {
 			apiVersion = 520;
-		} else {
-			apiVersion = Cluster::API_VERSION_LATEST;
+		}
+		else {
+			apiVersion = Database::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
-		cx->cluster->apiVersion = apiVersion;
-		if (clientId == 0) return _start(cx, this, 1 / transactionsPerSecond);
+		cx->apiVersion = apiVersion;
+		if (clientId == 0)
+			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
 	}
 
@@ -99,7 +105,8 @@ struct VersionStampWorkload : TestWorkload {
 		if (oldVSFormat) {
 			data[keySize - 2] = 24 + vsKeyPrefix.size();
 			data[keySize - 1] = 0;
-		} else {
+		}
+		else {
 			data[keySize - 4] = 24 + vsKeyPrefix.size();
 			data[keySize - 3] = 0;
 			data[keySize - 2] = 0;
@@ -119,7 +126,8 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId == 0) return _check(cx, this);
+		if (clientId == 0)
+			return _check(cx, this);
 		return true;
 	}
 
@@ -128,7 +136,7 @@ struct VersionStampWorkload : TestWorkload {
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		memcpy(&parsedVersion, value.begin(), sizeof(Version));
 		memcpy(mutateString(parsedVersionstamp), value.begin(), 10);
-		return { bigEndian64(parsedVersion), parsedVersionstamp };
+		return {bigEndian64(parsedVersion), parsedVersionstamp};
 	}
 
 	// `key` needs to be the non-prefixed key, as we use a fixed offset for the versionstamp location.
@@ -137,28 +145,24 @@ struct VersionStampWorkload : TestWorkload {
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		memcpy(&parsedVersion, &(key.begin())[24], sizeof(Version));
 		memcpy(mutateString(parsedVersionstamp), &(key.begin())[24], 10);
-		return { bigEndian64(parsedVersion), parsedVersionstamp };
+		return {bigEndian64(parsedVersion), parsedVersionstamp};
 	}
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			cx = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
 		state Version readVersion = wait(tr.getReadVersion());
-		loop {
+		loop{
 			try {
-				Standalone<RangeResultRef> result = wait(tr.getRange(
-				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
+				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				ASSERT(result.size() <= self->nodeCount);
-				if (self->failIfDataLost)
-					ASSERT(result.size() == self->key_commit.size());
-				else
-					TEST(result.size() > 0); // Not all data should always be lost.
+				if (self->failIfDataLost) ASSERT(result.size() == self->key_commit.size());
+				else TEST(result.size() > 0);  // Not all data should always be lost.
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
 				for (auto it : result) {
@@ -169,18 +173,14 @@ struct VersionStampWorkload : TestWorkload {
 
 					//TraceEvent("VST_Check0a").detail("ItKey", printable(it.key)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
 					const auto& all_values_iter = self->key_commit.find(key);
-					ASSERT(all_values_iter != self->key_commit.end()); // Reading a key that we didn't commit.
+					ASSERT(all_values_iter != self->key_commit.end());  // Reading a key that we didn't commit.
 					const auto& all_values = all_values_iter->second;
 
-					const auto& value_pair_iter =
-					    std::find_if(all_values.cbegin(), all_values.cend(),
-					                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
-						                 return pair.first == parsedVersion;
-					                 });
-					ASSERT(value_pair_iter != all_values.cend()); // The key exists, but we never wrote the timestamp.
+					const auto& value_pair_iter = std::find_if(all_values.cbegin(), all_values.cend(),
+						[parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
+					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
-						auto last_element_iter = all_values.cend();
-						last_element_iter--;
+						auto last_element_iter = all_values.cend();  last_element_iter--;
 						ASSERT(value_pair_iter == last_element_iter);
 					}
 					Version commitVersion = value_pair_iter->first;
@@ -191,13 +191,10 @@ struct VersionStampWorkload : TestWorkload {
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
 
-				Standalone<RangeResultRef> result = wait(
-				    tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
+				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
 				ASSERT(result.size() <= self->nodeCount);
-				if (self->failIfDataLost)
-					ASSERT(result.size() == self->versionStampKey_commit.size());
-				else
-					TEST(result.size() > 0); // Not all data should always be lost.
+				if (self->failIfDataLost) ASSERT(result.size() == self->versionStampKey_commit.size());
+				else TEST(result.size() > 0);  // Not all data should always be lost.
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
 				for (auto it : result) {
@@ -209,19 +206,14 @@ struct VersionStampWorkload : TestWorkload {
 					const Key vsKey = key.substr(4, 16);
 					//TraceEvent("VST_Check1a").detail("ItKey", printable(it.key)).detail("VsKey", printable(vsKey)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
 					const auto& all_values_iter = self->versionStampKey_commit.find(vsKey);
-					ASSERT(all_values_iter !=
-					       self->versionStampKey_commit.end()); // Reading a key that we didn't commit.
+					ASSERT(all_values_iter != self->versionStampKey_commit.end());  // Reading a key that we didn't commit.
 					const auto& all_values = all_values_iter->second;
 
-					const auto& value_pair_iter =
-					    std::find_if(all_values.cbegin(), all_values.cend(),
-					                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
-						                 return pair.first == parsedVersion;
-					                 });
-					ASSERT(value_pair_iter != all_values.cend()); // The key exists, but we never wrote the timestamp.
+					const auto& value_pair_iter = std::find_if(all_values.cbegin(), all_values.cend(),
+						[parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
+					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
-						auto last_element_iter = all_values.cend();
-						last_element_iter--;
+						auto last_element_iter = all_values.cend();  last_element_iter--;
 						ASSERT(value_pair_iter == last_element_iter);
 					}
 
@@ -232,7 +224,8 @@ struct VersionStampWorkload : TestWorkload {
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
 				break;
-			} catch (Error& e) {
+			}
+			catch (Error &e) {
 				wait(tr.onError(e));
 			}
 		}
@@ -248,21 +241,19 @@ struct VersionStampWorkload : TestWorkload {
 
 		if (g_simulator.extraDB != NULL) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			state Database extraDB = Database::createDatabase(extraFile, -1);
 		}
 
-		loop {
+		loop{
 			wait(poisson(&lastTime, delay));
-			bool oldVSFormat = !cx->cluster->apiVersionAtLeast(520);
+			bool oldVSFormat = !cx->apiVersionAtLeast(520);
 
 			state bool cx_is_primary = true;
 			state ReadYourWritesTransaction tr(cx);
 			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
 			state Value value = std::string(g_random->randomInt(10, 100), 'x');
-			state Key versionStampKey =
-			    self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount), oldVSFormat);
-			state StringRef prefix = versionStampKey.substr(0, 20 + self->vsKeyPrefix.size());
+			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount), oldVSFormat);
+			state StringRef prefix = versionStampKey.substr(0, 20+self->vsKeyPrefix.size());
 			state Key endOfRange = self->endOfRange(prefix);
 			state KeyRangeRef range(prefix, endOfRange);
 			state Standalone<StringRef> committedVersionStamp;
@@ -275,7 +266,7 @@ struct VersionStampWorkload : TestWorkload {
 				versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
 			}
 
-			loop {
+			loop{
 				state bool error = false;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
 				try {
@@ -288,7 +279,8 @@ struct VersionStampWorkload : TestWorkload {
 					committedVersion = tr.getCommittedVersion();
 					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
 					committedVersionStamp = committedVersionStamp_;
-				} catch (Error& e) {
+				}
+				catch (Error &e) {
 					state Error err = e;
 					if (err.code() == error_code_database_locked) {
 						//TraceEvent("VST_CommitDatabaseLocked");
@@ -309,21 +301,20 @@ struct VersionStampWorkload : TestWorkload {
 								const Version value_version = versionFromValue(vs_value.get()).first;
 								//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
 								const auto& value_ts = self->key_commit[key.removePrefix(self->vsValuePrefix)];
-								const auto& iter = std::find_if(
-								    value_ts.cbegin(), value_ts.cend(),
-								    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
-									    return value_version == pair.first;
-								    });
+								const auto& iter = std::find_if(value_ts.cbegin(), value_ts.cend(),
+									[value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
+									  return value_version == pair.first;
+									});
 								if (iter == value_ts.cend()) {
 									// The commit was successful, and thus we need to record the new data.
 									committedVersion = value_version;
-									committedVersionStamp = vs_value.get().substr(0, 10);
+									committedVersionStamp = vs_value.get().substr(0,10);
 								} else {
 									error = true;
 									break;
 								}
 								break;
-							} catch (Error& e) {
+							} catch (Error &e) {
 								wait(cur_tr.onError(e));
 							}
 						}
@@ -333,10 +324,7 @@ struct VersionStampWorkload : TestWorkload {
 				}
 
 				if (error) {
-					TraceEvent("VST_CommitFailed")
-					    .error(err)
-					    .detail("Key", printable(key))
-					    .detail("VsKey", printable(versionStampKey));
+					TraceEvent("VST_CommitFailed").error(err).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
 					wait(tr.onError(err));
 					continue;
 				}
@@ -349,7 +337,8 @@ struct VersionStampWorkload : TestWorkload {
 				break;
 			}
 
-			if (now() - startTime > self->testDuration) break;
+			if (now() - startTime > self->testDuration)
+				break;
 		}
 		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", self->nodeCount);
 		return Void();

@@ -30,45 +30,43 @@
 
 struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
+
 	LocalityData locality;
 	UID uniqueID;
 	UID sharedTLogID;
-	RequestStream<struct TLogPeekRequest> peekMessages;
-	RequestStream<struct TLogPopRequest> popMessages;
+	RequestStream< struct TLogPeekRequest > peekMessages;
+	RequestStream< struct TLogPopRequest > popMessages;
 
-	RequestStream<struct TLogCommitRequest> commit;
-	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
-	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
-	RequestStream<struct TLogConfirmRunningRequest> confirmRunning; // used for getReadVersion requests from client
+	RequestStream< struct TLogCommitRequest > commit;
+	RequestStream< ReplyPromise< struct TLogLockResult > > lock; // first stage of database recovery
+	RequestStream< struct TLogQueuingMetricsRequest > getQueuingMetrics;
+	RequestStream< struct TLogConfirmRunningRequest > confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct TLogRecoveryFinishedRequest> recoveryFinished;
-
+	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
+	
 	TLogInterface() {}
-	explicit TLogInterface(LocalityData locality) : uniqueID(g_random->randomUniqueID()), locality(locality) {
-		sharedTLogID = uniqueID;
-	}
-	TLogInterface(UID sharedTLogID, LocalityData locality)
-	  : uniqueID(g_random->randomUniqueID()), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality)
-	  : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(LocalityData locality) : uniqueID( g_random->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
-	bool operator==(TLogInterface const& r) const { return id() == r.id(); }
+	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().address; }
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint(TaskTLogQueuingMetrics);
-		popMessages.getEndpoint(TaskTLogPop);
-		peekMessages.getEndpoint(TaskTLogPeek);
-		confirmRunning.getEndpoint(TaskTLogConfirmRunning);
-		commit.getEndpoint(TaskTLogCommit);
+		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
+		popMessages.getEndpoint( TaskTLogPop );
+		peekMessages.getEndpoint( TaskTLogPeek );
+		confirmRunning.getEndpoint( TaskTLogConfirmRunning );
+		commit.getEndpoint( TaskTLogCommit );
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
+	template <class Ar> 
+	void serialize( Ar& ar ) {
 		ASSERT(ar.isDeserializing || uniqueID != UID());
-		ar& uniqueID& sharedTLogID& locality& peekMessages& popMessages& commit& lock& getQueuingMetrics&
-		    confirmRunning& waitFailure& recoveryFinished;
+		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
+		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
 	}
 };
 
@@ -77,9 +75,9 @@ struct TLogRecoveryFinishedRequest {
 
 	TLogRecoveryFinishedRequest() {}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& reply;
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		ar & reply;
 	}
 };
 
@@ -88,8 +86,8 @@ struct TLogLockResult {
 	Version knownCommittedVersion;
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& end& knownCommittedVersion;
+	void serialize( Ar& ar ) {
+		ar & end & knownCommittedVersion;
 	}
 };
 
@@ -98,11 +96,11 @@ struct TLogConfirmRunningRequest {
 	ReplyPromise<Void> reply;
 
 	TLogConfirmRunningRequest() {}
-	TLogConfirmRunningRequest(Optional<UID> debugID) : debugID(debugID) {}
+	TLogConfirmRunningRequest( Optional<UID> debugID ) : debugID(debugID) {}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& debugID& reply;
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		ar & debugID & reply;
 	}
 };
 
@@ -112,14 +110,13 @@ struct VersionUpdateRef {
 	bool isPrivateData;
 
 	VersionUpdateRef() : isPrivateData(false), version(invalidVersion) {}
-	VersionUpdateRef(Arena& to, const VersionUpdateRef& from)
-	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
+	VersionUpdateRef( Arena& to, const VersionUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int totalSize() const { return mutations.totalSize(); }
 	int expectedSize() const { return mutations.expectedSize(); }
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& version& mutations& isPrivateData;
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		ar & version & mutations & isPrivateData;
 	}
 };
 
@@ -129,13 +126,12 @@ struct VerUpdateRef {
 	bool isPrivateData;
 
 	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
-	VerUpdateRef(Arena& to, const VerUpdateRef& from)
-	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
+	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& version& mutations& isPrivateData;
+	void serialize( Ar& ar ) {
+		ar & version & mutations & isPrivateData;
 	}
 };
 
@@ -150,7 +146,7 @@ struct TLogPeekReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& arena& messages& end& popped& maxKnownVersion& minKnownCommittedVersion& begin;
+		ar & arena & messages & end & popped & maxKnownVersion & minKnownCommittedVersion & begin;
 	}
 };
 
@@ -162,14 +158,12 @@ struct TLogPeekRequest {
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest(Version begin, Tag tag, bool returnIfBlocked,
-	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
-	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence) {}
+	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& arena& begin& tag& returnIfBlocked& sequence& reply;
+		ar & arena & begin & tag & returnIfBlocked & sequence & reply;
 	}
 };
 
@@ -180,13 +174,12 @@ struct TLogPopRequest {
 	Tag tag;
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest(Version to, Version durableKnownCommittedVersion, Tag tag)
-	  : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest( Version to, Version durableKnownCommittedVersion, Tag tag ) : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& arena& to& durableKnownCommittedVersion& tag& reply;
+		ar & arena & to & durableKnownCommittedVersion & tag & reply;
 	}
 };
 
@@ -195,13 +188,15 @@ struct TagMessagesRef {
 	VectorRef<int> messageOffsets;
 
 	TagMessagesRef() {}
-	TagMessagesRef(Arena& a, const TagMessagesRef& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
+	TagMessagesRef(Arena &a, const TagMessagesRef &from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
 
-	size_t expectedSize() const { return messageOffsets.expectedSize(); }
+	size_t expectedSize() const {
+		return messageOffsets.expectedSize();
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& tag& messageOffsets;
+		ar & tag & messageOffsets;
 	}
 };
 
@@ -209,19 +204,17 @@ struct TLogCommitRequest {
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
-	StringRef messages; // Each message prefixed by a 4-byte length
+	StringRef messages;// Each message prefixed by a 4-byte length
 
 	ReplyPromise<Version> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest(const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion,
-	                  Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID)
-	  : arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar>
-	void serialize(Ar& ar) {
-		ar& prevVersion& version& knownCommittedVersion& minKnownCommittedVersion& messages& reply& arena& debugID;
+	void serialize( Ar& ar ) {
+		ar & prevVersion & version & knownCommittedVersion & minKnownCommittedVersion & messages & reply & arena & debugID;
 	}
 };
 
@@ -230,20 +223,20 @@ struct TLogQueuingMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& reply;
+		ar & reply;
 	}
 };
 
 struct TLogQueuingMetricsReply {
 	double localTime;
-	int64_t instanceID; // changes if bytesDurable and bytesInput reset
+	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
 	Version v; // committed version
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar& localTime& instanceID& bytesDurable& bytesInput& storageBytes& v;
+		ar & localTime & instanceID & bytesDurable & bytesInput & storageBytes & v;
 	}
 };
 

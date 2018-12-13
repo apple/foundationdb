@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
+
 #include "flow/flow.h"
-#include "XmlTraceLogFormatter.h"
-#include "actorcompiler.h"
+#include "flow/XmlTraceLogFormatter.h"
+#include "flow/actorcompiler.h"
 
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();
@@ -42,44 +43,48 @@ const char* XmlTraceLogFormatter::getFooter() {
 	return "</Trace>\r\n";
 }
 
-void XmlTraceLogFormatter::escape(std::stringstream& ss, std::string source) {
+void XmlTraceLogFormatter::escape(std::stringstream &ss, std::string source) {
 	loop {
-		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
-		if (index == source.npos) {
+		int index = source.find_first_of(std::string({'&', '"', '<', '>', '\r', '\n', '\0'}));
+		if(index == source.npos) {
 			break;
 		}
 
 		ss << source.substr(0, index);
-		if (source[index] == '&') {
+		if(source[index] == '&') {
 			ss << "&amp;";
-		} else if (source[index] == '"') {
+		}
+		else if(source[index] == '"') {
 			ss << "&quot;";
-		} else if (source[index] == '<') {
+		}
+		else if(source[index] == '<') {
 			ss << "&lt;";
-		} else if (source[index] == '>') {
+		}
+		else if(source[index] == '>') {
 			ss << "&gt;";
-		} else if (source[index] == '\n' || source[index] == '\r') {
+		}
+		else if(source[index] == '\n' || source[index] == '\r') {
 			ss << " ";
-		} else if (source[index] == '\0') {
+		}
+		else if(source[index] == '\0') {
 			ss << " ";
-			TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent")
-			    .detail("Source", StringRef(source).printable())
-			    .detail("Character", StringRef(source.substr(index, 1)).printable());
-		} else {
+			TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent").detail("Source", StringRef(source).printable()).detail("Character", StringRef(source.substr(index, 1)).printable());
+		}
+		else {
 			ASSERT(false);
 		}
 
-		source = source.substr(index + 1);
+		source = source.substr(index+1);
 	}
 
 	ss << source;
 }
 
-std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
+std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields &fields) {
 	std::stringstream ss;
 	ss << "<Event ";
 
-	for (auto itr : fields) {
+	for(auto itr : fields) {
 		escape(ss, itr.first);
 		ss << "=\"";
 		escape(ss, itr.second);

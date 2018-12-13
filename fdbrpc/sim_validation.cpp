@@ -19,16 +19,16 @@
  */
 
 #include "sim_validation.h"
-#include "TraceFileIO.h"
+#include "fdbrpc/TraceFileIO.h"
 #include "flow/network.h"
 #include "fdbrpc/simulator.h"
 
-// used for simulation validations
-static std::map<std::string, int64_t> validationData;
+//used for simulation validations
+static std::map< std::string, int64_t > validationData;
 static std::set<UID> disabledMachines;
 
 void debug_setVersionCheckEnabled(UID uid, bool enabled) {
-	if (enabled)
+	if(enabled)
 		disabledMachines.erase(uid);
 	else {
 		disabledMachines.insert(uid);
@@ -41,10 +41,11 @@ void debug_advanceCommittedVersions(UID id, int64_t minVersion, int64_t maxVersi
 	debug_advanceMaxCommittedVersion(id, maxVersion);
 }
 
-void debug_advanceVersion(UID id, int64_t version, const char* suffix) {
-	if (!disabledMachines.count(id)) {
+void debug_advanceVersion(UID id, int64_t version, const char *suffix) {
+	if(!disabledMachines.count(id)) {
 		auto& entry = validationData[id.toString() + suffix];
-		if (version > entry) entry = version;
+		if( version > entry )
+			entry = version;
 	}
 }
 
@@ -58,49 +59,47 @@ void debug_advanceMaxCommittedVersion(UID id, int64_t version) {
 	debug_advanceVersion(id, version, "max");
 }
 
-bool debug_checkPartRestoredVersion(UID id, int64_t version, std::string context, std::string minormax,
-                                    Severity sev = SevError) {
+bool debug_checkPartRestoredVersion( UID id, int64_t version, std::string context, std::string minormax, Severity sev = SevError ) {
 	if (!g_network->isSimulated() || g_simulator.extraDB) return false;
-	if (disabledMachines.count(id)) return false;
-	if (!validationData.count(id.toString() + minormax)) {
+	if( disabledMachines.count(id) ) return false;
+	if( !validationData.count( id.toString() + minormax ) ) {
 		TraceEvent(SevWarn, (context + "UnknownVersion").c_str(), id).detail("RestoredVersion", version);
 		return false;
 	}
-	int sign = minormax == "min" ? 1 : -1;
-	if (version * sign < validationData[id.toString() + minormax] * sign) {
+	int sign = minormax=="min" ? 1 : -1;
+	if( version*sign < validationData[id.toString() + minormax]*sign ) {
 		TraceEvent(sev, (context + "DurabilityError").c_str(), id)
-		    .detail("RestoredVersion", version)
-		    .detail("Checking", minormax)
-		    .detail("MinVersion", validationData[id.toString() + "min"])
-		    .detail("MaxVersion", validationData[id.toString() + "max"]);
+			.detail("RestoredVersion", version)
+			.detail("Checking", minormax)
+			.detail("MinVersion", validationData[id.toString() + "min"])
+			.detail("MaxVersion", validationData[id.toString() + "max"]);
 		return true;
 	}
 	return false;
 }
 
-bool debug_checkRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
+bool debug_checkRestoredVersion( UID id, int64_t version, std::string context, Severity sev ) {
 	if (!g_network->isSimulated() || g_simulator.extraDB) return false;
-	return debug_checkPartRestoredVersion(id, version, context, "min", sev) ||
-	       debug_checkPartRestoredVersion(id, version, context, "max", sev);
+	return debug_checkPartRestoredVersion(id, version, context, "min", sev) || debug_checkPartRestoredVersion(id, version, context, "max", sev);
 }
 
 void debug_removeVersions(UID id) {
-	if (!g_network->isSimulated() || g_simulator.extraDB) return;
-	validationData.erase(id.toString() + "min");
-	validationData.erase(id.toString() + "max");
+	if(!g_network->isSimulated() || g_simulator.extraDB) return;
+	validationData.erase( id.toString() + "min" );
+	validationData.erase( id.toString() + "max" );
 }
 
 bool debug_versionsExist(UID id) {
-	if (!g_network->isSimulated() || g_simulator.extraDB) return false;
-	return validationData.count(id.toString() + "min") != 0 || validationData.count(id.toString() + "max") != 0;
+	if(!g_network->isSimulated() || g_simulator.extraDB) return false;
+	return validationData.count( id.toString() + "min" ) != 0 || validationData.count( id.toString() + "max" ) != 0;
 }
 
-bool debug_checkMinRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
+bool debug_checkMinRestoredVersion( UID id, int64_t version, std::string context, Severity sev ) {
 	if (!g_network->isSimulated() || g_simulator.extraDB) return false;
 	return debug_checkPartRestoredVersion(id, version, context, "min", sev);
 }
 
-bool debug_checkMaxRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
+bool debug_checkMaxRestoredVersion( UID id, int64_t version, std::string context, Severity sev ) {
 	if (!g_network->isSimulated() || g_simulator.extraDB) return false;
 	return debug_checkPartRestoredVersion(id, version, context, "max", sev);
 }

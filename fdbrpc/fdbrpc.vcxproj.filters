@@ -18,11 +18,6 @@
     <ActorCompiler Include="FailureMonitor.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="ActorFuzz.actor.cpp" />
-    <ActorCompiler Include="batcher.actor.h" />
-    <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
-    <ActorCompiler Include="BlobStore.actor.cpp" />
-    <ActorCompiler Include="HTTP.actor.cpp" />
-    <ActorCompiler Include="AsyncFileBlobStore.actor.h" />
     <ActorCompiler Include="AsyncFileReadAhead.actor.h" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
     <ActorCompiler Include="networksender.actor.h" />
@@ -79,10 +74,6 @@
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="QueueModel.cpp" />
     <ClCompile Include="TraceFileIO.cpp" />
-    <ClCompile Include="sha1\SHA1.cpp" />
-    <ClCompile Include="libb64\cencode.c" />
-    <ClCompile Include="libb64\cdecode.c" />
-    <ClCompile Include="md5\md5.c" />
     <ClCompile Include="Replication.cpp" />
     <ClCompile Include="ReplicationTypes.cpp" />
     <ClCompile Include="ReplicationPolicy.cpp" />
@@ -155,23 +146,13 @@
     <ClInclude Include="Smoother.h" />
     <ClInclude Include="TraceFileIO.h" />
     <ClInclude Include="TLSConnection.h" />
-    <ClInclude Include="sha1\SHA1.h" />
-    <ClInclude Include="libb64\encode.h" />
-    <ClInclude Include="libb64\cencode.h" />
-    <ClInclude Include="libb64\decode.h" />
-    <ClInclude Include="libb64\cdecode.h" />
-    <ClInclude Include="md5\md5.h" />
     <ClInclude Include="IRateControl.h" />
-    <ClInclude Include="BlobStore.h" />
-    <ClInclude Include="HTTP.h" />
     <ClInclude Include="Replication.h" />
     <ClInclude Include="ReplicationTypes.h" />
     <ClInclude Include="ReplicationPolicy.h" />
     <ClInclude Include="crc32c.h" />
     <ClInclude Include="ReplicationUtils.h" />
-    <ClInclude Include="xml2json.hpp" />
     <ClInclude Include="AsyncFileWriteChecker.h" />
-    <ClInclude Include="JSONDoc.h" />
     <ClInclude Include="linux_kaio.h" />
     <ClInclude Include="LoadPlugin.h" />
   </ItemGroup>

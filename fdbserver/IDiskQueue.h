@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 
 class IDiskQueue : public IClosable {
 public:
@@ -32,39 +32,29 @@ public:
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
-		operator std::string() {
-			return format("%lld.%lld", hi, lo);
-		} // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for
-		  // safety)
+		operator std::string() { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
 
-		bool operator<(location const& r) const {
-			if (hi < r.hi) return true;
-			if (hi > r.hi) return false;
+		bool operator < (location const& r) const {
+			if (hi<r.hi) return true;
+			if (hi>r.hi) return false;
 			return lo < r.lo;
 		}
 	};
 
-	// Before calling push or commit, the caller *must* perform recovery by calling readNext() until it returns less
-	// than the requested number of bytes. Thereafter it may not be called again.
-	virtual Future<Standalone<StringRef>> readNext(int bytes) = 0; // Return the next bytes in the queue (beginning, the
-	                                                               // first time called, with the first unpopped byte)
-	virtual location getNextReadLocation() = 0; // Returns a location >= the location of all bytes previously returned
-	                                            // by readNext(), and <= the location of all bytes subsequently returned
+	// Before calling push or commit, the caller *must* perform recovery by calling readNext() until it returns less than the requested number of bytes.
+	// Thereafter it may not be called again.
+	virtual Future<Standalone<StringRef>> readNext( int bytes ) = 0;  // Return the next bytes in the queue (beginning, the first time called, with the first unpopped byte)
+	virtual location getNextReadLocation() = 0;    // Returns a location >= the location of all bytes previously returned by readNext(), and <= the location of all bytes subsequently returned
 
-	virtual location push(StringRef contents) = 0; // Appends the given bytes to the byte stream.  Returns a location
-	                                               // token representing the *end* of the contents.
-	virtual void pop(location upTo) = 0; // Removes all bytes before the given location token from the byte stream.
-	virtual Future<Void>
-	commit() = 0; // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a
-	              // crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.
+	virtual location push( StringRef contents ) = 0;  // Appends the given bytes to the byte stream.  Returns a location token representing the *end* of the contents.
+	virtual void pop( location upTo ) = 0;            // Removes all bytes before the given location token from the byte stream.
+	virtual Future<Void> commit() = 0;  // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.
 
-	virtual int getCommitOverhead() = 0; // returns the amount of unused space that would be written by a commit that
-	                                     // immediately followed this call
+	virtual int getCommitOverhead() = 0; // returns the amount of unused space that would be written by a commit that immediately followed this call
 
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
-IDiskQueue* openDiskQueue(std::string basename, UID dbgid,
-                          int64_t fileSizeWarningLimit = -1); // opens basename+"0.fdq" and basename+"1.fdq"
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

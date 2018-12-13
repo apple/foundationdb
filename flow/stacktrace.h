@@ -57,7 +57,8 @@ namespace absl {
 //
 // This routine may return fewer stack frame entries than are
 // available. Also note that "result" and "sizes" must both be non-null.
-extern int GetStackFrames(void** result, int* sizes, int max_depth, int skip_count);
+extern int GetStackFrames(void** result, int* sizes, int max_depth,
+                          int skip_count);
 
 // Same as above, but to be used from a signal handler. The "uc" parameter
 // should be the pointer to ucontext_t which was passed as the 3rd parameter
@@ -68,7 +69,8 @@ extern int GetStackFrames(void** result, int* sizes, int max_depth, int skip_cou
 // lower bound on the number of dropped stack frames. The stored value is
 // guaranteed to be >= 0. The number of real stack frames is guaranteed to
 // be >= skip_count + max_depth + *min_dropped_frames.
-extern int GetStackFramesWithContext(void** result, int* sizes, int max_depth, int skip_count, const void* uc,
+extern int GetStackFramesWithContext(void** result, int* sizes, int max_depth,
+                                     int skip_count, const void* uc,
                                      int* min_dropped_frames);
 
 // This is similar to the absl::GetStackFrames routine, except that it returns
@@ -98,7 +100,8 @@ extern int GetStackTrace(void** result, int max_depth, int skip_count);
 // lower bound on the number of dropped stack frames. The stored value is
 // guaranteed to be >= 0. The number of real stack frames is guaranteed to
 // be >= skip_count + max_depth + *min_dropped_frames.
-extern int GetStackTraceWithContext(void** result, int max_depth, int skip_count, const void* uc,
+extern int GetStackTraceWithContext(void** result, int max_depth,
+                                    int skip_count, const void* uc,
                                     int* min_dropped_frames);
 
 // Call this to provide a custom function for unwinding stack frames
@@ -126,7 +129,9 @@ extern int GetStackTraceWithContext(void** result, int max_depth, int skip_count
 // Therefore do not clean up any state that may be needed by an old
 // unwinder.
 // ****************************************************************
-extern void SetStackUnwinder(int (*unwinder)(void** pcs, int* sizes, int max_depth, int skip_count, const void* uc,
+extern void SetStackUnwinder(int (*unwinder)(void** pcs, int* sizes,
+                                             int max_depth, int skip_count,
+                                             const void* uc,
                                              int* min_dropped_frames));
 
 // Function that exposes built-in stack-unwinding behavior, ignoring
@@ -146,9 +151,10 @@ extern void SetStackUnwinder(int (*unwinder)(void** pcs, int* sizes, int max_dep
 //     null uc | GetStackTrace()            | GetStackFrames()            |
 // non-null uc | GetStackTraceWithContext() | GetStackFramesWithContext() |
 //             |==========================================================|
-extern int DefaultStackUnwinder(void** pcs, int* sizes, int max_depth, int skip_count, const void* uc,
+extern int DefaultStackUnwinder(void** pcs, int* sizes, int max_depth,
+                                int skip_count, const void* uc,
                                 int* min_dropped_frames);
 
-} // namespace absl
+}  // namespace absl
 
-#endif // ABSL_DEBUGGING_STACKTRACE_H_
+#endif  // ABSL_DEBUGGING_STACKTRACE_H_

@@ -23,46 +23,46 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 
 #include <map>
 
-// An in-memory key-value store designed to mirror the contents of the database after performing sequences of operations
+//An in-memory key-value store designed to mirror the contents of the database after performing sequences of operations
 class MemoryKeyValueStore {
 
 public:
-	// Get the value associated with a key
+	//Get the value associated with a key
 	Optional<Value> get(KeyRef key) const;
 
-	// Returns the key designated by a key selector
+	//Returns the key designated by a key selector
 	Key getKey(KeySelectorRef selector) const;
 
-	// Gets a range of key-value pairs, returning a maximum of <limit> results
+	//Gets a range of key-value pairs, returning a maximum of <limit> results
 	Standalone<RangeResultRef> getRange(KeyRangeRef range, int limit, bool reverse) const;
 
-	// Stores a key-value pair in the database
+	//Stores a key-value pair in the database
 	void set(KeyRef key, ValueRef value);
 
-	// Removes a key from the database
+	//Removes a key from the database
 	void clear(KeyRef key);
 
-	// Removes a range of keys from the database
+	//Removes a range of keys from the database
 	void clear(KeyRangeRef range);
 
-	// The number of keys in the database
+	//The number of keys in the database
 	uint64_t size() const;
 
-	// The first key in the database; returned by key selectors that choose a key off the front
+	//The first key in the database; returned by key selectors that choose a key off the front
 	Key startKey() const;
 
-	// The last key in the database; returned by key selectors that choose a key off the back
+	//The last key in the database; returned by key selectors that choose a key off the back
 	Key endKey() const;
 
-	// Debugging function that prints all key-value pairs
+	//Debugging function that prints all key-value pairs
 	void printContents() const;
 
 private:
-	// A map holding the key-value pairs
+	//A map holding the key-value pairs
 	std::map<Key, Value> store;
 };
 

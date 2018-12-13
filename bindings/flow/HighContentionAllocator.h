@@ -26,17 +26,16 @@
 #include "Subspace.h"
 
 namespace FDB {
-class HighContentionAllocator {
-public:
-	HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
-	Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
+	class HighContentionAllocator {
+	public:
+		HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
+		Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
 
-	static int64_t windowSize(int64_t start);
-
-private:
-	Subspace counters;
-	Subspace recent;
-};
-} // namespace FDB
+		static int64_t windowSize(int64_t start);
+	private:
+		Subspace counters;
+		Subspace recent;
+	};
+}
 
 #endif

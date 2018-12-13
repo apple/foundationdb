@@ -26,11 +26,11 @@
 
 struct ConflictSet;
 ConflictSet* newConflictSet();
-void clearConflictSet(ConflictSet*, Version);
+void clearConflictSet( ConflictSet*, Version );
 void destroyConflictSet(ConflictSet*);
 
 struct ConflictBatch {
-	explicit ConflictBatch(ConflictSet*);
+	explicit ConflictBatch( ConflictSet* );
 	~ConflictBatch();
 
 	enum TransactionCommitResult {
@@ -39,26 +39,24 @@ struct ConflictBatch {
 		TransactionCommitted,
 	};
 
-	void addTransaction(const CommitTransactionRef& transaction);
-	void detectConflicts(Version now, Version newOldestVersion, vector<int>& nonConflicting,
-	                     vector<int>* tooOldTransactions = NULL);
+	void addTransaction( const CommitTransactionRef& transaction );
+	void detectConflicts(Version now, Version newOldestVersion, vector<int>& nonConflicting, vector<int>* tooOldTransactions = NULL);
 	void GetTooOldTransactions(vector<int>& tooOldTransactions);
 
 private:
 	ConflictSet* cs;
-	Standalone<VectorRef<struct TransactionInfo*>> transactionInfo;
+	Standalone< VectorRef< struct TransactionInfo* > > transactionInfo;
 	vector<struct KeyInfo> points;
 	int transactionCount;
-	vector<pair<StringRef, StringRef>> combinedWriteConflictRanges;
-	vector<struct ReadConflictRange> combinedReadConflictRanges;
+	vector< pair<StringRef,StringRef> > combinedWriteConflictRanges;
+	vector< struct ReadConflictRange > combinedReadConflictRanges;
 	bool* transactionConflictStatus;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();
 	void checkReadConflictRanges();
 	void mergeWriteConflictRanges(Version now);
-	void addConflictRanges(Version now, vector<pair<StringRef, StringRef>>::iterator begin,
-	                       vector<pair<StringRef, StringRef>>::iterator end, class SkipList* part);
+	void addConflictRanges(Version now, vector< pair<StringRef,StringRef> >::iterator begin, vector< pair<StringRef,StringRef> >::iterator end, class SkipList* part);
 };
 
 #endif

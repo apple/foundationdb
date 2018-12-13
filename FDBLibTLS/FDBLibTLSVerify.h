@@ -47,10 +47,14 @@ enum class X509Location {
 };
 
 struct Criteria {
-	Criteria(const std::string& s) : criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
-	Criteria(const std::string& s, MatchType mt) : criteria(s), match_type(mt), location(X509Location::NAME) {}
-	Criteria(const std::string& s, X509Location loc) : criteria(s), match_type(MatchType::EXACT), location(loc) {}
-	Criteria(const std::string& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
+	Criteria( const std::string& s )
+		: criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
+	Criteria( const std::string& s, MatchType mt )
+		: criteria(s), match_type(mt), location(X509Location::NAME) {}
+	Criteria( const std::string& s, X509Location loc)
+		: criteria(s), match_type(MatchType::EXACT), location(loc) {}
+	Criteria( const std::string& s, MatchType mt, X509Location loc)
+		: criteria(s), match_type(mt), location(loc) {}
 
 	std::string criteria;
 	MatchType match_type;
@@ -61,7 +65,7 @@ struct Criteria {
 	}
 };
 
-struct FDBLibTLSVerify : ReferenceCounted<FDBLibTLSVerify> {
+struct FDBLibTLSVerify: ReferenceCounted<FDBLibTLSVerify> {
 	FDBLibTLSVerify(std::string verify);
 	virtual ~FDBLibTLSVerify();
 
@@ -73,9 +77,9 @@ struct FDBLibTLSVerify : ReferenceCounted<FDBLibTLSVerify> {
 	bool verify_cert;
 	bool verify_time;
 
-	std::map<NID, Criteria> subject_criteria;
-	std::map<NID, Criteria> issuer_criteria;
-	std::map<NID, Criteria> root_criteria;
+	std::map< NID, Criteria > subject_criteria;
+	std::map< NID, Criteria > issuer_criteria;
+	std::map< NID, Criteria > root_criteria;
 };
 
 #endif /* FDB_LIBTLS_VERIFY_H */

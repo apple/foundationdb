@@ -22,13 +22,13 @@
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
-Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
-Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
+Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
+Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Database const &db);
 
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
@@ -39,15 +39,18 @@ public:
 	IBackupFile(std::string fileName) : m_fileName(fileName), m_offset(0) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
-	virtual Future<Void> append(const void* data, int len) = 0;
+	virtual Future<Void> append(const void *data, int len) = 0;
 	virtual Future<Void> finish() = 0;
-	inline std::string getFileName() const { return m_fileName; }
-	inline int64_t size() const { return m_offset; }
+	inline std::string getFileName() const {
+		return m_fileName;
+	}
+	inline int64_t size() const {
+		return m_offset;
+	}
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
 	Future<Void> appendStringRefWithLen(Standalone<StringRef> s);
-
 protected:
 	std::string m_fileName;
 	int64_t m_offset;
@@ -63,7 +66,7 @@ struct LogFile {
 	int64_t fileSize;
 
 	// Order by beginVersion, break ties with endVersion
-	bool operator<(const LogFile& rhs) const {
+	bool operator< (const LogFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 };
@@ -75,7 +78,7 @@ struct RangeFile {
 	int64_t fileSize;
 
 	// Order by version, break ties with name
-	bool operator<(const RangeFile& rhs) const {
+	bool operator< (const RangeFile &rhs) const {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
 	}
 };
@@ -85,10 +88,10 @@ struct KeyspaceSnapshotFile {
 	Version endVersion;
 	std::string fileName;
 	int64_t totalSize;
-	Optional<bool> restorable; // Whether or not the snapshot can be used in a restore, if known
+	Optional<bool> restorable;  // Whether or not the snapshot can be used in a restore, if known
 
 	// Order by beginVersion, break ties with endVersion
-	bool operator<(const KeyspaceSnapshotFile& rhs) const {
+	bool operator< (const KeyspaceSnapshotFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 };
@@ -110,7 +113,7 @@ struct BackupDescription {
 	Optional<Version> contiguousLogEnd;
 	Optional<Version> maxRestorableVersion;
 	Optional<Version> minRestorableVersion;
-	std::string extendedDetail; // Freeform container-specific info.
+	std::string extendedDetail;  // Freeform container-specific info.
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -153,7 +156,7 @@ public:
 
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
-	virtual Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) = 0;
+	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
@@ -166,14 +169,13 @@ public:
 	// If force is false, then nothing will be deleted unless there is a restorable snapshot which
 	//   - begins at or after expireEndVersion
 	//   - ends at or before restorableBeginVersion
-	// If force is true, data is deleted unconditionally which could leave the backup in an unusable state.  This is not
-	// recommended. Returns true if expiration was done.
-	virtual Future<Void> expireData(Version expireEndVersion, bool force = false,
-	                                Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
+	// If force is true, data is deleted unconditionally which could leave the backup in an unusable state.  This is not recommended.
+	// Returns true if expiration was done.
+	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
-	virtual Future<Void> deleteContainer(int* pNumDeleted = nullptr) = 0;
+	virtual Future<Void> deleteContainer(int *pNumDeleted = nullptr) = 0;
 
 	// Return key details about a backup's contents, possibly using cached or stored metadata
 	// unless deepScan is true.
@@ -190,10 +192,13 @@ public:
 	static std::vector<std::string> getURLFormats();
 	static Future<std::vector<std::string>> listContainers(std::string baseURL);
 
-	std::string getURL() const { return URL; }
+	std::string getURL() const {
+		return URL;
+	}
 
 	static std::string lastOpenError;
 
 private:
 	std::string URL;
 };
+

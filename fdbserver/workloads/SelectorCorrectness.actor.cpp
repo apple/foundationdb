@@ -21,11 +21,11 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SelectorCorrectnessWorkload : TestWorkload {
-	int minOperationsPerTransaction, maxOperationsPerTransaction, maxKeySpace, maxOffset;
+	int minOperationsPerTransaction,maxOperationsPerTransaction,maxKeySpace,maxOffset;
 	bool testReadYourWrites;
 	double testDuration;
 
@@ -33,69 +33,76 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	PerfIntCounter transactions, retries;
 
 	SelectorCorrectnessWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
-
-		minOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 10);
-		maxOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 50);
-		maxKeySpace = getOption(options, LiteralStringRef("maxKeySpace"), 10);
-		maxOffset = getOption(options, LiteralStringRef("maxOffset"), 20);
-		testReadYourWrites = getOption(options, LiteralStringRef("testReadYourWrites"), true);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		: TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
+		
+		minOperationsPerTransaction = getOption( options, LiteralStringRef("minOperationsPerTransaction"), 10 );
+		maxOperationsPerTransaction = getOption( options, LiteralStringRef("minOperationsPerTransaction"), 50 );
+		maxKeySpace = getOption( options, LiteralStringRef("maxKeySpace"), 10 );
+		maxOffset = getOption( options, LiteralStringRef("maxOffset"), 20 );
+		testReadYourWrites = getOption( options, LiteralStringRef("testReadYourWrites"), true );
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 	}
 
 	virtual std::string description() { return "SelectorCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) { return SelectorCorrectnessSetup(cx->clone(), this); }
+	virtual Future<Void> setup( Database const& cx ) { 
+		return SelectorCorrectnessSetup( cx->clone(), this );
+	}
 
-	virtual Future<Void> start(Database const& cx) {
-		clients.push_back(timeout(SelectorCorrectnessClient(cx->clone(), this), testDuration, Void()));
+	virtual Future<Void> start( Database const& cx ) { 
+		clients.push_back(
+			timeout(
+			SelectorCorrectnessClient( cx->clone(), this), testDuration, Void()) );
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	virtual Future<bool> check( Database const& cx ) { 
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-		m.push_back(transactions.getMetric());
-		m.push_back(retries.getMetric());
+	virtual void getMetrics( vector<PerfMetric>& m ) {
+		m.push_back( transactions.getMetric() );
+		m.push_back( retries.getMetric() );
 	}
 
-	ACTOR Future<Void> SelectorCorrectnessSetup(Database cx, SelectorCorrectnessWorkload* self) {
-		state Value myValue = StringRef(format("%010d", g_random->randomInt(0, 10000000)));
+	ACTOR Future<Void> SelectorCorrectnessSetup( Database cx, SelectorCorrectnessWorkload* self ) {
+		state Value myValue = StringRef(format( "%010d", g_random->randomInt( 0, 10000000 ) ));
 		state Transaction tr(cx);
 
-		if (!self->testReadYourWrites) {
+		if(!self->testReadYourWrites) {
 			loop {
 				try {
-					for (int i = 0; i < self->maxKeySpace; i += 2) tr.set(StringRef(format("%010d", i)), myValue);
+					for(int i = 0; i < self->maxKeySpace; i+=2) tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					wait(tr.commit());
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					wait( tr.onError(e) );
 				}
 			}
 		} else {
 			loop {
 				try {
-					for (int i = 0; i < self->maxKeySpace; i += 4) tr.set(StringRef(format("%010d", i)), myValue);
-					for (int i = 2; i < self->maxKeySpace; i += 4)
-						if (g_random->random01() > 0.5) tr.set(StringRef(format("%010d", i)), myValue);
+					for(int i = 0; i < self->maxKeySpace; i+=4) 
+						tr.set(StringRef(format( "%010d", i ) ),myValue);
+					for(int i = 2; i < self->maxKeySpace; i+=4) 
+						if(g_random->random01() > 0.5)
+							tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					wait(tr.commit());
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					wait( tr.onError(e) );
 				}
 			}
 		}
-
+		
 		return Void();
 	}
 
-	ACTOR Future<Void> SelectorCorrectnessClient(Database cx, SelectorCorrectnessWorkload* self) {
+	ACTOR Future<Void> SelectorCorrectnessClient( 
+		Database cx, SelectorCorrectnessWorkload *self) {
 		state int i;
 		state int j;
 		state std::string myKeyA;
@@ -108,119 +115,87 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		state Standalone<StringRef> maxKey;
 		state bool reverse;
 
-		maxKey = Standalone<StringRef>(format("%010d", self->maxKeySpace + 1));
+		maxKey = Standalone<StringRef>(format( "%010d", self->maxKeySpace + 1 ));
 
 		loop {
-
+			
 			state Transaction tr(cx);
 			state ReadYourWritesTransaction trRYOW(cx);
 
 			trRYOW.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			if (self->testReadYourWrites) {
-				myValue = StringRef(format("%010d", g_random->randomInt(0, 10000000)));
-				for (int i = 2; i < self->maxKeySpace; i += 4) trRYOW.set(StringRef(format("%010d", i)), myValue);
-				for (int i = 0; i < self->maxKeySpace; i += 4)
-					if (g_random->random01() > 0.5) trRYOW.set(StringRef(format("%010d", i)), myValue);
+			if( self->testReadYourWrites ) {
+				myValue = StringRef(format( "%010d", g_random->randomInt( 0, 10000000 ) ));
+				for(int i = 2; i < self->maxKeySpace; i+=4)
+					trRYOW.set(StringRef(format( "%010d", i ) ),myValue);
+				for(int i = 0; i < self->maxKeySpace; i+=4)
+					if(g_random->random01() > 0.5)
+						trRYOW.set(StringRef(format( "%010d", i ) ),myValue);
 			}
 
 			try {
-				for (i = 0;
-				     i < g_random->randomInt(self->minOperationsPerTransaction, self->maxOperationsPerTransaction + 1);
-				     i++) {
-					j = g_random->randomInt(0, 2);
-					if (j < 1) {
-						state int searchInt = g_random->randomInt(0, self->maxKeySpace);
-						myKeyA = format("%010d", searchInt);
+				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
+					j = g_random->randomInt(0,2);
+					if( j < 1 ) {
+						state int searchInt = g_random->randomInt( 0, self->maxKeySpace );
+						myKeyA = format( "%010d", searchInt );
 
-						if (self->testReadYourWrites) {
+						if(self->testReadYourWrites) {
 							Optional<Value> getTest = wait(trRYOW.get(StringRef(myKeyA)));
-							if ((searchInt % 2 == 0 && !getTest.present()) ||
-							    (searchInt % 2 == 1 && getTest.present())) {
-								TraceEvent(SevError, "RanSelTestFailure")
-								    .detail("Reason", "Value not present")
-								    .detail("KeyA", myKeyA);
+							if( (searchInt%2==0 && !getTest.present()) || (searchInt%2==1 && getTest.present())) {
+									TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "Value not present").detail("KeyA",myKeyA);
 							}
 						} else {
 							Optional<Value> getTest = wait(tr.get(StringRef(myKeyA)));
-							if ((searchInt % 2 == 0 && !getTest.present()) ||
-							    (searchInt % 2 == 1 && getTest.present())) {
-								TraceEvent(SevError, "RanSelTestFailure")
-								    .detail("Reason", "Value not present")
-								    .detail("KeyA", myKeyA);
+							if( (searchInt%2==0 && !getTest.present()) || (searchInt%2==1 && getTest.present())) {
+									TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "Value not present").detail("KeyA",myKeyA);
 							}
 						}
 					} else {
-						int a = g_random->randomInt(2, self->maxKeySpace);
-						int b = g_random->randomInt(2, 2 * self->maxKeySpace);
-						int abmax = std::max(a, b);
-						int abmin = std::min(a, b) - 1;
-						myKeyA = format("%010d", abmin);
-						myKeyB = format("%010d", abmax);
-						onEqualA = g_random->randomInt(0, 2) != 0;
-						onEqualB = g_random->randomInt(0, 2) != 0;
-						offsetA = 1; //-1*g_random->randomInt( 0, self->maxOffset );
-						offsetB = g_random->randomInt(1, self->maxOffset);
+						int a = g_random->randomInt( 2, self->maxKeySpace );
+						int b = g_random->randomInt( 2, 2*self->maxKeySpace );
+						int abmax = std::max(a,b);
+						int abmin = std::min(a,b)-1;
+						myKeyA = format( "%010d", abmin );
+						myKeyB = format( "%010d", abmax );
+						onEqualA = g_random->randomInt( 0, 2 ) != 0;
+						onEqualB = g_random->randomInt( 0, 2 ) != 0;
+						offsetA = 1;//-1*g_random->randomInt( 0, self->maxOffset );
+						offsetB = g_random->randomInt( 1, self->maxOffset );
 						reverse = g_random->random01() > 0.5 ? false : true;
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
-						state int expectedSize =
-						    (std::min(abmax + 2 * offsetB - (abmax % 2 == 1 ? 1 : (onEqualB ? 0 : 2)),
-						              self->maxKeySpace) -
-						     (std::max(abmin + 2 * offsetA - (abmin % 2 == 1 ? 1 : (onEqualA ? 0 : 2)), 0))) /
-						    2;
+						state int expectedSize = (std::min( abmax + 2*offsetB - (abmax%2==1 ? 1 : (onEqualB ? 0 : 2)), self->maxKeySpace ) - ( std::max( abmin + 2*offsetA - (abmin%2==1 ? 1 : (onEqualA ? 0 : 2)), 0 ) ))/2;
 
-						if (self->testReadYourWrites) {
-							Standalone<RangeResultRef> getRangeTest =
-							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                         2 * (self->maxKeySpace + self->maxOffset), false, reverse));
+						if(self->testReadYourWrites) {
+							Standalone<RangeResultRef> getRangeTest = wait( trRYOW.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB), 2*(self->maxKeySpace+self->maxOffset), false, reverse ) );
 
 							int trueSize = 0;
-							while (trueSize < getRangeTest.size() &&
-							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key < maxKey)
-								trueSize++;
+							while(trueSize < getRangeTest.size() && getRangeTest[ !reverse ? trueSize : getRangeTest.size() - trueSize - 1 ].key < maxKey) trueSize++;
 
-							if (trueSize != expectedSize) {
+							if( trueSize != expectedSize ) {
 								std::string outStr = "";
-								for (int k = 0; k < trueSize; k++) {
-									std::string keyStr =
-									    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
+								for(int k = 0; k < trueSize; k++) {
+									std::string keyStr = printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
 									outStr = outStr + keyStr + " ";
 								}
 
-								TraceEvent(SevError, "RanSelTestFailure")
-								    .detail("Reason", "The getRange results did not match expected size")
-								    .detail("Size", trueSize)
-								    .detail("Expected", expectedSize)
-								    .detail("Data", outStr)
-								    .detail("DataSize", getRangeTest.size());
+								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("Size", trueSize).detail("Expected",expectedSize).detail("Data",outStr).detail("DataSize", getRangeTest.size());
 							}
 						} else {
-							Standalone<RangeResultRef> getRangeTest =
-							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                     2 * (self->maxKeySpace + self->maxOffset), false, reverse));
-
+							Standalone<RangeResultRef> getRangeTest = wait( tr.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB), 2*(self->maxKeySpace+self->maxOffset), false, reverse ) );
+							
 							int trueSize = 0;
-							while (trueSize < getRangeTest.size() &&
-							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key < maxKey)
-								trueSize++;
-
-							if (trueSize != expectedSize) {
+							while(trueSize < getRangeTest.size() && getRangeTest[ !reverse ? trueSize : getRangeTest.size() - trueSize - 1 ].key < maxKey) trueSize++;
+							
+							if( trueSize != expectedSize ) {
 								std::string outStr = "";
-								for (int k = 0; k < trueSize; k++) {
-									std::string keyStr =
-									    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
+								for(int k = 0; k < trueSize; k++) {
+									std::string keyStr = printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
 									outStr = outStr + keyStr + " ";
 								}
-
-								TraceEvent(SevError, "RanSelTestFailure")
-								    .detail("Reason", "The getRange results did not match expected size")
-								    .detail("Size", trueSize)
-								    .detail("Expected", expectedSize)
-								    .detail("Data", outStr)
-								    .detail("DataSize", getRangeTest.size());
+								
+								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match expected size").detail("Size", trueSize).detail("Expected",expectedSize).detail("Data",outStr).detail("DataSize", getRangeTest.size());
 							}
 						}
 					}
@@ -230,7 +205,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				trRYOW.reset();
 				++self->transactions;
 			} catch (Error& e) {
-				wait(trRYOW.onError(e));
+				wait( trRYOW.onError(e) );
 				trRYOW.reset();
 				++self->retries;
 			}

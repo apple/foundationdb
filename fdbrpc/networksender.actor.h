@@ -18,27 +18,27 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBRPC_NETWORKSENDER_ACTOR_G_H)
-#define FDBRPC_NETWORKSENDER_ACTOR_G_H
-#include "networksender.actor.g.h"
-#elif !defined(RPCNETWORKSENDER_ACTOR_H)
-#define RPCNETWORKSENDER_ACTOR_H
 
-#include "FlowTransport.h"
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#if defined(NO_INTELLISENSE) && !defined(FDBRPC_NETWORKSENDER_ACTOR_G_H)
+	#define FDBRPC_NETWORKSENDER_ACTOR_G_H
+	#include "fdbrpc/networksender.actor.g.h"
+#elif !defined(RPCNETWORKSENDER_ACTOR_H)
+	#define RPCNETWORKSENDER_ACTOR_H
+
+#include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class T>
-void networkSender(Future<T> input, Endpoint endpoint) {
+void networkSender( Future<T> input, Endpoint endpoint ) {
 	try {
-		T value = wait(input);
-		FlowTransport::transport().sendUnreliable(SerializeBoolAnd<T>(true, value), endpoint, false);
+		T value = wait( input );
+		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<T>(true, value), endpoint, false );
 	} catch (Error& err) {
-		// if (err.code() == error_code_broken_promise) return;
-		ASSERT(err.code() != error_code_actor_cancelled);
-		FlowTransport::transport().sendUnreliable(SerializeBoolAnd<Error>(false, err), endpoint, false);
+		//if (err.code() == error_code_broken_promise) return;
+		ASSERT( err.code() != error_code_actor_cancelled );
+		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<Error>(false, err), endpoint, false );
 	}
 }
 #include "flow/unactorcompiler.h"

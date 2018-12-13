@@ -20,52 +20,54 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_G_H)
-#define FDBCLIENT_RUNTRANSACTION_ACTOR_G_H
-#include "RunTransaction.actor.g.h"
+	#define FDBCLIENT_RUNTRANSACTION_ACTOR_G_H
+	#include "fdbclient/RunTransaction.actor.g.h"
 #elif !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_H)
-#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
+	#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
 
 #include "flow/flow.h"
-#include "ReadYourWrites.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransaction(Database cx,
-                                                                                                        Function func) {
+ACTOR template < class Function >
+Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+runRYWTransaction(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+	loop{
 		try {
-			state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
+			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
 			wait(tr->commit());
 			return result;
-		} catch (Error& e) {
+		}
+		catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
 }
 
-ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionFailIfLocked(
-    Database cx, Function func) {
+ACTOR template < class Function >
+Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+runRYWTransactionFailIfLocked(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+	loop{
 		try {
-			state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
+			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
 			wait(tr->commit());
 			return result;
-		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw;
+		}
+		catch (Error& e) {
+			if(e.code() == error_code_database_locked)
+				throw;
 			wait(tr->onError(e));
 		}
 	}
 }
 
-ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionNoRetry(
-    Database cx, Function func) {
+ACTOR template < class Function >
+Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+runRYWTransactionNoRetry(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
 	wait(tr->commit());

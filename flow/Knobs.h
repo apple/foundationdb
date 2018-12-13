@@ -22,7 +22,7 @@
 #define FLOW_KNOBS_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 
 #include <map>
 #include <string>
@@ -30,15 +30,14 @@
 
 class Knobs {
 public:
-	bool setKnob(std::string const& name,
-	             std::string const& value); // Returns true if the knob name is known, false if it is unknown
+	bool setKnob( std::string const& name, std::string const& value ); // Returns true if the knob name is known, false if it is unknown
 	void trace();
 
 protected:
-	void initKnob(double& knob, double value, std::string const& name);
-	void initKnob(int64_t& knob, int64_t value, std::string const& name);
-	void initKnob(int& knob, int value, std::string const& name);
-	void initKnob(std::string& knob, const std::string& value, const std::string& name);
+	void initKnob( double& knob, double value, std::string const& name );
+	void initKnob( int64_t& knob, int64_t value, std::string const& name );
+	void initKnob( int& knob, int value, std::string const& name );
+	void initKnob( std::string& knob, const std::string& value, const std::string& name );
 
 	std::map<std::string, double*> double_knobs;
 	std::map<std::string, int64_t*> int64_knobs;
@@ -63,16 +62,16 @@ public:
 
 	int RANDOMSEED_RETRY_LIMIT;
 
-	// slow task profiling
+	//slow task profiling
 	double SLOWTASK_PROFILING_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
 
-	// connectionMonitor
+	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
 	double CONNECTION_MONITOR_TIMEOUT;
 
-	// FlowTransport
+	//FlowTransport
 	double CONNECTION_REJECTED_MESSAGE_DELAY;
 	double CONNECTION_ID_TIMEOUT;
 	double CONNECTION_CLEANUP_DELAY;
@@ -84,7 +83,7 @@ public:
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 
-	// AsyncFileCached
+	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
 	int64_t SIM_PAGE_CACHE_4K;
@@ -92,25 +91,26 @@ public:
 	int64_t BUGGIFY_SIM_PAGE_CACHE_4K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_64K;
 	int MAX_EVICT_ATTEMPTS;
+	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
 
-	// AsyncFileKAIO
+	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
 
 	int PAGE_WRITE_CHECKSUM_HISTORY;
 
-	// AsyncFileNonDurable
+	//AsyncFileNonDurable
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
-	// GenericActors
+	//GenericActors
 	double MAX_DELIVER_DUPLICATE_DELAY;
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
 
-	// IAsyncFile
+	//IAsyncFile
 	int64_t INCREMENTAL_DELETE_TRUNCATE_AMOUNT;
 	double INCREMENTAL_DELETE_INTERVAL;
 
-	// Net2
+	//Net2
 	double MIN_COALESCE_DELAY;
 	double MAX_COALESCE_DELAY;
 	double SLOW_LOOP_CUTOFF;
@@ -118,13 +118,13 @@ public:
 	int64_t TSC_YIELD_TIME;
 	int64_t REACTOR_FLAGS;
 
-	// Network
+	//Network
 	int64_t PACKET_LIMIT;
-	int64_t PACKET_WARNING; // 2MB packet warning quietly allows for 1MB system messages
+	int64_t PACKET_WARNING;  // 2MB packet warning quietly allows for 1MB system messages
 	double TIME_OFFSET_LOGGING_INTERVAL;
 
-	// Sim2
-	// FIMXE: more parameters could be factored out
+	//Sim2
+	//FIMXE: more parameters could be factored out
 	double MIN_OPEN_TIME;
 	double MAX_OPEN_TIME;
 	int64_t SIM_DISK_IOPS;
@@ -135,7 +135,7 @@ public:
 	double MAX_CLOGGING_LATENCY;
 	double MAX_BUGGIFIED_DELAY;
 
-	// Tracefiles
+	//Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
 	double TRACE_FLUSH_INTERVAL;
 	double TRACE_RETRY_OPEN_INTERVAL;
@@ -147,7 +147,7 @@ public:
 	int TRACE_EVENT_THROTTLER_MSG_LIMIT;
 	std::string TRACE_FORMAT;
 
-	// TDMetrics
+	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
 	int64_t MAX_METRIC_LEVEL;
 	double METRIC_LEVEL_DIVISOR;
@@ -155,7 +155,7 @@ public:
 	int METRIC_LIMIT_RESPONSE_FACTOR;
 	int MAX_METRICS;
 
-	// Load Balancing
+	//Load Balancing
 	double LOAD_BALANCE_MAX_BACKOFF;
 	double LOAD_BALANCE_START_BACKOFF;
 	double LOAD_BALANCE_BACKOFF_RATE;

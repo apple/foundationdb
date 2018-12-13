@@ -68,7 +68,7 @@
 #include "flow/SimpleOpt.h"
 #include "SimpleIni.h"
 
-#include "fdbclient/versions.h"
+#include <fdbclient/versions.h>
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
@@ -78,25 +78,26 @@ typedef int fdb_fd_set;
 
 #define CANONICAL_PATH_SEPARATOR '/'
 
-void monitor_fd(fdb_fd_set list, int fd, int* maxfd, void* cmd) {
+void monitor_fd( fdb_fd_set list, int fd, int* maxfd, void* cmd ) {
 #ifdef __linux__
-	FD_SET(fd, list);
-	if (fd > *maxfd) *maxfd = fd;
+	FD_SET( fd, list );
+	if ( fd > *maxfd )
+		*maxfd = fd;
 #elif defined __APPLE__
 	/* ignore maxfd */
 	struct kevent ev;
-	EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, cmd);
-	kevent(list, &ev, 1, NULL, 0, NULL); // FIXME: check?
+	EV_SET( &ev, fd, EVFILT_READ, EV_ADD, 0, 0, cmd );
+	kevent( list, &ev, 1, NULL, 0, NULL ); // FIXME: check?
 #endif
 }
 
-void unmonitor_fd(fdb_fd_set list, int fd) {
+void unmonitor_fd( fdb_fd_set list, int fd ) {
 #ifdef __linux__
-	FD_CLR(fd, list);
+	FD_CLR( fd, list );
 #elif defined __APPLE__
 	struct kevent ev;
-	EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-	kevent(list, &ev, 1, NULL, 0, NULL); // FIXME: check?
+	EV_SET( &ev, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL );
+	kevent( list, &ev, 1, NULL, 0, NULL ); // FIXME: check?
 #endif
 }
 
@@ -106,23 +107,24 @@ double get_cur_timestamp() {
 	gettimeofday(&tv, NULL);
 	localtime_r(&tv.tv_sec, &tm_info);
 
-	return tv.tv_sec + 1e-6 * tv.tv_usec;
+	return tv.tv_sec + 1e-6*tv.tv_usec;
 }
 
-enum Severity { SevDebug = 5, SevInfo = 10, SevWarn = 20, SevWarnAlways = 30, SevError = 40 };
+enum Severity { SevDebug=5, SevInfo=10, SevWarn=20, SevWarnAlways=30, SevError=40 };
 int severity_to_priority(Severity severity) {
-	switch (severity) {
-	case SevError:
-		return LOG_ERR;
-	case SevWarnAlways:
-		return LOG_WARNING;
-	case SevWarn:
-		return LOG_NOTICE;
-	case SevDebug:
-		return LOG_DEBUG;
-	case SevInfo:
-	default:
-		return LOG_INFO;
+	switch(severity) {
+		case SevError:
+			return LOG_ERR;
+		case SevWarnAlways:
+			return LOG_WARNING;
+		case SevWarn:
+			return LOG_NOTICE;
+		case SevDebug:
+			return LOG_DEBUG;
+		case SevInfo:
+		default:
+			return LOG_INFO;
+
 	}
 }
 
@@ -132,12 +134,10 @@ std::string logGroup = "default";
 void vlog_process_msg(Severity severity, const char* process, const char* format, va_list args) {
 	if (daemonize) {
 		char buf[4096];
-		int len = vsnprintf(buf, 4096, format, args);
-		syslog(severity_to_priority(severity), "LogGroup=\"%s\" Process=\"%s\": %.*s", logGroup.c_str(), process, len,
-		       buf);
+		int len = vsnprintf( buf, 4096, format, args);
+		syslog(severity_to_priority(severity), "LogGroup=\"%s\" Process=\"%s\": %.*s", logGroup.c_str(), process, len, buf);
 	} else {
-		fprintf(stderr, "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ", get_cur_timestamp(),
-		        (int)severity, logGroup.c_str(), process);
+		fprintf(stderr, "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ", get_cur_timestamp(), (int)severity, logGroup.c_str(), process);
 		vfprintf(stderr, format, args);
 	}
 }
@@ -165,9 +165,9 @@ void log_err(const char* func, int err, const char* format, ...) {
 	va_start(args, format);
 
 	char buf[4096];
-	int len = vsnprintf(buf, 4096, format, args);
+	int len = vsnprintf( buf, 4096, format, args );
 
-	log_msg(SevError, "%.*s (%s error %d: %s)\n", len, buf, func, err, strerror(err));
+	log_msg( SevError, "%.*s (%s error %d: %s)\n", len, buf, func, err, strerror(err) );
 
 	va_end(args);
 }
@@ -179,7 +179,8 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	va_list ap;
 	va_start(ap, key);
 
-	while (!ret && (section = va_arg(ap, const char*))) ret = ini.GetValue(section, key, NULL);
+	while (!ret && (section = va_arg(ap, const char *)))
+		ret = ini.GetValue(section, key, NULL);
 
 	va_end(ap);
 
@@ -211,22 +212,25 @@ int randomInt(int min, int max) {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR)) f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR)) d = d.substr(0, d.size() - 1);
+	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+		f = f.substr(1);
+	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+		d = d.substr(0, d.size()-1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
 
 std::string abspath(std::string const& filename) {
 	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
 	char result[PATH_MAX];
-	auto r = realpath(filename.c_str(), result);
+	auto r = realpath( filename.c_str(), result );
 	if (!r) {
 		if (errno == ENOENT) {
-			int sep = filename.find_last_of(CANONICAL_PATH_SEPARATOR);
+			int sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
 			if (sep != std::string::npos) {
-				return joinPath(abspath(filename.substr(0, sep)), filename.substr(sep));
-			} else if (filename.find("~") == std::string::npos) {
-				return joinPath(abspath("."), filename);
+				return joinPath( abspath( filename.substr(0, sep) ), filename.substr(sep) );
+			}
+			else if (filename.find("~") == std::string::npos) {
+				return joinPath( abspath( "." ), filename );
 			}
 		}
 
@@ -237,7 +241,7 @@ std::string abspath(std::string const& filename) {
 }
 
 std::string parentDirectory(std::string const& filename) {
-	size_t sep = filename.find_last_of(CANONICAL_PATH_SEPARATOR);
+	size_t sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {
 		return "";
 	}
@@ -249,8 +253,9 @@ int mkdir(std::string const& directory) {
 	size_t sep = 0;
 	do {
 		sep = directory.find_first_of('/', sep + 1);
-		if (mkdir(directory.substr(0, sep).c_str(), 0755) != 0) {
-			if (errno == EEXIST) continue;
+		if ( mkdir( directory.substr(0, sep).c_str(), 0755 ) != 0 ) {
+			if (errno == EEXIST)
+				continue;
 
 			return -1;
 		}
@@ -263,7 +268,6 @@ struct Command {
 private:
 	std::vector<std::string> commands;
 	fdb_fd_set fds;
-
 public:
 	const char** argv;
 	std::string section, ssection;
@@ -275,26 +279,24 @@ public:
 	double last_start;
 	double fork_retry_time;
 	bool quiet;
-	const char* delete_envvars;
+	const char *delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
 
 	// one pair for each of stdout and stderr
 	int pipes[2][2];
 
-	Command() : argv(NULL) {}
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd)
-	  : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds),
-	    deconfigured(false), kill_on_configuration_change(true) {
+	Command() : argv(NULL) { }
+	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
 		ssection = _ssection;
 
-		for (auto p : pipes) {
-			if ((pipe(p) == 0)) {
-				monitor_fd(fds, p[0], maxfd, this);
+		for ( auto p : pipes ) {
+			if ( (pipe(p) == 0) ) {
+				monitor_fd( fds, p[0], maxfd, this );
 			} else {
-				log_err("pipe", errno, "Unable to construct pipe for %s", ssection.c_str());
+				log_err( "pipe", errno, "Unable to construct pipe for %s", ssection.c_str() );
 				p[0] = -1;
 				p[1] = -1;
 			}
@@ -309,19 +311,19 @@ public:
 		keys.splice(keys.end(), skeys, skeys.begin(), skeys.end());
 		keys.splice(keys.end(), gkeys, gkeys.begin(), gkeys.end());
 		keys.sort(CSimpleIniA::Entry::KeyOrder());
-		keys.unique([](const CSimpleIniA::Entry& lhs, const CSimpleIniA::Entry& rhs) -> bool {
-			return !CSimpleIniA::Entry::KeyOrder()(lhs, rhs);
-		});
+		keys.unique( [](const CSimpleIniA::Entry& lhs, const CSimpleIniA::Entry& rhs) -> bool {
+				return !CSimpleIniA::Entry::KeyOrder()(lhs, rhs);
+			} );
 
 		last_start = 0;
 
 		char* endptr;
-		const char* rd =
-		    get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* rd = get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!rd) {
 			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
-		} else {
+		}
+		else {
 			max_restart_delay = strtoul(rd, &endptr, 10);
 			if (*endptr != '\0') {
 				log_msg(SevError, "Unable to parse restart delay for %s\n", ssection.c_str());
@@ -329,11 +331,11 @@ public:
 			}
 		}
 
-		const char* mrd = get_value_multi(ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general",
-		                                  "fdbmonitor", NULL);
+		const char* mrd = get_value_multi(ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!mrd) {
 			initial_restart_delay = 0;
-		} else {
+		}
+		else {
 			initial_restart_delay = std::min<uint32_t>(max_restart_delay, strtoul(mrd, &endptr, 10));
 			if (*endptr != '\0') {
 				log_msg(SevError, "Unable to parse initial restart delay for %s\n", ssection.c_str());
@@ -343,11 +345,11 @@ public:
 
 		current_restart_delay = initial_restart_delay;
 
-		const char* rbo =
-		    get_value_multi(ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
-		if (!rbo) {
+		const char* rbo = get_value_multi(ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		if(!rbo) {
 			restart_backoff = max_restart_delay;
-		} else {
+		}
+		else {
 			restart_backoff = strtod(rbo, &endptr);
 			if (*endptr != '\0') {
 				log_msg(SevError, "Unable to parse restart backoff for %s\n", ssection.c_str());
@@ -359,11 +361,11 @@ public:
 			}
 		}
 
-		const char* rdri = get_value_multi(ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(),
-		                                   "general", "fdbmonitor", NULL);
+		const char* rdri = get_value_multi(ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
-		} else {
+		}
+		else {
 			restart_delay_reset_interval = strtoul(rdri, &endptr, 10);
 			if (*endptr != '\0') {
 				log_msg(SevError, "Unable to parse restart delay reset interval for %s\n", ssection.c_str());
@@ -371,17 +373,15 @@ public:
 			}
 		}
 
-		const char* q =
-		    get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
-		if (q && !strcmp(q, "true")) quiet = true;
+		const char* q = get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
+		if (q && !strcmp(q, "true"))
+			quiet = true;
 
-		const char* del_env =
-		    get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* del_env = get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", NULL);
 		delete_envvars = del_env;
 
-		const char* kocc =
-		    get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", NULL);
-		if (kocc && strcmp(kocc, "true")) {
+		const char* kocc = get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", NULL);
+		if(kocc && strcmp(kocc, "true")) {
 			kill_on_configuration_change = false;
 		}
 
@@ -391,16 +391,15 @@ public:
 			return;
 		}
 		std::stringstream ss(binary);
-		std::copy(std::istream_iterator<std::string>(ss), std::istream_iterator<std::string>(),
-		          std::back_inserter<std::vector<std::string>>(commands));
+		std::copy(std::istream_iterator<std::string> (ss), std::istream_iterator<std::string>(), std::back_inserter<std::vector<std::string>>(commands));
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
-			    !strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") ||
-			    !strcmp(i.pItem, "delete_envvars") || !strcmp(i.pItem, "kill_on_configuration_change")) {
+			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") || !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
+				!strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") || !strcmp(i.pItem, "delete_envvars") ||
+				!strcmp(i.pItem, "kill_on_configuration_change"))
+			{
 				continue;
 			}
 
@@ -408,22 +407,23 @@ public:
 
 			std::size_t pos = 0;
 
-			while ((pos = opt.find("$ID", pos)) != opt.npos) opt.replace(pos, 3, id_s, strlen(id_s));
+			while ((pos = opt.find("$ID", pos)) != opt.npos)
+				opt.replace(pos, 3, id_s, strlen(id_s));
 
-			const char* flagName = i.pItem + 5;
-			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
-				if (opt == "true")
+			const char *flagName = i.pItem + 5;
+			if(strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+				if(opt == "true")
 					commands.push_back(std::string("--") + flagName);
-				else if (opt != "false") {
-					log_msg(SevError, "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n", flagName,
-					        opt.c_str());
+				else if(opt != "false") {
+					log_msg(SevError, "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n", flagName, opt.c_str());
 					return;
 				}
-			} else
+			}
+			else
 				commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
 		}
 
-		argv = new const char*[commands.size() + 1];
+		argv = new const char* [commands.size() + 1];
 		int i = 0;
 		for (auto itr : commands) {
 			argv[i++] = strdup(itr.c_str());
@@ -432,11 +432,11 @@ public:
 	}
 	~Command() {
 		delete[] argv;
-		for (auto p : pipes) {
-			if (p[0] >= 0 && p[1] >= 0) {
-				unmonitor_fd(fds, p[0]);
-				close(p[0]);
-				close(p[1]);
+		for ( auto p : pipes ) {
+			if ( p[0] >= 0 && p[1] >= 0 ) {
+				unmonitor_fd( fds, p[0] );
+				close( p[0] );
+				close( p[1] );
 			}
 		}
 	}
@@ -454,24 +454,25 @@ public:
 		current_restart_delay = std::max<double>(initial_restart_delay, current_restart_delay);
 	}
 	bool operator!=(const Command& rhs) {
-		if (rhs.commands.size() != commands.size()) return true;
+		if (rhs.commands.size() != commands.size())
+			return true;
 
 		for (size_t i = 0; i < commands.size(); i++) {
-			if (commands[i].compare(rhs.commands[i]) != 0) return true;
+			if (commands[i].compare(rhs.commands[i]) != 0)
+				return true;
 		}
 
 		return false;
 	}
 
 	int get_and_update_current_restart_delay() {
-		if (timer() - last_start >= restart_delay_reset_interval) {
+		if(timer() - last_start >= restart_delay_reset_interval) {
 			current_restart_delay = initial_restart_delay;
 		}
 
 		int jitter = randomInt(floor(-0.1 * current_restart_delay), ceil(0.1 * current_restart_delay));
 		int delay = std::max<int>(0, round(current_restart_delay) + jitter);
-		current_restart_delay =
-		    std::min<double>(max_restart_delay, restart_backoff * std::max(1.0, current_restart_delay));
+		current_restart_delay = std::min<double>(max_restart_delay, restart_backoff * std::max(1.0, current_restart_delay));
 		return delay;
 	}
 };
@@ -482,17 +483,20 @@ std::unordered_map<uint64_t, pid_t> id_pid;
 
 enum { OPT_CONFFILE, OPT_LOCKFILE, OPT_LOGGROUP, OPT_DAEMONIZE, OPT_HELP };
 
-CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP },
-	                                  { OPT_LOCKFILE, "--lockfile", SO_REQ_SEP },
-	                                  { OPT_LOGGROUP, "--loggroup", SO_REQ_SEP },
-	                                  { OPT_DAEMONIZE, "--daemonize", SO_NONE },
-	                                  { OPT_HELP, "-?", SO_NONE },
-	                                  { OPT_HELP, "-h", SO_NONE },
-	                                  { OPT_HELP, "--help", SO_NONE },
-	                                  SO_END_OF_OPTIONS };
+CSimpleOpt::SOption g_rgOptions[] = {
+	{ OPT_CONFFILE, "--conffile", SO_REQ_SEP },
+	{ OPT_LOCKFILE, "--lockfile", SO_REQ_SEP },
+	{ OPT_LOGGROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_DAEMONIZE, "--daemonize", SO_NONE },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	SO_END_OF_OPTIONS
+};
 
 void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
-	if (!cmd->argv) return;
+	if (!cmd->argv)
+		return;
 
 	pid_t pid = fork();
 
@@ -500,8 +504,7 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 		cmd->last_start = timer();
 		int fork_delay = cmd->get_and_update_current_restart_delay();
 		cmd->fork_retry_time = cmd->last_start + fork_delay;
-		log_err("fork", errno, "Unable to fork new %s process, restarting %s in %d seconds", cmd->argv[0],
-		        cmd->ssection.c_str(), fork_delay);
+		log_err("fork", errno, "Unable to fork new %s process, restarting %s in %d seconds", cmd->argv[0], cmd->ssection.c_str(), fork_delay);
 		return;
 	} else if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
@@ -511,10 +514,10 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 
 		/* All output in this block should be to stdout (for SevInfo messages) or stderr (for SevError messages) */
 		/* Using log_msg() or log_err() from the child will cause the logs to be written incorrectly */
-		dup2(cmd->pipes[0][1], fileno(stdout));
-		dup2(cmd->pipes[1][1], fileno(stderr));
+		dup2( cmd->pipes[0][1], fileno(stdout) );
+		dup2( cmd->pipes[1][1], fileno(stderr) );
 
-		if (cmd->delete_envvars != NULL && std::strlen(cmd->delete_envvars) > 0) {
+		if(cmd->delete_envvars != NULL && std::strlen(cmd->delete_envvars) > 0) {
 			std::string vars(cmd->delete_envvars);
 			size_t start = 0;
 			do {
@@ -522,14 +525,14 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 				std::string var = vars.substr(start, bound - start);
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
-				if (unsetenv(var.c_str())) {
-					fprintf(stderr, "Unable to remove parent environment variable: %s (unsetenv error %d: %s)\n",
-					        var.c_str(), errno, strerror(errno));
+				if(unsetenv(var.c_str())) {
+					fprintf(stderr, "Unable to remove parent environment variable: %s (unsetenv error %d: %s)\n", var.c_str(), errno, strerror(errno));
 					exit(1);
 				}
 				start = bound;
-				while (vars[start] == ' ') start++;
-			} while (start <= vars.length());
+				while(vars[start] == ' ')
+					start++;
+			} while(start <= vars.length());
 		}
 
 #ifdef __linux__
@@ -544,8 +547,7 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 #endif
 
 		if (delay)
-			while ((delay = sleep(delay)) > 0) {
-			}
+			while ((delay = sleep(delay)) > 0) {}
 
 		if (getegid() != gid)
 			if (setgid(gid) != 0) {
@@ -586,7 +588,8 @@ volatile int exit_signal = 0;
 
 #ifdef __linux__
 void signal_handler(int sig) {
-	if (sig > exit_signal) exit_signal = sig;
+	if (sig > exit_signal)
+		exit_signal = sig;
 }
 #endif
 
@@ -599,49 +602,55 @@ void child_handler(int sig) {
 #endif
 
 void print_usage(const char* name) {
-	printf("FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
-	       "Usage: %s [OPTIONS]\n"
-	       "\n"
-	       "  --conffile CONFFILE\n"
-	       "                 The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is\n"
-	       "                 `/etc/foundationdb/foundationdb.conf'.\n"
-	       "  --lockfile LOCKFILE\n"
-	       "                 The path of the mutual exclusion file for this instance of\n"
-	       "                 fdbmonitor. The default is `/var/run/fdbmonitor.pid'.\n"
-	       "  --loggroup LOGGROUP\n"
-	       "                 Sets the 'LogGroup' field with the specified value for all\n"
-	       "                 entries in the log output. The default log group is 'default'.\n"
-	       "  --daemonize    Background the fdbmonitor process.\n"
-	       "  -h, --help     Display this help and exit.\n",
-	       name);
+	printf(
+		"FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
+		"Usage: %s [OPTIONS]\n"
+		"\n"
+		"  --conffile CONFFILE\n"
+		"                 The path of a file containing the connection string for the\n"
+		"                 FoundationDB cluster. The default is\n"
+		"                 `/etc/foundationdb/foundationdb.conf'.\n"
+		"  --lockfile LOCKFILE\n"
+		"                 The path of the mutual exclusion file for this instance of\n"
+		"                 fdbmonitor. The default is `/var/run/fdbmonitor.pid'.\n"
+		"  --loggroup LOGGROUP\n"
+		"                 Sets the 'LogGroup' field with the specified value for all\n"
+		"                 entries in the log output. The default log group is 'default'.\n"
+		"  --daemonize    Background the fdbmonitor process.\n"
+		"  -h, --help     Display this help and exit.\n", name);
 }
 
-bool argv_equal(const char** a1, const char** a2) {
+bool argv_equal(const char** a1, const char** a2)
+{
 	int i = 0;
 
 	while (a1[i] && a2[i]) {
-		if (strcmp(a1[i], a2[i])) return false;
+		if (strcmp(a1[i], a2[i]))
+			return false;
 		i++;
 	}
 
-	if (a1[i] != NULL || a2[i] != NULL) return false;
+	if (a1[i] != NULL || a2[i] != NULL)
+		return false;
 	return true;
 }
 
-void kill_process(uint64_t id) {
+void kill_process(uint64_t id, bool wait = true) {
 	pid_t pid = id_pid[id];
 
 	log_msg(SevInfo, "Killing process %d\n", pid);
 
 	kill(pid, SIGTERM);
-	waitpid(pid, NULL, 0);
+	if(wait) {
+		waitpid(pid, NULL, 0);
+	}
 
 	pid_id.erase(pid);
 	id_pid.erase(id);
 }
 
-void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd) {
+void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd)
+{
 	log_msg(SevInfo, "Loading configuration %s\n", confpath);
 
 	CSimpleIniA ini;
@@ -653,7 +662,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		log_msg(SevError, "Unable to load configuration file %s (SI_Error: %d, errno: %d)\n", confpath, err, errno);
 	}
 
-	if (loadedConf) {
+	if(loadedConf) {
 		uid_t _uid;
 		gid_t _gid;
 
@@ -664,7 +673,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 			errno = 0;
 			struct passwd* pw = getpwnam(user);
 			if (!pw) {
-				log_err("getpwnam", errno, "Unable to lookup user %s", user);
+				log_err( "getpwnam", errno, "Unable to lookup user %s", user );
 				return;
 			}
 			_uid = pw->pw_uid;
@@ -675,7 +684,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 			errno = 0;
 			struct group* gr = getgrnam(group);
 			if (!gr) {
-				log_err("getgrnam", errno, "Unable to lookup group %s", group);
+				log_err( "getgrnam", errno, "Unable to lookup group %s", group );
 				return;
 			}
 			_gid = gr->gr_gid;
@@ -686,7 +695,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		if (uid != _uid || gid != _gid) {
 			std::vector<uint64_t> kill_ids;
 			for (auto i : id_pid) {
-				if (id_command[i.first]->kill_on_configuration_change) {
+				if(id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
 				}
 			}
@@ -711,7 +720,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 
 			id_command[i.first]->deconfigured = true;
 
-			if (id_command[i.first]->kill_on_configuration_change) {
+			if(id_command[i.first]->kill_on_configuration_change) {
 				kill_ids.push_back(i.first);
 				delete id_command[i.first];
 				id_command.erase(i.first);
@@ -719,15 +728,13 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		} else {
 			Command* cmd = new Command(ini, id_command[i.first]->section, i.first, rfds, maxfd);
 
-			// If we just turned on 'kill_on_configuration_change', then kill the process to make sure we pick up any of
-			// its pending config changes
-			if (*(id_command[i.first]) != *cmd ||
-			    (cmd->kill_on_configuration_change && !id_command[i.first]->kill_on_configuration_change)) {
+			// If we just turned on 'kill_on_configuration_change', then kill the process to make sure we pick up any of its pending config changes
+			if (*(id_command[i.first]) != *cmd || (cmd->kill_on_configuration_change && !id_command[i.first]->kill_on_configuration_change)) {
 				log_msg(SevInfo, "Found new configuration for %s\n", id_command[i.first]->ssection.c_str());
 				delete id_command[i.first];
 				id_command[i.first] = cmd;
 
-				if (id_command[i.first]->kill_on_configuration_change) {
+				if(id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
 					start_ids.push_back(std::make_pair(i.first, cmd));
 				}
@@ -739,7 +746,8 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		}
 	}
 
-	for (auto i : kill_ids) kill_process(i);
+	for (auto i : kill_ids)
+		kill_process(i);
 
 	for (auto i : start_ids) {
 		start_process(i.second, i.first, uid, gid, 0, mask);
@@ -747,7 +755,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 
 	/* We've handled deconfigured sections, now look for newly
 	   configured sections */
-	if (loadedConf) {
+	if(loadedConf) {
 		CSimpleIniA::TNamesDepend sections;
 		ini.GetAllSections(sections);
 		for (auto i : sections) {
@@ -761,18 +769,19 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 				} else {
 					if (!id_pid.count(id)) {
 						/* Found something we haven't yet started */
-						Command* cmd;
+						Command *cmd;
 
 						auto itr = id_command.find(id);
-						if (itr != id_command.end()) {
+						if(itr != id_command.end()) {
 							cmd = itr->second;
-						} else {
+						}
+						else {
 							std::string section(i.pItem, dot - i.pItem);
 							cmd = new Command(ini, section, id, rfds, maxfd);
 							id_command[id] = cmd;
 						}
 
-						if (cmd->fork_retry_time <= timer()) {
+						if(cmd->fork_retry_time <= timer()) {
 							log_msg(SevInfo, "Starting %s\n", i.pItem);
 							start_process(cmd, id, uid, gid, 0, mask);
 						}
@@ -784,17 +793,17 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 }
 
 /* cmd->pipes[pipe_idx] *must* be ready to read without blocking */
-void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds) {
+void read_child_output( Command* cmd, int pipe_idx, fdb_fd_set fds ) {
 	char buf[4096];
 
-	int len = read(cmd->pipes[pipe_idx][0], buf, 4096);
-	if (len == -1) {
-		if (errno != EINTR) {
+	int len = read( cmd->pipes[pipe_idx][0], buf, 4096 );
+	if ( len == -1 ) {
+		if ( errno != EINTR ) {
 			/* We shouldn't get EAGAIN or EWOULDBLOCK
 			   here, and if it's not EINTR then all of
 			   the other alternatives seem "bad". */
-			log_err("read", errno, "Error while reading from %s, no longer logging output", cmd->ssection.c_str());
-			unmonitor_fd(fds, cmd->pipes[pipe_idx][0]);
+			log_err( "read", errno, "Error while reading from %s, no longer logging output", cmd->ssection.c_str() );
+			unmonitor_fd( fds, cmd->pipes[pipe_idx][0] );
 		}
 		return;
 	}
@@ -803,52 +812,53 @@ void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds) {
 	Severity priority = (pipe_idx == 0) ? SevInfo : SevError;
 
 	int start = 0;
-	for (int i = 0; i < len; i++) {
-		if (buf[i] == '\n') {
-			log_process_msg(priority, cmd->ssection.c_str(), "%.*s", i - start + 1, buf + start);
+	for ( int i = 0; i < len; i++ ) {
+		if ( buf[i] == '\n' ) {
+			log_process_msg( priority, cmd->ssection.c_str(), "%.*s", i - start + 1, buf + start );
 			start = i + 1;
 		}
 	}
 
-	if (start < len) {
-		log_process_msg(priority, cmd->ssection.c_str(), "%.*s\n", len - start, buf + start);
+	if ( start < len ) {
+		log_process_msg( priority, cmd->ssection.c_str(), "%.*s\n", len - start, buf + start );
 	}
 }
 
 #ifdef __APPLE__
-void watch_conf_dir(int kq, int* confd_fd, std::string confdir) {
+void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
 	struct kevent ev;
 	std::string original = confdir;
 
-	while (true) {
+	while(true) {
 		/* If already watching, drop it and close */
-		if (*confd_fd >= 0) {
-			EV_SET(&ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, NULL);
-			kevent(kq, &ev, 1, NULL, 0, NULL);
-			close(*confd_fd);
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
+			close( *confd_fd );
 		}
 
 		confdir = original;
 		std::string child = confdir;
 
 		/* Find the nearest existing ancestor */
-		while ((*confd_fd = open(confdir.c_str(), O_EVTONLY)) < 0 && errno == ENOENT) {
+		while( (*confd_fd = open( confdir.c_str(), O_EVTONLY )) < 0 && errno == ENOENT ) {
 			child = confdir;
 			confdir = parentDirectory(confdir);
 		}
 
-		if (*confd_fd >= 0) {
-			EV_SET(&ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL);
-			kevent(kq, &ev, 1, NULL, 0, NULL);
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
 
 			/* If our child appeared since we last tested it, start over from the beginning */
-			if (confdir != child && (access(child.c_str(), F_OK) == 0 || errno != ENOENT)) {
+			if ( confdir != child && (access(child.c_str(), F_OK) == 0 || errno != ENOENT) ) {
 				continue;
 			}
 
-			if (confdir != original) {
+			if(confdir != original) {
 				log_msg(SevInfo, "Watching parent directory of missing directory %s\n", child.c_str());
-			} else {
+			}
+			else {
 				log_msg(SevInfo, "Watching conf dir %s\n", confdir.c_str());
 			}
 		}
@@ -857,27 +867,27 @@ void watch_conf_dir(int kq, int* confd_fd, std::string confdir) {
 	}
 }
 
-void watch_conf_file(int kq, int* conff_fd, const char* confpath) {
+void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 	struct kevent ev;
 
 	/* If already watching, drop it and close */
-	if (*conff_fd >= 0) {
-		EV_SET(&ev, *conff_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE | NOTE_ATTRIB, 0, NULL);
-		kevent(kq, &ev, 1, NULL, 0, NULL);
-		close(*conff_fd);
+	if ( *conff_fd >= 0 ) {
+		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE | NOTE_ATTRIB, 0, NULL );
+		kevent( kq, &ev, 1, NULL, 0, NULL );
+		close( *conff_fd );
 	}
 
 	/* Open and watch */
-	*conff_fd = open(confpath, O_EVTONLY);
-	if (*conff_fd >= 0) {
-		EV_SET(&ev, *conff_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE | NOTE_ATTRIB, 0, NULL);
-		kevent(kq, &ev, 1, NULL, 0, NULL);
+	*conff_fd = open( confpath, O_EVTONLY );
+	if ( *conff_fd >= 0 ) {
+		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE | NOTE_ATTRIB, 0, NULL );
+		kevent( kq, &ev, 1, NULL, 0, NULL );
 	}
 }
 #endif
 
 #ifdef __linux__
-int fdbmon_stat(const char* path, struct stat* path_stat, bool is_link) {
+int fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
 	return is_link ? lstat(path, path_stat) : stat(path, path_stat);
 }
 
@@ -887,7 +897,8 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 	struct stat path_stat;
 
-	if (path.size() < 2) return additional_watch_wds;
+	if(path.size() < 2)
+		return additional_watch_wds;
 
 	int idx = 1;
 	bool exists = true;
@@ -895,28 +906,30 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 	/* Check each level of the path, setting a watch on any symlinks.
 	 * Stop checking once we get to a part of the path that doesn't exist.
 	 * If we encounter a non-existing path, watch the closest existing ancestor. */
-	while (idx != std::string::npos && exists) {
-		idx = path.find_first_of('/', idx + 1);
+	while(idx != std::string::npos && exists) {
+		idx = path.find_first_of('/', idx+1);
 		std::string subpath = path.substr(0, idx);
 
 		int level = 0;
-		while (true) {
+		while(true) {
 			/* Check path existence */
 			int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
-			if (result != 0) {
-				if (errno == ENOENT) {
+			if(result != 0) {
+				if(errno == ENOENT) {
 					exists = false;
-				} else {
+				}
+				else {
 					log_err("lstat", errno, "Unable to stat %s", path.c_str());
 					exit(1);
 				}
 			}
 
-			if (exists) {
+			if(exists) {
 				/* Don't do anything for existing non-links */
-				if (!S_ISLNK(path_stat.st_mode)) {
+				if(!S_ISLNK(path_stat.st_mode)) {
 					break;
-				} else if (level++ == 100) {
+				}
+				else if(level++ == 100) {
 					log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
 					exit(1);
 				}
@@ -931,35 +944,36 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				exit(1);
 			}
 
-			if (exists) {
+			if(exists) {
 				log_msg(SevInfo, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
-				additional_watch_wds[wd].insert(subpath.substr(parent.size() + 1));
-			} else {
-				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the
-				 * path */
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+			}
+			else {
+				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the path */
 				int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
-				if (result == 0 || errno != ENOENT) {
+				if(result == 0 || errno != ENOENT) {
 					inotify_rm_watch(ifd, wd);
 					continue;
 				}
 
 				log_msg(SevInfo, "Watching parent directory of missing directory %s (%d)\n", subpath.c_str(), wd);
-				additional_watch_wds[wd].insert(subpath.substr(parent.size() + 1));
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
 				break;
 			}
 
 			/* Follow the symlink */
-			char buf[PATH_MAX + 1];
+			char buf[PATH_MAX+1];
 			ssize_t len = readlink(subpath.c_str(), buf, PATH_MAX);
-			if (len < 0) {
+			if(len < 0) {
 				log_err("readlink", errno, "Unable to follow symlink %s", subpath.c_str());
 				exit(1);
 			}
 
 			buf[len] = '\0';
-			if (buf[0] == '/') {
+			if(buf[0] == '/') {
 				subpath = buf;
-			} else {
+			}
+			else {
 				subpath = joinPath(parent, buf);
 			}
 		}
@@ -973,32 +987,32 @@ int main(int argc, char** argv) {
 	std::string lockfile = "/var/run/fdbmonitor.pid";
 	std::string _confpath = "/etc/foundationdb/foundationdb.conf";
 
-	std::vector<const char*> additional_watch_paths;
+	std::vector<const char *> additional_watch_paths;
 
 	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR);
 
 	while (args.Next()) {
 		if (args.LastError() == SO_SUCCESS) {
 			switch (args.OptionId()) {
-			case OPT_CONFFILE:
-				_confpath = args.OptionArg();
-				break;
-			case OPT_LOCKFILE:
-				lockfile = args.OptionArg();
-				break;
-			case OPT_LOGGROUP:
-				if (strchr(args.OptionArg(), '"') != NULL) {
-					log_msg(SevError, "Invalid log group '%s', cannot contain '\"'\n", args.OptionArg());
-					exit(1);
-				}
-				logGroup = args.OptionArg();
-				break;
-			case OPT_DAEMONIZE:
-				daemonize = true;
-				break;
-			case OPT_HELP:
-				print_usage(argv[0]);
-				exit(0);
+				case OPT_CONFFILE:
+					_confpath = args.OptionArg();
+					break;
+				case OPT_LOCKFILE:
+					lockfile = args.OptionArg();
+					break;
+				case OPT_LOGGROUP:
+					if(strchr(args.OptionArg(), '"') != NULL) {
+						log_msg(SevError, "Invalid log group '%s', cannot contain '\"'\n", args.OptionArg());
+						exit(1);
+					}
+					logGroup = args.OptionArg();
+					break;
+				case OPT_DAEMONIZE:
+					daemonize = true;
+					break;
+				case OPT_HELP:
+					print_usage(argv[0]);
+					exit(0);
 			}
 		} else {
 			print_usage(argv[0]);
@@ -1009,9 +1023,9 @@ int main(int argc, char** argv) {
 	log_msg(SevInfo, "Started FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 
 	// Modify _confpath to be absolute for further traversals
-	if (!_confpath.empty() && _confpath[0] != '/') {
+	if(!_confpath.empty() && _confpath[0] != '/') {
 		char buf[PATH_MAX];
-		if (!getcwd(buf, PATH_MAX)) {
+		if( !getcwd(buf, PATH_MAX) ) {
 			log_err("getcwd", errno, "Unable to get cwd");
 			exit(1);
 		}
@@ -1021,7 +1035,7 @@ int main(int argc, char** argv) {
 
 	// Guaranteed (if non-NULL) to be an absolute path with no
 	// symbolic link, /./ or /../ components
-	const char* p = realpath(_confpath.c_str(), NULL);
+	const char *p = realpath(_confpath.c_str(), NULL);
 	if (!p) {
 		log_msg(SevError, "No configuration file at %s\n", _confpath.c_str());
 		exit(1);
@@ -1031,7 +1045,7 @@ int main(int argc, char** argv) {
 
 	// Will always succeed given an absolute path
 	std::string confdir = parentDirectory(confpath);
-	std::string conffile = confpath.substr(confdir.size() + 1);
+	std::string conffile = confpath.substr(confdir.size()+1);
 
 #ifdef __linux__
 	// Setup inotify
@@ -1096,24 +1110,23 @@ int main(int argc, char** argv) {
 
 	/* open and lock our lockfile for mutual exclusion */
 	std::string lockfileDir = parentDirectory(abspath(lockfile));
-	if (lockfileDir.size() == 0) {
+	if(lockfileDir.size() == 0) {
 		log_msg(SevError, "Unable to determine parent directory of lockfile %s\n", lockfile.c_str());
 		exit(1);
 	}
 
-	if (mkdir(lockfileDir) < 0) {
+	if(mkdir(lockfileDir) < 0) {
 		log_err("mkdir", errno, "Unable to create parent directory for lockfile %s", lockfile.c_str());
 		exit(1);
 	}
 
-	int lockfile_fd = open(lockfile.c_str(), O_RDWR | O_CREAT, 0640);
+	int lockfile_fd = open(lockfile.c_str(), O_RDWR|O_CREAT, 0640);
 	if (lockfile_fd < 0) {
 		log_err("open", errno, "Unable to open fdbmonitor lockfile %s", lockfile.c_str());
 		exit(1);
 	}
 	if (lockf(lockfile_fd, F_LOCK, 0) < 0) {
-		log_err("lockf", errno, "Unable to lock fdbmonitor lockfile %s (is fdbmonitor already running?)",
-		        lockfile.c_str());
+		log_err("lockf", errno, "Unable to lock fdbmonitor lockfile %s (is fdbmonitor already running?)", lockfile.c_str());
 		exit(0);
 	}
 
@@ -1134,8 +1147,8 @@ int main(int argc, char** argv) {
 	signal(SIGTERM, signal_handler);
 #elif defined(__APPLE__)
 	int kq = kqueue();
-	if (kq < 0) {
-		log_err("kqueue", errno, "Unable to create kqueue");
+	if ( kq < 0 ) {
+		log_err( "kqueue", errno, "Unable to create kqueue" );
 		exit(1);
 	}
 	watched_fds = kq;
@@ -1146,20 +1159,20 @@ int main(int argc, char** argv) {
 
 	struct kevent ev;
 
-	EV_SET(&ev, SIGHUP, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
-	EV_SET(&ev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
-	EV_SET(&ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
-	EV_SET(&ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
+	EV_SET( &ev, SIGHUP, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent( kq, &ev, 1, NULL, 0, NULL );
+	EV_SET( &ev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent( kq, &ev, 1, NULL, 0, NULL );
+	EV_SET( &ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent( kq, &ev, 1, NULL, 0, NULL );
+	EV_SET( &ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	kevent( kq, &ev, 1, NULL, 0, NULL );
 
 	int confd_fd = -1;
 	int conff_fd = -1;
 
 	// Watch the directory holding the configuration file
-	watch_conf_dir(kq, &confd_fd, confdir);
+	watch_conf_dir( kq, &confd_fd, confdir );
 
 #endif
 
@@ -1198,21 +1211,21 @@ int main(int argc, char** argv) {
 			reload = false;
 #ifdef __linux__
 			/* Remove existing watches on conf file and directory */
-			if (confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
+			if(confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf dir watch, continuing...\n");
 			}
-			if (conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
+			if(conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf file watch, continuing...\n");
 			}
 
 			/* Create new watches */
 			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
 			if (conffile_wd < 0) {
-				if (errno != ENOENT) {
-					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s",
-					        confpath.c_str());
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s", confpath.c_str());
 					exit(1);
-				} else {
+				}
+				else {
 					log_msg(SevInfo, "Conf file has been deleted %s\n", confpath.c_str());
 				}
 			} else {
@@ -1221,11 +1234,11 @@ int main(int argc, char** argv) {
 
 			confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
 			if (confdir_wd < 0) {
-				if (errno != ENOENT) {
-					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s",
-					        confdir.c_str());
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s", confdir.c_str());
 					exit(1);
-				} else {
+				}
+				else {
 					reload_additional_watches = true;
 					log_msg(SevInfo, "Conf dir has been deleted %s\n", confdir.c_str());
 				}
@@ -1234,32 +1247,32 @@ int main(int argc, char** argv) {
 			}
 
 			/* Reload watches on symlinks and/or the oldest existing ancestor */
-			if (reload_additional_watches) {
+			if(reload_additional_watches) {
 				additional_watch_wds = set_watches(_confpath, ifd);
 			}
 
 			load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
 			reload_additional_watches = false;
 #elif defined(__APPLE__)
-			load_conf(confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd);
-			watch_conf_file(kq, &conff_fd, confpath.c_str());
-			watch_conf_dir(kq, &confd_fd, confdir);
+			load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
+			watch_conf_file( kq, &conff_fd, confpath.c_str() );
+			watch_conf_dir( kq, &confd_fd, confdir );
 #endif
 		}
 
 		double end_time = std::numeric_limits<double>::max();
-		for (auto i : id_command) {
-			if (i.second->fork_retry_time >= 0) {
+		for(auto i : id_command) {
+			if(i.second->fork_retry_time >= 0) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
 		}
 		struct timespec tv;
 		double timeout = -1;
-		if (end_time < std::numeric_limits<double>::max()) {
+		if(end_time < std::numeric_limits<double>::max()) {
 			timeout = std::max(0.0, end_time - timer());
-			if (timeout > 0) {
+			if(timeout > 0) {
 				tv.tv_sec = timeout;
-				tv.tv_nsec = 1e9 * (timeout - tv.tv_sec);
+				tv.tv_nsec = 1e9*(timeout-tv.tv_sec);
 			}
 		}
 
@@ -1268,106 +1281,117 @@ int main(int argc, char** argv) {
 		   unblocking signals) */
 		srfds = rfds;
 		nfds = 0;
-		if (timeout < 0) {
-			nfds = pselect(maxfd + 1, &srfds, NULL, NULL, NULL, &normal_mask);
-		} else if (timeout > 0) {
-			nfds = pselect(maxfd + 1, &srfds, NULL, NULL, &tv, &normal_mask);
+		if(timeout < 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
+		}
+		else if(timeout > 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, &tv, &normal_mask);
 		}
 
-		if (nfds == 0) {
+		if(nfds == 0) {
 			reload = true;
 		}
 #elif defined(__APPLE__)
 		int nev = 0;
-		if (timeout < 0) {
-			nev = kevent(kq, NULL, 0, &ev, 1, NULL);
-		} else if (timeout > 0) {
-			nev = kevent(kq, NULL, 0, &ev, 1, &tv);
+		if(timeout < 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+		}
+		else if(timeout > 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, &tv );
 		}
 
-		if (nev == 0) {
+		if(nev == 0) {
 			reload = true;
 		}
 
 		if (nev > 0) {
 			switch (ev.filter) {
-			case EVFILT_VNODE:
-				struct kevent timeout;
-				// This could be the conf dir or conf file
-				if (ev.ident == confd_fd) {
-					/* Changes in the directory holding the conf file; schedule a future timeout to reset watches and
-					 * reload the conf */
-					EV_SET(&timeout, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, 200, NULL);
-					kevent(kq, &timeout, 1, NULL, 0, NULL);
-				} else {
-					/* Direct writes to the conf file; reload! */
-					reload = true;
-				}
-				break;
-			case EVFILT_TIMER:
-				reload = true;
-				break;
-			case EVFILT_SIGNAL:
-				switch (ev.ident) {
-				case SIGHUP:
-				case SIGINT:
-				case SIGTERM:
-					exit_signal = ev.ident;
-					break;
-				case SIGCHLD:
-					child_exited = true;
-					break;
-				default:
-					break;
-				}
-				break;
-			case EVFILT_READ:
-				Command* cmd = (Command*)ev.udata;
-				for (int i = 0; i < 2; i++) {
-					if (ev.ident == cmd->pipes[i][0]) {
-						read_child_output(cmd, i, watched_fds);
+				case EVFILT_VNODE:
+					struct kevent timeout;
+					// This could be the conf dir or conf file
+					if ( ev.ident == confd_fd ) {
+						/* Changes in the directory holding the conf file; schedule a future timeout to reset watches and reload the conf */
+						EV_SET( &timeout, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, 200, NULL );
+						kevent( kq, &timeout, 1, NULL, 0, NULL );
+					} else {
+						/* Direct writes to the conf file; reload! */
+						reload = true;
 					}
-				}
-				break;
+					break;
+				case EVFILT_TIMER:
+					reload = true;
+					break;
+				case EVFILT_SIGNAL:
+					switch (ev.ident) {
+						case SIGHUP:
+						case SIGINT:
+						case SIGTERM:
+							exit_signal = ev.ident;
+							break;
+						case SIGCHLD:
+							child_exited = true;
+							break;
+						default:
+							break;
+					}
+					break;
+				case EVFILT_READ:
+					Command* cmd = (Command*)ev.udata;
+					for ( int i = 0; i < 2 ; i++ ) {
+						if ( ev.ident == cmd->pipes[i][0] ) {
+							read_child_output( cmd, i, watched_fds );
+						}
+					}
+					break;
 			}
-		} else {
+		}
+		else {
 			reload = true;
 		}
 #endif
 
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {
-			switch (exit_signal) {
-			case SIGHUP:
-				for (auto i : id_command) {
-					i.second->current_restart_delay = i.second->initial_restart_delay;
-					i.second->fork_retry_time = -1;
-				}
-				reload = true;
-				log_msg(SevInfo, "Received signal %d (%s), resetting timeouts and reloading configuration\n",
-				        exit_signal, strsignal(exit_signal));
-				break;
-			case SIGINT:
-			case SIGTERM:
-				log_msg(SevWarn, "Received signal %d (%s), shutting down\n", exit_signal, strsignal(exit_signal));
+			switch(exit_signal) {
+				case SIGHUP:
+					for(auto i : id_command) {
+						i.second->current_restart_delay = i.second->initial_restart_delay;
+						i.second->fork_retry_time = -1;
+					}
+					reload = true;
+					log_msg(SevInfo, "Received signal %d (%s), resetting timeouts and reloading configuration\n", exit_signal, strsignal(exit_signal));
+					break;
+				case SIGINT:
+				case SIGTERM:
+					log_msg(SevWarn, "Received signal %d (%s), shutting down\n", exit_signal, strsignal(exit_signal));
 
-				/* Unblock signals */
-				signal(SIGCHLD, SIG_IGN);
-				sigprocmask(SIG_SETMASK, &normal_mask, NULL);
+					/* Unblock signals */
+					signal(SIGCHLD, SIG_IGN);
+					sigprocmask(SIG_SETMASK, &normal_mask, NULL);
 
-				/* Send SIGHUP to all child processes */
-				kill(0, SIGHUP);
+					/* If daemonized, setsid() was called earlier so we can just kill our entire new process group */
+					if(daemonize) {
+						kill(0, SIGHUP);
+					}
+					else {
+						/* Otherwise kill each process individually but don't wait on them yet */
+						auto i = id_pid.begin();
+						auto iEnd = id_pid.end();
+						while(i != iEnd) {
+							// Must advance i before calling kill_process() which erases the entry at i
+							kill_process((i++)->first, false);
+						}
+					}
 
-				/* Wait for all child processes (says POSIX.1-2001) */
-				/* POSIX.1-2001 specifies that if the disposition of SIGCHLD is set to SIG_IGN, then children that
-				   terminate do not become zombies and a call to wait() will block until all children have terminated,
-				   and then fail with errno set to ECHILD */
-				wait(NULL);
+					/* Wait for all child processes (says POSIX.1-2001) */
+					/* POSIX.1-2001 specifies that if the disposition of SIGCHLD is set to SIG_IGN, then children that terminate do not become zombies and a call to wait()
+					   will block until all children have terminated, and then fail with errno set to ECHILD */
+					wait(NULL);
 
-				unlink(lockfile.c_str());
-				exit(0);
-			default:
-				break;
+					unlink(lockfile.c_str());
+					exit(0);
+				default:
+					break;
 			}
 			exit_signal = 0;
 		}
@@ -1380,29 +1404,29 @@ int main(int argc, char** argv) {
 
 			char buf[4096];
 
-			for (auto itr : id_command) {
-				for (int i = 0; i < 2; i++) {
-					if (FD_ISSET((itr.second)->pipes[i][0], &srfds)) {
-						read_child_output(itr.second, i, watched_fds);
+			for ( auto itr : id_command ) {
+				for ( int i = 0; i < 2; i++ ) {
+					if ( FD_ISSET( (itr.second)->pipes[i][0], &srfds ) ) {
+						read_child_output( itr.second, i, watched_fds );
 					}
 				}
 			}
 
-			if (FD_ISSET(ifd, &srfds)) {
+			if ( FD_ISSET( ifd, &srfds ) ) {
 				len = read(ifd, buf, 4096);
-				if (len < 0) log_err("read", errno, "Error reading inotify message");
+				if (len < 0)
+					log_err("read", errno, "Error reading inotify message");
 
 				while (i < len) {
-					struct inotify_event* event = (struct inotify_event*)&buf[i];
+					struct inotify_event* event = (struct inotify_event*) &buf[i];
 
 					auto search = additional_watch_wds.find(event->wd);
-					if (event->wd != conffile_wd) {
-						if (search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
-							log_msg(SevInfo, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name,
-							        event->wd, event->mask);
+					if(event->wd != conffile_wd) {
+						if(search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
+							log_msg(SevInfo, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name, event->wd, event->mask);
 
-							char* redone_confpath = realpath(_confpath.c_str(), NULL);
-							if (!redone_confpath) {
+							char *redone_confpath = realpath(_confpath.c_str(), NULL);
+							if(!redone_confpath) {
 								log_msg(SevInfo, "Error calling realpath on `%s', continuing...\n", _confpath.c_str());
 								// exit(1);
 								i += sizeof(struct inotify_event) + event->len;
@@ -1416,10 +1440,10 @@ int main(int argc, char** argv) {
 							conffile = confpath.substr(confdir.size());
 
 							// Remove all the old watches
-							for (auto wd : additional_watch_wds) {
-								if (inotify_rm_watch(ifd, wd.first) < 0) {
-									// log_err("inotify_rm_watch", errno, "Unable to remove symlink watch %d",
-									// wd.first); exit(1);
+							for(auto wd : additional_watch_wds) {
+								if(inotify_rm_watch(ifd, wd.first) < 0) {
+									// log_err("inotify_rm_watch", errno, "Unable to remove symlink watch %d", wd.first);
+									// exit(1);
 									log_msg(SevInfo, "Could not remove inotify watch %d, continuing...\n", wd.first);
 								}
 							}
@@ -1427,7 +1451,8 @@ int main(int argc, char** argv) {
 							reload = true;
 							reload_additional_watches = true;
 							break;
-						} else if (event->wd == confdir_wd && event->len && conffile == event->name) {
+						}
+						else if(event->wd == confdir_wd && event->len && conffile == event->name) {
 							reload = true;
 						}
 					}
@@ -1449,7 +1474,8 @@ int main(int argc, char** argv) {
 			int child_status;
 			while ((pid = waitpid(-1, &child_status, WNOHANG))) {
 				if (pid < 0) {
-					if (errno != ECHILD) log_err("waitpid", errno, "Error while waiting for child process");
+					if (errno != ECHILD)
+						log_err("waitpid", errno, "Error while waiting for child process");
 					break;
 				}
 
@@ -1459,25 +1485,20 @@ int main(int argc, char** argv) {
 				pid_id.erase(pid);
 				id_pid.erase(id);
 
-				if (cmd->deconfigured) {
+				if(cmd->deconfigured) {
 					delete cmd;
 					id_command.erase(id);
-				} else {
+				}
+				else {
 					int delay = cmd->get_and_update_current_restart_delay();
 					if (!cmd->quiet) {
 						if (WIFEXITED(child_status)) {
 							Severity priority = (WEXITSTATUS(child_status) == 0) ? SevWarn : SevError;
-							log_process_msg(priority, cmd->ssection.c_str(),
-							                "Process %d exited %d, restarting in %d seconds\n", pid,
-							                WEXITSTATUS(child_status), delay);
+							log_process_msg(priority, cmd->ssection.c_str(), "Process %d exited %d, restarting in %d seconds\n", pid, WEXITSTATUS(child_status), delay);
 						} else if (WIFSIGNALED(child_status))
-							log_process_msg(SevWarn, cmd->ssection.c_str(),
-							                "Process %d terminated by signal %d, restarting in %d seconds\n", pid,
-							                WTERMSIG(child_status), delay);
+							log_process_msg(SevWarn, cmd->ssection.c_str(), "Process %d terminated by signal %d, restarting in %d seconds\n", pid, WTERMSIG(child_status), delay);
 						else
-							log_process_msg(SevWarnAlways, cmd->ssection.c_str(),
-							                "Process %d exited for unknown reason, restarting in %d seconds\n", pid,
-							                delay);
+							log_process_msg(SevWarnAlways, cmd->ssection.c_str(), "Process %d exited for unknown reason, restarting in %d seconds\n", pid, delay);
 					}
 
 					start_process(cmd, id, uid, gid, delay, &normal_mask);

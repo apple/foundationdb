@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "FDBLibTLSSession.h"
-#include "Trace.h"
+#include "FDBLibTLS/FDBLibTLSSession.h"
+#include "flow/Trace.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -34,30 +34,35 @@
 #include <string.h>
 #include <limits.h>
 
-static ssize_t tls_read_func(struct tls* ctx, void* buf, size_t buflen, void* cb_arg) {
-	FDBLibTLSSession* session = (FDBLibTLSSession*)cb_arg;
+static ssize_t tls_read_func(struct tls *ctx, void *buf, size_t buflen, void *cb_arg)
+{
+	FDBLibTLSSession *session = (FDBLibTLSSession *)cb_arg;
 
-	int rv = session->recv_func(session->recv_ctx, (uint8_t*)buf, buflen);
-	if (rv < 0) return 0;
-	if (rv == 0) return TLS_WANT_POLLIN;
+	int rv = session->recv_func(session->recv_ctx, (uint8_t *)buf, buflen);
+	if (rv < 0)
+		return 0;
+	if (rv == 0)
+		return TLS_WANT_POLLIN;
 	return (ssize_t)rv;
 }
 
-static ssize_t tls_write_func(struct tls* ctx, const void* buf, size_t buflen, void* cb_arg) {
-	FDBLibTLSSession* session = (FDBLibTLSSession*)cb_arg;
+static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, void *cb_arg)
+{
+	FDBLibTLSSession *session = (FDBLibTLSSession *)cb_arg;
 
-	int rv = session->send_func(session->send_ctx, (const uint8_t*)buf, buflen);
-	if (rv < 0) return 0;
-	if (rv == 0) return TLS_WANT_POLLOUT;
+	int rv = session->send_func(session->send_ctx, (const uint8_t *)buf, buflen);
+	if (rv < 0)
+		return 0;
+	if (rv == 0)
+		return TLS_WANT_POLLOUT;
 	return (ssize_t)rv;
 }
 
-FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername,
-                                   TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func,
-                                   void* recv_ctx, void* uidptr)
-  : tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
-    recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false) {
-	if (uidptr) uid = *(UID*)uidptr;
+FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uidptr) :
+	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
+	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false) {
+	if (uidptr)
+		uid = * (UID*) uidptr;
 
 	if (is_client) {
 		if ((tls_ctx = tls_client()) == NULL) {
@@ -107,40 +112,51 @@ bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, Match
 	unsigned char* entry_utf8 = NULL;
 	int entry_utf8_len = 0;
 
-	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL) goto err;
-	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1) goto err;
-	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1) goto err;
-	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1) goto err;
+	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
+		goto err;
+	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
+		goto err;
+	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1)
+		goto err;
+	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1)
+		goto err;
 	if (mt == MatchType::EXACT) {
-		if (criteria_utf8_len == entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len == entry_utf8_len &&
+		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::PREFIX) {
-		if (criteria_utf8_len <= entry_utf8_len && memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0) rc = true;
+		if (criteria_utf8_len <= entry_utf8_len &&
+		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
 	} else if (mt == MatchType::SUFFIX) {
 		if (criteria_utf8_len <= entry_utf8_len &&
 		    memcmp(criteria_utf8, entry_utf8 + (entry_utf8_len - criteria_utf8_len), criteria_utf8_len) == 0)
 			rc = true;
 	}
 
-err:
+	err:
 	ASN1_STRING_free(asn_criteria);
 	free(criteria_utf8);
 	free(entry_utf8);
 	return rc;
 }
 
-bool match_name_criteria(X509_NAME* name, NID nid, const std::string& criteria, MatchType mt) {
-	X509_NAME_ENTRY* name_entry;
+bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, MatchType mt) {
+	X509_NAME_ENTRY *name_entry;
 	int idx;
 
 	// If name does not exist, or has multiple of this RDN, refuse to proceed.
-	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0) return false;
-	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1) return false;
-	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL) return false;
+	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0)
+		return false;
+	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
+		return false;
+	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
+		return false;
 
 	return match_criteria_entry(criteria, name_entry->value, mt);
 }
 
-bool match_extension_criteria(X509* cert, NID nid, const std::string& value, MatchType mt) {
+bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, MatchType mt) {
 	if (nid != NID_subject_alt_name && nid != NID_issuer_alt_name) {
 		// I have no idea how other extensions work.
 		return false;
@@ -150,27 +166,29 @@ bool match_extension_criteria(X509* cert, NID nid, const std::string& value, Mat
 		return false;
 	}
 	std::string value_gen = value.substr(0, pos);
-	std::string value_val = value.substr(pos + 1, value.npos);
+	std::string value_val = value.substr(pos+1, value.npos);
 	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, NULL, NULL));
 	if (sans == NULL) {
 		return false;
 	}
-	int num_sans = sk_GENERAL_NAME_num(sans);
+	int num_sans = sk_GENERAL_NAME_num( sans );
 	bool match_found = false;
 	bool rc = false;
-	for (int i = 0; i < num_sans && !rc; ++i) {
-		GENERAL_NAME* altname = sk_GENERAL_NAME_value(sans, i);
+	for( int i = 0; i < num_sans && !rc; ++i ) {
+		GENERAL_NAME* altname = sk_GENERAL_NAME_value( sans, i );
 		std::string matchable;
 		switch (altname->type) {
 		case GEN_OTHERNAME:
 			break;
 		case GEN_EMAIL:
-			if (value_gen == "EMAIL" && match_criteria_entry(value_val, altname->d.rfc822Name, mt)) {
+			if (value_gen == "EMAIL" &&
+			    match_criteria_entry( value_val, altname->d.rfc822Name, mt)) {
 				rc = true;
 				break;
 			}
 		case GEN_DNS:
-			if (value_gen == "DNS" && match_criteria_entry(value_val, altname->d.dNSName, mt)) {
+			if (value_gen == "DNS" &&
+			    match_criteria_entry( value_val, altname->d.dNSName, mt )) {
 				rc = true;
 				break;
 			}
@@ -179,12 +197,14 @@ bool match_extension_criteria(X509* cert, NID nid, const std::string& value, Mat
 		case GEN_EDIPARTY:
 			break;
 		case GEN_URI:
-			if (value_gen == "URI" && match_criteria_entry(value_val, altname->d.uniformResourceIdentifier, mt)) {
+			if (value_gen == "URI" &&
+			    match_criteria_entry( value_val, altname->d.uniformResourceIdentifier, mt )) {
 				rc = true;
 				break;
 			}
 		case GEN_IPADD:
-			if (value_gen == "IP" && match_criteria_entry(value_val, altname->d.iPAddress, mt)) {
+			if (value_gen == "IP" &&
+			    match_criteria_entry( value_val, altname->d.iPAddress, mt )) {
 				rc = true;
 				break;
 			}
@@ -196,9 +216,8 @@ bool match_extension_criteria(X509* cert, NID nid, const std::string& value, Mat
 	return rc;
 }
 
-bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt,
-                    X509Location loc) {
-	switch (loc) {
+bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt, X509Location loc) {
+	switch(loc) {
 	case X509Location::NAME: {
 		return match_name_criteria(subject, nid, criteria, mt);
 	}
@@ -210,18 +229,18 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 	return false;
 }
 
-std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify,
-                                                             struct stack_st_X509* certs) {
-	X509_STORE_CTX* store_ctx = NULL;
+std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
+	X509_STORE_CTX *store_ctx = NULL;
 	X509_NAME *subject, *issuer;
-	BIO* bio = NULL;
+	BIO *bio = NULL;
 	bool rc = false;
 	X509* cert = NULL;
 	// if returning false, give a reason string
 	std::string reason = "";
 
 	// If certificate verification is disabled, there's nothing more to do.
-	if (!verify->verify_cert) return std::make_tuple(true, reason);
+	if (!verify->verify_cert)
+		return std::make_tuple(true, reason);
 
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
@@ -238,7 +257,7 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 	if (!verify->verify_time)
 		X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
 	if (X509_verify_cert(store_ctx) <= 0) {
-		const char* errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
+		const char *errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
 		reason = "FDBLibTLSVerifyCert VerifyError " + std::string(errstr);
 		goto err;
 	}
@@ -249,9 +268,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		reason = "FDBLibTLSCertSubjectError";
 		goto err;
 	}
-	for (auto& pair : verify->subject_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+	for (auto &pair: verify->subject_criteria) {
+		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSCertSubjectMatchFailure";
 			goto err;
 		}
@@ -262,9 +280,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		reason = "FDBLibTLSCertIssuerError";
 		goto err;
 	}
-	for (auto& pair : verify->issuer_criteria) {
-		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+	for (auto &pair: verify->issuer_criteria) {
+		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSCertIssuerMatchFailure";
 			goto err;
 		}
@@ -276,9 +293,8 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 		reason = "FDBLibTLSRootSubjectError";
 		goto err;
 	}
-	for (auto& pair : verify->root_criteria) {
-		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type,
-		                    pair.second.location)) {
+	for (auto &pair: verify->root_criteria) {
+		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSRootSubjectMatchFailure";
 			goto err;
 		}
@@ -287,15 +303,15 @@ std::tuple<bool, std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLS
 	// If we got this far, everything checked out...
 	rc = true;
 
-err:
+ err:
 	X509_STORE_CTX_free(store_ctx);
 
 	return std::make_tuple(rc, reason);
 }
 
 bool FDBLibTLSSession::verify_peer() {
-	struct stack_st_X509* certs = NULL;
-	const uint8_t* cert_pem;
+	struct stack_st_X509 *certs = NULL;
+	const uint8_t *cert_pem;
 	size_t cert_pem_len;
 	bool rc = false;
 	std::set<std::string> verify_failure_reasons;
@@ -304,33 +320,36 @@ bool FDBLibTLSSession::verify_peer() {
 
 	// If no verify peer rules have been set, we are relying on standard
 	// libtls verification.
-	if (policy->verify_rules.empty()) return true;
+	if (policy->verify_rules.empty())
+		return true;
 
 	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == NULL) {
 		TraceEvent(SevError, "FDBLibTLSNoCertError", uid);
 		goto err;
 	}
-	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL) goto err;
+	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL)
+		goto err;
 
 	// Any matching rule is sufficient.
-	for (auto& verify_rule : policy->verify_rules) {
+	for (auto &verify_rule: policy->verify_rules) {
 		std::tie(verify_success, verify_failure_reason) = check_verify(verify_rule, certs);
 		if (verify_success) {
 			rc = true;
 			break;
 		} else {
-			if (verify_failure_reason.length() > 0) verify_failure_reasons.insert(verify_failure_reason);
+			if (verify_failure_reason.length() > 0)
+				verify_failure_reasons.insert(verify_failure_reason);
 		}
 	}
 
 	if (!rc) {
 		// log the various failure reasons
 		for (std::string reason : verify_failure_reasons) {
-			TraceEvent(reason.c_str(), uid);
+			TraceEvent(reason.c_str(), uid).suppressFor(1.0);
 		}
 	}
 
-err:
+ err:
 	sk_X509_pop_free(certs, X509_free);
 
 	return rc;
@@ -341,7 +360,8 @@ int FDBLibTLSSession::handshake() {
 
 	switch (rv) {
 	case 0:
-		if (!verify_peer()) return FAILED;
+		if (!verify_peer())
+			return FAILED;
 		handshake_completed = true;
 		return SUCCESS;
 	case TLS_WANT_POLLIN:
@@ -372,8 +392,10 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 		TraceEvent("FDBLibTLSReadEOF").suppressFor(1.0);
 		return FAILED;
 	}
-	if (n == TLS_WANT_POLLIN) return WANT_READ;
-	if (n == TLS_WANT_POLLOUT) return WANT_WRITE;
+	if (n == TLS_WANT_POLLIN)
+		return WANT_READ;
+	if (n == TLS_WANT_POLLOUT)
+		return WANT_WRITE;
 
 	TraceEvent("FDBLibTLSReadError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;
@@ -397,8 +419,10 @@ int FDBLibTLSSession::write(const uint8_t* data, int length) {
 		TraceEvent("FDBLibTLSWriteEOF", uid).suppressFor(1.0);
 		return FAILED;
 	}
-	if (n == TLS_WANT_POLLIN) return WANT_READ;
-	if (n == TLS_WANT_POLLOUT) return WANT_WRITE;
+	if (n == TLS_WANT_POLLIN)
+		return WANT_READ;
+	if (n == TLS_WANT_POLLOUT)
+		return WANT_WRITE;
 
 	TraceEvent("FDBLibTLSWriteError", uid).suppressFor(1.0).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 	return FAILED;

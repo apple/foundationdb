@@ -20,18 +20,17 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/Deque.h"
-#include "Knobs.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure) {
+ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){
 	// when this actor is cancelled, the promises in the queue will send broken_promise
 	state Deque<ReplyPromise<Void>> queue;
-	state int limit = BUGGIFY ? SERVER_KNOBS->BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS
-	                          : SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
+	state int limit = BUGGIFY ? SERVER_KNOBS->BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS : SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	loop {
 		ReplyPromise<Void> P = waitNext(waitFailure);
 		queue.push_back(P);
-		if (queue.size() > SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS) {
+		if (queue.size()>SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS){
 			TEST(true); // wait server queue full
 			queue.front().send(Void());
 			queue.pop_front();
@@ -39,42 +38,42 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime,
-                                     double reactionSlope, int taskID) {
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, int taskID){
 	loop {
 		try {
 			state double start = now();
-			ErrorOr<Void> x =
-			    wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
+			ErrorOr<Void> x = wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
 			if (!x.present()) return Void();
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-			if (w > 0) wait(delay(w, taskID));
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+			if (w > 0)
+				wait( delay( w, taskID ) );
+		} catch (Error &e){
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}
 }
 
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed,
-                                      double reactionTime, double reactionSlope, int taskID) {
+ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure, Reference<AsyncVar<bool>> failed, double reactionTime, double reactionSlope, int taskID){
 	loop {
-		try {
-			failed->set(IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed());
-			if (failed->get()) {
-				wait(IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint()));
+		try {	
+			failed->set( IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed() );
+			if( failed->get() ) {
+				wait( IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint()) );
 			} else {
 				state double start = now();
-				ErrorOr<Void> x = wait(
-				    waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
+				ErrorOr<Void> x = wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
 				if (x.present()) {
 					double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-					if (w > 0) wait(delay(w, taskID));
+					if (w > 0)
+						wait( delay( w, taskID ) );
 				}
 			}
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
+		} catch (Error &e){
+			if (e.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}

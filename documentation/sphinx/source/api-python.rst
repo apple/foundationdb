@@ -89,7 +89,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
 
     import fdb
-    fdb.api_version(600)
+    fdb.api_version(610)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, db_name="DB", event_model=None )
@@ -1064,7 +1064,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
 .. method:: pack(tuple, prefix=b'')
 
     Returns a key (byte string) encoding the specified tuple. If ``prefix`` is set, it will prefix the serialized
-    bytes with the prefix string. This throws an error if any of the tuple's items are incomplete `Versionstamp`
+    bytes with the prefix string. This throws an error if any of the tuple's items are incomplete :class:`Versionstamp`
     instances.
 
 .. method:: pack_with_versionstamp(tuple, prefix=b'')
@@ -1074,8 +1074,8 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
     recurse down nested tuples if there are any to find one.) If so, it will produce a byte string
     that can be fed into :meth:`fdb.Transaction.set_versionstamped_key` and correctly fill in the
     versionstamp information at commit time so that when the key is re-read and deserialized, the
-    only difference is that the `Versionstamp` instance is complete and has the transaction version
-    filled in. This throws an error if there are no incomplete `Versionstamp` instances in the tuple
+    only difference is that the :class:`Versionstamp` instance is complete and has the transaction version
+    filled in. This throws an error if there are no incomplete :class:`Versionstamp` instances in the tuple
     or if there is more than one.
 
 .. method:: unpack(key)

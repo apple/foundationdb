@@ -33,19 +33,14 @@ public:
 	NetworkAddress address;
 	Token token;
 
-	Endpoint() : address(0, 0) {}
-	Endpoint(NetworkAddress const& address, Token token) : address(address), token(token) {}
+	Endpoint() : address(0,0) {}
+	Endpoint( NetworkAddress const& address, Token token ) : address(address), token(token) {}
 	bool isValid() const { return token.isValid(); }
 	bool isLocal() const;
 
-	bool operator==(Endpoint const& r) const { return address == r.address && token == r.token; }
-	bool operator!=(Endpoint const& r) const { return address != r.address || token != r.token; }
-	bool operator<(Endpoint const& r) const {
-		if (address != r.address)
-			return address < r.address;
-		else
-			return token < r.token;
-	}
+	bool operator == (Endpoint const& r) const { return address == r.address && token == r.token; }
+	bool operator != (Endpoint const& r) const { return address != r.address || token != r.token; }
+	bool operator < (Endpoint const& r) const { if (address != r.address) return address < r.address; else return token < r.token; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -53,13 +48,16 @@ public:
 	}
 };
 #pragma pack(pop)
-BINARY_SERIALIZABLE(Endpoint);
+BINARY_SERIALIZABLE( Endpoint );
+
 
 class NetworkMessageReceiver {
 public:
-	virtual void receive(ArenaReader&) = 0;
+	virtual void receive( ArenaReader& ) = 0;
 	virtual bool isStream() const { return false; }
 };
+
+
 
 typedef struct NetworkPacket* PacketID;
 
@@ -69,13 +67,13 @@ public:
 	~FlowTransport();
 
 	static void createInstance(uint64_t transportId = 0);
-	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()
-	// variables, so it will be private to a simulation.
+	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
+	// so it will be private to a simulation.
 
 	void initMetrics();
 	// Metrics must be initialized after FlowTransport::createInstance has been called
 
-	Future<Void> bind(NetworkAddress publicAddress, NetworkAddress listenAddress);
+	Future<Void> bind( NetworkAddress publicAddress, NetworkAddress listenAddress );
 	// Starts a server listening on the given listenAddress, and sets publicAddress to be the public
 	// address of this server.  Returns only errors.
 
@@ -85,42 +83,39 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
-	void addPeerReference(const Endpoint&, NetworkMessageReceiver*);
+	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
-	void removePeerReference(const Endpoint&, NetworkMessageReceiver*);
+	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID);
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
-	void removeEndpoint(const Endpoint&, NetworkMessageReceiver*);
+	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 
-	void addWellKnownEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID);
+	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
 
-	PacketID sendReliable(ISerializeSource const& what, const Endpoint& destination);
+	PacketID sendReliable( ISerializeSource const& what, const Endpoint& destination );
 	// sendReliable will keep trying to deliver the data to the destination until cancelReliable is
 	//   called.  It will retry sending if the connection is closed or the failure manager reports
 	//   the destination become available (edge triggered).
 
-	void cancelReliable(PacketID);
+	void cancelReliable( PacketID );
 	// Makes PacketID "unreliable" (either the data or a connection close event will be delivered
 	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
 
-	void sendUnreliable(ISerializeSource const& what, const Endpoint& destination,
-	                    bool openConnection = true); // { cancelReliable(sendReliable(what,destination)); }
+	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection = true );// { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();
 	// for tracing only
 
 	bool incompatibleOutgoingConnectionsPresent();
 
-	static FlowTransport& transport() {
-		return *static_cast<FlowTransport*>((void*)g_network->global(INetwork::enFlowTransport));
-	}
+	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 
 	template <class Ar>
@@ -135,8 +130,8 @@ private:
 	void loadedEndpoint(Endpoint&);
 };
 
-inline bool Endpoint::isLocal() const {
-	return address == FlowTransport::transport().getLocalAddress();
+inline bool Endpoint::isLocal() const { 
+	return address == FlowTransport::transport().getLocalAddress(); 
 }
 
 #endif

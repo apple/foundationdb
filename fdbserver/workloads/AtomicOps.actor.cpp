@@ -21,10 +21,10 @@
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
@@ -34,51 +34,54 @@ struct AtomicOpsWorkload : TestWorkload {
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
 
-	AtomicOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), opNum(0) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		opType = getOption(options, LiteralStringRef("opType"), -1);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 1000);
-		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version
-		// (500) with a 10% probability Actual change of api Version happens in setup
+	AtomicOpsWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx), opNum(0)
+	{
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
+		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
+		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
+		opType = getOption( options, LiteralStringRef("opType"), -1 );
+		nodeCount = getOption( options, LiteralStringRef("nodeCount"), 1000 );
+		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version (500) with a 10% probability
+		// Actual change of api Version happens in setup
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
 		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
 		int64_t randNum = sharedRandomNumber / 10;
-		if (opType == -1) opType = randNum % 8;
+		if(opType == -1)
+			opType = randNum % 8;
 
-		switch (opType) {
+		switch(opType) {
 		case 0:
-			TEST(true); // Testing atomic AddValue
+			TEST(true); //Testing atomic AddValue
 			opType = MutationRef::AddValue;
 			break;
 		case 1:
-			TEST(true); // Testing atomic And
+			TEST(true); //Testing atomic And
 			opType = MutationRef::And;
 			break;
 		case 2:
-			TEST(true); // Testing atomic Or
+			TEST(true); //Testing atomic Or
 			opType = MutationRef::Or;
 			break;
 		case 3:
-			TEST(true); // Testing atomic Xor
+			TEST(true); //Testing atomic Xor
 			opType = MutationRef::Xor;
 			break;
 		case 4:
-			TEST(true); // Testing atomic Max
+			TEST(true); //Testing atomic Max
 			opType = MutationRef::Max;
 			break;
 		case 5:
-			TEST(true); // Testing atomic Min
+			TEST(true); //Testing atomic Min
 			opType = MutationRef::Min;
 			break;
 		case 6:
-			TEST(true); // Testing atomic ByteMin
+			TEST(true); //Testing atomic ByteMin
 			opType = MutationRef::ByteMin;
 			break;
 		case 7:
-			TEST(true); // Testing atomic ByteMax
+			TEST(true); //Testing atomic ByteMax
 			opType = MutationRef::ByteMax;
 			break;
 		default:
@@ -89,127 +92,122 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	virtual std::string description() { return "AtomicOps"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		if (apiVersion500) cx->cluster->apiVersion = 500;
+	virtual Future<Void> setup( Database const& cx ) {
+		if (apiVersion500)
+			cx->apiVersion = 500;
 
-		if (clientId != 0) return Void();
-		return _setup(cx, this);
+		if(clientId != 0)
+			return Void();
+		return _setup( cx, this );
 	}
 
-	virtual Future<Void> start(Database const& cx) {
-		for (int c = 0; c < actorCount; c++)
-			clients.push_back(
-			    timeout(atomicOpWorker(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
+	virtual Future<Void> start( Database const& cx ) {
+		for(int c=0; c<actorCount; c++)
+		clients.push_back(
+			timeout(
+				atomicOpWorker( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		if (clientId != 0) return true;
-		return _check(cx, this);
+	virtual Future<bool> check( Database const& cx ) {
+		if(clientId != 0)
+			return true;
+		return _check( cx, this );
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	virtual void getMetrics( vector<PerfMetric>& m ) {
+	}
 
-	Key logKey(int group) { return StringRef(format("log%08x%08x%08x", group, clientId, opNum++)); }
+	Key logKey( int group ) { return StringRef(format("log%08x%08x%08x",group,clientId,opNum++));}
 
-	ACTOR Future<Void> _setup(Database cx, AtomicOpsWorkload* self) {
+	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
 		state int g = 0;
-		for (; g < 100; g++) {
+		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					for (int i = 0; i < self->nodeCount / 100; i++) {
+					for(int i = 0; i < self->nodeCount/100; i++) {
 						uint64_t intValue = 0;
-						tr.set(StringRef(format("ops%08x%08x", g, i)),
-						       StringRef((const uint8_t*)&intValue, sizeof(intValue)));
+						tr.set(StringRef(format("ops%08x%08x",g,i)), StringRef((const uint8_t*) &intValue, sizeof(intValue)));
 					}
-					wait(tr.commit());
+					wait( tr.commit() );
 					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				} catch( Error &e ) {
+					wait( tr.onError(e) );
 				}
 			}
 		}
 		return Void();
 	}
 
-	ACTOR Future<Void> atomicOpWorker(Database cx, AtomicOpsWorkload* self, double delay) {
+	ACTOR Future<Void> atomicOpWorker( Database cx, AtomicOpsWorkload* self, double delay ) {
 		state double lastTime = now();
 		loop {
-			wait(poisson(&lastTime, delay));
+			wait( poisson( &lastTime, delay ) );
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					int group = g_random->randomInt(0, 100);
-					uint64_t intValue = g_random->randomInt(0, 10000000);
-					Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+					int group = g_random->randomInt(0,100);
+					uint64_t intValue = g_random->randomInt( 0, 10000000 );
+					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
-					tr.atomicOp(StringRef(format("ops%08x%08x", group, g_random->randomInt(0, self->nodeCount / 100))),
-					            val, self->opType);
-					wait(tr.commit());
+					tr.atomicOp(StringRef(format("ops%08x%08x",group,g_random->randomInt(0,self->nodeCount/100))), val, self->opType);
+					wait( tr.commit() );
 					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				} catch( Error &e ) {
+					wait( tr.onError(e) );
 				}
 			}
 		}
 	}
 
-	ACTOR Future<bool> _check(Database cx, AtomicOpsWorkload* self) {
+	ACTOR Future<bool> _check( Database cx, AtomicOpsWorkload* self ) {
 		state int g = 0;
-		for (; g < 100; g++) {
+		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
 					Key begin(format("log%08x", g));
-					state Standalone<RangeResultRef> log =
-					    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+					state Standalone<RangeResultRef> log = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
-					for (auto& kv : log) {
+					tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
+					for(auto& kv : log) {
 						uint64_t intValue = 0;
 						memcpy(&intValue, kv.value.begin(), kv.value.size());
 						tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
 					}
 
 					Key begin(format("ops%08x", g));
-					Standalone<RangeResultRef> ops =
-					    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+					Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
 					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
-					for (auto& kv : ops) {
+					tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
+					for(auto& kv : ops) {
 						uint64_t intValue = 0;
 						memcpy(&intValue, kv.value.begin(), kv.value.size());
 						tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
 					}
 
-					if (tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-						TraceEvent(SevError, "LogMismatch")
-						    .detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get()))
-						    .detail("OpsResult", printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
+						TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
 					}
 
-					if (self->opType == MutationRef::AddValue) {
-						uint64_t opsResult = 0;
+					if( self->opType == MutationRef::AddValue ) {
+						uint64_t opsResult=0;
 						Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
 						memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
-						uint64_t logResult = 0;
-						for (auto& kv : log) {
+						uint64_t logResult=0;
+						for(auto& kv : log) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
 							logResult += intValue;
 						}
-						if (logResult != opsResult) {
-							TraceEvent(SevError, "LogAddMismatch")
-							    .detail("LogResult", logResult)
-							    .detail("OpResult", opsResult)
-							    .detail("OpsResultStr", printable(opsResultStr))
-							    .detail("Size", opsResultStr.size());
+						if(logResult != opsResult) {
+							TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
 						}
 					}
 					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				} catch( Error &e ) {
+					wait( tr.onError(e) );
 				}
 			}
 		}

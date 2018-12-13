@@ -38,16 +38,18 @@ public:
 	double FAILURE_MIN_DELAY;
 	double FAILURE_TIMEOUT_DELAY;
 	double CLIENT_FAILURE_TIMEOUT_DELAY;
+	double FAILURE_EMERGENCY_DELAY;
+	double FAILURE_MAX_GENERATIONS;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
-	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
-	                                 // mostly wrong (e.g. dumping the database after a test)
+	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
 	double DEFAULT_MAX_BACKOFF;
 	double BACKOFF_GROWTH_RATE;
 	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
+	int PROXY_COMMIT_OVERHEAD_BYTES;
 
 	int64_t TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
@@ -68,13 +70,12 @@ public:
 	double STORAGE_METRICS_UNFAIR_SPLIT_LIMIT;
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 
-	// KeyRangeMap
+	//KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
-	int KRM_GET_RANGE_LIMIT_BYTES; // This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two
-	                               // entries will be returned from an attempt to read a key range map
+	int KRM_GET_RANGE_LIMIT_BYTES; //This must be sufficiently larger than KEY_SIZE_LIMIT to ensure that at least two entries will be returned from an attempt to read a key range map
 
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
-	int ABSOLUTE_MAX_WATCHES; // The client cannot set the max outstanding watches higher than this
+	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
 	double NO_RECENT_UPDATES_DURATION;
 	double FAST_WATCH_TIMEOUT;
@@ -82,8 +83,9 @@ public:
 
 	double IS_ACCEPTABLE_DELAY;
 
+
 	// Core
-	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
+	int64_t CORE_VERSIONSPERSECOND;  // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 
