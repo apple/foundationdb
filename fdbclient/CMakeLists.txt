@@ -1,10 +1,13 @@
 set(FDBCLIENT_SRCS
+  AsyncFileBlobStore.actor.cpp
+  AsyncFileBlobStore.actor.h
   Atomic.h
   AutoPublicAddress.cpp
   BackupAgent.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
+  BlobStore.actor.cpp
   ClientDBInfo.h
   ClientLogEvents.h
   ClientWorkerInterface.h
@@ -12,6 +15,8 @@ set(FDBCLIENT_SRCS
   CommitTransaction.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
+  DatabaseConfiguration.cpp
+  DatabaseConfiguration.h
   DatabaseContext.h
   EventTypes.actor.h
   FailureMonitorClient.actor.cpp
@@ -19,6 +24,7 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  HTTP.actor.cpp
   IClientApi.h
   KeyBackedTypes.h
   KeyRangeMap.actor.cpp
@@ -67,6 +73,10 @@ set(FDBCLIENT_SRCS
   json_spirit/json_spirit_value.h
   json_spirit/json_spirit_writer_options.h
   json_spirit/json_spirit_writer_template.h
+  libb64/cdecode.c
+  libb64/cencode.c
+  md5/md5.c
+	sha1/SHA1.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 

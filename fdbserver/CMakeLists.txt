@@ -9,8 +9,6 @@ set(FDBSERVER_SRCS
   CoordinationInterface.h
   CoroFlow.actor.cpp
   CoroFlow.h
-  DatabaseConfiguration.cpp
-  DatabaseConfiguration.h
   DataDistribution.actor.cpp
   DataDistribution.h
   DataDistributionQueue.actor.cpp
