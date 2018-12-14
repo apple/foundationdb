@@ -363,7 +363,7 @@ FoundationDB will never use processes on the same machine for the replication of
 Datacenter-aware mode
 ---------------------
 
-In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters. Although data will always be triple replicated in this mode, it may not be replicated across all datacenters.
+In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters.
 
     .. note:: When using the datacenter-aware mode, all ``fdbserver`` processes should be passed a valid datacenter identifier on the command line.
 
