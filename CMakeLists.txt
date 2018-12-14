@@ -1,5 +1,5 @@
 #
-# flow.h
+# CMakeLists.txt
 #
 # This source file is part of the FoundationDB open source project
 #
@@ -138,7 +138,7 @@ else()
     -mmmx
     -mavx
     -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++14>)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++11>)
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
