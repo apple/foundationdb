@@ -85,6 +85,7 @@ if (NOT APPLE)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+target_compile_definitions(flow PUBLIC TLS_DISABLED)
 
 if(APPLE)
   find_library(IO_KIT IOKit)
