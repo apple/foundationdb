@@ -52,7 +52,6 @@ Reference<ITraceLogFormatter> createLogFormatter() {
 		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
 	} else {
 		ASSERT(false);
-		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
 	}
 }
 
