@@ -1,5 +1,5 @@
 /*
- * XmlTraceLogFormatter.h
+ * JsonTraceLogFormatter.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,7 @@
  */
 
 #include "flow/flow.h"
-#include "JsonTraceLogFormatter.h"
+#include "flow/JsonTraceLogFormatter.h"
 
 #include <sstream>
 

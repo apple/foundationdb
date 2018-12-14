@@ -20,8 +20,10 @@
     <ClCompile Include="FaultInjection.cpp" />
     <ClCompile Include="FileTraceLogWriter.cpp" />
     <ClCompile Include="XmlTraceLogFormatter.cpp" />
+    <ClCompile Include="JsonTraceLogFormatter.cpp" />
     <ClInclude Include="FileTraceLogWriter.h" />
     <ClInclude Include="XmlTraceLogFormatter.h" />
+    <ClInclude Include="JsonTraceLogFormatter.h" />
     <ClInclude Include="MetricSample.h" />
     <ClInclude Include="Profiler.h" />
     <ActorCompiler Include="Profiler.actor.cpp" />

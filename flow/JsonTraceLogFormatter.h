@@ -1,5 +1,5 @@
 /*
- * XmlTraceLogFormatter.h
+ * JsonTraceLogFormatter.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "FastRef.h"
-#include "Trace.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 
 struct JsonTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<JsonTraceLogFormatter> {
 	const char* getExtension() override;
