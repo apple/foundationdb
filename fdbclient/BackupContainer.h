@@ -108,10 +108,19 @@ struct BackupDescription {
 	std::string url;
 	std::vector<KeyspaceSnapshotFile> snapshots;
 	int64_t snapshotBytes;
+	// The version before which everything has been deleted by an expire
+	Optional<Version> expiredEndVersion;
+	// The latest version before which at least some data has been deleted by an expire
+	Optional<Version> unreliableEndVersion;
+	// The minimum log version in the backup
 	Optional<Version> minLogBegin;
+	// The maximum log version in the backup
 	Optional<Version> maxLogEnd;
+	// The maximum log version for which there is contiguous log version coverage extending back to minLogBegin
 	Optional<Version> contiguousLogEnd;
+	// The maximum version which this backup can be used to restore to
 	Optional<Version> maxRestorableVersion;
+	// The minimum version which this backup can be used to restore to
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail;  // Freeform container-specific info.
 

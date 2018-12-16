@@ -123,6 +123,10 @@ std::string BackupDescription::toString() const {
 
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
 
+	if(expiredEndVersion.present())
+		info.append(format("ExpiredEndVersion:       %s\n", formatVersion(expiredEndVersion.get()).c_str()));
+	if(unreliableEndVersion.present())
+		info.append(format("UnreliableEndVersion:    %s\n", formatVersion(unreliableEndVersion.get()).c_str()));
 	if(minLogBegin.present())
 		info.append(format("MinLogBeginVersion:      %s\n", formatVersion(minLogBegin.get()).c_str()));
 	if(contiguousLogEnd.present())
@@ -518,27 +522,61 @@ public:
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
-		// This is the range of logs we'll have to list to determine log continuity
-		state Version scanBegin = 0;
-		state Version scanEnd = std::numeric_limits<Version>::max();
+		// Get metadata versions
+		state Optional<Version> metaLogBegin;
+		state Optional<Version> metaLogEnd;
+		state Optional<Version> metaExpiredEnd;
+		state Optional<Version> metaUnreliableEnd;
 
-		// Get range for which we know there are logs, if available
-		state Optional<Version> begin;
-		state Optional<Version> end;
-
+		// For a deep scan, do not use the version boundary metadata
 		if(!deepScan) {
-			Void _ = wait(store(bc->logBeginVersion().get(), begin) && store(bc->logEndVersion().get(), end));
+			Void _ = wait(store(bc->logBeginVersion().get(), metaLogBegin) && store(bc->logEndVersion().get(), metaLogEnd)
+				&& store(bc->expiredEndVersion().get(), metaExpiredEnd) && store(bc->unreliableEndVersion().get(), metaUnreliableEnd));
 		}
 
+		TraceEvent("BackupContainerMetadata")
+			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(-1))
+			.detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(-1))
+			.detail("LogBeginVersion", metaLogBegin.orDefault(-1))
+			.detail("LogEndVersion", metaLogEnd.orDefault(-1));
+
+		// Don't use metaLogBegin or metaLogEnd if any of the following are true
+		//   - either are missing
+		//   - metaLogEnd <= metaLogBegin
+		//   - metaLogEnd < metaExpiredEnd
+		//   - metaLogEnd < metaUnreliableEnd
+		if(!metaLogBegin.present() || !metaLogEnd.present()
+			 || metaLogEnd.get() <= metaLogBegin.get()
+			 || metaLogEnd.get() < metaExpiredEnd.orDefault(-1)
+			 || metaLogEnd.get() < metaUnreliableEnd.orDefault(-1)
+		) {
+			TraceEvent(SevWarnAlways, "BackupContainerMetadataInvalid")
+				.detail("LogBeginVersion", metaLogBegin.orDefault(-1))
+				.detail("LogEndVersion", metaLogEnd.orDefault(-1));
+
+			metaLogBegin = Optional<Version>();
+			metaLogEnd = Optional<Version>();
+		}
+
+		// If the unreliable end version is not set or is < expiredEndVersion then default it to expiredEndVersion
+		if(!metaUnreliableEnd.present() || metaUnreliableEnd.get() < metaExpiredEnd.orDefault(0))
+			metaUnreliableEnd = metaExpiredEnd;
+
+		desc.unreliableEndVersion = metaUnreliableEnd;
+		desc.expiredEndVersion = metaExpiredEnd;
+
+		// Start scanning for files at a version after which nothing has been deleted by an expire or 0
+		state Version scanBegin = desc.unreliableEndVersion.orDefault(0);
+		state Version scanEnd = std::numeric_limits<Version>::max();
+
 		// Use the known log range if present
-		if(begin.present() && end.present()) {
-			// Logs are assumed to be contiguious between begin and max(begin, end), so initalize desc accordingly
-			// The use of max() is to allow for a stale end version that has been exceeded by begin version
-			desc.minLogBegin = begin.get();
-			desc.maxLogEnd = std::max(begin.get(), end.get());
+		if(metaLogBegin.present() && metaLogEnd.present()) {
+			// Logs are assumed to be contiguious between metaLogBegin and metaLogEnd, so initalize desc accordingly
+			desc.minLogBegin = metaLogBegin.get();
+			desc.maxLogEnd = metaLogEnd.get();
 			desc.contiguousLogEnd = desc.maxLogEnd;
 
-			// Begin file scan at the contiguous log end version
+			// Move scanBegin forward (higher) to the contiguous log end version
 			scanBegin = desc.contiguousLogEnd.get();
 		}
 
@@ -570,20 +608,26 @@ public:
 			}
 		}
 
-		// Try to update the saved log versions if they are not set and we have values for them,
-		// but ignore errors in the update attempt in case the container is not writeable
-		// Also update logEndVersion if it has a value but it is less than contiguousLogEnd
+		// If the log metadata begin/end versions are missing (or treated as missing due to invalidity) or
+		// differ from the newly calculated values for minLogBegin and contiguousLogEnd, respectively,
+		// then attempt to update the metadata in the backup container but ignore errors in case the 
+		// container is not writeable.
 		try {
 			state Future<Void> updates = Void();
-			if(desc.minLogBegin.present() && !begin.present())
+
+			if(desc.minLogBegin.present() && metaLogBegin != desc.minLogBegin) {
 				updates = updates && bc->logBeginVersion().set(desc.minLogBegin.get());
-			if(desc.contiguousLogEnd.present() && (!end.present() || end.get() < desc.contiguousLogEnd.get()) )
+			}
+
+			if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
 				updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+			}
+
 			Void _ = wait(updates);
 		} catch(Error &e) {
 			if(e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevWarn, "BackupContainerSafeVersionUpdateFailure").detail("URL", bc->getURL());
+			TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure").detail("URL", bc->getURL());
 		}
 
 		for(auto &s : desc.snapshots) {
@@ -631,10 +675,14 @@ public:
 		if(restorableBeginVersion < expireEndVersion)
 			throw backup_cannot_expire();
 
-		state Version scanBegin = 0;
-
 		// Get the backup description.
 		state BackupDescription desc = wait(bc->describeBackup());
+
+		// If the expire request is to a version at or before the previous version to which data was already deleted
+		// then do nothing and just return
+		if(expireEndVersion <= desc.expiredEndVersion.orDefault(-1)) {
+			return Void();
+		}
 
 		// Assume force is needed, then try to prove otherwise.
 		// Force is required if there is not a restorable snapshot which both
@@ -648,27 +696,12 @@ public:
 			}
 		}
 
-		// Get metadata
-		state Optional<Version> expiredEnd;
-		state Optional<Version> logBegin;
-		state Optional<Version> logEnd;
-		Void _ = wait(store(bc->expiredEndVersion().get(), expiredEnd) && store(bc->logBeginVersion().get(), logBegin) && store(bc->logEndVersion().get(), logEnd));
+		// Start scan for files to delete at the last completed expire operation's end or 0.
+		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
 
-		// Update scan range if expiredEnd is present
-		if(expiredEnd.present()) {
-			if(expireEndVersion <= expiredEnd.get()) {
-				// If the expire request is to the version already expired to then there is no work to do so return true
-				return Void();
-			}
-			scanBegin = expiredEnd.get();
-		}
-
-		TraceEvent("BackupContainerFileSystem")
+		TraceEvent("BackupContainerFileSystemExpire")
 			.detail("ExpireEndVersion", expireEndVersion)
-			.detail("ScanBeginVersion", scanBegin)
-			.detail("CachedLogBegin", logBegin.orDefault(-1))
-			.detail("CachedLogEnd", logEnd.orDefault(-1))
-			.detail("CachedExpiredEnd", expiredEnd.orDefault(-1));
+			.detail("ScanBeginVersion", scanBegin);
 
 		// Get log files that contain any data at or before expireEndVersion
 		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion - 1));
@@ -720,37 +753,20 @@ public:
 		}
 		desc = BackupDescription();
 
+		for(auto &f : toDelete) {
+			printf("delete: %s\n", f.c_str());
+		}
+
 		// If some files to delete were found AND force is needed AND the force option is NOT set, then fail
 		if(!toDelete.empty() && forceNeeded && !force)
 			throw backup_cannot_expire();
 
-		// We are about to start deleting files, at which point no data prior to the expire end version can be 
-		// safely assumed to exist. The [logBegin, logEnd) range from the container's metadata describes
-		// a range of log versions which can be assumed to exist, so if the range of data being deleted overlaps
-		// that range then the metadata range must be updated.
-
-		// If we're expiring the entire log range described by the metadata then clear both metadata values
-		if(logEnd.present() && logEnd.get() < expireEndVersion) {
-			if(logBegin.present())
-				Void _ = wait(bc->logBeginVersion().clear());
-			if(logEnd.present())
-				Void _ = wait(bc->logEndVersion().clear());
-		}
-		else {
-			// If we are expiring to a point within the metadata range then update the begin if we have a new
-			// log begin version (which we should!) or clear the metadata range if we do not (which would be
-			// repairing the metadata from an incorrect state)
-			if(logBegin.present() && logBegin.get() < expireEndVersion) {
-				if(newLogBeginVersion.present()) {
-					Void _ = wait(bc->logBeginVersion().set(newLogBeginVersion.get()));
-				}
-				else {
-					if(logBegin.present())
-						Void _ = wait(bc->logBeginVersion().clear());
-					if(logEnd.present())
-						Void _ = wait(bc->logEndVersion().clear());
-				}
-			}
+		// We are about to start deleting files, at which point all data prior to expireEndVersion is considered
+		// 'unreliable' as some or all of it will be missing.  So before deleting anything, read unreliableEndVersion
+		// (don't use cached value in desc) and update its value if it is missing or < expireEndVersion
+		Optional<Version> metaUnreliableEnd = wait(bc->unreliableEndVersion().get());
+		if(metaUnreliableEnd.orDefault(0) < expireEndVersion) {
+			Void _ = wait(bc->unreliableEndVersion().set(expireEndVersion));
 		}
 
 		// Delete files, but limit parallelism because the file list could use a lot of memory and the corresponding
@@ -776,8 +792,12 @@ public:
 			}
 		}
 
-		// Update the expiredEndVersion property.
-		Void _ = wait(bc->expiredEndVersion().set(expireEndVersion));
+		// Update the expiredEndVersion metadata to indicate that everything prior to that version has been
+		// successfully deleted.  a if existing value is < expiredEndVersion
+		Optional<Version> metaExpiredEnd = wait(bc->expiredEndVersion().get());
+		if(metaExpiredEnd.orDefault(0) < expireEndVersion) {
+			Void _ = wait(bc->expiredEndVersion().set(expireEndVersion));
+		}
 
 		return Void();
 	}
@@ -858,18 +878,19 @@ private:
 
 public:
 	// To avoid the need to scan the underyling filesystem in many cases, some important version boundaries are stored in named files.
-	// These files can be deleted from the filesystem if they appear to be wrong or corrupt, and full scans will done
-	// when needed.
+	// These versions also indicate what version ranges are known to be deleted or partially deleted.
 	//
-	// The three versions below, when present, describe 4 version ranges which collectively cover the entire version timeline.
-	//                   0 -   expiredEndVersion:  All files in this range have been deleted
-	//   expiredEndVersion - presentBeginVersion:  Files in this range *may* have been deleted so their presence must not be assumed.
-	// presentBeginVersion -   presentEndVersion:  Files in this range have NOT been deleted by any FDB backup operations.
-	//   presentEndVersion -            infinity:  Files in this range may or may not exist yet.  Scan to find what is there.
+	// The values below describe version ranges as follows:
+	//                   0 - expiredEndVersion      All files in this range have been deleted
+	//   expiredEndVersion - unreliableEndVersion   Some files in this range may have been deleted.
+	//
+	//   logBeginVersion   - logEnd                 Log files are contiguous in this range and have NOT been deleted by fdbbackup
+	//   logEnd            - infinity               Files in this range may or may not exist yet
 	//
 	VersionProperty logBeginVersion() { return {Reference<BackupContainerFileSystem>::addRef(this), "log_begin_version"}; }
 	VersionProperty logEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "log_end_version"}; }
 	VersionProperty expiredEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "expired_end_version"}; }
+	VersionProperty unreliableEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "unreliable_end_version"}; }
 
 	ACTOR static Future<Void> writeVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path, Version v) {
 		try {
