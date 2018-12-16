@@ -528,10 +528,14 @@ public:
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
 
-		// For a deep scan, do not use the version boundary metadata
+		std::vector<Future<Void>> metaReads;
+		metaReads.push_back(store(bc->expiredEndVersion().get(), metaExpiredEnd));
+		metaReads.push_back(store(bc->unreliableEndVersion().get(), metaUnreliableEnd));
+
+		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculae them.
 		if(!deepScan) {
-			Void _ = wait(store(bc->logBeginVersion().get(), metaLogBegin) && store(bc->logEndVersion().get(), metaLogEnd)
-				&& store(bc->expiredEndVersion().get(), metaExpiredEnd) && store(bc->unreliableEndVersion().get(), metaUnreliableEnd));
+			metaReads.push_back(store(bc->logBeginVersion().get(), metaLogBegin));
+			metaReads.push_back(store(bc->logEndVersion().get(), metaLogEnd));
 		}
 
 		TraceEvent("BackupContainerMetadata")
