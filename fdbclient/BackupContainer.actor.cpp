@@ -535,6 +535,7 @@ public:
 		}
 
 		TraceEvent("BackupContainerMetadata")
+			.detail("URL", bc->getURL())
 			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(-1))
 			.detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(-1))
 			.detail("LogBeginVersion", metaLogBegin.orDefault(-1))
@@ -551,6 +552,7 @@ public:
 			 || metaLogEnd.get() < metaUnreliableEnd.orDefault(-1)
 		) {
 			TraceEvent(SevWarnAlways, "BackupContainerMetadataInvalid")
+				.detail("URL", bc->getURL())
 				.detail("LogBeginVersion", metaLogBegin.orDefault(-1))
 				.detail("LogEndVersion", metaLogEnd.orDefault(-1));
 
@@ -627,7 +629,9 @@ public:
 		} catch(Error &e) {
 			if(e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure").detail("URL", bc->getURL());
+			TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure")
+				.error(e)
+				.detail("URL", bc->getURL());
 		}
 
 		for(auto &s : desc.snapshots) {
@@ -700,6 +704,7 @@ public:
 		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
 
 		TraceEvent("BackupContainerFileSystemExpire")
+			.detail("URL", bc->getURL())
 			.detail("ExpireEndVersion", expireEndVersion)
 			.detail("ScanBeginVersion", scanBegin);
 
@@ -900,7 +905,10 @@ public:
 			Void _ = wait(f->finish());
 			return Void();
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "BackupContainerWritePropertyFailed").error(e).detail("Path", path);
+			TraceEvent(SevWarn, "BackupContainerWritePropertyFailed")
+				.error(e)
+				.detail("URL", bc->getURL())
+				.detail("Path", path);
 			throw;
 		}
 	}
@@ -917,12 +925,20 @@ public:
 			if(rs == size && sscanf(s.c_str(), "%lld%n", &v, &len) == 1 && len == size)
 				return v;
 
-			TraceEvent(SevWarn, "BackupContainerInvalidProperty");
+			TraceEvent(SevWarn, "BackupContainerInvalidProperty")
+				.detail("URL", bc->getURL())
+				.detail("Path", path);
+
 			throw backup_invalid_info();
 		} catch(Error &e) {
 			if(e.code() == error_code_file_not_found)
 				return Optional<Version>();
-			TraceEvent(SevWarn, "BackupContainerReadPropertyFailed").error(e).detail("Path", path);
+
+			TraceEvent(SevWarn, "BackupContainerReadPropertyFailed")
+				.error(e)
+				.detail("URL", bc->getURL())
+				.detail("Path", path);
+
 			throw;
 		}
 	}
@@ -1305,10 +1321,12 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
-		m.detail("Description", "Invalid container specification.  See help.").detail("URL", url);
-
+		m.detail("Description", "Invalid container specification.  See help.");
+		m.detail("URL", url);
+		m.error(e);
 		if(e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
+
 		throw;
 	}
 }
@@ -1349,10 +1367,13 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
-		m.detail("Description", "Invalid backup container URL prefix.  See help.").detail("URL", baseURL);
-
+		
+		m.detail("Description", "Invalid backup container URL prefix.  See help.");
+		m.detail("URL", baseURL);
+		m.error(e);
 		if(e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", IBackupContainer::lastOpenError);
+
 		throw;
 	}
 }
