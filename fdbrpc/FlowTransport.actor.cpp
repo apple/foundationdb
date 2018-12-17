@@ -164,16 +164,20 @@ public:
 	struct Peer* getPeer( NetworkAddress const& address, bool openConnection = true );
 
 	// TODO (Vishesh) : Now make it make sense!
-	const NetworkAddress& getFirstLocalAddress() const {
-		return localListeners.begin()->first;
+	NetworkAddress getFirstLocalAddress() const {
+		if (localAddresses.empty()) {
+			return NetworkAddress();
+		}
+		return localAddresses[0];
 	}
 
 	// Returns a vector of NetworkAddresses we are listening to.
-	NetworkAddressList getLocalAddresses() const;
+	const NetworkAddressList& getLocalAddresses() const;
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
 
+	NetworkAddressList localAddresses;
 	std::map<NetworkAddress, Future<Void>> localListeners;
 	std::map<NetworkAddress, struct Peer*> peers;
 	bool warnAlwaysForLargePacket;
@@ -376,7 +380,7 @@ struct Peer : NonCopyable {
 	ACTOR static Future<Void> connectionKeeper( Peer* self, 
 			Reference<IConnection> conn = Reference<IConnection>(), 
 			Future<Void> reader = Void()) {
-		TraceEvent(SevDebug, "ConnKeeper", conn ? conn->getDebugID() : UID())
+		TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 			.detail("PeerAddr", self->destination)
 			.detail("ConnSet", (bool)conn);
 		loop {
@@ -771,7 +775,9 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0).detail("FromAddress", conn->getPeerAddress());
+			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
+				.detail("FromAddress", conn->getPeerAddress())
+				.detail("ListenAddress", listenAddr.toString());
 			incoming.add( connectionIncoming(self, conn) );
 			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskWriteSocket));
 		}
@@ -794,12 +800,8 @@ Peer* TransportData::getPeer( NetworkAddress const& address, bool openConnection
 	return newPeer;
 }
 
-NetworkAddressList TransportData::getLocalAddresses() const {
-	 NetworkAddressList addresses;
-	 for (const auto& addr_listener : localListeners) {
-		 addresses.push_back(addr_listener.first);
-	 }
-	 return addresses;
+const NetworkAddressList& TransportData::getLocalAddresses() const {
+	 return localAddresses;
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
@@ -858,6 +860,7 @@ std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompa
 Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress listenAddress ) {
 	ASSERT( publicAddress.isPublic() );
 	ASSERT( self->localListeners.find(publicAddress) == self->localListeners.end() );
+	self->localAddresses.push_back(publicAddress);
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
 
 	Future<Void> listenF = listen( self, listenAddress );
