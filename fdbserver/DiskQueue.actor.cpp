@@ -770,6 +770,8 @@ private:
 		uint64_t popped;
 		int payloadSize;
 	};
+	// The on disk format depends on the size of PageHeader.
+	static_assert( sizeof(PageHeader) == 36, "PageHeader must be packed" );
 
 	struct Page : PageHeader {
 		static const int maxPayload = _PAGE_SIZE - sizeof(PageHeader);
@@ -901,7 +903,7 @@ private:
 
 		// Writes go at the end of our reads (but on the next page)
 		self->nextPageSeq = self->nextReadLocation/sizeof(Page)*sizeof(Page);
-		if (self->nextReadLocation % sizeof(Page) > 36) self->nextPageSeq += sizeof(Page);
+		if (self->nextReadLocation % sizeof(Page) > sizeof(PageHeader)) self->nextPageSeq += sizeof(Page);
 
 		TraceEvent("DQRecovered", self->dbgid).detail("LastPoppedSeq", self->lastPoppedSeq).detail("PoppedSeq", self->poppedSeq).detail("NextPageSeq", self->nextPageSeq).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->recovered = true;
