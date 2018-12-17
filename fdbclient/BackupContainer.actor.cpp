@@ -538,6 +538,8 @@ public:
 			metaReads.push_back(store(bc->logEndVersion().get(), metaLogEnd));
 		}
 
+		Void _ = wait(waitForAll(metaReads));
+
 		TraceEvent("BackupContainerMetadata")
 			.detail("URL", bc->getURL())
 			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(-1))
