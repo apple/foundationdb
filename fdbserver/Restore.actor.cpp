@@ -542,13 +542,66 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	
 
-	printf("---MX: Perform the resource in the master now---\n");
+	printf("---MX: Perform the restore in the master now---\n");
 
 	// ----------------Restore code START
 	state int restoreId = 0;
 	state int checkNum = 0;
 	loop {
 		state vector<RestoreRequest> restoreRequests;
+
+		//watch for the restoreRequestTriggerKey
+		state ReadYourWritesTransaction tr2(cx);
+
+		loop {
+			try {
+				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+				state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
+				wait(tr2.commit());
+				printf("[INFO] set up watch for restoreRequestTriggerKey\n");
+				wait(watch4RestoreRequest);
+				printf("[INFO] restoreRequestTriggerKey watch is triggered\n");
+				break;
+			} catch(Error &e) {
+				printf("[Error] Transaction for restore request. Error:%s\n", e.name());
+				wait(tr2.onError(e));
+			}
+		};
+
+		loop {
+			try {
+				tr2.reset();
+				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state Optional<Value> numRequests = wait(tr2.get(restoreRequestTriggerKey));
+				int num = decodeRestoreRequestTriggerValue(numRequests.get());
+				//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
+				printf("[INFO] RestoreRequestNum:%d\n", num);
+
+
+				// TODO: Create request request info. by using the same logic in the current restore
+				state Standalone<RangeResultRef> restoreRequestValues = wait(tr2.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+				printf("Restore worker get restoreRequest: %sn", restoreRequestValues.toString().c_str());
+
+				ASSERT(!restoreRequestValues.more);
+
+				if(restoreRequestValues.size()) {
+					for ( auto &it : restoreRequestValues ) {
+						printf("Now decode restore request value...\n");
+						restoreRequests.push_back(decodeRestoreRequestValue(it.value));
+					}
+				}
+				break;
+			} catch(Error &e) {
+				printf("[Error] Transaction for restore request. Error:%s\n", e.name());
+				wait(tr2.onError(e));
+			}
+		};
+
+		/*
+
 		loop {
 			state Transaction tr2(cx);
 			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -587,6 +640,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				wait( tr2.onError(e) );
 			}
 		}
+		 */
 		printf("---Print out the restore requests we received---\n");
 		// Print out the requests info
 		for ( auto &it : restoreRequests ) {
@@ -638,7 +692,6 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityD
 
 ////--- Restore functions
 ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Reference<RestoreConfig> restore,  UID uid) {
- //	wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 
  	//state RestoreConfig restore(task);
 // 	state RestoreConfig restore(uid);
@@ -653,8 +706,6 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 
  	// Clear the applyMutations stuff, including any unapplied mutations from versions beyond the restored version.
  //	restore.clearApplyMutationsKeys(tr);
-
- //	wait(taskBucket->finish(tr, task));
 
 
  	try {
@@ -818,7 +869,6 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  	// Shrink file range to be entirely within restoreRange and translate it to the new prefix
  	// First, use the untranslated file range to create the shrunk original file range which must be used in the kv range version map for applying mutations
  	state KeyRange originalFileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin), std::min(fileRange.end,   restoreRange.end));
- //	Params.originalFileRange().set(task, originalFileRange);
 
  	// Now shrink and translate fileRange
  	Key fileEnd = std::min(fileRange.end,   restoreRange.end);
