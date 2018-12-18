@@ -3009,5 +3009,5 @@ int main(int argc, char* argv[]) {
 		status = FDB_EXIT_MAIN_EXCEPTION;
 	}
 
-	return status;
+	flushAndExit(status);
 }
