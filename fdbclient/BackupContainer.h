@@ -186,9 +186,12 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted = nullptr) = 0;
 
-	// Return key details about a backup's contents, possibly using cached or stored metadata
-	// unless deepScan is true.
-	virtual Future<BackupDescription> describeBackup(bool deepScan = false) = 0;
+	// Return key details about a backup's contents.
+	// Unless deepScan is true, use cached metadata, if present, as initial contiguous available log range.
+	// If logStartVersionOverride is given, log data prior to that version will be ignored for the purposes
+	// of this describe operation.  This can be used to calculate what the restorability of a backup would
+	// be after deleting all data prior to logStartVersionOverride.
+	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
 	virtual Future<FullBackupListing> dumpFileList() = 0;
 
