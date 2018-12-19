@@ -657,29 +657,33 @@ public:
 			}
 		}
 
-		// If the log metadata begin/end versions are missing (or treated as missing due to invalidity) or
-		// differ from the newly calculated values for minLogBegin and contiguousLogEnd, respectively,
-		// then attempt to update the metadata in the backup container but ignore errors in case the 
-		// container is not writeable.
-		try {
-			state Future<Void> updates = Void();
 
-			// Only update minLogBegin if we did NOT use a log start override version
-			if(logStartVersionOverride == invalidVersion && desc.minLogBegin.present() && metaLogBegin != desc.minLogBegin) {
-				updates = updates && bc->logBeginVersion().set(desc.minLogBegin.get());
+		// Only update stored contiguous log begin and end versions if we did NOT use a log start override.
+		// Otherwise, a series of describe operations can result in a version range which is actually missing data.
+		if(logStartVersionOverride == invalidVersion) {
+			// If the log metadata begin/end versions are missing (or treated as missing due to invalidity) or
+			// differ from the newly calculated values for minLogBegin and contiguousLogEnd, respectively,
+			// then attempt to update the metadata in the backup container but ignore errors in case the 
+			// container is not writeable.
+			try {
+				state Future<Void> updates = Void();
+
+				if(desc.minLogBegin.present() && metaLogBegin != desc.minLogBegin) {
+					updates = updates && bc->logBeginVersion().set(desc.minLogBegin.get());
+				}
+
+				if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
+					updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+				}
+
+				Void _ = wait(updates);
+			} catch(Error &e) {
+				if(e.code() == error_code_actor_cancelled)
+					throw;
+				TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure")
+					.error(e)
+					.detail("URL", bc->getURL());
 			}
-
-			if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
-				updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
-			}
-
-			Void _ = wait(updates);
-		} catch(Error &e) {
-			if(e.code() == error_code_actor_cancelled)
-				throw;
-			TraceEvent(SevWarn, "BackupContainerMetadataUpdateFailure")
-				.error(e)
-				.detail("URL", bc->getURL());
 		}
 
 		for(auto &s : desc.snapshots) {
