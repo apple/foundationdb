@@ -737,9 +737,10 @@ public:
 		state BackupDescription desc = wait(bc->describeBackup(false, expireEndVersion));
 
 		// Resolve relative versions using max log version
-		expireEndVersion =       resolveRelativeVersion(desc.maxLogEnd, expireEndVersion,       "ExpireEndVersion",       backup_cannot_expire());
-		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", backup_cannot_expire());
+		expireEndVersion =       resolveRelativeVersion(desc.maxLogEnd, expireEndVersion,       "ExpireEndVersion",       invalid_option_value());
+		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", invalid_option_value());
 
+		// It would be impossible to have restorability to any version < expireEndVersion after expiring to that version
 		if(restorableBeginVersion < expireEndVersion)
 			throw backup_cannot_expire();
 
