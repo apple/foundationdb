@@ -761,6 +761,13 @@ public:
 			}
 		}
 
+		// If force is needed but not passed then refuse to expire anything.
+		// Note that it is possible for there to be no actual files in the backup prior to expireEndVersion,
+		// if they were externally deleted or an expire operation deleted them but was terminated before
+		// updating expireEndVersion
+		if(forceNeeded && !force)
+			throw backup_cannot_expire();
+
 		// Start scan for files to delete at the last completed expire operation's end or 0.
 		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
 
@@ -828,10 +835,6 @@ public:
 				toDelete.push_back(std::move(f.fileName));
 		}
 		desc = BackupDescription();
-
-		// If some files to delete were found AND force is needed AND the force option is NOT set, then fail
-		if(!toDelete.empty() && forceNeeded && !force)
-			throw backup_cannot_expire();
 
 		// We are about to start deleting files, at which point all data prior to expireEndVersion is considered
 		// 'unreliable' as some or all of it will be missing.  So before deleting anything, read unreliableEndVersion
