@@ -515,9 +515,36 @@ public:
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this));
 	}
 
+	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
+		if(v == invalidVersion) {
+			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);
+			throw e;
+		}
+		if(v < 0) {
+			if(!max.present()) {
+				TraceEvent(SevError, "BackupExpireCannotResolveRelativeVersion").detail(name, v);
+				throw e;
+			}
+			v += max.get();
+		}
+		return v;
+	}
+
 	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan, Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
+
+		TraceEvent("BackupContainerDescribe1")
+			.detail("URL", bc->getURL())
+			.detail("LogStartVersionOverride", logStartVersionOverride);
+
+		// If logStartVersion is relative, then first do a recursive call without it to find the max log version
+		// from which to resolve the relative version.
+		// This could be handled more efficiently without recursion but it's tricky, this will do for now.
+		if(logStartVersionOverride != invalidVersion && logStartVersionOverride < 0) {
+			BackupDescription tmp = wait(bc->describeBackup(false, invalidVersion));
+			logStartVersionOverride = resolveRelativeVersion(tmp.maxLogEnd, logStartVersionOverride, "LogStartVersionOverride", invalid_option_value());
+		}
 
 		// Get metadata versions
 		state Optional<Version> metaLogBegin;
@@ -537,7 +564,7 @@ public:
 
 		Void _ = wait(waitForAll(metaReads));
 
-		TraceEvent("BackupContainerDescribe")
+		TraceEvent("BackupContainerDescribe2")
 			.detail("URL", bc->getURL())
 			.detail("LogStartVersionOverride", logStartVersionOverride)
 			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
@@ -545,7 +572,7 @@ public:
 			.detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
 			.detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion));
 
-		// If the logStartVersionOverride is set then ensure that unreliableEndVersion is at least as much
+		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or greater
 		if(logStartVersionOverride != invalidVersion && metaUnreliableEnd.orDefault(invalidVersion) < logStartVersionOverride) {
 			metaUnreliableEnd = logStartVersionOverride;
 		}
@@ -697,11 +724,20 @@ public:
 	}
 
 	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, Version restorableBeginVersion) {
-		if(restorableBeginVersion < expireEndVersion)
-			throw backup_cannot_expire();
+		TraceEvent("BackupContainerFileSystemExpire1")
+			.detail("URL", bc->getURL())
+			.detail("ExpireEndVersion", expireEndVersion)
+			.detail("RestorableBeginVersion", restorableBeginVersion);
 
 		// Get the backup description.
 		state BackupDescription desc = wait(bc->describeBackup(false, expireEndVersion));
+
+		// Resolve relative versions using max log version
+		expireEndVersion =       resolveRelativeVersion(desc.maxLogEnd, expireEndVersion,       "ExpireEndVersion",       backup_cannot_expire());
+		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", backup_cannot_expire());
+
+		if(restorableBeginVersion < expireEndVersion)
+			throw backup_cannot_expire();
 
 		// If the expire request is to a version at or before the previous version to which data was already deleted
 		// then do nothing and just return
@@ -724,9 +760,10 @@ public:
 		// Start scan for files to delete at the last completed expire operation's end or 0.
 		state Version scanBegin = desc.expiredEndVersion.orDefault(0);
 
-		TraceEvent("BackupContainerFileSystemExpire")
+		TraceEvent("BackupContainerFileSystemExpire2")
 			.detail("URL", bc->getURL())
 			.detail("ExpireEndVersion", expireEndVersion)
+			.detail("RestorableBeginVersion", restorableBeginVersion)
 			.detail("ScanBeginVersion", scanBegin);
 
 		state std::vector<LogFile> logs;

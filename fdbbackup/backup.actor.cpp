@@ -91,7 +91,8 @@ enum enumRestoreType {
 enum {
 	// Backup constants
 	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE,
-	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
+	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
+	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
 
 	// Backup and Restore constants
@@ -336,6 +337,8 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,      "--restorable_after_timestamp",             SO_REQ_SEP },
 	{ OPT_EXPIRE_BEFORE_VERSION,                 "--expire_before_version",                  SO_REQ_SEP },
 	{ OPT_EXPIRE_BEFORE_DATETIME,                "--expire_before_timestamp",                SO_REQ_SEP },
+	{ OPT_EXPIRE_MIN_RESTORABLE_DAYS,            "--min_restorable_days",                    SO_REQ_SEP },
+	{ OPT_EXPIRE_DELETE_BEFORE_DAYS,             "--delete_before_days",                     SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -724,10 +727,16 @@ static void printBackupUsage(bool devhelp) {
 		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
 	printf("  --expire_before_version VERSION\n"
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
+	printf("  --delete_before_days NUM_DAYS\n"
+		   "                 Another way to specify version cutoff for expire operations.  Deletes data files containing no data at or after a\n"
+		   "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in the backup.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
 	printf("  --restorable_after_version VERSION\n"
 		   "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
+	printf("  --min_restorable_days NUM_DAYS\n"
+		   "                 For expire operations, set minimum acceptable restorability to approximately NUM_DAYS days worth of versions\n"
+		   "                 prior to the latest log version in the backup.\n");
 	printf("  --version_timestamps\n");
 	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
 	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
@@ -1843,7 +1852,10 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		Void _ = wait(c->expireData(endVersion, force, restorableAfterVersion));
-		printf("All data before version %lld is deleted.\n", endVersion);
+		if(endVersion < 0)
+			printf("All data before %lld versions (%lld days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+		else
+			printf("All data before version %lld has been deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2396,6 +2408,8 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_EXPIRE_BEFORE_VERSION:
 				case OPT_EXPIRE_RESTORABLE_AFTER_VERSION:
+				case OPT_EXPIRE_MIN_RESTORABLE_DAYS:
+				case OPT_EXPIRE_DELETE_BEFORE_DAYS:
 				{
 					const char* a = args->OptionArg();
 					long long ver = 0;
@@ -2404,7 +2418,13 @@ int main(int argc, char* argv[]) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
-					if(optId == OPT_EXPIRE_BEFORE_VERSION)
+
+					// Interpret the value as days worth of versions relative to now (negative)
+					if(optId == OPT_EXPIRE_MIN_RESTORABLE_DAYS || optId == OPT_EXPIRE_DELETE_BEFORE_DAYS) {
+						ver = -ver * 24 * 60 * 60 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					}
+
+					if(optId == OPT_EXPIRE_BEFORE_VERSION || optId == OPT_EXPIRE_DELETE_BEFORE_DAYS)
 						expireVersion = ver;
 					else
 						expireRestorableAfterVersion = ver;
