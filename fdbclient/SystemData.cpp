@@ -627,6 +627,19 @@ RestoreInterface decodeRestoreWorkerValue( ValueRef const& value ) {
 	return s;
 }
 
+const Value restoreCommandInterfaceValue( RestoreCommandInterface const& cmdInterf ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << cmdInterf;
+	return wr.toStringRef();
+}
+
+RestoreCommandInterface decodeRestoreCommandInterfaceValue( ValueRef const& value ) {
+	RestoreCommandInterface s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
 
 // Encode and decode restore request value
 // restoreRequestTrigger key

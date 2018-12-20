@@ -274,6 +274,8 @@ extern const KeyRangeRef restoreRequestKeys;
 const Key restoreWorkerKeyFor( UID const& agentID );
 const Value restoreWorkerValue( RestoreInterface const& server );
 RestoreInterface decodeRestoreWorkerValue( ValueRef const& value );
+const Value restoreCommandInterfaceValue( RestoreCommandInterface const& server );
+RestoreCommandInterface decodeRestoreCommandInterfaceValue( ValueRef const& value );
 
 // MX: parallel restore
 const Value restoreRequestTriggerValue (int const numRequests);

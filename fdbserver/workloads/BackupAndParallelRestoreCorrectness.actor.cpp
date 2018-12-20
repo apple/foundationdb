@@ -631,30 +631,52 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// MX: We should wait on all restore before proceeds
 				printf("Wait for restore to finish\n");
 				state int waitNum = 0;
-				state Transaction tr2(cx);
+				state ReadYourWritesTransaction tr2(cx);
 				loop {
 					tr2.reset();
 					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
 						//TraceEvent("CheckRestoreRequestDoneMX");
-						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
-						if ( !numFinished.present() ) { // restore has not been finished yet
-							if ( waitNum++ % 10 == 0 ) {
-								//TraceEvent("CheckRestoreRequestDone").detail("SecondsOfWait", 5);
-								printf("Still waiting for restore to finish, has wait for %d seconds\n", waitNum * 5);
-							}
-							wait( delay(5.0) );
-							continue;
+						state Optional<Value> restoreRequestDoneValue = wait(tr2.get(restoreRequestDoneKey));
+						if ( restoreRequestDoneValue.present()) {
+							printf("[ERROR] restoreRequest was unexpectedly set somewhere\n");
+							tr2.clear(restoreRequestDoneKey);
+							wait( tr2.commit() );
+							tr2.reset();
+							tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						}
+
+						state Future<Void> watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
+						wait( tr2.commit() );
+						printf("[INFO] set up watch for restoreRequestDoneKey\n");
+						wait(watch4RestoreRequestDone);
+						printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
+						break;
+					} catch( Error &e ) {
+						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
+						printf("[WARNING] watch for restoreRequestDoneKey, error:%s\n", e.what());
+						wait( tr2.onError(e) );
+					}
+				}
+
+				loop {
+					tr2.reset();
+					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+					try {
+						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
+						ASSERT(numFinished.present());
 						int num = decodeRestoreRequestDoneValue(numFinished.get());
 						TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
-						printf("RestoreRequestKeyDone, numFinished:%d\n", num);
+						printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
 						tr2.clear(restoreRequestDoneKey);
 						wait( tr2.commit() );
 						break;
 					} catch( Error &e ) {
 						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
+						printf("[WARNING] CheckRestoreRequestDoneError: %s\n", e.what());
 						wait( tr2.onError(e) );
 					}
 

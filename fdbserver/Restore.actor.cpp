@@ -42,6 +42,7 @@
 bool debug_verbose = false;
 
 
+
 ////-- Restore code declaration START
 
 std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
@@ -52,6 +53,33 @@ std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most rec
 // Use push_back_deep() to copy data to the standalone arena.
 //Standalone<VectorRef<MutationRef>> mOps;
 std::vector<MutationRef> mOps;
+
+//---- Declare status structure which records the progress and status of each worker in each role
+
+RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
+
+std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, stored in master node
+
+void printGlobalNodeStatus() {
+	printf("---Print globalNodeStatus---\n");
+	printf("Number of entries:%d\n", globalNodeStatus.size());
+	for(int i = 0; i < globalNodeStatus.size(); ++i) {
+		printf("[Node:%d] %s\n", globalNodeStatus[i].toString().c_str());
+	}
+}
+
+std::vector<std::string> RestoreRoleStr = {"Master", "Loader", "Applier"};
+int numRoles = RestoreRoleStr.size();
+std::string getRoleStr(RestoreRole role) {
+	if ( (int) role > numRoles ) {
+		printf("[ERROR] role:%d is out of scope\n", (int) role);
+		return "[Unset]";
+	}
+	return RestoreRoleStr[(int)role];
+}
+
+
+////--- Parse backup files
 
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
@@ -436,14 +464,173 @@ bool allOpsAreKnown();
 
 ////-- Restore code declaration END
 
+////--- Restore Functions for the master role
+// Set roles (Loader or Applier) for workers
+ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface> ret_agents
+	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
+	printf("[INFO] Role:%s start configure roles\n", getRoleStr(localNodeStatus.role).c_str());
+	loop {
+		try {
+			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!agentValues.more);
+			if(agentValues.size()) {
+				for(auto& it : agentValues) {
+					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
+				}
+				break;
+			}
+			wait( delay(5.0) );
+		} catch( Error &e ) {
+			printf("[WARNING] configureRoles transaction error:%s\n", e.what());
+			wait( tr.onError(e) );
+		}
+	}
+	// Set up the role, and the global status for each node
+	int numNodes = agents.size();
+	int numLoader = numNodes / 2;
+	int numApplier = numNodes - numLoader;
+	if (numLoader <= 0 || numApplier <= 0) {
+		fprintf(stderr, "[ERROR] not enough nodes for loader and applier. numLoader:%d, numApplier:%d\n", numLoader, numApplier);
+	} else {
+		printf("[INFO] numWorkders:%d numLoader:%d numApplier:%d\n", numNodes, numLoader, numApplier);
+	}
+	// The first numLoader nodes will be loader, and the rest nodes will be applier
+	for (int i = 0; i < numLoader; ++i) {
+		globalNodeStatus.push_back(RestoreNodeStatus());
+		globalNodeStatus.back().init(RestoreRole::Loader);
+		globalNodeStatus.back().nodeID = agents[i].id();
+	}
+
+	for (int i = numLoader; i < numNodes; ++i) {
+		globalNodeStatus.push_back(RestoreNodeStatus());
+		globalNodeStatus.back().init(RestoreRole::Applier);
+		globalNodeStatus.back().nodeID = agents[i].id();
+	}
+
+	state int index = 0;
+	state RestoreRole role;
+	state UID nodeID;
+	loop {
+		wait(delay(1.0));
+		std::vector<Future<RestoreCommandReply>> cmdReplies;
+		for(auto& cmdInterf : agents) {
+			role = globalNodeStatus[index].role;
+			nodeID = globalNodeStatus[index].nodeID;
+			printf("[CMD] set role (%s) to node (index=%d uid=%s)\n",
+					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, nodeID, role)));
+			index++;
+		}
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] get restoreCommandReply value:%s\n",
+					reps[i].id.toString().c_str());
+		}
+
+		break;
+	}
+
+	// Notify node that all nodes' roles have been set
+	index = 0;
+	loop {
+		wait(delay(1.0));
+
+		std::vector<Future<RestoreCommandReply>> cmdReplies;
+		for(auto& cmdInterf : agents) {
+			role = globalNodeStatus[index].role;
+			nodeID = globalNodeStatus[index].nodeID;
+			printf("[CMD] notify the finish of set role (%s) to node (index=%d uid=%s)\n",
+			getRoleStr(role).c_str(), index, nodeID.toString().c_str());
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role_Done, nodeID, role)));
+			index++;
+		}
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] get restoreCommandReply value:%s for set_role_done\n",
+					reps[i].id.toString().c_str());
+		}
+
+		break;
+	}
+
+
+	printf("Role:%s finish configure roles\n", getRoleStr(localNodeStatus.role).c_str());
+	return Void();
+
+}
+
+//TODO: collect backup info
+ACTOR Future<Void>
+
+//TODO: distribute every k MB backup data to loader to parse the data.
+// Note: before let loader to send data to applier, notify applier to receive loader's data
+// Also wait for the ACKs from all loaders and appliers that
+// (1) loaders have parsed all backup data and send the mutations to applier, and
+// (2) applier have received all mutations and are ready to apply them to DB
+
+
+//TODO: Wait for applier to apply mutations to DB
+
+//TODO: sanity check the status of loader and applier
+
+//TODO: notify the user (or test workload) that restore has finished
+
+
+
+
+
+
+////--- Functions for both loader and applier role
+// Handle restore command request on workers
+ACTOR Future<Void> configureRolesHandler(RestoreCommandInterface interf) {
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				printf("[INFO] Got Restore Command: cmd:%d UID:%s Role:%d(%s)\n",
+						req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str());
+				if ( req.cmd == RestoreCommandEnum::Set_Role ) {
+					localNodeStatus.init(req.role);
+					localNodeStatus.nodeID = interf.id();
+
+					if ( localNodeStatus.nodeID != req.id ) {
+						printf("[WARNING] node:%s receive request with a different id:%s\n",
+								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+					}
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
+					printf("[INFO] Node:%s set to role:%s Done.\n",
+							localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+
+////--- Restore Functions for the loader role
+
+////--- Restore Functions for the applier role
+
+
+
 static Future<Version> restoreMX(Database const &cx, RestoreRequest const &request);
 
 
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Database cx = cx_input;
-	state RestoreInterface interf;
+	state RestoreCommandInterface interf;
 	interf.initEndpoints();
-	state Optional<RestoreInterface> leaderInterf;
+	state Optional<RestoreCommandInterface> leaderInterf;
 
 	state Transaction tr(cx);
 	loop {
@@ -453,7 +640,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
-				leaderInterf = BinaryReader::fromStringRef<RestoreInterface>(leader.get(), IncludeVersion());
+				leaderInterf = BinaryReader::fromStringRef<RestoreCommandInterface>(leader.get(), IncludeVersion());
 				break;
 			}
 			tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
@@ -470,13 +657,16 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		loop {
 			try {
 				//tr.set(restoreWorkerKeyFor(interf.id()), BinaryWriter::toValue(interf, IncludeVersion()));
-				tr.set(restoreWorkerKeyFor(interf.id()), restoreWorkerValue(interf));
+				printf("[Worker] Worker restore interface id:%s\n", interf.id().toString().c_str());
+				tr.set(restoreWorkerKeyFor(interf.id()), restoreCommandInterfaceValue(interf));
 				wait(tr.commit());
 				break;
 			} catch( Error &e ) {
 				wait( tr.onError(e) );
 			}
 		}
+
+		wait( configureRolesHandler(interf) );
 
 		/*
 		// Handle the dummy workload that increases a counter
@@ -501,26 +691,18 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	//we are the leader
 	wait( delay(5.0) );
 
-	state vector<RestoreInterface> agents;
-	printf("MX: I'm the master\n");
-	printf("Restore master waits for agents to register their workerKeys\n");
-	loop {
-		try {
-			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!agentValues.more);
-			if(agentValues.size()) {
-				for(auto& it : agentValues) {
-					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
-				}
-				break;
-			}
-			wait( delay(5.0) );
-		} catch( Error &e ) {
-			wait( tr.onError(e) );
-		}
-	}
+	//state vector<RestoreInterface> agents;
+	state VectorRef<RestoreInterface> agents;
 
-	ASSERT(agents.size() > 0);
+	printf("[INFO] MX: I'm the master\n");
+	printf("[INFO] Restore master waits for agents to register their workerKeys\n");
+
+	localNodeStatus.init(RestoreRole::Master);
+	localNodeStatus.nodeID = interf.id();
+	wait( configureRoles(cx) );
+
+
+//	ASSERT(agents.size() > 0);
 
 	/*
 	// Handle the dummy workload that increases a counter
@@ -542,7 +724,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	
 
-	printf("---MX: Perform the restore in the master now---\n");
+	printf("[INFO]---MX: Perform the restore in the master now---\n");
 
 	// ----------------Restore code START
 	state int restoreId = 0;
@@ -564,7 +746,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				printf("[INFO] restoreRequestTriggerKey watch is triggered\n");
 				break;
 			} catch(Error &e) {
-				printf("[Error] Transaction for restore request. Error:%s\n", e.name());
+				printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
 				wait(tr2.onError(e));
 			}
 		};
@@ -595,7 +777,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				}
 				break;
 			} catch(Error &e) {
-				printf("[Error] Transaction for restore request. Error:%s\n", e.name());
+				printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
 				wait(tr2.onError(e));
 			}
 		};
@@ -641,10 +823,10 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			}
 		}
 		 */
-		printf("---Print out the restore requests we received---\n");
+		printf("[INFO] ---Print out the restore requests we received---\n");
 		// Print out the requests info
 		for ( auto &it : restoreRequests ) {
-			printf("---RestoreRequest info:%s\n", it.toString().c_str());
+			printf("[INFO] ---RestoreRequest info:%s\n", it.toString().c_str());
 		}
 
 		// Perform the restore requests
@@ -654,7 +836,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		}
 
 		// Notify the finish of the restore by cleaning up the restore keys
-		state Transaction tr3(cx);
+		state ReadYourWritesTransaction tr3(cx);
 		loop {
 			tr3.reset();
 			tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -663,17 +845,27 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				tr3.clear(restoreRequestTriggerKey);
 				tr3.clear(restoreRequestKeys);
 				tr3.set(restoreRequestDoneKey, restoreRequestDoneValue(restoreRequests.size()));
-				TraceEvent("LeaderFinishRestoreRequest");
-				printf("LeaderFinishRestoreRequest\n");
 				wait(tr3.commit());
+				TraceEvent("LeaderFinishRestoreRequest");
+				printf("[INFO] RestoreLeader write restoreRequestDoneKey\n");
+
+				// Verify by reading the key
+				tr3.reset();
+				tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
+				state Optional<Value> numFinished = wait(tr3.get(restoreRequestDoneKey));
+				ASSERT(numFinished.present());
+				int num = decodeRestoreRequestDoneValue(numFinished.get());
+				printf("[INFO] RestoreLeader read restoreRequestDoneKey, numFinished:%d\n", num);
 				break;
 			}  catch( Error &e ) {
 				TraceEvent("RestoreAgentLeaderErrorTr3").detail("ErrorCode", e.code()).detail("ErrorName", e.name());
+				printf("[Error] RestoreLead operation on restoreRequestDoneKey, error:%s\n", e.what());
 				wait( tr3.onError(e) );
 			}
 		};
 
-		printf("MXRestoreEndHere RestoreID:%d\n", restoreId);
+		printf("[INFO] MXRestoreEndHere RestoreID:%d\n", restoreId);
 		TraceEvent("MXRestoreEndHere").detail("RestoreID", restoreId++);
 		wait( delay(5.0) );
 		//NOTE: we have to break the loop so that the tester.actor can receive the return of this test workload.

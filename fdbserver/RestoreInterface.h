@@ -22,6 +22,7 @@
 #define FDBCLIENT_RestoreInterface_H
 #pragma once
 
+#include <sstream>
 #include "fdbclient/FDBTypes.h"
 //#include "fdbclient/NativeAPI.h" //MX: Cannot have NativeAPI.h in this .h
 #include "fdbrpc/fdbrpc.h"
@@ -29,6 +30,8 @@
 #include "fdbrpc/Locality.h"
 
 class RestoreConfig;
+enum class RestoreRole {Invalid = -1, Master = 0, Loader = 1, Applier = 2};
+BINARY_SERIALIZABLE( RestoreRole );
 
 struct RestoreInterface {
 	RequestStream< struct TestRequest > test;
@@ -37,6 +40,7 @@ struct RestoreInterface {
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
 	UID id() const { return test.getEndpoint().token; }
+	//MX: Q: is request's endPoint().token different from test's?
 	NetworkAddress address() const { return test.getEndpoint().address; }
 
 	void initEndpoints() {
@@ -48,6 +52,57 @@ struct RestoreInterface {
 		ar & test & request;
 	}
 };
+
+// NOTE: is cmd's Endpoint token the same with the request's token for the same node?
+struct RestoreCommandInterface {
+	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
+
+	bool operator == (RestoreCommandInterface const& r) const { return id() == r.id(); }
+	bool operator != (RestoreCommandInterface const& r) const { return id() != r.id(); }
+	UID id() const { return cmd.getEndpoint().token; }
+
+	NetworkAddress address() const { return cmd.getEndpoint().address; }
+
+	void initEndpoints() {
+		cmd.getEndpoint( TaskClusterController );
+	}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & cmd;
+	}
+};
+
+
+enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done};
+BINARY_SERIALIZABLE(RestoreCommandEnum);
+struct RestoreCommand {
+	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
+	UID id; // Node id
+	RestoreRole role; // role of the command;
+	ReplyPromise< struct RestoreCommandReply > reply;
+
+	RestoreCommand() : id(UID()), role(RestoreRole::Invalid) {}
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role) : cmd(cmd), id(id), role(role) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & cmd & id & role & reply;
+	}
+};
+
+struct RestoreCommandReply {
+	UID id; // placeholder, which reply the worker's node id back to master
+
+	RestoreCommandReply() : id(UID()) {}
+	explicit RestoreCommandReply(UID id) : id(id) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & id;
+	}
+};
+
 
 struct TestRequest {
 	int testData;
@@ -122,18 +177,75 @@ struct RestoreRequest {
 
 struct RestoreReply {
 	int replyData;
-	std::vector<int> restoreReplies;
 
 	RestoreReply() : replyData(0) {}
 	explicit RestoreReply(int replyData) : replyData(replyData) {}
-	explicit RestoreReply(int replyData, std::vector<int> restoreReplies) : replyData(replyData), restoreReplies(restoreReplies) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & replyData & restoreReplies;
+		ar & replyData;
 	}
 };
 
+
+////--- Fast restore logic structure
+
+//std::vector<std::string> RestoreRoleStr; // = {"Master", "Loader", "Applier"};
+//int numRoles = RestoreRoleStr.size();
+std::string getRoleStr(RestoreRole role);
+
+struct RestoreNodeStatus {
+	// ConfigureKeyRange is to determine how to split the key range and apply the splitted key ranges to appliers
+	// NotifyKeyRange is to notify the Loaders and Appliers about the key range each applier is responsible for
+	// Loading is to notify all Loaders to load the backup data and send the mutation to appliers
+	// Applying is to notify appliers to apply the aggregated mutations to DB
+	// Done is to notify the test workload (or user) that we have finished restore
+	enum class MasterState {Invalid = -1, Ready, ConfigureRoles, Sampling, ConfigureKeyRange, NotifyKeyRange, Loading, Applying, Done};
+	enum class LoaderState {Invalid = -1, Ready, Sampling, LoadRange, LoadLog, Done};
+	enum class ApplierState {Invalid = -1, Ready, Aggregating, ApplyToDB, Done};
+
+	UID nodeID;
+	RestoreRole role;
+	MasterState masterState;
+	LoaderState loaderState;
+	ApplierState applierState;
+
+	double lastStart; // The most recent start time. now() - lastStart = execution time
+	double totalExecTime; // The total execution time.
+	double lastSuspend; // The most recent time when the process stops exeuction
+
+	RestoreNodeStatus() : nodeID(UID()), role(RestoreRole::Invalid),
+		masterState(MasterState::Invalid), loaderState(LoaderState::Invalid), applierState(ApplierState::Invalid),
+		lastStart(0), totalExecTime(0), lastSuspend(0) {}
+
+	std::string toString() {
+		std::stringstream str;
+		str << "nodeID:" << nodeID.toString() << " role:" << getRoleStr(role)
+			<< " masterState:" << (int) masterState << " loaderState:" << (int) loaderState << " applierState:" << (int) applierState
+			<< " lastStart:" << lastStart << " totalExecTime:" << totalExecTime << " lastSuspend:" << lastSuspend;
+
+		return str.str();
+	}
+
+	void init(RestoreRole newRole) {
+		role = newRole;
+		if ( newRole == RestoreRole::Loader ) {
+			loaderState = LoaderState::Ready;
+		} else if ( newRole == RestoreRole::Applier) {
+			applierState = ApplierState::Ready;
+		} else if ( newRole == RestoreRole::Master) {
+			masterState == MasterState::Ready;
+		}
+		lastStart = 0;
+		totalExecTime = 0;
+		lastSuspend = 0;
+	}
+
+};
+
+std::string getRoleStr(RestoreRole role);
+
+////--- Interface functions
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
 

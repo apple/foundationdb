@@ -4550,7 +4550,7 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
     int c;
 
     /* pPage->nCell must be greater than zero. If this is the root-page
-    ** the cursor would have been INVALID above and this for(;;) loop
+    ** the cursor would have been Invalid above and this for(;;) loop
     ** not run. If this is not the root-page, then the moveToChild() routine
     ** would have already detected db corruption. Similarly, pPage must
     ** be the right kind (index or table) of b-tree page. Otherwise
