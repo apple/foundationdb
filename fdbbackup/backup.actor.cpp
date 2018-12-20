@@ -110,7 +110,9 @@ enum {
 	//DB constants
 	OPT_SOURCE_CLUSTER,
 	OPT_DEST_CLUSTER,
-	OPT_CLEANUP
+	OPT_CLEANUP,
+
+    OPT_TRACE_FORMAT
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
@@ -127,6 +129,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
@@ -162,6 +165,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -191,6 +195,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_QUIET,           "-q",               SO_NONE },
@@ -216,6 +221,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -243,6 +249,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -270,6 +277,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -293,6 +301,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -318,6 +327,7 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -349,6 +359,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -376,6 +387,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -403,6 +415,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_BASEURL,         "--base_url",       SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -440,6 +453,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_DBVERSION,       "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_DRYRUN,          "-n",               SO_NONE },
@@ -473,6 +487,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
@@ -499,6 +514,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -528,6 +544,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_QUIET,           "-q",               SO_NONE },
@@ -555,6 +572,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -583,6 +601,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -608,6 +627,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace-format",   SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
@@ -2371,10 +2391,15 @@ int main(int argc, char* argv[]) {
 				case OPT_TRACE:
 					trace = true;
 					break;
-				case OPT_TRACE_DIR:
+			    case OPT_TRACE_DIR:
 					trace = true;
 					traceDir = args->OptionArg();
 					break;
+			    case OPT_TRACE_FORMAT:
+				    if (!selectTraceFormatter(args->OptionArg())) {
+					    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
+				    }
+				    break;
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;

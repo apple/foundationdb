@@ -57,7 +57,7 @@ extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION };
+enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -74,6 +74,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -2331,7 +2332,12 @@ struct CLIOptions {
 				return 0;
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
-			case OPT_VERSION:
+		    case OPT_TRACE_FORMAT:
+			    if (!selectTraceFormatter(args.OptionArg())) {
+				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+			    }
+			    break;
+		    case OPT_VERSION:
 				printVersion();
 				return FDB_EXIT_SUCCESS;
 		}
