@@ -51,7 +51,7 @@ Reference<ITraceLogFormatter> createLogFormatter() {
 	} else if (f == "xml") {
 		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
 	} else {
-		ASSERT(false);
+		UNREACHABLE();
 	}
 }
 
