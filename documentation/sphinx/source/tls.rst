@@ -70,7 +70,7 @@ The value for each setting can be specified in more than one way.  The actual va
 2. The value of the environment variable, if one has been set;
 3. The default value
 
-For the password, rather than using the command-line option, we recommend setting it via environment variable ``FDB_TLS_PASSWORD`` for security purpose.
+For the password, rather than using the command-line option, it is recommended to use the environment variable ``FDB_TLS_PASSWORD``, as command-line options are more visible to other processes running on the same host.
 
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
@@ -104,12 +104,13 @@ Parameters and client bindings
 Automatic TLS certificate refresh
 ------------------------------
 
-The TLS certificate can be automatically refreshed on a configurable cadence. The server will inspect the related files in configured location periodically and will replace the in memory copies if following criterion were met:
+The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
 
   * They are changed, judging by the last modified time.
-  * The certificate and key files do match each other.
+  * They are valid certificates.
+  * The key file matches the certificate file.
 
-The refresh rate is controlled by the field ``TLS_CERT_REFRESH_DELAY_SECONDS`` in the ``knob``. Set it to 0 will disable the refresh.
+The refresh rate is controlled by ``--knob_tls_cert_refresh_delay_seconds``. Setting it to 0 will disable the refresh.
 
 The default LibreSSL-based implementation
 =========================================
