@@ -74,7 +74,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
