@@ -174,13 +174,19 @@ public:
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
 
+	struct ExpireProgress {
+		std::string step;
+		int total;
+		int done;
+		std::string toString() const;
+	};
 	// Delete backup files which do not contain any data at or after (more recent than) expireEndVersion.
 	// If force is false, then nothing will be deleted unless there is a restorable snapshot which
 	//   - begins at or after expireEndVersion
 	//   - ends at or before restorableBeginVersion
 	// If force is true, data is deleted unconditionally which could leave the backup in an unusable state.  This is not recommended.
 	// Returns true if expiration was done.
-	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
+	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, ExpireProgress *progress = nullptr, Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.

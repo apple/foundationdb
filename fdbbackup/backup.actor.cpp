@@ -1851,7 +1851,31 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
-		Void _ = wait(c->expireData(endVersion, force, restorableAfterVersion));
+
+		state IBackupContainer::ExpireProgress progress;
+		state std::string lastProgress;
+		state Future<Void> expire = c->expireData(endVersion, force, &progress, restorableAfterVersion);
+
+		loop {
+			choose {
+				when(Void _ = wait(delay(5))) {
+					std::string p = progress.toString();
+					if(p != lastProgress) {
+						int spaces = lastProgress.size() - p.size();
+						printf("\r%s%s", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : "") );
+						lastProgress = p;
+					}
+				}
+				when(Void _ = wait(expire)) {
+					break;
+				}
+			}
+		}
+
+		std::string p = progress.toString();
+		int spaces = lastProgress.size() - p.size();
+		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : "") );
+
 		if(endVersion < 0)
 			printf("All data before %lld versions (%lld days) prior to latest backup log has been deleted.\n", -endVersion, -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
@@ -1876,17 +1900,24 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 		state int numDeleted = 0;
 		state Future<Void> done = c->deleteContainer(&numDeleted);
 
+		state int lastUpdate = -1;
+		printf("Deleting data...\n");
+
 		loop {
 			choose {
 				when ( Void _ = wait(done) ) {
 					printf("The entire container has been deleted.\n");
 					break;
 				}
-				when ( Void _ = wait(delay(3)) ) {
-					printf("%d files have been deleted so far...\n", numDeleted);
+				when ( Void _ = wait(delay(5)) ) {
+					if(numDeleted != lastUpdate) {
+						printf("\r%d...", numDeleted);
+						lastUpdate = numDeleted;
+					}
 				}
 			}
 		}
+		printf("\n");
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)

@@ -47,6 +47,14 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
+std::string IBackupContainer::ExpireProgress::toString() const {
+	std::string s = step + "...";
+	if(total > 0) {
+		s += format("%d/%d (%.2f%%)", done, total, double(done) / total * 100);
+	}
+	return s;
+}
+
 std::string formatTime(int64_t t) {
 	time_t curTime = (time_t)t;
 	char buffer[128];
@@ -731,7 +739,12 @@ public:
 		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride);
 	}
 
-	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, Version restorableBeginVersion) {
+	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {
+		if(progress != nullptr) {
+			progress->step = "Describing backup";
+			progress->total = 0;
+		}
+
 		TraceEvent("BackupContainerFileSystemExpire1")
 			.detail("URL", bc->getURL())
 			.detail("ExpireEndVersion", expireEndVersion)
@@ -785,6 +798,9 @@ public:
 		state std::vector<LogFile> logs;
 		state std::vector<RangeFile> ranges;
 
+		if(progress != nullptr) {
+			progress->step = "Listing files";
+		}
 		// Get log files or range files that contain any data at or before expireEndVersion
 		Void _ = wait(store(bc->listLogFiles(scanBegin, expireEndVersion - 1), logs) && store(bc->listRangeFiles(scanBegin, expireEndVersion - 1), ranges));
 
@@ -844,9 +860,18 @@ public:
 		// We are about to start deleting files, at which point all data prior to expireEndVersion is considered
 		// 'unreliable' as some or all of it will be missing.  So before deleting anything, read unreliableEndVersion
 		// (don't use cached value in desc) and update its value if it is missing or < expireEndVersion
+		if(progress != nullptr) {
+			progress->step = "Initial metadata update";
+		}
 		Optional<Version> metaUnreliableEnd = wait(bc->unreliableEndVersion().get());
 		if(metaUnreliableEnd.orDefault(0) < expireEndVersion) {
 			Void _ = wait(bc->unreliableEndVersion().set(expireEndVersion));
+		}
+
+		if(progress != nullptr) {
+			progress->step = "Deleting files";
+			progress->total = toDelete.size();
+			progress->done = 0;
 		}
 
 		// Delete files, but limit parallelism because the file list could use a lot of memory and the corresponding
@@ -868,10 +893,17 @@ public:
 
 			while(deleteFutures.size() > targetFuturesSize) {
 				Void _ = wait(deleteFutures.front());
+				if(progress != nullptr) {
+					++progress->done;
+				}
 				deleteFutures.pop_front();
 			}
 		}
 
+		if(progress != nullptr) {
+			progress->step = "Final metadata update";
+			progress->total = 0;
+		}
 		// Update the expiredEndVersion metadata to indicate that everything prior to that version has been
 		// successfully deleted if the current version is lower or missing
 		Optional<Version> metaExpiredEnd = wait(bc->expiredEndVersion().get());
@@ -883,8 +915,8 @@ public:
 	}
 
 	// Delete all data up to (but not including endVersion)
-	Future<Void> expireData(Version expireEndVersion, bool force, Version restorableBeginVersion) {
-		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, restorableBeginVersion);
+	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {
+		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 	}
 
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
