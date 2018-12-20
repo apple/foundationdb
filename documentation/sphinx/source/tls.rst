@@ -70,6 +70,8 @@ The value for each setting can be specified in more than one way.  The actual va
 2. The value of the environment variable, if one has been set;
 3. The default value
 
+For the password, rather than using the command-line option, we recommend setting it via environment variable ``FDB_TLS_PASSWORD`` for security purpose.
+
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
 The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.
@@ -98,6 +100,16 @@ There is no default password. If no password is specified, it is assumed that th
 
 Parameters and client bindings
 ------------------------------
+
+Automatic TLS certificate refresh
+------------------------------
+
+The TLS certificate can be automatically refreshed on a configurable cadence. The server will inspect the related files in configured location periodically and will replace the in memory copies if following criterion were met:
+
+  * They are changed, judging by the last modified time.
+  * The certificate and key files do match each other.
+
+The refresh rate is controlled by the field ``TLS_CERT_REFRESH_DELAY_SECONDS`` in the ``knob``. Set it to 0 will disable the refresh.
 
 The default LibreSSL-based implementation
 =========================================
