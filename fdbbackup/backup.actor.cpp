@@ -1917,7 +1917,7 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 				}
 			}
 		}
-		printf("\n");
+		printf("\r%d objects deleted\n", numDeleted);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
