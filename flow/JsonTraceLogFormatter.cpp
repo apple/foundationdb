@@ -45,14 +45,22 @@ const char* JsonTraceLogFormatter::getFooter() {
 
 namespace {
 
-void escapeString(std::stringstream& ss, const std::string source) {
+void escapeString(std::stringstream& ss, const std::string& source) {
 	for (auto c : source) {
 		if (c == '"') {
 			ss << "\\\"";
 		} else if (c == '\\') {
 			ss << "\\\\";
-		} else {
+		} else if (c == '\n') {
+			ss << "\\n";
+		} else if (c == '\r') {
+			ss << "\\r";
+		} else if (isprint(c)) {
 			ss << c;
+		} else {
+			constexpr char hex[] = "0123456789abcdef";
+			int x = int{ static_cast<uint8_t>(c) };
+			ss << "\\x" << hex[x / 16] << hex[x % 16];
 		}
 	}
 }
