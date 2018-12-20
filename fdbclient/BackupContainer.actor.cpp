@@ -110,6 +110,10 @@ std::string BackupDescription::toString() const {
 			else
 				s = format("%lld (unknown)", v);
 		}
+		else if(maxLogEnd.present()) {
+			double days = double(maxLogEnd.get() - v) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
+			s = format("%lld (maxLogEnd %s%.2f days)", v, days < 0 ? "+" : "-", days);
+		}
 		else {
 			s = format("%lld", v);
 		}
