@@ -2062,6 +2062,19 @@ bool fileExists(std::string const& filename) {
 	return true;
 }
 
+bool directoryExists(std::string const& path) {
+#ifdef _WIN32
+	DWORD bits = ::GetFileAttributes(path.c_str());
+	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
+#else
+	DIR *d = opendir(path.c_str());
+	if(d == nullptr)
+		return false;
+	closedir(d);
+	return true;
+#endif
+}
+
 int64_t fileSize(std::string const& filename) {
 #ifdef _WIN32
 	struct _stati64 file_status;

@@ -162,6 +162,7 @@ public:
 
 	// Create the container
 	virtual Future<Void> create() = 0;
+	virtual Future<bool> exists() = 0;
 
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;

@@ -200,6 +200,7 @@ public:
 
 	// Create the container
 	virtual Future<Void> create() = 0;
+	virtual Future<bool> exists() = 0;
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
@@ -549,6 +550,12 @@ public:
 		TraceEvent("BackupContainerDescribe1")
 			.detail("URL", bc->getURL())
 			.detail("LogStartVersionOverride", logStartVersionOverride);
+
+		bool e = wait(bc->exists());
+		if(!e) {
+			TraceEvent(SevWarnAlways, "BackupContainerDoesNotExist").detail("URL", bc->getURL());
+			throw backup_does_not_exist();
+		}
 
 		// If logStartVersion is relative, then first do a recursive call without it to find the max log version
 		// from which to resolve the relative version.
@@ -1115,6 +1122,11 @@ public:
 		return Void();
 	}
 
+	// The container exists if the folder it resides in exists
+	Future<bool> exists() {
+		return directoryExists(m_path);
+	}
+
 	Future<Reference<IAsyncFile>> readFile(std::string path) {
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 		// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
@@ -1361,7 +1373,18 @@ public:
 		return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
 	}
 
+	// The container exists if the index entry in the blob bucket exists
+	Future<bool> exists() {
+		return m_bstore->objectExists(m_bucket, indexEntry());
+	}
+
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
+		bool e = wait(bc->exists());
+		if(!e) {
+			TraceEvent(SevWarnAlways, "BackupContainerDoesNotExist").detail("URL", bc->getURL());
+			throw backup_does_not_exist();
+		}
+
 		// First delete everything under the data prefix in the bucket
 		Void _ = wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
 

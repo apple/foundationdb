@@ -1901,12 +1901,11 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 		state Future<Void> done = c->deleteContainer(&numDeleted);
 
 		state int lastUpdate = -1;
-		printf("Deleting data...\n");
+		printf("Deleting %s...\n", destinationContainer.c_str());
 
 		loop {
 			choose {
 				when ( Void _ = wait(done) ) {
-					printf("The entire container has been deleted.\n");
 					break;
 				}
 				when ( Void _ = wait(delay(5)) ) {
@@ -1918,6 +1917,7 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 			}
 		}
 		printf("\r%d objects deleted\n", numDeleted);
+		printf("The entire container has been deleted.\n");
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
