@@ -56,6 +56,7 @@ struct RestoreInterface {
 // NOTE: is cmd's Endpoint token the same with the request's token for the same node?
 struct RestoreCommandInterface {
 	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
+//	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
 
 	bool operator == (RestoreCommandInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreCommandInterface const& r) const { return id() != r.id(); }
@@ -70,6 +71,7 @@ struct RestoreCommandInterface {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ar & cmd;
+//		ar & cmd & request;
 	}
 };
 

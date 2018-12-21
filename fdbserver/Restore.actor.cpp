@@ -28,6 +28,7 @@
 //#include "FileBackupAgent.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/BackupContainer.h"
 
 #include <ctime>
 #include <climits>
@@ -303,7 +304,7 @@ public:
 	}
 
 };
-class RestoreConfig;
+
 typedef RestoreConfig::RestoreFile RestoreFile;
 
 
@@ -462,7 +463,563 @@ void registerBackupMutationForAll(Version empty);
 bool isKVOpsSorted();
 bool allOpsAreKnown();
 
+// TODO: RestoreStatus
+// Information of the backup files to be restored, and the restore progress
+struct RestoreStatus {
+//	std::vector<RestoreFile> files;
+	std::map<RestoreFile, int> files; // first: restore files, second: the current starting point to restore the file
+};
+
+RestoreStatus restoreStatus;
+
 ////-- Restore code declaration END
+
+//// --- Some common functions
+
+ACTOR static Future<Optional<RestorableFileSet>> prepareRestoreFiles(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
+		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
+		Reference<RestoreConfig> restore_input) {
+ 	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+
+ 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
+	wait(checkDatabaseLock(tr, uid));
+
+ 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+ 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
+ 	// Get old restore config for this tag
+ 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
+ 	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
+ 	TraceEvent("PrepareRestoreMX").detail("OldUidAndAbortedPresent", oldUidAndAborted.present());
+ 	if(oldUidAndAborted.present()) {
+ 		if (oldUidAndAborted.get().first == uid) {
+ 			if (oldUidAndAborted.get().second) {
+ 				throw restore_duplicate_uid();
+ 			}
+ 			else {
+ 				return Void();
+ 			}
+ 		}
+
+ 		state Reference<RestoreConfig> oldRestore = Reference<RestoreConfig>(new RestoreConfig(oldUidAndAborted.get().first));
+
+ 		// Make sure old restore for this tag is not runnable
+ 		bool runnable = wait(oldRestore->isRunnable(tr));
+
+ 		if (runnable) {
+ 			throw restore_duplicate_tag();
+ 		}
+
+ 		// Clear the old restore config
+ 		oldRestore->clear(tr);
+ 	}
+
+ 	KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+ 	Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
+ 	if (existingRows.size() > 0) {
+ 		throw restore_destination_not_empty();
+ 	}
+
+ 	// Make new restore config
+ 	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
+
+ 	// Point the tag to the new uid
+	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
+ 	tag.set(tr, {uid, false});
+
+ 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
+
+ 	// Configure the new restore
+ 	restore->tag().set(tr, tagName.toString());
+ 	restore->sourceContainer().set(tr, bc);
+ 	restore->stateEnum().set(tr, ERestoreState::QUEUED);
+ 	restore->restoreVersion().set(tr, restoreVersion);
+ 	restore->restoreRange().set(tr, restoreRange);
+ 	// this also sets restore.add/removePrefix.
+ 	restore->initApplyMutations(tr, addPrefix, removePrefix);
+	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
+	restore_input = restore;
+	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
+
+
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+	if(!restorable.present())
+ 		throw restore_missing_data();
+
+	/*
+	state std::vector<RestoreConfig::RestoreFile> files;
+
+ 	for(const RangeFile &f : restorable.get().ranges) {
+// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
+ 		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
+ 		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
+ 	}
+ 	for(const LogFile &f : restorable.get().logs) {
+// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
+		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
+ 		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
+ 	}
+
+	 */
+
+	return restorable;
+
+ }
+
+
+ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
+		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
+		Reference<RestoreConfig> restore_input, VectorRef<RestoreFile> files) {
+ 	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+
+ 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
+	wait(checkDatabaseLock(tr, uid));
+
+ 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+ 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
+ 	// Get old restore config for this tag
+ 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
+ 	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
+ 	TraceEvent("PrepareRestoreMX").detail("OldUidAndAbortedPresent", oldUidAndAborted.present());
+ 	if(oldUidAndAborted.present()) {
+ 		if (oldUidAndAborted.get().first == uid) {
+ 			if (oldUidAndAborted.get().second) {
+ 				throw restore_duplicate_uid();
+ 			}
+ 			else {
+ 				return Void();
+ 			}
+ 		}
+
+ 		state Reference<RestoreConfig> oldRestore = Reference<RestoreConfig>(new RestoreConfig(oldUidAndAborted.get().first));
+
+ 		// Make sure old restore for this tag is not runnable
+ 		bool runnable = wait(oldRestore->isRunnable(tr));
+
+ 		if (runnable) {
+ 			throw restore_duplicate_tag();
+ 		}
+
+ 		// Clear the old restore config
+ 		oldRestore->clear(tr);
+ 	}
+
+ 	KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+ 	Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
+ 	if (existingRows.size() > 0) {
+ 		throw restore_destination_not_empty();
+ 	}
+
+ 	// Make new restore config
+ 	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
+
+ 	// Point the tag to the new uid
+	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
+ 	tag.set(tr, {uid, false});
+
+ 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
+
+ 	// Configure the new restore
+ 	restore->tag().set(tr, tagName.toString());
+ 	restore->sourceContainer().set(tr, bc);
+ 	restore->stateEnum().set(tr, ERestoreState::QUEUED);
+ 	restore->restoreVersion().set(tr, restoreVersion);
+ 	restore->restoreRange().set(tr, restoreRange);
+ 	// this also sets restore.add/removePrefix.
+ 	restore->initApplyMutations(tr, addPrefix, removePrefix);
+	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
+	restore_input = restore;
+	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
+
+
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+	if(!restorable.present())
+ 		throw restore_missing_data();
+
+
+//	state std::vector<RestoreFile> files;
+
+ 	for(const RangeFile &f : restorable.get().ranges) {
+// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
+ 		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
+		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
+ 		files.push_back(file);
+ 	}
+ 	for(const LogFile &f : restorable.get().logs) {
+// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
+		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
+		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
+		files.push_back(file);
+ 	}
+
+	return Void();
+
+ }
+
+
+ ACTOR static Future<Void> _parseRangeFileToMutations(Database cx, Reference<RestoreConfig> restore_input,
+ 													 RestoreFile rangeFile_input, int64_t readOffset_input, int64_t readLen_input,
+ 													 Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
+ 													 ) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx)); // Used to clear the range where the KV will be applied.
+
+ 	TraceEvent("ExecuteApplyRangeFileToDB_MX").detail("RestoreRange", restoreRange.contents().toString()).detail("AddPrefix", addPrefix.printable()).detail("RemovePrefix", removePrefix.printable());
+
+ 	state Reference<RestoreConfig> restore = restore_input;
+ 	state RestoreFile rangeFile = rangeFile_input;
+ 	state int64_t readOffset = readOffset_input;
+ 	state int64_t readLen = readLen_input;
+
+
+ 	TraceEvent("FileRestoreRangeStart_MX")
+ 			.suppressFor(60)
+ 			.detail("RestoreUID", restore->getUid())
+ 			.detail("FileName", rangeFile.fileName)
+ 			.detail("FileVersion", rangeFile.version)
+ 			.detail("FileSize", rangeFile.fileSize)
+ 			.detail("ReadOffset", readOffset)
+ 			.detail("ReadLen", readLen);
+ 	//MX: the set of key value version is rangeFile.version. the key-value set in the same range file has the same version
+
+ 	TraceEvent("ReadFileStart").detail("Filename", rangeFile.fileName);
+ 	state Reference<IAsyncFile> inFile = wait(bc->readFile(rangeFile.fileName));
+ 	TraceEvent("ReadFileFinish").detail("Filename", rangeFile.fileName).detail("FileRefValid", inFile.isValid());
+
+
+ 	state Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
+ 	TraceEvent("ExtractApplyRangeFileToDB_MX").detail("BlockDataVectorSize", blockData.contents().size())
+ 			.detail("RangeFirstKey", blockData.front().key.printable()).detail("RangeLastKey", blockData.back().key.printable());
+
+ 	// First and last key are the range for this file
+ 	state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+ 	printf("[INFO] RangeFile:%s KeyRange:%s, restoreRange:%s\n",
+ 			rangeFile.fileName.c_str(), fileRange.toString().c_str(), restoreRange.toString().c_str());
+
+ 	// If fileRange doesn't intersect restore range then we're done.
+ 	if(!fileRange.intersects(restoreRange)) {
+ 		TraceEvent("ExtractApplyRangeFileToDB_MX").detail("NoIntersectRestoreRange", "FinishAndReturn");
+ 		return Void();
+ 	}
+
+ 	// We know the file range intersects the restore range but there could still be keys outside the restore range.
+ 	// Find the subvector of kv pairs that intersect the restore range.  Note that the first and last keys are just the range endpoints for this file
+ 	int rangeStart = 1;
+ 	int rangeEnd = blockData.size() - 1;
+ 	// Slide start forward, stop if something in range is found
+	// Move rangeStart and rangeEnd until they is within restoreRange
+ 	while(rangeStart < rangeEnd && !restoreRange.contains(blockData[rangeStart].key))
+ 		++rangeStart;
+ 	// Side end backward, stop if something in range is found
+ 	while(rangeEnd > rangeStart && !restoreRange.contains(blockData[rangeEnd - 1].key))
+ 		--rangeEnd;
+
+ 	// MX: now data only contains the kv mutation within restoreRange
+ 	state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
+ 	printf("[INFO] RangeFile:%s blockData entry size:%d recovered data size:%d\n", rangeFile.fileName.c_str(), blockData.size(), data.size());
+
+ 	// Shrink file range to be entirely within restoreRange and translate it to the new prefix
+ 	// First, use the untranslated file range to create the shrunk original file range which must be used in the kv range version map for applying mutations
+ 	state KeyRange originalFileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin), std::min(fileRange.end,   restoreRange.end));
+
+ 	// Now shrink and translate fileRange
+ 	Key fileEnd = std::min(fileRange.end,   restoreRange.end);
+ 	if(fileEnd == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix)) ) {
+ 		fileEnd = addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix);
+ 	} else {
+ 		fileEnd = fileEnd.removePrefix(removePrefix).withPrefix(addPrefix);
+ 	}
+ 	fileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin).removePrefix(removePrefix).withPrefix(addPrefix),fileEnd);
+
+ 	state int start = 0;
+ 	state int end = data.size();
+ 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+ 	state int kvCount = 0;
+
+ 	tr->reset();
+ 	//MX: This is where the key-value pair in range file is applied into DB
+ 	TraceEvent("ExtractApplyRangeFileToDB_MX").detail("Progress", "StartApplyKVToDB").detail("DataSize", data.size()).detail("DataSizeLimit", dataSizeLimit);
+ 	loop {
+ 		try {
+ 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+ 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ 			state int i = start;
+ 			state int txBytes = 0;
+ 			state int iend = start;
+
+ 			// find iend that results in the desired transaction size
+ 			for(; iend < end && txBytes < dataSizeLimit; ++iend) {
+ 				txBytes += data[iend].key.expectedSize();
+ 				txBytes += data[iend].value.expectedSize();
+ 			}
+
+ 			// Clear the range we are about to set.
+ 			// If start == 0 then use fileBegin for the start of the range, else data[start]
+ 			// If iend == end then use fileEnd for the end of the range, else data[iend]
+ 			state KeyRange trRange = KeyRangeRef((start == 0 ) ? fileRange.begin : data[start].key.removePrefix(removePrefix).withPrefix(addPrefix)
+ 					, (iend == end) ? fileRange.end   : data[iend ].key.removePrefix(removePrefix).withPrefix(addPrefix));
+
+ 			// Clear the range before we set it.
+ 			tr->clear(trRange);
+
+ 			for(; i < iend; ++i) {
+ //				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+ //				tr->set(data[i].key.removePrefix(removePrefix).withPrefix(addPrefix), data[i].value);
+ 				//MXX: print out the key value version, and operations.
+ //				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), rangeFile.version);
+// 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
+// 					.detail("Version", rangeFile.version).detail("Op", "set");
+////				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
+////						getHexString(data[i].key.c_str(), getHexString(data[i].value).c_str(), data[i].key.size(), data[i].value.size());
+
+				//NOTE: Should NOT removePrefix and addPrefix for the backup data!
+				// In other words, the following operation is wrong:  data[i].key.removePrefix(removePrefix).withPrefix(addPrefix)
+ 				MutationRef m(MutationRef::Type::SetValue, data[i].key, data[i].value); //ASSUME: all operation in range file is set.
+				++kvCount;
+
+ 				// TODO: we can commit the kv operation into DB.
+ 				// Right now, we cache all kv operations into kvOps, and apply all kv operations later in one place
+ 				if ( kvOps.find(rangeFile.version) == kvOps.end() ) { // Create the map's key if mutation m is the first on to be inserted
+ 					//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
+ 					kvOps.insert(std::make_pair(rangeFile.version, VectorRef<MutationRef>()));
+ 				}
+
+ 				ASSERT(kvOps.find(rangeFile.version) != kvOps.end());
+				kvOps[rangeFile.version].push_back_deep(kvOps[rangeFile.version].arena(), m);
+
+ 			}
+
+ 			// Add to bytes written count
+ //			restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
+ //
+ 			state Future<Void> checkLock = checkDatabaseLock(tr, restore->getUid());
+
+ 			wait( checkLock );
+
+ 			wait(tr->commit());
+
+ 			TraceEvent("FileRestoreCommittedRange_MX")
+ 					.suppressFor(60)
+ 					.detail("RestoreUID", restore->getUid())
+ 					.detail("FileName", rangeFile.fileName)
+ 					.detail("FileVersion", rangeFile.version)
+ 					.detail("FileSize", rangeFile.fileSize)
+ 					.detail("ReadOffset", readOffset)
+ 					.detail("ReadLen", readLen)
+ //					.detail("CommitVersion", tr->getCommittedVersion())
+ 					.detail("BeginRange", printable(trRange.begin))
+ 					.detail("EndRange", printable(trRange.end))
+ 					.detail("StartIndex", start)
+ 					.detail("EndIndex", i)
+ 					.detail("DataSize", data.size())
+ 					.detail("Bytes", txBytes)
+ 					.detail("OriginalFileRange", printable(originalFileRange));
+
+
+ 			TraceEvent("ExtraApplyRangeFileToDB_ENDMX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[rangeFile.version].size());
+
+ 			// Commit succeeded, so advance starting point
+ 			start = i;
+
+ 			if(start == end) {
+ 				TraceEvent("ExtraApplyRangeFileToDB_MX").detail("Progress", "DoneApplyKVToDB");
+ 				printf("[INFO] RangeFile:%s: the number of kv operations = %d\n", rangeFile.fileName.c_str(), kvCount);
+ 				return Void();
+ 			}
+ 			tr->reset();
+ 		} catch(Error &e) {
+ 			if(e.code() == error_code_transaction_too_large)
+ 				dataSizeLimit /= 2;
+ 			else
+ 				wait(tr->onError(e));
+ 		}
+ 	}
+
+ }
+
+
+ ACTOR static Future<Void> _parseLogFileToMutations(Database cx, Reference<RestoreConfig> restore_input,
+ 														   RestoreFile logFile_input, int64_t readOffset_input, int64_t readLen_input,
+ 														   Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
+ 														   ) {
+ 	state Reference<RestoreConfig> restore = restore_input;
+
+ 	state RestoreFile logFile = logFile_input;
+ 	state int64_t readOffset = readOffset_input;
+ 	state int64_t readLen = readLen_input;
+
+ 	TraceEvent("FileRestoreLogStart_MX")
+ 			.suppressFor(60)
+ 			.detail("RestoreUID", restore->getUid())
+ 			.detail("FileName", logFile.fileName)
+ 			.detail("FileBeginVersion", logFile.version)
+ 			.detail("FileEndVersion", logFile.endVersion)
+ 			.detail("FileSize", logFile.fileSize)
+ 			.detail("ReadOffset", readOffset)
+ 			.detail("ReadLen", readLen);
+
+ 	state Key mutationLogPrefix = restore->mutationLogPrefix();
+ 	TraceEvent("ReadLogFileStart").detail("LogFileName", logFile.fileName);
+ 	state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
+ 	TraceEvent("ReadLogFileFinish").detail("LogFileName", logFile.fileName).detail("FileInfo", logFile.toString());
+
+
+ 	printf("Parse log file:%s\n", logFile.fileName.c_str());
+ 	state Standalone<VectorRef<KeyValueRef>> data = wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
+ 	//state Standalone<VectorRef<MutationRef>> data = wait(fileBackup::decodeLogFileBlock_MX(inFile, readOffset, readLen)); //Decode log file
+ 	TraceEvent("ReadLogFileFinish").detail("LogFileName", logFile.fileName).detail("DecodedDataSize", data.contents().size());
+ 	printf("ReadLogFile, raw data size:%d\n", data.size());
+
+ 	state int start = 0;
+ 	state int end = data.size();
+ 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+	state int kvCount = 0;
+
+ //	tr->reset();
+ 	loop {
+ //		try {
+ 			printf("Process start:%d where end=%d\n", start, end);
+ 			if(start == end)
+ 				return Void();
+
+ //			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+ //			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ 			state int i = start;
+ 			state int txBytes = 0;
+ 			for(; i < end && txBytes < dataSizeLimit; ++i) {
+ 				Key k = data[i].key.withPrefix(mutationLogPrefix);
+ 				ValueRef v = data[i].value;
+ //				tr->set(k, v);
+ 				txBytes += k.expectedSize();
+ 				txBytes += v.expectedSize();
+ 				//MXX: print out the key value version, and operations.
+ 				//printf("LogFile [key:%s, value:%s, version:%ld, op:NoOp]\n", k.printable().c_str(), v.printable().c_str(), logFile.version);
+ //				printf("LogFile [KEY:%s, VALUE:%s, VERSION:%ld, op:NoOp]\n", getHexString(k).c_str(), getHexString(v).c_str(), logFile.version);
+ //				printBackupMutationRefValueHex(v, " |\t");
+ /*
+ 				TraceEvent("PrintMutationLogFile_MX").detail("Key",  getHexString(k)).detail("Value", getHexString(v))
+ 						.detail("Version", logFile.version).detail("Op", "NoOps");
+
+ 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
+ 				registerBackupMutation(data[i].value, logFile.version);
+ */
+ //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
+ 				concatenateBackupMutation(data[i].value, data[i].key);
+ 			}
+
+ 			// Add to bytes written count
+ //			restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
+ //			wait(tr->commit());
+
+ 			TraceEvent("FileRestoreCommittedLog")
+ 					.suppressFor(60)
+ 					.detail("RestoreUID", restore->getUid())
+ 					.detail("FileName", logFile.fileName)
+ 					.detail("FileBeginVersion", logFile.version)
+ 					.detail("FileEndVersion", logFile.endVersion)
+ 					.detail("FileSize", logFile.fileSize)
+ 					.detail("ReadOffset", readOffset)
+ 					.detail("ReadLen", readLen)
+ //					.detail("CommitVersion", tr->getCommittedVersion())
+ 					.detail("StartIndex", start)
+ 					.detail("EndIndex", i)
+ 					.detail("DataSize", data.size())
+ 					.detail("Bytes", txBytes);
+ //					.detail("TaskInstance", (uint64_t)this);
+
+ 			TraceEvent("ExtractApplyLogFileToDBEnd_MX").detail("KVOpsMapSizeMX", kvOps.size()).detail("MutationSize", kvOps[logFile.version].size());
+
+ 			// Commit succeeded, so advance starting point
+ 			start = i;
+ //			tr->reset();
+ //		} catch(Error &e) {
+ //			if(e.code() == error_code_transaction_too_large)
+ //				dataSizeLimit /= 2;
+ //			else
+ //				wait(tr->onError(e));
+ //		}
+ 	}
+
+ 	// return is in the above code
+ }
+
+
+
+ ACTOR Future<Void> applyKVOpsToDB(Database cx) {
+ 	state bool isPrint = false; //Debug message
+ 	state std::string typeStr = "";
+
+ 	if ( debug_verbose ) {
+		TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
+		printf("ApplyKVOPsToDB num_of_version:%d\n", kvOps.size());
+ 	}
+ 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = kvOps.begin();
+ 	state int count = 0;
+ 	for ( ; it != kvOps.end(); ++it ) {
+
+ 		if ( debug_verbose ) {
+			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
+ 		}
+ 		printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
+
+ 		state MutationRef m;
+ 		state int index = 0;
+ 		for ( ; index < it->second.size(); ++index ) {
+ 			m = it->second[index];
+ 			if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
+ 				typeStr = typeString[m.type];
+ 			else {
+ 				printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
+ 			}
+
+ 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+ 			loop {
+ 				try {
+ 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+ 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ 					if ( m.type == MutationRef::SetValue ) {
+ 						tr->set(m.param1, m.param2);
+ 					} else if ( m.type == MutationRef::ClearRange ) {
+ 						KeyRangeRef mutationRange(m.param1, m.param2);
+ 						tr->clear(mutationRange);
+ 					} else {
+ 						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
+ 					}
+
+ 					wait(tr->commit());
+					++count;
+ 					break;
+ 				} catch(Error &e) {
+ 					printf("ApplyKVOPsToDB transaction error:%s. Type:%d, Param1:%s, Param2:%s\n", e.what(),
+ 							m.type, getHexString(m.param1).c_str(), getHexString(m.param2).c_str());
+ 					wait(tr->onError(e));
+ 				}
+ 			}
+
+ 			if ( isPrint ) {
+ 				printf("\tApplyKVOPsToDB Version:%016lx MType:%s K:%s, V:%s K_size:%d V_size:%d\n", it->first, typeStr.c_str(),
+ 					   getHexString(m.param1).c_str(), getHexString(m.param2).c_str(), m.param1.size(), m.param2.size());
+
+ 				TraceEvent("ApplyKVOPsToDB\t\t").detail("Version", it->first)
+ 						.detail("MType", m.type).detail("MTypeStr", typeStr)
+ 						.detail("MKey", getHexString(m.param1))
+ 						.detail("MValueSize", m.param2.size())
+ 						.detail("MValue", getHexString(m.param2));
+ 			}
+ 		}
+ 	}
+
+ 	printf("ApplyKVOPsToDB number of kv mutations:%d\n", count);
+
+ 	return Void();
+}
+
 
 ////--- Restore Functions for the master role
 // Set roles (Loader or Applier) for workers
@@ -563,12 +1120,11 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 
 }
 
-//TODO: collect backup info
+//TODO: DONE: collectRestoreRequests
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
 	state int restoreId = 0;
 	state int checkNum = 0;
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests;
-
 
 	//wait for the restoreRequestTriggerKey to be set by the client/test workload
 	state ReadYourWritesTransaction tr2(cx);
@@ -621,6 +1177,277 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 
 	return restoreRequests;
 }
+
+void printRestorableFileSet(Optional<RestorableFileSet> files) {
+
+	printf("[INFO] RestorableFileSet num_of_range_files:%d num_of_log_files:%d\n",
+			files.get().ranges.size(), files.get().logs.size());
+	int index = 0;
+ 	for(const RangeFile &f : files.get().ranges) {
+ 		printf("\t[INFO] [RangeFile:%d]:%s\n", index, f.toString().c_str());
+ 		++index;
+ 	}
+ 	index = 0;
+ 	for(const LogFile &f : files.get().logs) {
+		printf("\t[INFO], [LogFile:%d]:%s\n", index, f.toString().c_str());
+		++index;
+ 	}
+
+ 	return;
+}
+
+std::vector<RestoreFile> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
+	std::vector<RestoreFile> files;
+
+ 	for(const RangeFile &f : fileSet.get().ranges) {
+ 		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
+ 	}
+ 	for(const LogFile &f : fileSet.get().logs) {
+ 		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
+ 	}
+
+ 	return files;
+}
+
+//TODO: collect back up files info
+ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request, VectorRef<RestoreFile> files) {
+	state Key tagName = request.tagName;
+	state Key url = request.url;
+	state bool waitForComplete = request.waitForComplete;
+	state Version targetVersion = request.targetVersion;
+	state bool verbose = request.verbose;
+	state KeyRange range = request.range;
+	state Key addPrefix = request.addPrefix;
+	state Key removePrefix = request.removePrefix;
+	state bool lockDB = request.lockDB;
+	state UID randomUid = request.randomUid;
+	//state VectorRef<RestoreFile> files; // return result
+
+	//MX: Lock DB if it is not locked
+	printf("[INFO] RestoreRequest lockDB:%d\n", lockDB);
+	if ( lockDB == false ) {
+		printf("[WARNING] RestoreRequest lockDB:%d; we will forcibly lock db\n", lockDB);
+		lockDB = true;
+	}
+
+	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+
+	/*
+	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+	state BackupDescription desc = wait(bc->describeBackup());
+
+	wait(desc.resolveVersionTimes(cx));
+
+	printf("[INFO] Backup Description\n%s", desc.toString().c_str());
+	printf("[INFO] Restore for url:%s, lockDB:%d\n", url.toString().c_str(), lockDB);
+	if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
+		targetVersion = desc.maxRestorableVersion.get();
+
+	Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+
+	//Above is the restore master code
+	//Below is the agent code
+	printf("[INFO] collectBackupFiles: start parse restore request: %s\n", request.toString().c_str());
+
+	if(!restoreSet.present()) {
+		TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
+				.detail("BackupContainer", bc->getURL())
+				.detail("TargetVersion", targetVersion);
+		fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
+		throw restore_invalid_version();
+	} else {
+		printf("---To restore from the following files: num_logs_file:%d num_range_files:%d---\n",
+				restoreSet.get().logs.size(), restoreSet.get().ranges.size());
+		for (int i = 0; i < restoreSet.get().logs.size(); ++i) {
+			printf("log file:%s\n", restoreSet.get().logs[i].toString().c_str());
+		}
+		for (int i = 0; i < restoreSet.get().ranges.size(); ++i) {
+			printf("range file:%s\n", restoreSet.get().ranges[i].toString().c_str());
+		}
+	}
+	 */
+
+
+//
+//	if (verbose) {
+//		printf("[INFO] Restoring backup to version: %lld\n", (long long) targetVersion);
+//	}
+
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(randomUid));
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// NOTE: cannot declare  RestorableFileSet as state, it will requires construction function in compilation
+//			Optional<RestorableFileSet> fileSet = wait(prepareRestoreFiles(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig));
+			wait(prepareRestoreFilesV2(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig, files));
+			printf("[INFO] collectBackupFiles: num_of_files:%d. After prepareRestoreFiles(), restoreConfig is %s; TargetVersion is %ld (0x%lx)\n",
+					files.size(), restoreConfig->toString().c_str(), targetVersion, targetVersion);
+
+			TraceEvent("SetApplyEndVersion_MX").detail("TargetVersion", targetVersion);
+			restoreConfig->setApplyEndVersion(tr, targetVersion); //MX: TODO: This may need to be set at correct position and may be set multiple times?
+
+//			printRestorableFileSet(fileSet);
+//			files = getRestoreFiles(fileSet);
+
+			printf("[INFO] lockDB:%d before we finish prepareRestore()\n", lockDB);
+			if (lockDB)
+				wait(lockDatabase(tr, randomUid));
+			else
+				wait(checkDatabaseLock(tr, randomUid));
+
+			wait(tr->commit());
+
+
+			// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
+			// Order does not matter, they will be put in order when written to the restoreFileMap below.
+
+
+			break;
+		} catch(Error &e) {
+			if(e.code() != error_code_restore_duplicate_tag) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	return Void();
+}
+
+
+ACTOR Future<Void> extractRestoreFileToMutations(Database cx, std::vector<RestoreFile> files, RestoreRequest request,
+													Reference<RestoreConfig> restore, UID uid ) {
+	state Key tagName = request.tagName;
+	state Key url = request.url;
+	state bool waitForComplete = request.waitForComplete;
+	state Version targetVersion = request.targetVersion;
+	state bool verbose = request.verbose;
+	state KeyRange restoreRange = request.range;
+	state Key addPrefix = request.addPrefix;
+	state Key removePrefix = request.removePrefix;
+	state bool lockDB = request.lockDB;
+	state UID randomUid = request.randomUid;
+	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+
+ 	//Apply range and log files to DB
+ 	TraceEvent("ApplyBackupFileToDB").detail("FileSize", files.size());
+ 	printf("ApplyBackupFileToDB, FileSize:%d\n", files.size());
+ 	state int64_t beginBlock = 0;
+ 	state int64_t j = 0;
+ 	state int64_t readLen = 0;
+ 	state int64_t readOffset = 0;
+ 	state RestoreConfig::RestoreFile f;
+ 	state int fi = 0;
+ 	//Get the mutation log into the kvOps first
+ 	printf("Extra mutation logs...\n");
+ 	state std::vector<Future<Void>> futures;
+ 	for ( fi = 0; fi < files.size(); ++fi ) {
+ 		f = files[fi];
+ 		if ( !f.isRange ) {
+ 			TraceEvent("ExtractLogFileToDB_MX").detail("FileInfo", f.toString());
+ 			printf("ExtractMutationLogs: id:%d fileInfo:%s\n", fi, f.toString().c_str());
+ 			beginBlock = 0;
+ 			j = beginBlock *f.blockSize;
+ 			readLen = 0;
+ 			// For each block of the file
+ 			for(; j < f.fileSize; j += f.blockSize) {
+ 				readOffset = j;
+ 				readLen = std::min<int64_t>(f.blockSize, f.fileSize - j);
+ 				printf("ExtractMutationLogs: id:%d fileInfo:%s, readOffset:%d\n", fi, f.toString().c_str(), readOffset);
+
+ 				wait( _parseRangeFileToMutations(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
+
+ 				// Increment beginBlock for the file
+ 				++beginBlock;
+ 				TraceEvent("ApplyLogFileToDB_MX_Offset").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
+ 			}
+ 		}
+ 	}
+ 	printf("Wait for  futures of concatenate mutation logs, start waiting\n");
+ //	wait(waitForAll(futures));
+ 	printf("Wait for  futures of concatenate mutation logs, finish waiting\n");
+
+ 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
+ 	registerBackupMutationForAll(Version());
+ 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
+
+ 	//Get the range file into the kvOps later
+ 	printf("ApplyRangeFiles\n");
+ 	futures.clear();
+ 	for ( fi = 0; fi < files.size(); ++fi ) {
+ 		f = files[fi];
+ 		printf("ApplyRangeFiles:id:%d\n", fi);
+ 		if ( f.isRange ) {
+ //			TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString());
+ 			printf("ApplyRangeFileToDB_MX FileInfo:%s\n", f.toString().c_str());
+ 			beginBlock = 0;
+ 			j = beginBlock *f.blockSize;
+ 			readLen = 0;
+ 			// For each block of the file
+ 			for(; j < f.fileSize; j += f.blockSize) {
+ 				readOffset = j;
+ 				readLen = std::min<int64_t>(f.blockSize, f.fileSize - j);
+ 				futures.push_back( _parseLogFileToMutations(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
+
+ 				// Increment beginBlock for the file
+ 				++beginBlock;
+// 				TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
+ 			}
+ 		}
+ 	}
+ 	if ( futures.size() != 0 ) {
+ 		printf("Wait for  futures of applyRangeFiles, start waiting\n");
+ 		wait(waitForAll(futures));
+ 		printf("Wait for  futures of applyRangeFiles, finish waiting\n");
+ 	}
+
+ 	return Void();
+
+}
+
+ACTOR Future<Void> sanityCheckRestoreOps(Database cx, UID uid) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+ //	printf("Now print KVOps\n");
+ //	printKVOps();
+
+ //	printf("Now sort KVOps in increasing order of commit version\n");
+ //	sort(kvOps.begin(), kvOps.end()); //sort in increasing order of key using default less_than comparator
+ 	if ( isKVOpsSorted() ) {
+ 		printf("[CORRECT] KVOps is sorted by version\n");
+ 	} else {
+ 		printf("[ERROR]!!! KVOps is NOT sorted by version\n");
+ //		assert( 0 );
+ 	}
+
+ 	if ( allOpsAreKnown() ) {
+ 		printf("[CORRECT] KVOps all operations are known.\n");
+ 	} else {
+ 		printf("[ERROR]!!! KVOps has unknown mutation op. Exit...\n");
+ //		assert( 0 );
+ 	}
+
+ 	printf("Now apply KVOps to DB. start...\n");
+ 	printf("DB lock status:%d\n");
+ 	tr->reset();
+ 	wait(checkDatabaseLock(tr, uid));
+	wait(tr->commit());
+
+	return Void();
+
+}
+
+ACTOR Future<Void> applyRestoreOpsToDB(Database cx) {
+	//Apply the kv operations to DB
+	wait( applyKVOpsToDB(cx) );
+	printf("Now apply KVOps to DB, Done\n");
+
+	return Void();
+}
+
 
 //TODO: distribute every k MB backup data to loader to parse the data.
 // Note: before let loader to send data to applier, notify applier to receive loader's data
@@ -788,58 +1615,6 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state int checkNum = 0;
 	loop {
 		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
-		// the below commented code is in collectRestoreRequests()
-		/*
-		//watch for the restoreRequestTriggerKey
-		state ReadYourWritesTransaction tr2(cx);
-
-		loop {
-			try {
-				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
-				wait(tr2.commit());
-				printf("[INFO] set up watch for restoreRequestTriggerKey\n");
-				wait(watch4RestoreRequest);
-				printf("[INFO] restoreRequestTriggerKey watch is triggered\n");
-				break;
-			} catch(Error &e) {
-				printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
-				wait(tr2.onError(e));
-			}
-		};
-
-		loop {
-			try {
-				tr2.reset();
-				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				state Optional<Value> numRequests = wait(tr2.get(restoreRequestTriggerKey));
-				int num = decodeRestoreRequestTriggerValue(numRequests.get());
-				//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
-				printf("[INFO] RestoreRequestNum:%d\n", num);
-
-
-				// TODO: Create request request info. by using the same logic in the current restore
-				state Standalone<RangeResultRef> restoreRequestValues = wait(tr2.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
-				printf("Restore worker get restoreRequest: %sn", restoreRequestValues.toString().c_str());
-
-				ASSERT(!restoreRequestValues.more);
-
-				if(restoreRequestValues.size()) {
-					for ( auto &it : restoreRequestValues ) {
-						printf("Now decode restore request value...\n");
-						restoreRequests.push_back(decodeRestoreRequestValue(it.value));
-					}
-				}
-				break;
-			} catch(Error &e) {
-				printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
-				wait(tr2.onError(e));
-			}
-		};
-	 	*/
 
 		printf("[INFO] ---Print out the restore requests we received---\n");
 		// Print out the requests info
@@ -847,14 +1622,13 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			printf("[INFO] ---RestoreRequest info:%s\n", it.toString().c_str());
 		}
 
-
-		// Perform the restore requests
+		// Step: Perform the restore requests
 		for ( auto &it : restoreRequests ) {
 			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
 			Version ver = wait( restoreMX(cx, it) );
 		}
 
-		// Notify the finish of the restore by cleaning up the restore keys
+		// Step: Notify the finish of the restore by cleaning up the restore keys
 		state ReadYourWritesTransaction tr3(cx);
 		loop {
 			tr3.reset();
@@ -942,77 +1716,6 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 
  	return Void();
  }
-
- ACTOR Future<Void> applyKVOpsToDB(Database cx) {
- 	state bool isPrint = false; //Debug message
- 	state std::string typeStr = "";
-
- 	if ( debug_verbose ) {
-		TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
-		printf("ApplyKVOPsToDB num_of_version:%d\n", kvOps.size());
- 	}
- 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = kvOps.begin();
- 	state int count = 0;
- 	for ( ; it != kvOps.end(); ++it ) {
-
- 		if ( debug_verbose ) {
-			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
- 		}
- 		printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
-
- 		state MutationRef m;
- 		state int index = 0;
- 		for ( ; index < it->second.size(); ++index ) {
- 			m = it->second[index];
- 			if (  m.type >= MutationRef::Type::SetValue && m.type <= MutationRef::Type::MAX_ATOMIC_OP )
- 				typeStr = typeString[m.type];
- 			else {
- 				printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
- 			}
-
- 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-
- 			loop {
- 				try {
- 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
- 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
- 					if ( m.type == MutationRef::SetValue ) {
- 						tr->set(m.param1, m.param2);
- 					} else if ( m.type == MutationRef::ClearRange ) {
- 						KeyRangeRef mutationRange(m.param1, m.param2);
- 						tr->clear(mutationRange);
- 					} else {
- 						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
- 					}
-
- 					wait(tr->commit());
-					++count;
- 					break;
- 				} catch(Error &e) {
- 					printf("ApplyKVOPsToDB transaction error:%s. Type:%d, Param1:%s, Param2:%s\n", e.what(),
- 							m.type, getHexString(m.param1).c_str(), getHexString(m.param2).c_str());
- 					wait(tr->onError(e));
- 				}
- 			}
-
- 			if ( isPrint ) {
- 				printf("\tApplyKVOPsToDB Version:%016lx MType:%s K:%s, V:%s K_size:%d V_size:%d\n", it->first, typeStr.c_str(),
- 					   getHexString(m.param1).c_str(), getHexString(m.param2).c_str(), m.param1.size(), m.param2.size());
-
- 				TraceEvent("ApplyKVOPsToDB\t\t").detail("Version", it->first)
- 						.detail("MType", m.type).detail("MTypeStr", typeStr)
- 						.detail("MKey", getHexString(m.param1))
- 						.detail("MValueSize", m.param2.size())
- 						.detail("MValue", getHexString(m.param2));
- 			}
- 		}
- 	}
-
- 	printf("ApplyKVOPsToDB number of kv mutations:%d\n", count);
-
- 	return Void();
-}
 
 
 //--- Extract backup range and log file and get the mutation list
@@ -1318,18 +2021,19 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  }
 
 
+
 ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
 		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
 		Reference<RestoreConfig> restore_input) {
  	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
 
- 	printf("prepareRestore: the current db lock status is as below\n");
+ 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
 	wait(checkDatabaseLock(tr, uid));
 
  	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
  	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
- 	printf("MX:Prepare restore for the tag:%s\n", tagName.toString().c_str());
+ 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
  	// Get old restore config for this tag
  	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
  	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
@@ -1367,7 +2071,7 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
 
  	// Point the tag to the new uid
-	printf("MX:Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
+	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
  	tag.set(tr, {uid, false});
 
  	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
@@ -1380,13 +2084,11 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  	restore->restoreRange().set(tr, restoreRange);
  	// this also sets restore.add/removePrefix.
  	restore->initApplyMutations(tr, addPrefix, removePrefix);
-	printf("MX:Configure new restore config to :%s\n", restore->toString().c_str());
+	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
 	restore_input = restore;
-	printf("MX:Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
+	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
 
- 	TraceEvent("PrepareRestoreMX").detail("RestoreConfigConstruct", "Done");
-
-	printf("MX: lockDB:%d before we finish prepareRestore()\n", lockDB);
+	printf("[INFO] lockDB:%d before we finish prepareRestore()\n", lockDB);
  	if (lockDB)
  		wait(lockDatabase(tr, uid));
  	else
@@ -1461,7 +2163,7 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
 
  	// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
  	// Order does not matter, they will be put in order when written to the restoreFileMap below.
- 	state std::vector<RestoreConfig::RestoreFile> files;
+ 	state std::vector<RestoreFile> files;
 
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
@@ -1643,6 +2345,7 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 		lockDB = true;
 	}
 
+	/*
 
 	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 	state BackupDescription desc = wait(bc->describeBackup());
@@ -1683,6 +2386,7 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 		printf("Restoring backup to version: %lld\n", (long long) targetVersion);
 		TraceEvent("RestoreBackupMX").detail("TargetVersion", (long long) targetVersion);
 	}
+	*/
 
 
 
@@ -1692,22 +2396,30 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state std::vector<RestoreFile> files = wait( collectBackupFiles(cx, request) );
+
+			/*
+			// prepareRestore will set the restoreConfig based on the other input parameters
 			wait(prepareRestore(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig));
-			printf("MX:After prepareRestore() restoreConfig becomes :%s\n", restoreConfig->toString().c_str());
-			printf("MX: TargetVersion:%ld (0x%lx)\n", targetVersion, targetVersion);
+			printf("[INFO] After prepareRestore() restoreConfig becomes :%s\n", restoreConfig->toString().c_str());
+			printf("[INFO] TargetVersion:%ld (0x%lx)\n", targetVersion, targetVersion);
 
 			TraceEvent("SetApplyEndVersion_MX").detail("TargetVersion", targetVersion);
 			restoreConfig->setApplyEndVersion(tr, targetVersion); //MX: TODO: This may need to be set at correct position and may be set multiple times?
 
 			wait(tr->commit());
+			*/
+
 			// MX: Now execute the restore: Step 1 get the restore files (range and mutation log) name
 			// At the end of extractBackupData, we apply the mutation to DB
-			wait( extractBackupData(cx, restoreConfig, randomUid, request) );
+			//wait( extractBackupData(cx, restoreConfig, randomUid, request) );
+			wait( extractRestoreFileToMutations(cx, files, request, restoreConfig, randomUid) );
+			wait( sanityCheckRestoreOps(cx, randomUid) );
+			wait( applyRestoreOpsToDB(cx) );
+
 			printf("Finish my restore now!\n");
 
-			//Unlock DB
-			TraceEvent("RestoreMX").detail("UnlockDB", "Start");
-			//state RestoreConfig restore(task);
 
 			// MX: Unlock DB after restore
 			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
@@ -1717,8 +2429,6 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 
 			TraceEvent("RestoreMX").detail("UnlockDB", "Done");
 
-
-
 			break;
 		} catch(Error &e) {
 			if(e.code() != error_code_restore_duplicate_tag) {
@@ -1726,12 +2436,6 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 			}
 		}
 	}
-
-
-
-	//TODO: _finish() task: Make sure the restore is finished.
-
-	//TODO: Uncomment the following code later
 
 	return targetVersion;
 }
