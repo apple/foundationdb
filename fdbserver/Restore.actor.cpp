@@ -564,7 +564,63 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 }
 
 //TODO: collect backup info
-ACTOR Future<Void>
+ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
+	state int restoreId = 0;
+	state int checkNum = 0;
+	state Standalone<VectorRef<RestoreRequest>> restoreRequests;
+
+
+	//wait for the restoreRequestTriggerKey to be set by the client/test workload
+	state ReadYourWritesTransaction tr2(cx);
+
+	loop {
+		try {
+			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+			state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
+			wait(tr2.commit());
+			printf("[INFO] set up watch for restoreRequestTriggerKey\n");
+			wait(watch4RestoreRequest);
+			printf("[INFO] restoreRequestTriggerKey watch is triggered\n");
+			break;
+		} catch(Error &e) {
+			printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			wait(tr2.onError(e));
+		}
+	};
+
+	loop {
+		try {
+			tr2.reset();
+			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Optional<Value> numRequests = wait(tr2.get(restoreRequestTriggerKey));
+			int num = decodeRestoreRequestTriggerValue(numRequests.get());
+			//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
+			printf("[INFO] RestoreRequestNum:%d\n", num);
+
+			state Standalone<RangeResultRef> restoreRequestValues = wait(tr2.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+			printf("Restore worker get restoreRequest: %sn", restoreRequestValues.toString().c_str());
+
+			ASSERT(!restoreRequestValues.more);
+
+			if(restoreRequestValues.size()) {
+				for ( auto &it : restoreRequestValues ) {
+					printf("Now decode restore request value...\n");
+					restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+				}
+			}
+			break;
+		} catch(Error &e) {
+			printf("[WARNING] Transaction error: collect restore requests. Error:%s\n", e.name());
+			wait(tr2.onError(e));
+		}
+	};
+
+
+	return restoreRequests;
+}
 
 //TODO: distribute every k MB backup data to loader to parse the data.
 // Note: before let loader to send data to applier, notify applier to receive loader's data
@@ -727,11 +783,13 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	printf("[INFO]---MX: Perform the restore in the master now---\n");
 
 	// ----------------Restore code START
+	// Step: Collect restore requests
 	state int restoreId = 0;
 	state int checkNum = 0;
 	loop {
-		state vector<RestoreRequest> restoreRequests;
-
+		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
+		// the below commented code is in collectRestoreRequests()
+		/*
 		//watch for the restoreRequestTriggerKey
 		state ReadYourWritesTransaction tr2(cx);
 
@@ -781,53 +839,14 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				wait(tr2.onError(e));
 			}
 		};
+	 	*/
 
-		/*
-
-		loop {
-			state Transaction tr2(cx);
-			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				//TraceEvent("CheckRestoreRequestTrigger");
-				printf("CheckRestoreRequestTrigger:%d\n", checkNum);
-				checkNum++;
-
-				state Optional<Value> numRequests = wait(tr2.get(restoreRequestTriggerKey));
-				if ( !numRequests.present() ) { // restore has not been triggered yet
-					TraceEvent("CheckRestoreRequestTrigger").detail("SecondsOfWait", 5);
-					wait( delay(5.0) );
-					continue;
-				}
-				int num = decodeRestoreRequestTriggerValue(numRequests.get());
-				//TraceEvent("RestoreRequestKey").detail("NumRequests", num);
-				printf("RestoreRequestNum:%d\n", num);
-
-				// TODO: Create request request info. by using the same logic in the current restore
-				state Standalone<RangeResultRef> restoreRequestValues = wait(tr2.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
-				printf("Restore worker get restoreRequest: %sn", restoreRequestValues.toString().c_str());
-
-				ASSERT(!restoreRequestValues.more);
-
-				if(restoreRequestValues.size()) {
-					for ( auto &it : restoreRequestValues ) {
-						printf("Now decode restore request value...\n");
-						restoreRequests.push_back(decodeRestoreRequestValue(it.value));
-					}
-				}
-				break;
-			} catch( Error &e ) {
-				TraceEvent("RestoreAgentLeaderErrorTr2").detail("ErrorCode", e.code()).detail("ErrorName", e.name());
-				printf("RestoreAgentLeaderErrorTr2 Error code:%d name:%s\n", e.code(), e.name());
-				wait( tr2.onError(e) );
-			}
-		}
-		 */
 		printf("[INFO] ---Print out the restore requests we received---\n");
 		// Print out the requests info
 		for ( auto &it : restoreRequests ) {
 			printf("[INFO] ---RestoreRequest info:%s\n", it.toString().c_str());
 		}
+
 
 		// Perform the restore requests
 		for ( auto &it : restoreRequests ) {

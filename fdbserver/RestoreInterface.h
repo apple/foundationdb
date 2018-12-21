@@ -161,6 +161,12 @@ struct RestoreRequest {
 													addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
 													randomUid(randomUid) {}
 
+
+//	RestoreRequest(Arena& to, const RestoreRequest& from) : index(index), tagName(tagName), url(url), waitForComplete(waitForComplete),
+//								targetVersion(targetVersion), verbose(verbose), range(range),
+//								addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
+//								randomUid(randomUid) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar & index & tagName & url &  waitForComplete & targetVersion & verbose & range & addPrefix & removePrefix & lockDB & randomUid &
@@ -174,6 +180,30 @@ struct RestoreRequest {
 			   + " removePrefix:" + removePrefix.contents().toString() + " lockDB:" + std::to_string(lockDB) + " randomUid:" + randomUid.toString();
 	}
 };
+
+/*
+// To pass struct RestoreRequest as a reference without affecting the serialization functions
+struct RestoreRequestConfig : RestoreRequest, public ReferenceCounted<RestoreRequestConfig>{
+//	explicit RestoreRequestConfig(RestoreRequest req) : index(req.index), tagName(req.tagName), url(req.url), waitForComplete(req.waitForComplete),
+//		targetVersion(req.targetVersion), verbose(req.verbose), range(req.range),
+//		addPrefix(req.addPrefix), removePrefix(req.removePrefix), lockDB(req.lockDB),
+//		randomUid(req.randomUid) {}
+	explicit RestoreRequestConfig(RestoreRequest req) {
+		index = req.index;
+		tagName = req.tagName;
+		url = req.url;
+		waitForComplete = req.waitForComplete;
+		targetVersion = req.targetVersion;
+		verbose = req.verbose;
+		range = req.range;
+		addPrefix = req.addPrefix;
+		removePrefix = req.removePrefix;
+		lockDB = req.lockDB;
+		randomUid = req.randomUid;
+	}
+
+};
+*/
 
 struct RestoreReply {
 	int replyData;
