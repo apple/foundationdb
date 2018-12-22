@@ -55,6 +55,18 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 	return s;
 }
 
+void BackupFileList::toStream(FILE *fout) const {
+	for(const RangeFile &f : ranges) {
+		fprintf(fout, "range %lld %s\n", f.fileSize, f.fileName.c_str());
+	}
+	for(const LogFile &f : logs) {
+		fprintf(fout, "log %lld %s\n", f.fileSize, f.fileName.c_str());
+	}
+	for(const KeyspaceSnapshotFile &f : snapshots) {
+		fprintf(fout, "snapshotManifest %lld %s\n", f.totalSize, f.fileName.c_str());
+	}
+}
+
 std::string formatTime(int64_t t) {
 	time_t curTime = (time_t)t;
 	char buffer[128];
@@ -502,13 +514,13 @@ public:
 		});
 	}
 
-	// List snapshots which have been fully written, in sorted beginVersion order.
-	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots() {
+	// List snapshots which have been fully written, in sorted beginVersion order, which start before end and finish on or after begin
+	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots(Version begin = 0, Version end = std::numeric_limits<Version>::max()) {
 		return map(listFiles("snapshots/"), [=](const FilesAndSizesT &files) {
 			std::vector<KeyspaceSnapshotFile> results;
 			KeyspaceSnapshotFile sf;
 			for(auto &f : files) {
-				if(pathToKeyspaceSnapshotFile(sf, f.first))
+				if(pathToKeyspaceSnapshotFile(sf, f.first) && sf.beginVersion < end && sf.endVersion >= begin)
 					results.push_back(sf);
 			}
 			std::sort(results.begin(), results.end());
@@ -516,16 +528,18 @@ public:
 		});
 	}
 
-	ACTOR static Future<FullBackupListing> dumpFileList_impl(Reference<BackupContainerFileSystem> bc) {
-		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(0, std::numeric_limits<Version>::max());
-		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots();
-		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(0, std::numeric_limits<Version>::max());
+	ACTOR static Future<BackupFileList> dumpFileList_impl(Reference<BackupContainerFileSystem> bc, Version begin, Version end) {
+		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(begin, end);
+		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(begin, end);
+		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(begin, end);
+
 		Void _ = wait(success(fRanges) && success(fSnapshots) && success(fLogs));
-		return FullBackupListing({fRanges.get(), fLogs.get(), fSnapshots.get()});
+
+		return BackupFileList({fRanges.get(), fLogs.get(), fSnapshots.get()});
 	}
 
-	Future<FullBackupListing> dumpFileList() {
-		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	Future<BackupFileList> dumpFileList(Version begin, Version end) {
+		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
 	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
@@ -1723,7 +1737,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	Void _ = wait(waitForAll(writes));
 
-	state FullBackupListing listing = wait(c->dumpFileList());
+	state BackupFileList listing = wait(c->dumpFileList());
 	ASSERT(listing.ranges.size() == nRangeFiles);
 	ASSERT(listing.logs.size() == logs.size());
 	ASSERT(listing.snapshots.size() == snapshots.size());
@@ -1769,7 +1783,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(d.snapshots.size() == 0);
 	ASSERT(!d.minLogBegin.present());
 
-	FullBackupListing empty = wait(c->dumpFileList());
+	BackupFileList empty = wait(c->dumpFileList());
 	ASSERT(empty.ranges.size() == 0);
 	ASSERT(empty.logs.size() == 0);
 	ASSERT(empty.snapshots.size() == 0);

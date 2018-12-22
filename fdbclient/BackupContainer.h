@@ -96,10 +96,12 @@ struct KeyspaceSnapshotFile {
 	}
 };
 
-struct FullBackupListing {
+struct BackupFileList {
 	std::vector<RangeFile> ranges;
 	std::vector<LogFile> logs;
 	std::vector<KeyspaceSnapshotFile> snapshots;
+
+	void toStream(FILE *fout) const;
 };
 
 // The byte counts here only include usable log files and byte counts from kvrange manifests
@@ -200,7 +202,7 @@ public:
 	// be after deleting all data prior to logStartVersionOverride.
 	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
-	virtual Future<FullBackupListing> dumpFileList() = 0;
+	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.
