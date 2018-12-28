@@ -30,7 +30,7 @@
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
 	template <class Ar>
-	void serialize(Ar& ar) { ar & prevOwner & myOwner & prevWrite; }
+	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
 };
 
 Future<MoveKeysLock> takeMoveKeysLock( Database const& cx, UID const& masterId );

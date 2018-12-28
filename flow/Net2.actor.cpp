@@ -1023,7 +1023,7 @@ struct TestGVR {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 

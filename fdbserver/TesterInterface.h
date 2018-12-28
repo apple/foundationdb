@@ -37,7 +37,7 @@ struct WorkloadInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & setup & start & check & metrics & stop;
+		serializer(ar, setup, start, check, metrics, stop);
 	}
 };
 
@@ -68,7 +68,7 @@ struct WorkloadRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & title & timeout & databasePingDelay & sharedRandomNumber & useDatabase & options & clientId & clientCount & reply & arena;
+		serializer(ar, title, timeout, databasePingDelay, sharedRandomNumber, useDatabase, options, clientId, clientCount, reply, arena);
 	}
 };
 
@@ -79,7 +79,7 @@ struct TesterInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recruitments;
+		serializer(ar, recruitments);
 	}
 };
 

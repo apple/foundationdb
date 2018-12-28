@@ -136,7 +136,7 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & _attribKey & _count;
+		serializer(ar, _attribKey, _count);
 		serializeReplicationPolicy(ar, _policy);
 	}
 
@@ -207,7 +207,7 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		int count = _policies.size();
-		ar & count;
+		serializer(ar, count);
 		_policies.resize(count);
 		for(int i = 0; i < count; i++) {
 			serializeReplicationPolicy(ar, _policies[i]);
@@ -233,7 +233,7 @@ template <class Ar>
 void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
 	if(Ar::isDeserializing) {
 		StringRef name;
-		ar & name;
+		serializer(ar, name);
 
 		if(name == LiteralStringRef("One")) {
 			PolicyOne* pointer = new PolicyOne();
@@ -261,7 +261,7 @@ void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
 	else {
 		std::string name = policy ? policy->name() : "None";
 		Standalone<StringRef> nameRef = StringRef(name);
-		ar & nameRef;
+		serializer(ar, nameRef);
 		if(name == "One") {
 			((PolicyOne*)policy.getPtr())->serialize(ar);
 		}

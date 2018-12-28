@@ -122,7 +122,7 @@ struct LeaderInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & changeID & serializedInfo & forward;
+		serializer(ar, changeID, serializedInfo, forward);
 	}
 };
 
@@ -136,7 +136,7 @@ struct GetLeaderRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & knownLeader & reply;
+		serializer(ar, key, knownLeader, reply);
 	}
 };
 

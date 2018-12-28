@@ -415,7 +415,7 @@ struct RCGroup {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & items & version & groupKey;
+		serializer(ar, items, version, groupKey);
 	}
 };
 
