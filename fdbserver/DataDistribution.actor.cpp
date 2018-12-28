@@ -154,7 +154,7 @@ public:
 	std::string getMachineIDsStr() {
 		std::stringstream ss;
 
-		if (this == NULL || machineIDs.empty()) return "[unset]";
+		if (machineIDs.empty()) return "[unset]";
 
 		for (auto& id : machineIDs) {
 			ss << id.contents().toString() << " ";
@@ -211,7 +211,7 @@ public:
 	virtual std::string getServerIDsStr() {
 		std::stringstream ss;
 
-		if (this == NULL || serverIDs.empty()) return "[unset]";
+		if (serverIDs.empty()) return "[unset]";
 
 		for (auto& id : serverIDs) {
 			ss << id.toString() << " ";
