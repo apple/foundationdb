@@ -48,7 +48,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & error_code;
+		serializer(ar, error_code);
 	}
 
 	Error() : error_code(invalid_error_code), flags(0) {}

@@ -170,10 +170,10 @@ public:
 		// SOMEDAY: specialize for space efficiency?
 		if (valid && Ar::isDeserializing)
 			(*(T *)&value).~T();
-		ar & valid;
+		serializer(ar, valid);
 		if (valid) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
 	}
 
@@ -247,10 +247,10 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
-		ar & error;
+		serializer(ar, error);
 		if (present()) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
 	}
 

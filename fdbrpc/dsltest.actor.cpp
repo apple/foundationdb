@@ -925,7 +925,7 @@ struct AddReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & sum;
+		serializer(ar, sum);
 	}
 };
 
@@ -938,7 +938,7 @@ struct AddRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & a & b & reply;
+		serializer(ar, a, b, reply);
 	}
 };
 

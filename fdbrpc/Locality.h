@@ -110,7 +110,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & _class & _source;
+		serializer(ar, _class, _source);
 	}
 };
 
@@ -188,10 +188,10 @@ public:
 			Standalone<StringRef> key;
 			Optional<Standalone<StringRef>> value;
 			uint64_t mapSize = (uint64_t)_data.size();
-			ar & mapSize;
+			serializer(ar, mapSize);
 			if (ar.isDeserializing) {
 				for (size_t i = 0; i < mapSize; i++) {
-					ar & key & value;
+					serializer(ar, key, value);
 					_data[key] = value;
 				}
 			}
@@ -199,24 +199,24 @@ public:
 				for (auto it = _data.begin(); it != _data.end(); it++) {
 					key = it->first;
 					value = it->second;
-					ar & key & value;
+					serializer(ar, key, value);
 				}
 			}
 		}
 		else {
 			ASSERT(ar.isDeserializing);
 			UID	zoneId, dcId, processId;
-			ar & zoneId & dcId;
+			serializer(ar, zoneId, dcId);
 			set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
 			set(keyDcId, Standalone<StringRef>(dcId.toString()));
 
 			if (ar.protocolVersion() >= 0x0FDB00A340000001LL) {
-				ar & processId;
+				serializer(ar, processId);
 				set(keyProcessId, Standalone<StringRef>(processId.toString()));
 			}
 			else {
 				int _machineClass = ProcessClass::UnsetClass;
-				ar & _machineClass;
+				serializer(ar, _machineClass);
 			}
 		}
 	}
@@ -258,7 +258,7 @@ struct ProcessData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & locality & processClass & address;
+		serializer(ar, locality, processClass, address);
 	}
 
 	struct sort_by_address {

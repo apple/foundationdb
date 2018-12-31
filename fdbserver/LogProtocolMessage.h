@@ -60,7 +60,7 @@ struct LogProtocolMessage {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		uint8_t poly = MutationRef::Reserved_For_LogProtocolMessage;
-		ar & poly;
+		serializer(ar, poly);
 		applyVersionStartingHere(ar, IncludeVersion());
 	}
 
