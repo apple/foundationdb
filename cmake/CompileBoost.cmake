@@ -1,4 +1,4 @@
-find_package(Boost 1.52)
+find_package(Boost 1.67)
 
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
