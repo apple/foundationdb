@@ -15,13 +15,12 @@ ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-DMCS := $(shell which dmcs)
 MCS := $(shell which mcs)
-ifneq ($(DMCS),)
-  MCS := $(DMCS)
+ifeq ($(MCS),)
+  MCS := $(shell which dmcs) 
 endif
 ifeq ($(MCS),)
-  MCS := /usr/bin/dmcs
+  MCS := /usr/bin/mcs
 endif
 
 CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
