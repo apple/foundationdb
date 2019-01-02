@@ -553,7 +553,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the log files. xml and json supported. \n");
+		   "                 Select the format of the log files. xml and json supported. \n");
 	printf("  -i ID, --machine_id ID\n"
 		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
 		   "                 to a random value shared by all fdbserver processes on this\n"
@@ -1132,11 +1132,11 @@ int main(int argc, char* argv[]) {
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
 					break;
-			    case OPT_TRACE_FORMAT:
-				    if (!selectTraceFormatter(args.OptionArg())) {
-					    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-				    }
-				    break;
+				case OPT_TRACE_FORMAT:
+					if (!selectTraceFormatter(args.OptionArg())) {
+						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+					}
+					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
 					args.OptionArg();

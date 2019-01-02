@@ -403,8 +403,8 @@ static void printProgramUsage(const char* name) {
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n"
 		   "  --trace_format FORMAT\n"
-	       "                 Select the format of the log files. xml and json supported. Has\n"
-	       "                 no effect unless --log is specified.\n"
+		   "                 Select the format of the log files. xml and json supported. Has\n"
+		   "                 no effect unless --log is specified.\n"
 		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 		   "                 and then exits.\n"
 		   "  --no-status    Disables the initial status check done when starting\n"
@@ -2335,12 +2335,12 @@ struct CLIOptions {
 				return 0;
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
-		    case OPT_TRACE_FORMAT:
-			    if (!selectTraceFormatter(args.OptionArg())) {
-				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-			    }
-			    break;
-		    case OPT_VERSION:
+			case OPT_TRACE_FORMAT:
+				if (!selectTraceFormatter(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				break;
+			case OPT_VERSION:
 				printVersion();
 				return FDB_EXIT_SUCCESS;
 		}

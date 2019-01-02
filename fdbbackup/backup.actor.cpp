@@ -112,7 +112,7 @@ enum {
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
 
-    OPT_TRACE_FORMAT
+	OPT_TRACE_FORMAT
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
@@ -698,8 +698,8 @@ static void printAgentUsage(bool devhelp) {
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
 	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files. xml and json supported.\n"
-           "                 Has no effect unless --log is specified.\n");
+		   "                 Select the format of the trace files. xml and json supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -836,8 +836,8 @@ static void printDBAgentUsage(bool devhelp) {
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
 	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the trace files. xml and json supported.\n"
-           "                 Has no effect unless --log is specified.\n");
+		   "                 Select the format of the trace files. xml and json supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -2397,11 +2397,11 @@ int main(int argc, char* argv[]) {
 				case OPT_TRACE:
 					trace = true;
 					break;
-			    case OPT_TRACE_DIR:
+				case OPT_TRACE_DIR:
 					trace = true;
 					traceDir = args->OptionArg();
 					break;
-			    case OPT_TRACE_FORMAT:
+				case OPT_TRACE_FORMAT:
 				    if (!selectTraceFormatter(args->OptionArg())) {
 					    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
 				    }
