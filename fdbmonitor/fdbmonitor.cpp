@@ -68,7 +68,7 @@
 #include "flow/SimpleOpt.h"
 #include "SimpleIni.h"
 
-#include "fdbclient/versions.h"
+#include "versions.h"
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
