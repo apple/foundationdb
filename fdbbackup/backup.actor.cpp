@@ -76,7 +76,7 @@ enum enumProgramExe {
 };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST
+	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP
 };
 
 enum enumDBType {
@@ -94,6 +94,7 @@ enum {
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
+	OPT_DUMP_BEGIN, OPT_DUMP_END,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -393,6 +394,35 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
+
+	SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE,     "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
+	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
+	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
+	{ OPT_TRACE,           "--log",            SO_NONE },
+	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_QUIET,           "-q",               SO_NONE },
+	{ OPT_QUIET,           "--quiet",          SO_NONE },
+	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_VERSION,         "--version",        SO_NONE },
+	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
+	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_DUMP_BEGIN,      "--begin",          SO_REQ_SEP },
+	{ OPT_DUMP_END,        "--end",            SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -978,6 +1008,7 @@ enumBackupType	getBackupType(std::string backupType)
 		values["delete"] = BACKUP_DELETE;
 		values["describe"] = BACKUP_DESCRIBE;
 		values["list"] = BACKUP_LIST;
+		values["dump"] = BACKUP_DUMP;
 	}
 
 	auto i = values.find(backupType);
@@ -1832,6 +1863,33 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
+ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationContainer, Version beginVersion, Version endVersion) {
+	state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
+
+	if(beginVersion < 0 || endVersion < 0) {
+		BackupDescription desc = wait(c->describeBackup());
+
+		if(!desc.maxLogEnd.present()) {
+			fprintf(stderr, "ERROR: Backup must have log data in order to use relative begin/end versions.\n");
+			throw backup_invalid_info();
+		}
+
+		if(beginVersion < 0) {
+			beginVersion += desc.maxLogEnd.get();
+		}
+
+		if(endVersion < 0) {
+			endVersion += desc.maxLogEnd.get();
+		}
+	}
+
+	printf("Scanning version range %lld to %lld\n", beginVersion, endVersion);
+	BackupFileList files = wait(c->dumpFileList(beginVersion, endVersion));
+	files.toStream(stdout);
+
+	return Void();
+}
+
 ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
 		Version v = wait( timeKeeperVersionFromDatetime(endDatetime, db) );
@@ -2115,6 +2173,26 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 	return;
 }
 
+Version parseVersion(const char *str) {
+	StringRef s((const uint8_t *)str, strlen(str));
+
+	if(s.endsWith(LiteralStringRef("days")) || s.endsWith(LiteralStringRef("d"))) {
+		float days;
+		if(sscanf(str, "%f", &days) != 1) {
+			fprintf(stderr, "Could not parse version: %s\n", str);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+		return (double)CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 3600 * -days;
+	}
+
+	Version ver;
+	if(sscanf(str, "%lld", &ver) != 1) {
+		fprintf(stderr, "Could not parse version: %s\n", str);
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+	return ver;
+}
+
 #ifdef ALLOC_INSTRUMENTATION
 extern uint8_t *g_extra_memory;
 #endif
@@ -2192,6 +2270,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case BACKUP_DESCRIBE:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDescribeOptions, SO_O_EXACT);
+					break;
+				case BACKUP_DUMP:
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDumpOptions, SO_O_EXACT);
 					break;
 				case BACKUP_LIST:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
@@ -2330,6 +2411,8 @@ int main(int argc, char* argv[]) {
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
 		std::vector<std::string> blobCredentials;
+		Version dumpBegin = 0;
+		Version dumpEnd = std::numeric_limits<Version>::max();
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
@@ -2586,6 +2669,12 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_BLOB_CREDENTIALS:
 					blobCredentials.push_back(args->OptionArg());
+					break;
+				case OPT_DUMP_BEGIN:
+					dumpBegin = parseVersion(args->OptionArg());
+					break;
+				case OPT_DUMP_END:
+					dumpEnd = parseVersion(args->OptionArg());
 					break;
 			}
 		}
@@ -2908,9 +2997,15 @@ int main(int argc, char* argv[]) {
 				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
 				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
 				break;
+
 			case BACKUP_LIST:
 				initTraceFile();
 				f = stopAfter( listBackup(baseUrl) );
+				break;
+
+			case BACKUP_DUMP:
+				initTraceFile();
+				f = stopAfter( dumpBackupData(argv[0], destinationContainer, dumpBegin, dumpEnd) );
 				break;
 
 			case BACKUP_UNDEFINED:
