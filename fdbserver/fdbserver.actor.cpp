@@ -553,7 +553,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml and json supported. \n");
+		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
 		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
 		   "                 to a random value shared by all fdbserver processes on this\n"
