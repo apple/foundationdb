@@ -136,10 +136,10 @@ static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
 static int TRACE_EVENT_MAX_SIZE = 4000;
 
 struct TraceLog {
+	Reference<ITraceLogFormatter> formatter;
 
 private:
 	Reference<ITraceLogWriter> logWriter;
-	Reference<ITraceLogFormatter> formatter;
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
@@ -294,14 +294,7 @@ public:
 		}
 	};
 
-	explicit TraceLog(const std::string& format)
-		: bufferLength(0)
-		, loggedLength(0)
-		, opened(false)
-		, preopenOverflowCount(0)
-		, barriers(new BarrierList)
-		, logTraceEventMetrics(false)
-		, formatter(createLogFormatter(format)) {}
+	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
 
 	bool isOpen() const { return opened; }
 
@@ -581,13 +574,13 @@ TraceEventFields LatestEventCache::getLatestError() {
 	return latestErrors[getAddressIndex()];
 }
 
-TraceLog* g_traceLog = new TraceLog("xml");
+static TraceLog g_traceLog;
 
 bool selectTraceFormatter(std::string format) {
+	ASSERT(!g_traceLog.isOpen());
 	std::transform(format.begin(), format.end(), format.begin(), ::tolower);
 	if (format == "xml" || format == "json") {
-		delete g_traceLog;
-		g_traceLog = new TraceLog(format);
+		g_traceLog.formatter = createLogFormatter(format);
 		return true;
 	} else {
 		return false;
@@ -595,9 +588,9 @@ bool selectTraceFormatter(std::string format) {
 }
 
 ThreadFuture<Void> flushTraceFile() {
-	if (!g_traceLog->isOpen())
+	if (!g_traceLog.isOpen())
 		return Void();
-	return g_traceLog->flush();
+	return g_traceLog.flush();
 }
 
 void flushTraceFileVoid() {
@@ -609,7 +602,7 @@ void flushTraceFileVoid() {
 }
 
 void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory, std::string baseOfBase, std::string logGroup) {
-	if(g_traceLog->isOpen())
+	if(g_traceLog.isOpen())
 		return;
 
 	if(directory.empty())
@@ -619,30 +612,30 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 		baseOfBase = "trace";
 
 	std::string baseName = format("%s.%03d.%03d.%03d.%03d.%d", baseOfBase.c_str(), (na.ip>>24)&0xff, (na.ip>>16)&0xff, (na.ip>>8)&0xff, na.ip&0xff, na.port);
-	g_traceLog->open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskFlushTrace));
 	g_traceBatch.dump();
 }
 
 void initTraceEventMetrics() {
-	g_traceLog->initMetrics();
+	g_traceLog.initMetrics();
 }
 
 void closeTraceFile() {
-	g_traceLog->close();
+	g_traceLog.close();
 }
 
 bool traceFileIsOpen() {
-	return g_traceLog->isOpen();
+	return g_traceLog.isOpen();
 }
 
 void addTraceRole(std::string role) {
-	g_traceLog->addRole(role);
+	g_traceLog.addRole(role);
 }
 
 void removeTraceRole(std::string role) {
-	g_traceLog->removeRole(role);
+	g_traceLog.removeRole(role);
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}
@@ -943,18 +936,18 @@ TraceEvent::~TraceEvent() {
 			}
 
 			TraceEvent::eventCounts[severity/10]++;
-			g_traceLog->writeEvent( fields, trackingKey, severity > SevWarnAlways );
+			g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
 
-			if (g_traceLog->isOpen()) {
+			if (g_traceLog.isOpen()) {
 				// Log Metrics
-				if(g_traceLog->logTraceEventMetrics && isNetworkThread()) {
+				if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
 					// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
 					// Note that if the event metric is disabled it won't actually be logged BUT any new fields added to it will be registered.
 					// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible
 					// in the Sev* event metrics.
 
 					uint64_t event_ts = DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)->setFieldsAndLogFrom(tmpEventMetric);
-					g_traceLog->log(severity, type, id, event_ts);
+					g_traceLog.log(severity, type, id, event_ts);
 				}
 			}
 		}
@@ -1004,7 +997,7 @@ void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 }
 
 void TraceBatch::dump() {
-	if (!g_traceLog->isOpen())
+	if (!g_traceLog.isOpen())
 		return;
 	std::string machine;
 	if(g_network->isSimulated()) {
@@ -1016,24 +1009,24 @@ void TraceBatch::dump() {
 		if(g_network->isSimulated()) {
 			attachBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog->writeEvent(attachBatch[i].fields, "", false);
+		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < eventBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			eventBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog->writeEvent(eventBatch[i].fields, "", false);
+		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			buggifyBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog->writeEvent(buggifyBatch[i].fields, "", false);
+		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	g_traceLog->flush();
+	g_traceLog.flush();
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();
