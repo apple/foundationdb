@@ -44,15 +44,15 @@
 #endif
 
 namespace {
-Reference<ITraceLogFormatter> createLogFormatter(const std::string& f) {
-	if (f == "json") {
-		return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
-	} else if (f == "xml") {
-		return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
-	} else {
-		UNREACHABLE();
+	Reference<ITraceLogFormatter> createLogFormatter(const std::string& f) {
+		if (f == "json") {
+			return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+		} else if (f == "xml") {
+			return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+		} else {
+			UNREACHABLE();
+		}
 	}
-}
 } // namespace
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
