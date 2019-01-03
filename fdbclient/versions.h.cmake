@@ -1,0 +1,3 @@
+#pragma once
+#define FDB_VT_VERSION "${FDB_VERSION}"
+#define FDB_VT_PACKAGE_NAME "${FDB_PACKAGE_NAME}"
