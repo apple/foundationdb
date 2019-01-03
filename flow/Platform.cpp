@@ -98,6 +98,8 @@
 #include <sys/resource.h>
 /* Needed for crash handler */
 #include <signal.h>
+/* Needed for gnu_dev_{major,minor} */
+#include <sys/sysmacros.h>
 #endif
 
 #ifdef __APPLE__
