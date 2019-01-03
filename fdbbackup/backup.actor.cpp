@@ -2402,10 +2402,10 @@ int main(int argc, char* argv[]) {
 					traceDir = args->OptionArg();
 					break;
 				case OPT_TRACE_FORMAT:
-				    if (!selectTraceFormatter(args->OptionArg())) {
-					    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
-				    }
-				    break;
+					if (!selectTraceFormatter(args->OptionArg())) {
+						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
+					}
+					break;
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;
