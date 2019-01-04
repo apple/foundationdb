@@ -8,40 +8,14 @@ import os
 import sys
 import subprocess
 import json
+import xml.sax
+import xml.sax.handler
 import functools
 import multiprocessing
 import re
 
 
-address_re = re.compile(r'(0x[0-9a-f]+\s+)+')
-
-def sanitize_backtrace(obj):
-    if sys.platform != "linux" and sys.platform != "linux2":
-        return None
-    raw_backtrace = obj.get('Backtrace', None)
-    if raw_backtrace is None:
-        return None
-    match = address_re.search(raw_backtrace)
-    if not match:
-        return None
-    return match.group(0)
-
-def apply_addr2line(basedir, obj):
-    addresses = sanitize_backtrace(obj)
-    assert addresses is not None
-    fdbbin = os.path.join(basedir, 'bin', 'fdbserver')
-    try:
-        resolved = subprocess.check_output(
-                ('addr2line -e %s -C -f -i' % fdbbin).split() + addresses.split()).splitlines()
-        tmp = dict(**obj)
-        for i, line in enumerate(resolved):
-            tmp['line%04d' % i] = line.decode('utf-8')
-    except (subprocess.CalledProcessError, UnicodeDecodeError):
-        obj['FailedAddr2LineResolution'] = 'true'
-        return obj
-    return tmp
-
-logger = None
+_logger = None
 
 def init_logging(loglevel, logdir):
     global _logger
@@ -62,57 +36,176 @@ def init_logging(loglevel, logdir):
     _logger.addHandler(sh)
 
 
-def log_trace_parse_error(line, e, infile, eof):
-    obj = {}
-    _logger.error("Process trace line file {} Failed".format(infile))
-    _logger.error("Exception {} args: {}".format(type(e), e.args))
-    _logger.error("Line: '{}'".format(line))
-    obj['Severity'] = "warning"
-    obj['Type'] = "TestInfastructureLogLineGarbled"
-    obj['isLastLine'] = "TestFailure"
-    obj['TraceLine'] = line
-    obj['File'] = infile
-    return obj
+class LogParser:
+    def __init__(self, basedir, name, infile, out):
+        self.basedir = basedir
+        self.name = name
+        self.infile = infile
+        self.out = out
+        self.backtraces = []
+        self.result = True
+        self.address_re = re.compile(r'(0x[0-9a-f]+\s+)+')
 
+    def writeHeader(self):
+        pass
 
-def process_trace(basedir, name, infile, out, backtraces):
-    """
-    backtraces is an out param
-    """
-    res = True
-    with open(infile) as f:
+    def writeFooter(self):
+        pass
+
+    def applyAddr2line(self, obj):
+        addresses = sanitize_backtrace(obj)
+        assert addresses is not None
+        fdbbin = os.path.join(basedir, 'bin', 'fdbserver')
         try:
+            resolved = subprocess.check_output(
+                    ('addr2line -e %s -C -f -i' % fdbbin).split() + addresses.split()).splitlines()
+            tmp = dict(**obj)
+            for i, line in enumerate(resolved):
+                tmp['line%04d' % i] = line.decode('utf-8')
+            return tmp
+        except (subprocess.CalledProcessError, UnicodeDecodeError):
+            obj['FailedAddr2LineResolution'] = 'true'
+            return obj
+
+
+    def sanitizeBacktrace(self, obj):
+        if sys.platform != "linux" and sys.platform != "linux2":
+            return None
+        raw_backtrace = obj.get('Backtrace', None)
+        if raw_backtrace is None:
+            return None
+        match = self.address_re.search(raw_backtrace)
+        if not match:
+            return None
+        return match.group(0)
+
+    def processTraces(self):
+        backtraces = 0
+        linenr = 0
+        with open(self.infile) as f:
             line = f.readline()
             while line != '':
-                obj = {}
-                nextLine = f.readline()
-                eof = nextLine == ''
-                try:
-                    obj = json.loads(line)
-                    line = nextLine
-                except Exception as e:
-                    obj = log_trace_parse_error(line, e, infile, eof)
-                    line = nextLine
+                obj = self.processLine(line, linenr)
+                line = f.readline()
+                linenr += 1
+                if obj is None:
+                    continue
                 if 'Type' not in obj:
                     continue
                 if obj['Type'] == 'TestFailure':
-                    res = False
+                    self.result = False
                 if obj['Severity'] == '40':
-                    res = False
-                if name is not None:
-                    obj['testname'] = name
-                # For now only addr2line one backtrace.
-                if sanitize_backtrace(obj) is not None and len(backtraces) == 0:
-                    backtraces.append(obj)
-                else:
-                    print(json.dumps(obj), file=out)
-        except BaseException as e:
-            _logger.error("Error: {}".format(e))
-    return res
+                    self.result = False
+                if self.name is not None:
+                    obj['testname'] = self.name
+                if self.sanitizeBacktrace(obj) is not None and backtraces == 0:
+                    obj = self.applyAddr2line(obj)
+                self.writeObject(obj)
+
+    def log_trace_parse_error(self, linenr, e):
+        obj = {}
+        _logger.error("Process trace line file {} Failed".format(self.infile))
+        _logger.error("Exception {} args: {}".format(type(e), e.args))
+        _logger.error("Line: '{}'".format(linenr))
+        obj['Severity'] = "warning"
+        obj['Type'] = "TestInfastructureLogLineGarbled"
+        obj['isLastLine'] = "TestFailure"
+        obj['TraceLine'] = linenr
+        obj['File'] = self.infile
+        return obj
+
+    def processReturnCodes(self, return_codes):
+        for (command, return_code) in return_codes.items():
+            return_code_trace = {}
+            if return_code != 0:
+                return_code_trace['Severity'] = '40'
+                return_code_trace['Type'] = 'TestFailure'
+                self.result = False
+            else:
+                return_code_trace['Severity'] = '10'
+                return_code_trace['Type'] = 'ReturnCode'
+            return_code_trace['Command'] = command
+            return_code_trace['ReturnCode'] = return_code
+            return_code_trace['testname'] = self.name
+            self.writeObject(return_code_trace)
 
 
-def get_traces(d):
-    p = re.compile('^trace\\..*\\.json$')
+
+class JSONParser(LogParser):
+    def __init__(self, basedir, name, infile, out):
+        super().__init__(basedir, name, infile, out)
+
+    def processLine(self, line, linenr):
+        try:
+            return json.loads(line)
+        except Exception as e:
+            self.log_trace_parse_error(linenr, e)
+
+    def writeObject(self, obj):
+        json.dump(obj, self.out)
+        self.out.write('\n')
+
+
+
+class XMLParser(LogParser):
+
+    class XMLHandler(xml.sax.handler.ContentHandler):
+        def __init__(self):
+            self.result = {}
+
+        def startElement(self, name, attrs):
+            if name != 'Event':
+                return
+            for (key, value) in attrs.items():
+                self.result[key] = value
+
+    class XMLErrorHandler(xml.sax.handler.ErrorHandler):
+        def __init__(self):
+            self.errors = []
+            self.fatalErrors = []
+            self.warnings = []
+
+        def error(self, exception):
+            self.errors.append(exception)
+
+        def fatalError(self, exception):
+            self.fatalError.append(exception)
+
+        def warning(self, exception):
+            self.warnings.append(exception)
+
+    def __init__(self, basedir, name, infile, out):
+        super().__init__(basedir, name, infile, out)
+
+    def writeHeader(self):
+        self.out.write('<?xml version="1.0"?>\n<Trace>\n')
+
+    def writeFooter(self):
+        self.out.write("</Trace>")
+
+    def writeObject(self, obj):
+        self.out.write('<Event')
+        for (key, value) in obj.items():
+            self.out.write(' {}="{}"'.format(key, value))
+        self.out.write('/>\n')
+
+    def processLine(self, line, linenr):
+        if linenr < 3:
+            # the first two lines don't need to be parsed
+            return None
+        if line.startswith('</'):
+            # don't parse the closing element
+            return None
+        handler = XMLParser.XMLHandler()
+        errorHandler = XMLParser.XMLErrorHandler()
+        xml.sax.parseString(line, handler, errorHandler=errorHandler)
+        if len(errorHandler.fatalErrors) > 0:
+            return self.log_trace_parse_error(linenr, errorHandler.fatalErrors[0])
+        return handler.result
+
+
+def get_traces(d, log_format):
+    p = re.compile('^trace\\..*\\.{}$'.format(log_format))
     traces = list(map(
         functools.partial(os.path.join, d),
         filter(
@@ -127,32 +220,29 @@ def get_traces(d):
     return traces
 
 
-def process_traces(basedir, testname, path, out):
+def process_traces(basedir, testname, path, out, log_format, return_codes):
     res = True
     backtraces = []
-    for trace in get_traces(path):
-        res = process_trace(
-                basedir, testname, trace, out, backtraces) and res
-    with multiprocessing.Pool(max(multiprocessing.cpu_count() - 1, 1)) as pool:
-        for o in pool.map(
-                functools.partial(apply_addr2line, basedir), backtraces):
-            print(json.dumps(o), file=out)
-    return res
+    parser = None
+    for trace in get_traces(path, log_format):
+        if log_format == 'json':
+            parser = JSONParser(basedir, testname, trace, out)
+        else:
+            parser = XMLParser(basedir, testname, trace, out)
+    parser.processTraces()
+    res = res and parser.result
+    if log_format == 'json':
+        parser = JSONParser(basedir, testname, trace, out)
+    else:
+        parser = XMLParser(basedir, testname, trace, out)
+    parser.processReturnCodes(return_codes)
+    return res and parser.result
 
-def process_return_codes(return_codes, name, out):
-    res = True
-    for (command, return_code) in return_codes.items():
-        return_code_trace = {'Command': command, 'ReturnCode': return_code, 'testname': name}
-        if return_code != 0:
-            return_code_trace['Type'] = 'TestFailure'
-            res = False
-        print(json.dumps(return_code_trace), file=out)
-    return res
-    
 def run_simulation_test(basedir,
                         testtype,
                         testname,
                         testfiles,
+                        log_format,
                         restart=False,
                         buggify=False,
                         seed=None):
@@ -167,7 +257,9 @@ def run_simulation_test(basedir,
     if buggify:
         pargs.append('-b')
         pargs.append('on')
-    pargs.append('--knob_trace_format=json')
+    # FIXME: include these lines as soon as json support is added
+    #pargs.append('--trace_format')
+    #pargs.append(log_format)
     test_dir = td.get_current_test_dir()
     if seed is not None:
         pargs.append('-s')
@@ -194,14 +286,14 @@ def run_simulation_test(basedir,
         return_codes[command] = proc.returncode
         if proc.returncode != 0:
             break
-    jsonfile = os.path.join(basedir, 'traces.json')
+    outfile = os.path.join(basedir, 'traces.{}'.format(log_format))
     res = True
-    with open(jsonfile, 'a') as f:
+    with open(outfile, 'a') as f:
         os.lockf(f.fileno(), os.F_LOCK, 0)
         pos = f.tell()
         res = process_traces(basedir, testname,
-                             os.path.join(os.getcwd(), wd), f)
-        res = process_return_codes(return_codes, testname, f) and res
+                             os.path.join(os.getcwd(), wd), f, log_format,
+                             return_codes)
         f.seek(pos)
         os.lockf(f.fileno(), os.F_ULOCK, 0)
     return res
@@ -229,6 +321,8 @@ if __name__ == '__main__':
                         default='INFO')
     parser.add_argument('-x', '--seed', required=False, default=None,
                         help='The seed to use for this test')
+    parser.add_argument('-F', '--log-format', required=False, default='xml',
+                        choices=['xml', 'json'], help='Log format (json or xml)')
     parser.add_argument('testfile', nargs="+", help='The tests to run')
     args = parser.parse_args()
     init_logging(args.loglevel, args.logdir)
@@ -236,6 +330,6 @@ if __name__ == '__main__':
     if args.builddir is not None:
         basedir = args.builddir
     res = run_simulation_test(basedir, args.testtype, args.name,
-                              args.testfile, args.restart, args.buggify,
+                              args.testfile, args.log_format, args.restart, args.buggify,
                               args.seed)
     sys.exit(0 if res else 1)

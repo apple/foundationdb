@@ -204,7 +204,7 @@ configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest ${PROJECT_BINARY_DI
 # - TEST_FILES followed by typically one test file. The test runner will run
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
-macro(add_fdb_test)
+function(add_fdb_test)
   set(options UNIT)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
@@ -239,7 +239,7 @@ macro(add_fdb_test)
     set(BUGGIFY_OPTION "-B")
   endif()
   add_test(NAME ${test_name}
-    COMMAND python3 ${TestRunner}
+    COMMAND ${PYTHON_EXECUTABLE} ${TestRunner}
     -n ${test_name}
     -b ${PROJECT_BINARY_DIR}
     -t ${test_type}
@@ -248,7 +248,7 @@ macro(add_fdb_test)
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout})
-endmacro()
+endfunction()
 
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/AsyncFileCorrectness.txt UNIT)
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/AsyncFileMix.txt UNIT)
