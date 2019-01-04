@@ -31,7 +31,7 @@ namespace HTTP {
 		o.reserve(s.size() * 3);
 		char buf[4];
 		for(auto c : s)
-			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_')
+			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.')
 				o.append(&c, 1);
 			else {
 				sprintf(buf, "%%%.02X", c);
