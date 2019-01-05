@@ -30,7 +30,8 @@
 #include "fdbrpc/Locality.h"
 
 class RestoreConfig;
-enum class RestoreRole {Invalid = -1, Master = 0, Loader = 1, Applier = 2};
+enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
+extern std::vector<std::string> RestoreRoleStr;
 BINARY_SERIALIZABLE( RestoreRole );
 
 struct RestoreInterface {
@@ -76,20 +77,23 @@ struct RestoreCommandInterface {
 };
 
 
-enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done};
+enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
 	UID id; // Node id
 	RestoreRole role; // role of the command;
+	KeyRange keyRange;
 	ReplyPromise< struct RestoreCommandReply > reply;
 
 	RestoreCommand() : id(UID()), role(RestoreRole::Invalid) {}
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id): cmd(cmd), id(id) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role) : cmd(cmd), id(id), role(role) {}
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRange keyRange): cmd(cmd), id(id), keyRange(keyRange), role(RestoreRole::Invalid) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & cmd & id & role & reply;
+		ar & cmd & id & role & keyRange & reply;
 	}
 };
 
@@ -273,6 +277,11 @@ struct RestoreNodeStatus {
 		lastSuspend = 0;
 	}
 
+};
+
+struct ApplierState {
+	UID id;
+	KeyRange keyRange; // the key range the applier is responsible for
 };
 
 std::string getRoleStr(RestoreRole role);

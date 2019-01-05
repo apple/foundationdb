@@ -55,11 +55,72 @@ std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most rec
 //Standalone<VectorRef<MutationRef>> mOps;
 std::vector<MutationRef> mOps;
 
+
 //---- Declare status structure which records the progress and status of each worker in each role
+std::map<UID, RestoreCommandInterface> workers_interface; // UID is worker's node id, RestoreCommandInterface is worker's communication interface
 
+void printGlobalNodeStatus();
 RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
+ApplierState applierState; // each applier should keep its state
 
-std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, stored in master node
+std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, excluding master node, stored in master node // May change to map, like servers_info
+std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responisible for
+
+//Print out the works_interface info
+void printWorkersInterface(){
+	printf("[INFO] workers_interface info: num of workers:%d\n", workers_interface.size());
+	int index = 0;
+	for (auto &interf : workers_interface) {
+		printf("\t[INFO][Worker %d] NodeID:%s, Interface.id():%s\n", index,
+				interf.first.toString().c_str(), interf.second.id().toString().c_str());
+	}
+}
+
+
+// Return <num_of_loader, num_of_applier> in the system
+std::pair<int, int> getNumLoaderAndApplier() {
+	int numLoaders = 0;
+	int numAppliers = 0;
+	for (int i = 0; i < globalNodeStatus.size(); ++i) {
+		if (globalNodeStatus[i].role == RestoreRole::Loader) {
+			numLoaders++;
+		} else if (globalNodeStatus[i].role == RestoreRole::Applier) {
+			numAppliers++;
+		}
+	}
+
+	if ( numLoaders + numAppliers != globalNodeStatus.size() ) {
+		printf("[ERROR] Number of workers does not add up! numLoaders:%d, numApplier:%d, totalProcess:%d\n",
+				numLoaders, numAppliers, globalNodeStatus.size());
+	}
+
+	return std::make_pair(numLoaders, numAppliers);
+}
+
+std::vector<UID> getApplierIDs() {
+	std::vector<UID> applierIDs;
+	for (int i = 0; i < globalNodeStatus.size(); ++i) {
+		if (globalNodeStatus[i].role == RestoreRole::Applier) {
+			applierIDs.push_back(globalNodeStatus[i].nodeID);
+		}
+	}
+
+	// Check if there exist duplicate applier IDs, which should never occur
+	std::sort(applierIDs.begin(), applierIDs.end());
+	bool unique = true;
+	for (int i = 1; i < applierIDs.size(); ++i) {
+		if (applierIDs[i-1] == applierIDs[i]) {
+			unique = false;
+			break;
+		}
+	}
+	if (!unique) {
+		printf("[ERROR] Applier IDs are not unique! All worker IDs are as follows\n");
+		printGlobalNodeStatus();
+	}
+
+	return applierIDs;
+}
 
 void printGlobalNodeStatus() {
 	printf("---Print globalNodeStatus---\n");
@@ -69,10 +130,10 @@ void printGlobalNodeStatus() {
 	}
 }
 
-std::vector<std::string> RestoreRoleStr = {"Master", "Loader", "Applier"};
+std::vector<std::string> RestoreRoleStr = {"Invalid", "Master", "Loader", "Applier"};
 int numRoles = RestoreRoleStr.size();
 std::string getRoleStr(RestoreRole role) {
-	if ( (int) role > numRoles ) {
+	if ( (int) role >= numRoles || (int) role < 0) {
 		printf("[ERROR] role:%d is out of scope\n", (int) role);
 		return "[Unset]";
 	}
@@ -299,7 +360,7 @@ public:
 	}
 
 	std::string toString() {
-		std::string ret = "[unset] TODO";
+		std::string ret = "uid:" + uid.toString() + " prefix:" + prefix.contents().toString();
 		return ret;
 	}
 
@@ -470,13 +531,113 @@ struct RestoreStatus {
 	std::map<RestoreFile, int> files; // first: restore files, second: the current starting point to restore the file
 };
 
+std::vector<RestoreFile> files; // backup files: range and log files
 RestoreStatus restoreStatus;
+
+void printBackupFilesInfo() {
+	printf("[INFO] backup files: num:%d\n", files.size());
+	for (int i = 0; i < files.size(); ++i) {
+		printf("\t[INFO][File %d] %s\n", i, files[i].toString().c_str());
+	}
+}
 
 ////-- Restore code declaration END
 
 //// --- Some common functions
+//
+//ACTOR static Future<Optional<RestorableFileSet>> prepareRestoreFiles(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
+//		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
+//		Reference<RestoreConfig> restore_input) {
+// 	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+//
+// 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
+//	wait(checkDatabaseLock(tr, uid));
+//
+// 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+// 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+//
+// 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
+// 	// Get old restore config for this tag
+// 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
+// 	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
+// 	TraceEvent("PrepareRestoreMX").detail("OldUidAndAbortedPresent", oldUidAndAborted.present());
+// 	if(oldUidAndAborted.present()) {
+// 		if (oldUidAndAborted.get().first == uid) {
+// 			if (oldUidAndAborted.get().second) {
+// 				throw restore_duplicate_uid();
+// 			}
+// 			else {
+// 				return Void();
+// 			}
+// 		}
+//
+// 		state Reference<RestoreConfig> oldRestore = Reference<RestoreConfig>(new RestoreConfig(oldUidAndAborted.get().first));
+//
+// 		// Make sure old restore for this tag is not runnable
+// 		bool runnable = wait(oldRestore->isRunnable(tr));
+//
+// 		if (runnable) {
+// 			throw restore_duplicate_tag();
+// 		}
+//
+// 		// Clear the old restore config
+// 		oldRestore->clear(tr);
+// 	}
+//
+// 	KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+// 	Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
+// 	if (existingRows.size() > 0) {
+// 		throw restore_destination_not_empty();
+// 	}
+//
+// 	// Make new restore config
+// 	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
+//
+// 	// Point the tag to the new uid
+//	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
+// 	tag.set(tr, {uid, false});
+//
+// 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
+//
+// 	// Configure the new restore
+// 	restore->tag().set(tr, tagName.toString());
+// 	restore->sourceContainer().set(tr, bc);
+// 	restore->stateEnum().set(tr, ERestoreState::QUEUED);
+// 	restore->restoreVersion().set(tr, restoreVersion);
+// 	restore->restoreRange().set(tr, restoreRange);
+// 	// this also sets restore.add/removePrefix.
+// 	restore->initApplyMutations(tr, addPrefix, removePrefix);
+//	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
+//	restore_input = restore;
+//	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
+//
+//
+//	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+//	if(!restorable.present())
+// 		throw restore_missing_data();
+//
+//	/*
+//	state std::vector<RestoreConfig::RestoreFile> files;
+//
+// 	for(const RangeFile &f : restorable.get().ranges) {
+//// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
+// 		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
+// 		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
+// 	}
+// 	for(const LogFile &f : restorable.get().logs) {
+//// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
+//		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
+// 		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
+// 	}
+//
+//	 */
+//
+//	return restorable;
+//
+// }
 
-ACTOR static Future<Optional<RestorableFileSet>> prepareRestoreFiles(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
+
+ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
 		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
 		Reference<RestoreConfig> restore_input) {
  	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
@@ -528,6 +689,7 @@ ACTOR static Future<Optional<RestorableFileSet>> prepareRestoreFiles(Database cx
 	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
  	tag.set(tr, {uid, false});
 
+ 	printf("[INFO] Open container for backup url:%s\n", backupURL.toString().c_str());
  	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
 
  	// Configure the new restore
@@ -544,113 +706,27 @@ ACTOR static Future<Optional<RestorableFileSet>> prepareRestoreFiles(Database cx
 
 
 	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
-	if(!restorable.present())
- 		throw restore_missing_data();
-
-	/*
-	state std::vector<RestoreConfig::RestoreFile> files;
-
- 	for(const RangeFile &f : restorable.get().ranges) {
-// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
- 		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
- 		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
- 	}
- 	for(const LogFile &f : restorable.get().logs) {
-// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
-		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
- 		files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
- 	}
-
-	 */
-
-	return restorable;
-
- }
-
-
-ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
-		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
-		Reference<RestoreConfig> restore_input, VectorRef<RestoreFile> files) {
- 	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
-
- 	printf("[INFO] prepareRestore: the current db lock status is as below\n");
-	wait(checkDatabaseLock(tr, uid));
-
- 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
- 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
- 	printf("[INFO] Prepare restore for the tag:%s\n", tagName.toString().c_str());
- 	// Get old restore config for this tag
- 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
- 	state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
- 	TraceEvent("PrepareRestoreMX").detail("OldUidAndAbortedPresent", oldUidAndAborted.present());
- 	if(oldUidAndAborted.present()) {
- 		if (oldUidAndAborted.get().first == uid) {
- 			if (oldUidAndAborted.get().second) {
- 				throw restore_duplicate_uid();
- 			}
- 			else {
- 				return Void();
- 			}
- 		}
-
- 		state Reference<RestoreConfig> oldRestore = Reference<RestoreConfig>(new RestoreConfig(oldUidAndAborted.get().first));
-
- 		// Make sure old restore for this tag is not runnable
- 		bool runnable = wait(oldRestore->isRunnable(tr));
-
- 		if (runnable) {
- 			throw restore_duplicate_tag();
- 		}
-
- 		// Clear the old restore config
- 		oldRestore->clear(tr);
- 	}
-
- 	KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
- 	Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
- 	if (existingRows.size() > 0) {
- 		throw restore_destination_not_empty();
- 	}
-
- 	// Make new restore config
- 	state Reference<RestoreConfig> restore = Reference<RestoreConfig>(new RestoreConfig(uid));
-
- 	// Point the tag to the new uid
-	printf("[INFO] Point the tag:%s to the new uid:%s\n", tagName.toString().c_str(), uid.toString().c_str());
- 	tag.set(tr, {uid, false});
-
- 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
-
- 	// Configure the new restore
- 	restore->tag().set(tr, tagName.toString());
- 	restore->sourceContainer().set(tr, bc);
- 	restore->stateEnum().set(tr, ERestoreState::QUEUED);
- 	restore->restoreVersion().set(tr, restoreVersion);
- 	restore->restoreRange().set(tr, restoreRange);
- 	// this also sets restore.add/removePrefix.
- 	restore->initApplyMutations(tr, addPrefix, removePrefix);
-	printf("[INFO] Configure new restore config to :%s\n", restore->toString().c_str());
-	restore_input = restore;
-	printf("[INFO] Assign the global restoreConfig to :%s\n", restore_input->toString().c_str());
-
-
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
-	if(!restorable.present())
- 		throw restore_missing_data();
-
+	if(!restorable.present()) {
+		printf("[WARNING] restoreVersion:%ld (%lx) is not restorable!\n", restoreVersion, restoreVersion);
+		throw restore_missing_data();
+	}
 
 //	state std::vector<RestoreFile> files;
+	if (!files.empty()) {
+		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", files.size());
+		files.clear();
+	}
 
+	printf("[INFO] Found backup files: num of files:%d\n", files.size());
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
- 		printf("FoundRangeFileMX, fileInfo:%s\n", f.toString().c_str());
+ 		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
  		files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
 // 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
-		printf("FoundLogFileMX, fileInfo:%s\n", f.toString().c_str());
+		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
 		files.push_back(file);
  	}
@@ -1023,13 +1099,14 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourW
 
 ////--- Restore Functions for the master role
 // Set roles (Loader or Applier) for workers
+// The master node's localNodeStatus has been set outside of this function
 ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	state Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
-	printf("[INFO] Role:%s start configure roles\n", getRoleStr(localNodeStatus.role).c_str());
+	printf("[INFO][Master] Start configuring roles for workers\n");
 	loop {
 		try {
 			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1037,6 +1114,8 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 			if(agentValues.size()) {
 				for(auto& it : agentValues) {
 					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
+					// Save the RestoreCommandInterface for the later operations
+					workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
 				break;
 			}
@@ -1071,20 +1150,21 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 	state int index = 0;
 	state RestoreRole role;
 	state UID nodeID;
+	printf("[INFO][Master] Start configuring roles for workers\n");
 	loop {
 		wait(delay(1.0));
 		std::vector<Future<RestoreCommandReply>> cmdReplies;
 		for(auto& cmdInterf : agents) {
 			role = globalNodeStatus[index].role;
 			nodeID = globalNodeStatus[index].nodeID;
-			printf("[CMD] set role (%s) to node (index=%d uid=%s)\n",
+			printf("[CMD] Set role (%s) to node (index=%d uid=%s)\n",
 					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, nodeID, role)));
 			index++;
 		}
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] get restoreCommandReply value:%s\n",
+			printf("[INFO] Get restoreCommandReply value:%s\n",
 					reps[i].id.toString().c_str());
 		}
 
@@ -1092,6 +1172,7 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 	}
 
 	// Notify node that all nodes' roles have been set
+	printf("[INFO][Master] Notify all workers their roles have been set\n");
 	index = 0;
 	loop {
 		wait(delay(1.0));
@@ -1100,24 +1181,169 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 		for(auto& cmdInterf : agents) {
 			role = globalNodeStatus[index].role;
 			nodeID = globalNodeStatus[index].nodeID;
-			printf("[CMD] notify the finish of set role (%s) to node (index=%d uid=%s)\n",
-			getRoleStr(role).c_str(), index, nodeID.toString().c_str());
+			printf("[CMD] Notify the finish of set role (%s) to node (index=%d uid=%s)\n",
+					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role_Done, nodeID, role)));
 			index++;
 		}
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] get restoreCommandReply value:%s for set_role_done\n",
+			printf("[INFO] get restoreCommandReply value:%s for Set_Role_Done\n",
 					reps[i].id.toString().c_str());
 		}
 
 		break;
 	}
 
-
 	printf("Role:%s finish configure roles\n", getRoleStr(localNodeStatus.role).c_str());
 	return Void();
 
+}
+
+// Handle restore command request on workers
+ACTOR Future<Void> configureRolesHandler(RestoreCommandInterface interf) {
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s Role:%d(%s) localNodeStatus.role:%d\n",
+						req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str(),
+						localNodeStatus.role);
+				if ( interf.id() != req.id ) {
+						printf("[WARNING] node:%s receive request with a different id:%s\n",
+								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+
+				if ( req.cmd == RestoreCommandEnum::Set_Role ) {
+					localNodeStatus.init(req.role);
+					localNodeStatus.nodeID = interf.id();
+					printf("[INFO][Worker] Set localNodeID to %s, set role to %s\n",
+							localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
+					printf("[INFO][Worker] NodeID:%s (interf ID:%s) set to role:%s Done.\n",
+							localNodeStatus.nodeID.toString().c_str(),
+							interf.id().toString().c_str(),
+							getRoleStr(localNodeStatus.role).c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+
+ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<RestoreInterface> ret_agents
+	//construct the key range for each applier
+	std::vector<KeyRef> lowerBounds;
+	std::vector<Standalone<KeyRangeRef>> keyRanges;
+	std::vector<UID> applierIDs;
+
+	for (auto& applier : range2Applier) {
+		lowerBounds.push_back(applier.first);
+		applierIDs.push_back(applier.second);
+	}
+	for (int i  = 0; i < lowerBounds.size(); ++i) {
+		KeyRef startKey = lowerBounds[i];
+		KeyRef endKey;
+		if ( i < lowerBounds.size() - 1) {
+			endKey = lowerBounds[i+1];
+		} else {
+			endKey = normalKeys.end;
+		}
+
+		keyRanges.push_back(KeyRangeRef(startKey, endKey));
+	}
+
+	ASSERT( applierIDs.size() == keyRanges.size() );
+	state std::map<UID, Standalone<KeyRangeRef>> appliers;
+	for (int i = 0; i < applierIDs.size(); ++i) {
+		ASSERT( appliers.find(applierIDs[i]) == appliers.end() );
+		appliers.insert(std::make_pair(applierIDs[i], keyRanges[i]));
+	}
+
+	loop {
+		wait(delay(1.0));
+
+		state std::vector<Future<RestoreCommandReply>> cmdReplies;
+		for (auto& applier : appliers) {
+			KeyRangeRef keyRange = applier.second;
+			UID nodeID = applier.first;
+			ASSERT(workers_interface.find(nodeID) != workers_interface.end());
+			RestoreCommandInterface& cmdInterf = workers_interface[nodeID];
+			printf("[CMD] Assign KeyRange %s to applier ID:%s\n", keyRange.toString().c_str(), nodeID.toString().c_str());
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange, nodeID, keyRange)) );
+
+		}
+		printf("[INFO] Wait for %d applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] get restoreCommandReply value:%s for Assign_Applier_KeyRange\n",
+					reps[i].id.toString().c_str());
+		}
+
+		cmdReplies.clear();
+		for (auto& applier : appliers) {
+			KeyRangeRef keyRange = applier.second;
+			UID nodeID = applier.first;
+			RestoreCommandInterface& cmdInterf = workers_interface[nodeID];
+			printf("[CMD] Finish assigning KeyRange %s to applier ID:%s\n", keyRange.toString().c_str(), nodeID.toString().c_str());
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange_Done, nodeID)) );
+
+		}
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] get restoreCommandReply value:%s for Assign_Applier_KeyRange_Done\n",
+					reps[i].id.toString().c_str());
+		}
+
+		break;
+	}
+
+	return Void();
+}
+
+// Handle restore command request on workers
+ACTOR Future<Void> assignKeyRangeToAppliersHandler(RestoreCommandInterface interf) {
+	if ( localNodeStatus.role != RestoreRole::Applier) {
+		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
+				localNodeStatus.nodeID.toString().c_str(), localNodeStatus.role);
+	} else {
+		printf("[INFO][Worker] nodeID:%s (interface id:%s) waits for Assign_Applier_KeyRange cmd\n",
+				localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				printf("[INFO] Got Restore Command: cmd:%d UID:%s KeyRange:%s\n",
+						req.cmd, req.id.toString().c_str(), req.keyRange.toString().c_str());
+				if ( localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] node:%s receive request with a different id:%s\n",
+								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange ) {
+					// The applier should remember the key range it is responsible for
+					applierState.id = req.id;
+					applierState.keyRange = req.keyRange;
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if (req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done) {
+					printf("[INFO] Node:%s finish configure its key range:%s.\n",
+							localNodeStatus.nodeID.toString().c_str(), applierState.keyRange.toString().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
 }
 
 //TODO: DONE: collectRestoreRequests
@@ -1210,7 +1436,8 @@ std::vector<RestoreFile> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
 }
 
 //TODO: collect back up files info
-ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request, VectorRef<RestoreFile> files) {
+// NOTE: This function can now get the backup file descriptors
+ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -1231,9 +1458,6 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 	}
 
 	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
-
-	/*
-	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 	state BackupDescription desc = wait(bc->describeBackup());
 
 	wait(desc.resolveVersionTimes(cx));
@@ -1243,29 +1467,33 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 	if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 		targetVersion = desc.maxRestorableVersion.get();
 
-	Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+	printf("[INFO] collectBackupFiles: now getting backup files for restore request: %s\n", request.toString().c_str());
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(targetVersion));
 
-	//Above is the restore master code
-	//Below is the agent code
-	printf("[INFO] collectBackupFiles: start parse restore request: %s\n", request.toString().c_str());
-
-	if(!restoreSet.present()) {
-		TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
-				.detail("BackupContainer", bc->getURL())
-				.detail("TargetVersion", targetVersion);
-		fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
-		throw restore_invalid_version();
-	} else {
-		printf("---To restore from the following files: num_logs_file:%d num_range_files:%d---\n",
-				restoreSet.get().logs.size(), restoreSet.get().ranges.size());
-		for (int i = 0; i < restoreSet.get().logs.size(); ++i) {
-			printf("log file:%s\n", restoreSet.get().logs[i].toString().c_str());
-		}
-		for (int i = 0; i < restoreSet.get().ranges.size(); ++i) {
-			printf("range file:%s\n", restoreSet.get().ranges[i].toString().c_str());
-		}
+	if(!restorable.present()) {
+		printf("[WARNING] restoreVersion:%ld (%lx) is not restorable!\n", targetVersion, targetVersion);
+		throw restore_missing_data();
 	}
-	 */
+
+//	state std::vector<RestoreFile> files;
+	if (!files.empty()) {
+		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", files.size());
+		files.clear();
+	}
+
+	printf("[INFO] Found backup files: num of files:%d\n", files.size());
+ 	for(const RangeFile &f : restorable.get().ranges) {
+// 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
+ 		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
+		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
+ 		files.push_back(file);
+ 	}
+ 	for(const LogFile &f : restorable.get().logs) {
+// 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
+		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
+		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
+		files.push_back(file);
+ 	}
 
 
 //
@@ -1273,6 +1501,7 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 //		printf("[INFO] Restoring backup to version: %lld\n", (long long) targetVersion);
 //	}
 
+/*
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(randomUid));
 	loop {
@@ -1281,7 +1510,7 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// NOTE: cannot declare  RestorableFileSet as state, it will requires construction function in compilation
 //			Optional<RestorableFileSet> fileSet = wait(prepareRestoreFiles(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig));
-			wait(prepareRestoreFilesV2(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig, files));
+			wait( prepareRestoreFilesV2(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig) );
 			printf("[INFO] collectBackupFiles: num_of_files:%d. After prepareRestoreFiles(), restoreConfig is %s; TargetVersion is %ld (0x%lx)\n",
 					files.size(), restoreConfig->toString().c_str(), targetVersion, targetVersion);
 
@@ -1306,14 +1535,88 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 
 			break;
 		} catch(Error &e) {
+			printf("[Error] collectBackupFiles error:%s (%d)\n", e.what(), e.code());
 			if(e.code() != error_code_restore_duplicate_tag) {
 				wait(tr->onError(e));
 			}
 		}
 	}
+ */
 
 	return Void();
 }
+
+// Increase key value in the keyRange to get a spliced key range
+// The key range is (\x00, \xff)
+/*
+// This function is not compilable
+int IncreaseKeyRef(KeyRef key, int step) {
+	ASSERT(key.size() == 1);
+	//char* p = &key[0];
+	//*p = *p + step;
+	*mutateString(key) = key[0] + step;
+	return (int) key[0];
+}
+*/
+
+// TODO WiP: Distribution workload
+ACTOR static Future<Void> distributeWorkload(Database cx, RestoreRequest request) {
+	state Key tagName = request.tagName;
+	state Key url = request.url;
+	state bool waitForComplete = request.waitForComplete;
+	state Version targetVersion = request.targetVersion;
+	state bool verbose = request.verbose;
+	state KeyRange range = request.range;
+	state Key addPrefix = request.addPrefix;
+	state Key removePrefix = request.removePrefix;
+	state bool lockDB = request.lockDB;
+	state UID randomUid = request.randomUid;
+
+	// Determine the key range each applier is responsible for
+	std::pair<int, int> numWorkers = getNumLoaderAndApplier();
+	int numLoaders = numWorkers.first;
+	int numAppliers = numWorkers.second;
+	ASSERT( numLoaders > 0 );
+	ASSERT( numAppliers > 0 );
+
+	KeyRef maxKey = normalKeys.end;
+	KeyRef minKey = normalKeys.begin;
+	if (minKey.size() != 1) {
+		printf("[WARNING] normalKeys starts with a key with size %d! set the start key as \\00\n", minKey.size());
+		minKey= LiteralStringRef("\x00");
+	}
+	ASSERT(maxKey.size() == 1);
+	ASSERT(minKey.size() == 1);
+	KeyRange normalKeyRange(KeyRangeRef(minKey, maxKey)); // [empty, \ff)
+
+	int distOfNormalKeyRange = (int) (maxKey[0] - minKey[0]);
+	int step = distOfNormalKeyRange / numAppliers;
+	printf("[INFO] distOfNormalKeyRange:%d, step:%d\n", distOfNormalKeyRange, step);
+
+	//Assign key range to applier ID
+	std::vector<UID> applierIDs = getApplierIDs();
+	KeyRef curLowerBound = minKey;
+	for (int i = 0; i < applierIDs.size(); ++i) {
+		printf("[INFO] Assign key-to-applier map: Key:%s -> applierID:%s\n",
+				curLowerBound.toHexString().c_str(), applierIDs[i].toString().c_str());
+		range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
+		uint8_t val = curLowerBound[0] + step;
+		curLowerBound = KeyRef(&val, 1);
+	}
+
+	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
+	wait( assignKeyRangeToAppliers(cx) );
+
+	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
+	// Notify the loader about the data block and send the cmd to the loader to start loading the data
+	// Wait for the ack from loader and repeats
+
+
+
+	return Void();
+
+}
+
 
 
 ACTOR Future<Void> extractRestoreFileToMutations(Database cx, std::vector<RestoreFile> files, RestoreRequest request,
@@ -1468,36 +1771,7 @@ ACTOR Future<Void> applyRestoreOpsToDB(Database cx) {
 
 
 ////--- Functions for both loader and applier role
-// Handle restore command request on workers
-ACTOR Future<Void> configureRolesHandler(RestoreCommandInterface interf) {
-	loop {
-		choose {
-			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-				printf("[INFO] Got Restore Command: cmd:%d UID:%s Role:%d(%s)\n",
-						req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str());
-				if ( req.cmd == RestoreCommandEnum::Set_Role ) {
-					localNodeStatus.init(req.role);
-					localNodeStatus.nodeID = interf.id();
 
-					if ( localNodeStatus.nodeID != req.id ) {
-						printf("[WARNING] node:%s receive request with a different id:%s\n",
-								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
-					}
-					req.reply.send(RestoreCommandReply(interf.id()));
-				} else if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
-					printf("[INFO] Node:%s set to role:%s Done.\n",
-							localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
-					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
-					break;
-				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
-				}
-			}
-		}
-	}
-
-	return Void();
-}
 
 
 ////--- Restore Functions for the loader role
@@ -1549,7 +1823,21 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			}
 		}
 
+		// Step: configure its role
+		printf("[INFO][Worker] Configure its role\n");
 		wait( configureRolesHandler(interf) );
+		printf("[INFO][Worker] NodeID:%s is configure to %s\n",
+				localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+
+		// Step: prepare restore info: applier waits for the responsible keyRange,
+		// loader waits for the info of backup block it needs to load
+		if ( localNodeStatus.role == RestoreRole::Applier ) {
+			printf("[INFO][Worker][Applier] Waits for the assignment of key range\n");
+			wait( assignKeyRangeToAppliersHandler(interf) );
+		} else if ( localNodeStatus.role == RestoreRole::Loader ) {
+			//printf("[INFO][Worker:%s] role:Loader receives \n");
+		}
+
 
 		/*
 		// Handle the dummy workload that increases a counter
@@ -1567,7 +1855,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		 */
 
 		// The workers' logic ends here. Should not proceed
-		printf("Restore worker is about to exit now\n");
+		printf("[INFO][Worker:%s] LocalNodeID:%s Role:%s will exit now\n", interf.id().toString().c_str(),
+				localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
 		return Void();
 	}
 
@@ -2397,7 +2686,10 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state std::vector<RestoreFile> files = wait( collectBackupFiles(cx, request) );
+			wait( collectBackupFiles(cx, request) );
+			printBackupFilesInfo();
+
+			wait( distributeWorkload(cx, request) );
 
 			/*
 			// prepareRestore will set the restoreConfig based on the other input parameters
