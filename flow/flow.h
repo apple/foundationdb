@@ -254,19 +254,6 @@ public:
 		}
 	}
 
-	bool operator == (ErrorOr const& o) const {
-		return error == o.error && (!present() || get() == o.get());
-	}
-	bool operator != (ErrorOr const& o) const {
-		return !(*this == o);
-	}
-
-	bool operator < (ErrorOr const& o) const {
-		if (error != o.error) return error < o.error;
-		if (!present()) return false;
-		return get() < o.get();
-	}
-
 	bool isError() const { return error.code() != invalid_error_code; }
 	bool isError(int code) const { return error.code() == code; }
 	Error getError() const { ASSERT(isError()); return error; }

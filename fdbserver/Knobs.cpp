@@ -20,6 +20,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/Locality.h"
+#include <cmath>
 
 ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
 
