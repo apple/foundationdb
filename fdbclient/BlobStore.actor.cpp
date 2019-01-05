@@ -511,8 +511,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
 			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
+			contentCopy.discardAll();
 			if(pContent != nullptr) {
-				contentCopy.discardAll();
 				PacketBuffer *pFirst = pContent->getUnsent();
 				PacketBuffer *pLast = nullptr;
 				for(PacketBuffer *p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {
