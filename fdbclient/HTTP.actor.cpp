@@ -31,7 +31,7 @@ namespace HTTP {
 		o.reserve(s.size() * 3);
 		char buf[4];
 		for(auto c : s)
-			if(std::isalnum(c))
+			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.')
 				o.append(&c, 1);
 			else {
 				sprintf(buf, "%%%.02X", c);
@@ -294,12 +294,20 @@ namespace HTTP {
 	// and be destroyed by the caller
 	// TODO:  pSent is very hackish, do something better.
 	ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn, std::string verb, std::string resource, HTTP::Headers headers, UnsentPacketQueue *pContent, int contentLen, Reference<IRateControl> sendRate, int64_t *pSent, Reference<IRateControl> recvRate) {
+		state TraceEvent event(SevDebug, "HTTPRequest");
+
 		state UnsentPacketQueue empty;
 		if(pContent == NULL)
 			pContent = &empty;
 
 		state bool earlyResponse = false;
 		state int total_sent = 0;
+
+		event.detail("DebugID", conn->getDebugID());
+		event.detail("RemoteAddress", conn->getPeerAddress());
+		event.detail("Verb", verb);
+		event.detail("Resource", resource);
+		event.detail("RequestContentLen", contentLen);
 
 		try {
 			// Write headers to a packet buffer chain
@@ -347,8 +355,11 @@ namespace HTTP {
 			}
 
 			Void _ = wait(responseReading);
+			event.detail("ResponseCode", r->code);
+			event.detail("ResponseContentLen", r->contentLen);
 
 			double elapsed = timer() - send_start;
+			event.detail("Elapsed", elapsed);
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
 				printf("[%s] HTTP code=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
 					conn->getDebugID().toString().c_str(), r->code, earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent, (int)r->contentLen);
