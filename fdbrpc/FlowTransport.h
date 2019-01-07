@@ -163,18 +163,23 @@ public:
 		loadedEndpoint(e);
 	}
 
-	const Endpoint& findEndpoint(const NetworkAddress& addr) {
-		return addressToEndpointMap[addr];
+	const NetworkAddressList& getEndpointAddresses(const NetworkAddress& addr) {
+		auto& addresses = endpointAddressList[addr];
+		if (addresses.empty()) {
+			addresses.push_back(addr);
+		}
+		TraceEvent("GetEndpointAddresses").detail("Addr", addr).detail("Size", endpointAddressList[addr].size());
+		return endpointAddressList[addr];
 	}
 
 private:
 	class TransportData* self;
 
-	std::map<NetworkAddress, Endpoint> addressToEndpointMap;
+	std::map<NetworkAddress, std::vector<NetworkAddress>> endpointAddressList;
 	void loadedEndpoint(Endpoint&);
 };
 
-inline bool Endpoint::isLocal() const { 
+inline bool Endpoint::isLocal() const {
 	return addresses[0] == FlowTransport::transport().getLocalAddress();
 }
 

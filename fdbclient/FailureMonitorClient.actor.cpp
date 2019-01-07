@@ -45,7 +45,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 	state double waitfor = 0;
 
 	monitor->setStatus(controller.failureMonitoring.getEndpoint().getPrimaryAddress(), FailureStatus(false));
-	fmState->knownAddrs.insert( controller.failureMonitoring.getEndpoint().getPrimaryAddress() );
+	fmState->knownAddrs.insert( controller.failureMonitoring.getEndpoint().getCompatibleAddress() );
 
 	//The cluster controller's address (controller.failureMonitoring.getEndpoint().getPrimaryAddress()) is treated specially because we can declare that it is down independently
 	//of the response from the cluster controller. It still needs to be in knownAddrs in case the cluster controller changes, so the next cluster controller resets its state

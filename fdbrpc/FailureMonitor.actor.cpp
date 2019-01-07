@@ -20,6 +20,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "fdbrpc/FlowTransport.h"
 
 ACTOR Future<Void> waitForStateEqual( IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status ) {
 	loop {
@@ -71,39 +72,46 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 
 	// onStateChanged() will be waiting on endpointKnownFailed only where it is false, so if the address status
 	// for an endpoint that is waited on changes, the waiter sees its failure status change
-	auto it = addressStatus.find(address);
 
-	//TraceEvent("NotifyFailureStatus").detail("Address", address).detail("Status", status.failed ? "Failed" : "OK").detail("Present", it == addressStatus.end());
-	if (it == addressStatus.end()) {
-		if (status != FailureStatus()) {
-			addressStatus[address]=status;
-			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
+	const NetworkAddressList& endpointAddresses = getEndpointAddresses(address);
+
+	for (const auto& addr : endpointAddresses) {
+		auto it = addressStatus.find(addr);
+		TraceEvent("NotifyFailureStatus").detail("Address", addr).detail("Status", status.failed ? "Failed" : "OK").detail("Present", it == addressStatus.end());
+		if (it == addressStatus.end()) {
+			if (status != FailureStatus()) {
+				addressStatus[addr]=status;
+				endpointKnownFailed.triggerRange( Endpoint({addr}, UID()), Endpoint({addr}, UID(-1,-1)) );
+			}
+		} else {
+			bool triggerEndpoint = status != it->value;
+			if (status != FailureStatus())
+				it->value = status;
+			else
+				addressStatus.erase(it);
+			if(triggerEndpoint)
+				endpointKnownFailed.triggerRange( Endpoint({addr}, UID()), Endpoint({addr}, UID(-1,-1)) );
 		}
-	} else {
-		bool triggerEndpoint = status != it->value;
-		if (status != FailureStatus())
-			it->value = status;
-		else
-			addressStatus.erase(it);
-		if(triggerEndpoint)
-			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 	}
 }
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
-	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
+	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token).detail("Size", endpoint.addresses.size());
 	endpointKnownFailed.set( endpoint, true );
 }
 
 void SimpleFailureMonitor::notifyDisconnect( NetworkAddress const& address ) {
-	//TraceEvent("NotifyDisconnect").detail("Address", address);
-	endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
+	TraceEvent("NotifyDisconnect").detail("Address", address);
+	const NetworkAddressList& endpointAddresses = getEndpointAddresses(address);
+	for (const auto addr : endpointAddresses) {
+		endpointKnownFailed.triggerRange( Endpoint({addr}, UID()), Endpoint({address}, UID(-1,-1)) );
+	}
 }
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure( Endpoint const& endpoint ) {
 	// If the endpoint or address is already failed, return right away
-	auto i = addressStatus.find(endpoint.getPrimaryAddress());
+	auto i = addressStatus.find(getPrimaryAddress(endpoint));
 	if (i == addressStatus.end() || i->value.isFailed() || endpointKnownFailed.get(endpoint)) {
 		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
@@ -141,7 +149,7 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
 	if(!endpointKnownFailed.get(endpoint))
 		return false;
-	auto a = addressStatus.find(endpoint.getPrimaryAddress());
+	auto a = addressStatus.find(getPrimaryAddress(endpoint));
 	if (a == addressStatus.end()) return true;
 	else return !a->value.failed;
 }
@@ -153,4 +161,8 @@ bool SimpleFailureMonitor::permanentlyFailed( Endpoint const& endpoint ) {
 void SimpleFailureMonitor::reset() {
 	addressStatus = Map< NetworkAddress, FailureStatus >();
 	endpointKnownFailed.resetNoWaiting();
+}
+
+const NetworkAddressList& SimpleFailureMonitor::getEndpointAddresses(const NetworkAddress& addr) {
+	return FlowTransport::transport().getEndpointAddresses(addr);
 }

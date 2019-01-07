@@ -84,3 +84,11 @@ compile_commands.json
 temp/
 
 .cquery_cached_index
+*.patch
+TAGS
+tags
+GRTAGS
+GTAGS
+GPATH
+gtags.files
+ctags.files

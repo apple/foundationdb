@@ -34,7 +34,7 @@
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-static NetworkAddress g_currentDeliveryPeerAddress;
+static NetworkAddressList g_currentDeliveryPeerAddress;
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 const UID WLTOKEN_PING_PACKET(-1, 1);
@@ -172,7 +172,7 @@ public:
 			// TraceEvent("VISHESHGetFirstLocalAddress").detail("Size", localAddresses.size());
 			return localAddresses[0];
 		}
-		return localAddresses[0];
+		return localAddresses[1];
 	}
 
 	// Returns a vector of NetworkAddresses we are listening to.
@@ -482,11 +482,11 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		try {
-			g_currentDeliveryPeerAddress = destination.getPrimaryAddress();
+			g_currentDeliveryPeerAddress = destination.addresses;
 			receiver->receive( reader );
-			g_currentDeliveryPeerAddress = NetworkAddress();
+			g_currentDeliveryPeerAddress = {NetworkAddress()};
 		} catch (Error& e) {
-			g_currentDeliveryPeerAddress = NetworkAddress();
+			g_currentDeliveryPeerAddress = {NetworkAddress()};
 			TraceEvent(SevError, "ReceiverError").error(e).detail("Token", destination.token.toString()).detail("Peer", destination.getPrimaryAddress());
 			throw;
 		}
@@ -591,7 +591,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 				transport->warnAlwaysForLargePacket = false;
 		}
 
-		deliver( transport, Endpoint( {peerAddress}, token ), std::move(reader), true );
+		const NetworkAddressList& addressList = {peerAddress}; //FlowTransport::transport().getEndpointAddresses(peerAddress);
+		const NetworkAddressList& destList = addressList.size() ? addressList : std::vector<NetworkAddress>({peerAddress});
+		deliver( transport, Endpoint( destList, token ), std::move(reader), true );
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -875,18 +877,32 @@ Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress l
 void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
 	if (endpoint.getPrimaryAddress().isValid()) return;
 	ASSERT( !(endpoint.token.first() & TOKEN_STREAM_FLAG) );  // Only reply promises are supposed to be unaddressed
-	ASSERT( g_currentDeliveryPeerAddress.isValid() );
-	endpoint.addresses = {g_currentDeliveryPeerAddress};
+	ASSERT( g_currentDeliveryPeerAddress[0].isValid() );
+	endpoint.addresses = g_currentDeliveryPeerAddress;
+	TraceEvent("LoadEndpoint").detail("Size", endpoint.addresses.size()).detail("Addr", endpoint.getPrimaryAddress());
 }
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
+	TraceEvent("AddPeerReference").detail("Address", endpoint.getPrimaryAddress())
+		.detail("PeerAddr", endpoint.getCompatibleAddress())
+		.detail("Size", endpoint.addresses.size());
 	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
-	const NetworkAddress& connectAddress = endpoint.getCompatibleAddress();
+	const Endpoint& newEndpoint = endpoint;
+	  // endpointAddressList[endpoint.getPrimaryAddress()].size() < endpoint.addresses.size()
+	    // ? endpoint
+	    // : Endpoint(endpointAddressList[endpoint.getPrimaryAddress()], endpoint.token);
+	const NetworkAddress& connectAddress = newEndpoint.getCompatibleAddress();
 	Peer* peer = self->getPeer(connectAddress);
 	if(peer->peerReferences == -1) {
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;
+	}
+	for (const auto& address : endpoint.addresses) {
+		NetworkAddressList& addrList = endpointAddressList[address];
+		if (addrList.size() < endpoint.addresses.size()) {
+			addrList = endpoint.addresses;
+		}
 	}
 }
 

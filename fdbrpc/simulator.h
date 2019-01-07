@@ -85,7 +85,7 @@ public:
 		bool isCleared() const { return cleared; }
 
 		const NetworkAddress& getPrimaryAddress() {
-			return addresses[0];
+			return addresses[1];
 		}
 
 		// Returns true if the class represents an acceptable worker
