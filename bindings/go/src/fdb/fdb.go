@@ -30,7 +30,6 @@ package fdb
 import "C"
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"runtime"
@@ -373,12 +372,6 @@ type KeyConvertible interface {
 // Key represents a FoundationDB key, a lexicographically-ordered sequence of
 // bytes. Key implements the KeyConvertible interface.
 type Key []byte
-
-// String returns human readable hexadecimal encoding of the key.
-func (k Key) String() string {
-	return hex.EncodeToString(k)
-}
-
 
 // FDBKey allows Key to (trivially) satisfy the KeyConvertible interface.
 func (k Key) FDBKey() Key {
