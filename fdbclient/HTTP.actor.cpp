@@ -310,6 +310,10 @@ namespace HTTP {
 		event.detail("RequestContentLen", contentLen);
 
 		try {
+			state std::string requestID = g_random->randomUniqueID().toString();
+			event.detail("RequestIDSent", requestID);
+			headers["X-Request-ID"] = requestID;
+
 			// Write headers to a packet buffer chain
 			PacketBuffer *pFirst = new PacketBuffer();
 			PacketBuffer *pLast = writeRequestHeader(verb, resource, headers, pFirst);
@@ -358,6 +362,12 @@ namespace HTTP {
 			event.detail("ResponseCode", r->code);
 			event.detail("ResponseContentLen", r->contentLen);
 
+			auto iid = r->headers.find("X-Request-ID");
+			if(iid != r->headers.end() && iid->second != requestID) {
+				event.detail("RequestIDReceived", iid->second);
+				throw http_bad_request_id();
+			}
+
 			double elapsed = timer() - send_start;
 			event.detail("Elapsed", elapsed);
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
@@ -371,6 +381,7 @@ namespace HTTP {
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
 				printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
 					conn->getDebugID().toString().c_str(), e.name(), earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent);
+			event.error(e);
 			throw;
 		}
 	}

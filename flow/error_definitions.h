@@ -101,7 +101,7 @@ ERROR( io_timeout, 1521, "A disk IO operation failed to complete in a timely man
 ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
-
+ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
