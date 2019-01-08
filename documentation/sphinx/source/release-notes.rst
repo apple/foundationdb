@@ -12,6 +12,7 @@ Fixes
 * Blobstore request failures could cause backup expire and delete operations to skip some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
 * Blobstore request failures could cause restore to fail to apply some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
 * Storage servers with large amounts of data would pause for a short period of time after rebooting. `(PR #1001) <https://github.com/apple/foundationdb/pull/1001>`_
+* The client library could leak memory when a thread died.
 
 Features
 --------
