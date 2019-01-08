@@ -9,8 +9,8 @@ Fixes
 -----
 
 * Backup metadata could falsely indicate that the backup is not usable. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
-* Backup expire and delete operations could fail to delete some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
-* Restore could fail to apply some range files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause backup expire and delete operations to skip some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause restore to fail to apply some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
 * Storage servers with large amounts of data would pause for a short period of time after rebooting. `(PR #1001) <https://github.com/apple/foundationdb/pull/1001>`_
 
 Features
