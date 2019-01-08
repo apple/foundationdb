@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -382,6 +383,23 @@ func (k Key) String() string {
 // FDBKey allows Key to (trivially) satisfy the KeyConvertible interface.
 func (k Key) FDBKey() Key {
 	return k
+}
+
+// String describes the key as a hexadecimal encoded string.
+func (k Key) String() string {
+	var sb strings.Builder
+	for _, b := range k {
+		if b >= 32 && b < 127 && b != '\\' {
+			sb.WriteByte(b)
+			continue
+		}
+		if b == '\\' {
+			sb.WriteString("\\\\")
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("\\x%x", b))
+	}
+	return sb.String()
 }
 
 func panicToError(e *error) {
