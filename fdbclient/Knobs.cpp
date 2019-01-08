@@ -148,6 +148,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( HTTP_READ_SIZE,                     128*1024 );
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
+	init( HTTP_REQUEST_ID_HEADER,                   "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
