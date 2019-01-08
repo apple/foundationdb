@@ -2,6 +2,22 @@
 Release Notes
 #############
 
+6.0.18
+======
+
+Fixes
+-----
+
+* Backup metadata could falsely indicate that the backup is not usable. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Backup expire and delete operations could fail to delete some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Restore could fail to apply some range files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Storage servers with large amounts of data would pause for a short period of time after rebooting. `(PR #1001) <https://github.com/apple/foundationdb/pull/1001>`_
+
+Features
+--------
+
+* Added the ability to specify versions as version-days ago from latest log in backup. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+
 6.0.17
 ======
 
