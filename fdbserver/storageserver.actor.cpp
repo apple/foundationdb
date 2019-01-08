@@ -3562,7 +3562,7 @@ void versionedMapTest() {
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
 	const int ASIZE = NSIZE<=64 ? 64 : NextPowerOfTwo<NSIZE>::Result;
 
-	auto before = FastAllocator< ASIZE >::getMemoryUsed();
+	auto before = FastAllocator< ASIZE >::getTotalMemory();
 
 	for(int v=1; v<=1000; ++v) {
 		vm.createNewVersion(v);
@@ -3576,7 +3576,7 @@ void versionedMapTest() {
 		}
 	}
 
-	auto after = FastAllocator< ASIZE >::getMemoryUsed();
+	auto after = FastAllocator< ASIZE >::getTotalMemory();
 
 	int count = 0;
 	for(auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)

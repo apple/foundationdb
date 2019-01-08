@@ -41,8 +41,8 @@ void systemMonitor() {
 	customSystemMonitor("ProcessMetrics", &statState, true );
 }
 
-#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
-#define DETAILALLOCATORMEMUSAGE( size ) detail("AllocatedMemory"#size, FastAllocator<size>::getMemoryUsed()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getMemoryUnused())
+#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
+#define DETAILALLOCATORMEMUSAGE( size ) detail("TotalMemory"#size, FastAllocator<size>::getTotalMemory()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getApproximateMemoryUnused()).detail("ActiveThreads"#size, FastAllocator<size>::getActiveThreads())
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "", 
