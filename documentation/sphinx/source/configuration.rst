@@ -355,22 +355,19 @@ FoundationDB will never use processes on the same machine for the replication of
     FoundationDB replicates data to three machines, and at least three available machines are required to make progress. This is the recommended mode for a cluster of five or more machines in a single datacenter.
 
 ``three_data_hall`` mode
-    FoundationDB replicates data to three machines, and at least three available machines are required to make progress. Every piece of data that has been committed to storage servers
-    will be replicated onto three different data halls, and the cluster will
-    remain available after losing a single data hall and one machine in another
-    data hall.
+    FoundationDB stores data in triplicate, with one copy on a storage server in each of three data halls. The transaction logs are replicated four times, with two data halls containing two replicas apiece. Four available machines (two in each of two data halls) are therefore required to make progress. This configuration enables the cluster to remain available after losing a single data hall and one machine in another data hall.
 
 Datacenter-aware mode
 ---------------------
 
-In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters. Although data will always be triple replicated in this mode, it may not be replicated across all datacenters.
+In addition to the more commonly used modes listed above, this version of FoundationDB has support for redundancy across multiple datacenters.
 
     .. note:: When using the datacenter-aware mode, all ``fdbserver`` processes should be passed a valid datacenter identifier on the command line.
 
 ``three_datacenter`` mode
     *(for 5+ machines in 3 datacenters)*
 
-    FoundationDB attempts to replicate data across three datacenters and will stay up with only two available. Data is replicated 6 times.  For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.
+    FoundationDB attempts to replicate data across three datacenters and will stay up with only two available. Data is replicated 6 times. Transaction logs are stored in the same configuration as the ``three_data_hall`` mode, so commit latencies are tied to the latency between datacenters. For maximum availability, you should use five coordination servers: two in two of the datacenters and one in the third datacenter.
 
 .. warning:: ``three_datacenter`` mode is not compatible with region configuration.
 
