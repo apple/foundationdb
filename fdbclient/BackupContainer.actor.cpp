@@ -361,14 +361,34 @@ public:
 			throw restore_corrupted_data();
 
 		std::vector<RangeFile> results;
+		int missing = 0;
+
 		for(auto const &fileValue : filesArray.get_array()) {
 			if(fileValue.type() != json_spirit::str_type)
 				throw restore_corrupted_data();
-			auto i = rangeIndex.find(fileValue.get_str());
-			if(i == rangeIndex.end())
-				throw restore_corrupted_data();
 
-			results.push_back(i->second);
+			// If the file is not in the index then log the error but don't throw yet, keep checking the whole list.
+			auto i = rangeIndex.find(fileValue.get_str());
+			if(i == rangeIndex.end()) {
+				TraceEvent(SevError, "FileRestoreMissingRangeFile")
+					.detail("URL", bc->getURL())
+					.detail("File", fileValue.get_str());
+
+				++missing;
+			}
+
+			// No point in using more memory once data is missing since an error will be thrown instead.
+			if(missing == 0) {
+				results.push_back(i->second);
+			}
+		}
+
+		if(missing > 0) {
+			TraceEvent(SevError, "FileRestoreMissingRangeFileSummary")
+				.detail("URL", bc->getURL())
+				.detail("Count", missing);
+
+			throw restore_missing_data();
 		}
 
 		return results;
@@ -1673,7 +1693,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	try {
 		Void _ = wait(c->deleteContainer());
 	} catch(Error &e) {
-		if(e.code() != error_code_backup_invalid_url)
+		if(e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
 			throw;
 	}
 
@@ -1778,10 +1798,9 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("DELETING\n");
 	Void _ = wait(c->deleteContainer());
 
-	BackupDescription d = wait(c->describeBackup());
-	printf("\n%s\n", d.toString().c_str());
-	ASSERT(d.snapshots.size() == 0);
-	ASSERT(!d.minLogBegin.present());
+	state Future<BackupDescription> d = c->describeBackup();
+	Void _ = wait(ready(d));
+	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
 
 	BackupFileList empty = wait(c->dumpFileList());
 	ASSERT(empty.ranges.size() == 0);

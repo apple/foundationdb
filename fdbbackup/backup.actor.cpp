@@ -793,7 +793,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -n, --dry-run  For start or restore operations, performs a trial run with no actual changes made.\n");
+	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -837,7 +837,7 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  -k KEYS        List of key ranges from the backup to restore\n");
 	printf("  --remove_prefix PREFIX   prefix to remove from the restored keys\n");
 	printf("  --add_prefix PREFIX      prefix to add to the restored keys\n");
-	printf("  -n, --dry-run  Perform a trial run with no changes made.\n");
+	printf("  -n, --dryrun  Perform a trial run with no changes made.\n");
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -1787,11 +1787,10 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version dbVersion, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
 	try
 	{
 		state FileBackupAgent backupAgent;
-		state int64_t restoreVersion = -1;
 
 		if(ranges.size() > 1) {
 			fprintf(stderr, "Currently only a single restore range is supported!\n");
@@ -1800,52 +1799,45 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 
 		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
-		if (performRestore) {
-			if(dbVersion == invalidVersion) {
-				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
-				if(!desc.maxRestorableVersion.present()) {
-					fprintf(stderr, "The specified backup is not restorable to any version.\n");
-					throw restore_error();
-				}
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
 
-				dbVersion = desc.maxRestorableVersion.get();
+		// If targetVersion is unset then use the maximum restorable version from the backup description
+		if(targetVersion == invalidVersion) {
+			if(verbose)
+				printf("No restore target version given, will use maximum restorable version from backup description.\n");
+
+			BackupDescription desc = wait(bc->describeBackup());
+
+			if(!desc.maxRestorableVersion.present()) {
+				fprintf(stderr, "The specified backup is not restorable to any version.\n");
+				throw restore_error();
 			}
-			Version _restoreVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
-			restoreVersion = _restoreVersion;
+			
+			targetVersion = desc.maxRestorableVersion.get();
+
+			if(verbose)
+				printf("Using target restore version %lld\n", targetVersion);
+		}
+
+		if (performRestore) {
+			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, targetVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
+
+			if(waitForDone && verbose) {
+				// If restore is now complete then report version restored
+				printf("Restored to version %lld\n", restoredVersion);
+			}
 		}
 		else {
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
-			state BackupDescription description = wait(bc->describeBackup());
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion));
 
-			if(dbVersion <= 0) {
-				Void _ = wait(description.resolveVersionTimes(db));
-				if(description.maxRestorableVersion.present())
-					restoreVersion = description.maxRestorableVersion.get();
-				else {
-					fprintf(stderr, "Backup is not restorable\n");
-					throw restore_invalid_version();
-				}
-			}
-			else
-				restoreVersion = dbVersion;
-
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if(!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
+				fprintf(stderr, "Insufficient data to restore to version %lld.  Describe backup for more information.\n", targetVersion);
 				throw restore_invalid_version();
 			}
 
-			// Display the restore information, if requested
-			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long) restoreVersion);
-				printf("%s\n", description.toString().c_str());
-			}
+			printf("Backup can be used to restore to version %lld\n", targetVersion);
 		}
 
-		if(waitForDone && verbose) {
-			// If restore completed then report version restored
-			printf("Restored to version %lld%s\n", (long long) restoreVersion, (performRestore) ? "" : " (DRY RUN)");
-		}
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -3036,8 +3028,13 @@ int main(int argc, char* argv[]) {
 
 			break;
 		case EXE_RESTORE:
-			if(!initCluster())
+			if(dryRun) {
+				initTraceFile();
+			}
+			else if(!initCluster()) {
 				return FDB_EXIT_ERROR;
+			}
+
 			switch(restoreType) {
 				case RESTORE_START:
 					f = stopAfter( runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
