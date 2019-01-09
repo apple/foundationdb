@@ -39,7 +39,7 @@ ifeq ($(PLATFORM),Linux)
 
   CXXFLAGS += -std=c++0x
 
-  BOOSTDIR ?= /opt/boost_1_52_0
+  BOOSTDIR ?= /opt/boost_1_67_0
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
@@ -55,7 +55,7 @@ else ifeq ($(PLATFORM),Darwin)
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
-  BOOSTDIR ?= $(HOME)/boost_1_52_0
+  BOOSTDIR ?= $(HOME)/boost_1_67_0
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
