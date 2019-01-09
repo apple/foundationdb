@@ -3028,8 +3028,13 @@ int main(int argc, char* argv[]) {
 
 			break;
 		case EXE_RESTORE:
-			if(!dryRun && !initCluster())
+			if(dryRun) {
+				initTraceFile();
+			}
+			else if(!initCluster()) {
 				return FDB_EXIT_ERROR;
+			}
+
 			switch(restoreType) {
 				case RESTORE_START:
 					f = stopAfter( runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
