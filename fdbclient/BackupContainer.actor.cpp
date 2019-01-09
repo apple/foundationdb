@@ -361,14 +361,34 @@ public:
 			throw restore_corrupted_data();
 
 		std::vector<RangeFile> results;
+		int missing = 0;
+
 		for(auto const &fileValue : filesArray.get_array()) {
 			if(fileValue.type() != json_spirit::str_type)
 				throw restore_corrupted_data();
-			auto i = rangeIndex.find(fileValue.get_str());
-			if(i == rangeIndex.end())
-				throw restore_corrupted_data();
 
-			results.push_back(i->second);
+			// If the file is not in the index then log the error but don't throw yet, keep checking the whole list.
+			auto i = rangeIndex.find(fileValue.get_str());
+			if(i == rangeIndex.end()) {
+				TraceEvent(SevError, "FileRestoreMissingRangeFile")
+					.detail("URL", bc->getURL())
+					.detail("File", fileValue.get_str());
+
+				++missing;
+			}
+
+			// No point in using more memory once data is missing since an error will be thrown instead.
+			if(missing == 0) {
+				results.push_back(i->second);
+			}
+		}
+
+		if(missing > 0) {
+			TraceEvent(SevError, "FileRestoreMissingRangeFileSummary")
+				.detail("URL", bc->getURL())
+				.detail("Count", missing);
+
+			throw restore_missing_data();
 		}
 
 		return results;
