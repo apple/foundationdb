@@ -40,12 +40,14 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+class RestoreConfig;
+struct RestoreData; // Only declare the struct exist but we cannot use its field
+
 bool debug_verbose = false;
 
 
-
 ////-- Restore code declaration START
-
+//TODO: Move to RestoreData
 std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
 //std::map<Version, std::vector<MutationRef>> kvOps; //TODO: Must change to standAlone before run correctness test. otherwise, you will see the mutationref memory is corrupted
 std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; //key is the unique identifier for a batch of mutation logs at the same version
@@ -56,79 +58,9 @@ std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most rec
 std::vector<MutationRef> mOps;
 
 
-//---- Declare status structure which records the progress and status of each worker in each role
-std::map<UID, RestoreCommandInterface> workers_interface; // UID is worker's node id, RestoreCommandInterface is worker's communication interface
-
-void printGlobalNodeStatus();
-RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
-ApplierState applierState; // each applier should keep its state
-
-std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, excluding master node, stored in master node // May change to map, like servers_info
-std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responisible for
-
-//Print out the works_interface info
-void printWorkersInterface(){
-	printf("[INFO] workers_interface info: num of workers:%d\n", workers_interface.size());
-	int index = 0;
-	for (auto &interf : workers_interface) {
-		printf("\t[INFO][Worker %d] NodeID:%s, Interface.id():%s\n", index,
-				interf.first.toString().c_str(), interf.second.id().toString().c_str());
-	}
-}
+void printGlobalNodeStatus(Reference<RestoreData>);
 
 
-// Return <num_of_loader, num_of_applier> in the system
-std::pair<int, int> getNumLoaderAndApplier() {
-	int numLoaders = 0;
-	int numAppliers = 0;
-	for (int i = 0; i < globalNodeStatus.size(); ++i) {
-		if (globalNodeStatus[i].role == RestoreRole::Loader) {
-			numLoaders++;
-		} else if (globalNodeStatus[i].role == RestoreRole::Applier) {
-			numAppliers++;
-		}
-	}
-
-	if ( numLoaders + numAppliers != globalNodeStatus.size() ) {
-		printf("[ERROR] Number of workers does not add up! numLoaders:%d, numApplier:%d, totalProcess:%d\n",
-				numLoaders, numAppliers, globalNodeStatus.size());
-	}
-
-	return std::make_pair(numLoaders, numAppliers);
-}
-
-std::vector<UID> getApplierIDs() {
-	std::vector<UID> applierIDs;
-	for (int i = 0; i < globalNodeStatus.size(); ++i) {
-		if (globalNodeStatus[i].role == RestoreRole::Applier) {
-			applierIDs.push_back(globalNodeStatus[i].nodeID);
-		}
-	}
-
-	// Check if there exist duplicate applier IDs, which should never occur
-	std::sort(applierIDs.begin(), applierIDs.end());
-	bool unique = true;
-	for (int i = 1; i < applierIDs.size(); ++i) {
-		if (applierIDs[i-1] == applierIDs[i]) {
-			unique = false;
-			break;
-		}
-	}
-	if (!unique) {
-		printf("[ERROR] Applier IDs are not unique! All worker IDs are as follows\n");
-		printGlobalNodeStatus();
-	}
-
-	return applierIDs;
-}
-
-void printGlobalNodeStatus() {
-	printf("---Print globalNodeStatus---\n");
-	printf("Number of entries:%d\n", globalNodeStatus.size());
-	for(int i = 0; i < globalNodeStatus.size(); ++i) {
-		printf("[Node:%d] %s\n", globalNodeStatus[i].toString().c_str());
-	}
-}
 
 std::vector<std::string> RestoreRoleStr = {"Invalid", "Master", "Loader", "Applier"};
 int numRoles = RestoreRoleStr.size();
@@ -214,6 +146,7 @@ public:
 		int64_t blockSize;
 		int64_t fileSize;
 		Version endVersion;  // not meaningful for range files
+		int64_t cursor; //The start block location to be restored. All blocks before cursor have been scheduled to load and restore
 
 		Tuple pack() const {
 			return Tuple()
@@ -519,25 +452,165 @@ namespace parallelFileRestore {
 
 }
 
+//TODO: RestoreData
+// RestoreData is the context for each restore process (worker and master)
+struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
+	//---- Declare status structure which records the progress and status of each worker in each role
+	std::map<UID, RestoreCommandInterface> workers_interface; // UID is worker's node id, RestoreCommandInterface is worker's communication interface
+
+	RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
+	std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, excluding master node, stored in master node // May change to map, like servers_info
+
+	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
+	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+
+	struct ApplierStatus {
+		UID id;
+		KeyRange keyRange; // the key range the applier is responsible for
+		// Applier state is changed at the following event
+		// Init: when applier's role is set
+		// Assigned: when applier is set for a key range to be respoinsible for
+		// Applying: when applier starts to apply the mutations to DB after receiving the cmd from loader
+		// Done: when applier has finished applying the mutation and notify the master. It will change to Assigned after Done
+		enum class ApplierState {Invalid = 0, Init = 1, Assigned, Applying, Done};
+		ApplierState state;
+	};
+	ApplierStatus applierStatus;
+
+	// LoadingState is a state machine, each state is set in the following event:
+	// Init: when master starts to collect all files before ask loaders to load data
+	// Assigned: when master sends out the loading cmd to loader to load a block of data
+	// Loading: when master receives the ack. responds from the loader about the loading cmd
+	// Applying: when master receives from applier that the applier starts to apply the results for the load cmd
+	// Done: when master receives from applier that the applier has finished applying the results for the load cmd
+	// When LoadingState becomes done, master knows the particular backup file block has been applied (restored) to DB
+	enum class LoadingState {Invalid = 0, Init = 1, Assigned, Loading, Applying, Done};
+	// TODO: RestoreStatus
+	// Information of the backup files to be restored, and the restore progress
+	struct LoadingStatus {
+		RestoreFile file;
+		int64_t start; // Starting point of the block in the file to load
+		int64_t length;// Length of block to load
+		LoadingState state; // Loading state of the particular file block
+		UID node; // The loader node ID that responsible for the file block
+
+		explicit LoadingStatus() {}
+		explicit LoadingStatus(RestoreFile file, int64_t start, int64_t length, UID node): file(file), start(start), length(length), state(LoadingState::Init), node(node) {}
+	};
+	std::map<int64_t, LoadingStatus> loadingStatus; // first is the global index of the loading cmd, starting from 0
+
+
+	std::vector<RestoreFile> files; // backup files: range and log files
+
+	~RestoreData() {
+		printf("[Exit] RestoreData is deleted\n");
+	}
+};
+
+typedef RestoreData::LoadingStatus LoadingStatus;
+typedef RestoreData::LoadingState LoadingState;
+
+
+//Print out the works_interface info
+void printWorkersInterface(Reference<RestoreData> restoreData){
+	printf("[INFO] workers_interface info: num of workers:%d\n", restoreData->workers_interface.size());
+	int index = 0;
+	for (auto &interf : restoreData->workers_interface) {
+		printf("\t[INFO][Worker %d] NodeID:%s, Interface.id():%s\n", index,
+				interf.first.toString().c_str(), interf.second.id().toString().c_str());
+	}
+}
+
+
+// Return <num_of_loader, num_of_applier> in the system
+std::pair<int, int> getNumLoaderAndApplier(Reference<RestoreData> restoreData){
+	int numLoaders = 0;
+	int numAppliers = 0;
+	for (int i = 0; i < restoreData->globalNodeStatus.size(); ++i) {
+		if (restoreData->globalNodeStatus[i].role == RestoreRole::Loader) {
+			numLoaders++;
+		} else if (restoreData->globalNodeStatus[i].role == RestoreRole::Applier) {
+			numAppliers++;
+		}
+	}
+
+	if ( numLoaders + numAppliers != restoreData->globalNodeStatus.size() ) {
+		printf("[ERROR] Number of workers does not add up! numLoaders:%d, numApplier:%d, totalProcess:%d\n",
+				numLoaders, numAppliers, restoreData->globalNodeStatus.size());
+	}
+
+	return std::make_pair(numLoaders, numAppliers);
+}
+
+std::vector<UID> getApplierIDs(Reference<RestoreData> restoreData) {
+	std::vector<UID> applierIDs;
+	for (int i = 0; i < restoreData->globalNodeStatus.size(); ++i) {
+		if (restoreData->globalNodeStatus[i].role == RestoreRole::Applier) {
+			applierIDs.push_back(restoreData->globalNodeStatus[i].nodeID);
+		}
+	}
+
+	// Check if there exist duplicate applier IDs, which should never occur
+	std::sort(applierIDs.begin(), applierIDs.end());
+	bool unique = true;
+	for (int i = 1; i < applierIDs.size(); ++i) {
+		if (applierIDs[i-1] == applierIDs[i]) {
+			unique = false;
+			break;
+		}
+	}
+	if (!unique) {
+		printf("[ERROR] Applier IDs are not unique! All worker IDs are as follows\n");
+		printGlobalNodeStatus(restoreData);
+	}
+
+	return applierIDs;
+}
+
+std::vector<UID> getLoaderIDs(Reference<RestoreData> restoreData) {
+	std::vector<UID> loaderIDs;
+	for (int i = 0; i < restoreData->globalNodeStatus.size(); ++i) {
+		if (restoreData->globalNodeStatus[i].role == RestoreRole::Loader) {
+			loaderIDs.push_back(restoreData->globalNodeStatus[i].nodeID);
+		}
+	}
+
+	// Check if there exist duplicate applier IDs, which should never occur
+	std::sort(loaderIDs.begin(), loaderIDs.end());
+	bool unique = true;
+	for (int i = 1; i < loaderIDs.size(); ++i) {
+		if (loaderIDs[i-1] == loaderIDs[i]) {
+			unique = false;
+			break;
+		}
+	}
+	if (!unique) {
+		printf("[ERROR] Applier IDs are not unique! All worker IDs are as follows\n");
+		printGlobalNodeStatus(restoreData);
+	}
+
+	return loaderIDs;
+}
+
+void printGlobalNodeStatus(Reference<RestoreData> restoreData) {
+	printf("---Print globalNodeStatus---\n");
+	printf("Number of entries:%d\n", restoreData->globalNodeStatus.size());
+	for(int i = 0; i < restoreData->globalNodeStatus.size(); ++i) {
+		printf("[Node:%d] %s\n", restoreData->globalNodeStatus[i].toString().c_str());
+	}
+}
+
 void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input);
 void registerBackupMutationForAll(Version empty);
 bool isKVOpsSorted();
 bool allOpsAreKnown();
 
-// TODO: RestoreStatus
-// Information of the backup files to be restored, and the restore progress
-struct RestoreStatus {
-//	std::vector<RestoreFile> files;
-	std::map<RestoreFile, int> files; // first: restore files, second: the current starting point to restore the file
-};
 
-std::vector<RestoreFile> files; // backup files: range and log files
-RestoreStatus restoreStatus;
 
-void printBackupFilesInfo() {
-	printf("[INFO] backup files: num:%d\n", files.size());
-	for (int i = 0; i < files.size(); ++i) {
-		printf("\t[INFO][File %d] %s\n", i, files[i].toString().c_str());
+void printBackupFilesInfo(Reference<RestoreData> restoreData) {
+	printf("[INFO] backup files: num:%d\n", restoreData->files.size());
+	for (int i = 0; i < restoreData->files.size(); ++i) {
+		printf("\t[INFO][File %d] %s\n", i, restoreData->files[i].toString().c_str());
 	}
 }
 
@@ -637,7 +710,7 @@ void printBackupFilesInfo() {
 // }
 
 
-ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
+ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreData, Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
 		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
 		Reference<RestoreConfig> restore_input) {
  	ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
@@ -712,27 +785,186 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourW
 	}
 
 //	state std::vector<RestoreFile> files;
-	if (!files.empty()) {
-		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", files.size());
-		files.clear();
+	if (!restoreData->files.empty()) {
+		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", restoreData->files.size());
+		restoreData->files.clear();
 	}
 
-	printf("[INFO] Found backup files: num of files:%d\n", files.size());
+	printf("[INFO] Found backup files: num of range files:%d, num of log files:%d\n",
+			restorable.get().ranges.size(), restorable.get().logs.size());
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
- 		files.push_back(file);
+ 		restoreData->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
 // 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
-		files.push_back(file);
+		restoreData->files.push_back(file);
  	}
 
 	return Void();
 
+ }
+
+
+ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<IBackupContainer> bc, Version version,
+ 									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
+ 									KeyRange restoreRange, Key addPrefix, Key removePrefix) {
+//	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx)); // Used to clear the range where the KV will be applied.
+
+ 	state int64_t readOffset = readOffset_input;
+ 	state int64_t readLen = readLen_input;
+
+ 	//MX: the set of key value version is rangeFile.version. the key-value set in the same range file has the same version
+ 	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
+
+ 	state Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, readOffset, readLen));
+
+ 	// First and last key are the range for this file
+ 	state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+ 	printf("[INFO] RangeFile:%s KeyRange:%s, restoreRange:%s\n",
+ 			fileName.c_str(), fileRange.toString().c_str(), restoreRange.toString().c_str());
+
+ 	// If fileRange doesn't intersect restore range then we're done.
+ 	if(!fileRange.intersects(restoreRange)) {
+ 		TraceEvent("ExtractApplyRangeFileToDB_MX").detail("NoIntersectRestoreRange", "FinishAndReturn");
+ 		return Void();
+ 	}
+
+ 	// We know the file range intersects the restore range but there could still be keys outside the restore range.
+ 	// Find the subvector of kv pairs that intersect the restore range.  Note that the first and last keys are just the range endpoints for this file
+ 	int rangeStart = 1;
+ 	int rangeEnd = blockData.size() - 1;
+ 	// Slide start forward, stop if something in range is found
+	// Move rangeStart and rangeEnd until they is within restoreRange
+ 	while(rangeStart < rangeEnd && !restoreRange.contains(blockData[rangeStart].key))
+ 		++rangeStart;
+ 	// Side end backward, stop if something in range is found
+ 	while(rangeEnd > rangeStart && !restoreRange.contains(blockData[rangeEnd - 1].key))
+ 		--rangeEnd;
+
+ 	// MX: now data only contains the kv mutation within restoreRange
+ 	state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
+ 	printf("[INFO] RangeFile:%s blockData entry size:%d recovered data size:%d\n", fileName.c_str(), blockData.size(), data.size());
+
+ 	// Shrink file range to be entirely within restoreRange and translate it to the new prefix
+ 	// First, use the untranslated file range to create the shrunk original file range which must be used in the kv range version map for applying mutations
+ 	state KeyRange originalFileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin), std::min(fileRange.end,   restoreRange.end));
+
+ 	// Now shrink and translate fileRange
+ 	Key fileEnd = std::min(fileRange.end,   restoreRange.end);
+ 	if(fileEnd == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix)) ) {
+ 		fileEnd = addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix);
+ 	} else {
+ 		fileEnd = fileEnd.removePrefix(removePrefix).withPrefix(addPrefix);
+ 	}
+ 	fileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin).removePrefix(removePrefix).withPrefix(addPrefix),fileEnd);
+
+ 	state int start = 0;
+ 	state int end = data.size();
+ 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+ 	state int kvCount = 0;
+
+ 	//MX: This is where the key-value pair in range file is applied into DB
+	loop {
+
+		state int i = start;
+		state int txBytes = 0;
+		state int iend = start;
+
+		// find iend that results in the desired transaction size
+		for(; iend < end && txBytes < dataSizeLimit; ++iend) {
+			txBytes += data[iend].key.expectedSize();
+			txBytes += data[iend].value.expectedSize();
+		}
+
+
+		for(; i < iend; ++i) {
+			//MXX: print out the key value version, and operations.
+//				printf("RangeFile [key:%s, value:%s, version:%ld, op:set]\n", data[i].key.printable().c_str(), data[i].value.printable().c_str(), rangeFile.version);
+// 				TraceEvent("PrintRangeFile_MX").detail("Key", data[i].key.printable()).detail("Value", data[i].value.printable())
+// 					.detail("Version", rangeFile.version).detail("Op", "set");
+////				printf("PrintRangeFile_MX: mType:set param1:%s param2:%s param1_size:%d, param2_size:%d\n",
+////						getHexString(data[i].key.c_str(), getHexString(data[i].value).c_str(), data[i].key.size(), data[i].value.size());
+
+			//NOTE: Should NOT removePrefix and addPrefix for the backup data!
+			// In other words, the following operation is wrong:  data[i].key.removePrefix(removePrefix).withPrefix(addPrefix)
+			MutationRef m(MutationRef::Type::SetValue, data[i].key, data[i].value); //ASSUME: all operation in range file is set.
+			++kvCount;
+
+			// TODO: we can commit the kv operation into DB.
+			// Right now, we cache all kv operations into kvOps, and apply all kv operations later in one place
+			if ( kvOps.find(version) == kvOps.end() ) { // Create the map's key if mutation m is the first on to be inserted
+				//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
+				kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
+			}
+
+			ASSERT(kvOps.find(version) != kvOps.end());
+			kvOps[version].push_back_deep(kvOps[version].arena(), m);
+
+		}
+
+		// Commit succeeded, so advance starting point
+		start = i;
+
+		if(start == end) {
+			//TraceEvent("ExtraApplyRangeFileToDB_MX").detail("Progress", "DoneApplyKVToDB");
+			printf("[INFO] RangeFile:%s: the number of kv operations = %d\n", fileName.c_str(), kvCount);
+			return Void();
+		}
+ 	}
+
+ }
+
+
+ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<IBackupContainer> bc, Version version,
+ 									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
+ 									KeyRange restoreRange, Key addPrefix, Key removePrefix) {
+
+	// First concatenate the backuped param1 and param2 (KV) at the same version.
+
+//
+//	wait( _executeApplyMutationLogFileToDB(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
+//
+//	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
+//
+// 	registerBackupMutationForAll(Version());
+// 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
+//
+// 	//Get the range file into the kvOps later
+// 	printf("ApplyRangeFiles\n");
+// 	futures.clear();
+// 	for ( fi = 0; fi < files.size(); ++fi ) {
+// 		f = files[fi];
+// 		printf("ApplyRangeFiles:id:%d\n", fi);
+// 		if ( f.isRange ) {
+// //			TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString());
+// 			printf("ApplyRangeFileToDB_MX FileInfo:%s\n", f.toString().c_str());
+// 			beginBlock = 0;
+// 			j = beginBlock *f.blockSize;
+// 			readLen = 0;
+// 			// For each block of the file
+// 			for(; j < f.fileSize; j += f.blockSize) {
+// 				readOffset = j;
+// 				readLen = std::min<int64_t>(f.blockSize, f.fileSize - j);
+// 				futures.push_back( _parseLogFileToMutations(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
+//
+// 				// Increment beginBlock for the file
+// 				++beginBlock;
+//// 				TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
+// 			}
+// 		}
+// 	}
+// 	if ( futures.size() != 0 ) {
+// 		printf("Wait for  futures of applyRangeFiles, start waiting\n");
+// 		wait(waitForAll(futures));
+// 		printf("Wait for  futures of applyRangeFiles, finish waiting\n");
+// 	}
+
+	return Void();
  }
 
 
@@ -1100,7 +1332,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Database cx, Reference<ReadYourW
 ////--- Restore Functions for the master role
 // Set roles (Loader or Applier) for workers
 // The master node's localNodeStatus has been set outside of this function
-ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface> ret_agents
+ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	state Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1115,7 +1347,7 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 				for(auto& it : agentValues) {
 					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
 					// Save the RestoreCommandInterface for the later operations
-					workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
+					restoreData->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
 				break;
 			}
@@ -1136,15 +1368,15 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 	}
 	// The first numLoader nodes will be loader, and the rest nodes will be applier
 	for (int i = 0; i < numLoader; ++i) {
-		globalNodeStatus.push_back(RestoreNodeStatus());
-		globalNodeStatus.back().init(RestoreRole::Loader);
-		globalNodeStatus.back().nodeID = agents[i].id();
+		restoreData->globalNodeStatus.push_back(RestoreNodeStatus());
+		restoreData->globalNodeStatus.back().init(RestoreRole::Loader);
+		restoreData->globalNodeStatus.back().nodeID = agents[i].id();
 	}
 
 	for (int i = numLoader; i < numNodes; ++i) {
-		globalNodeStatus.push_back(RestoreNodeStatus());
-		globalNodeStatus.back().init(RestoreRole::Applier);
-		globalNodeStatus.back().nodeID = agents[i].id();
+		restoreData->globalNodeStatus.push_back(RestoreNodeStatus());
+		restoreData->globalNodeStatus.back().init(RestoreRole::Applier);
+		restoreData->globalNodeStatus.back().nodeID = agents[i].id();
 	}
 
 	state int index = 0;
@@ -1155,8 +1387,8 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 		wait(delay(1.0));
 		std::vector<Future<RestoreCommandReply>> cmdReplies;
 		for(auto& cmdInterf : agents) {
-			role = globalNodeStatus[index].role;
-			nodeID = globalNodeStatus[index].nodeID;
+			role = restoreData->globalNodeStatus[index].role;
+			nodeID = restoreData->globalNodeStatus[index].nodeID;
 			printf("[CMD] Set role (%s) to node (index=%d uid=%s)\n",
 					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, nodeID, role)));
@@ -1179,8 +1411,8 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 
 		std::vector<Future<RestoreCommandReply>> cmdReplies;
 		for(auto& cmdInterf : agents) {
-			role = globalNodeStatus[index].role;
-			nodeID = globalNodeStatus[index].nodeID;
+			role = restoreData->globalNodeStatus[index].role;
+			nodeID = restoreData->globalNodeStatus[index].nodeID;
 			printf("[CMD] Notify the finish of set role (%s) to node (index=%d uid=%s)\n",
 					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role_Done, nodeID, role)));
@@ -1188,42 +1420,42 @@ ACTOR Future<Void> configureRoles(Database cx)  { //, VectorRef<RestoreInterface
 		}
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] get restoreCommandReply value:%s for Set_Role_Done\n",
+			printf("[INFO] Get restoreCommandReply value:%s for Set_Role_Done\n",
 					reps[i].id.toString().c_str());
 		}
 
 		break;
 	}
 
-	printf("Role:%s finish configure roles\n", getRoleStr(localNodeStatus.role).c_str());
+	printf("Role:%s finish configure roles\n", getRoleStr(restoreData->localNodeStatus.role).c_str());
 	return Void();
 
 }
 
 // Handle restore command request on workers
-ACTOR Future<Void> configureRolesHandler(RestoreCommandInterface interf) {
+ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf) {
 	loop {
 		choose {
 			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
 				printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s Role:%d(%s) localNodeStatus.role:%d\n",
 						req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str(),
-						localNodeStatus.role);
+						restoreData->localNodeStatus.role);
 				if ( interf.id() != req.id ) {
 						printf("[WARNING] node:%s receive request with a different id:%s\n",
-								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+							restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
 				}
 
 				if ( req.cmd == RestoreCommandEnum::Set_Role ) {
-					localNodeStatus.init(req.role);
-					localNodeStatus.nodeID = interf.id();
+					restoreData->localNodeStatus.init(req.role);
+					restoreData->localNodeStatus.nodeID = interf.id();
 					printf("[INFO][Worker] Set localNodeID to %s, set role to %s\n",
-							localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+							restoreData->localNodeStatus.nodeID.toString().c_str(), getRoleStr(restoreData->localNodeStatus.role).c_str());
 					req.reply.send(RestoreCommandReply(interf.id()));
 				} else if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
 					printf("[INFO][Worker] NodeID:%s (interf ID:%s) set to role:%s Done.\n",
-							localNodeStatus.nodeID.toString().c_str(),
+							restoreData->localNodeStatus.nodeID.toString().c_str(),
 							interf.id().toString().c_str(),
-							getRoleStr(localNodeStatus.role).c_str());
+							getRoleStr(restoreData->localNodeStatus.role).c_str());
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
@@ -1237,13 +1469,13 @@ ACTOR Future<Void> configureRolesHandler(RestoreCommandInterface interf) {
 }
 
 
-ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<RestoreInterface> ret_agents
+ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> restoreData, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	//construct the key range for each applier
 	std::vector<KeyRef> lowerBounds;
 	std::vector<Standalone<KeyRangeRef>> keyRanges;
 	std::vector<UID> applierIDs;
 
-	for (auto& applier : range2Applier) {
+	for (auto& applier : restoreData->range2Applier) {
 		lowerBounds.push_back(applier.first);
 		applierIDs.push_back(applier.second);
 	}
@@ -1273,8 +1505,8 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<Restor
 		for (auto& applier : appliers) {
 			KeyRangeRef keyRange = applier.second;
 			UID nodeID = applier.first;
-			ASSERT(workers_interface.find(nodeID) != workers_interface.end());
-			RestoreCommandInterface& cmdInterf = workers_interface[nodeID];
+			ASSERT(restoreData->workers_interface.find(nodeID) != restoreData->workers_interface.end());
+			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
 			printf("[CMD] Assign KeyRange %s to applier ID:%s\n", keyRange.toString().c_str(), nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange, nodeID, keyRange)) );
 
@@ -1282,7 +1514,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<Restor
 		printf("[INFO] Wait for %d applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] get restoreCommandReply value:%s for Assign_Applier_KeyRange\n",
+			printf("[INFO] Get restoreCommandReply value:%s for Assign_Applier_KeyRange\n",
 					reps[i].id.toString().c_str());
 		}
 
@@ -1290,14 +1522,14 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<Restor
 		for (auto& applier : appliers) {
 			KeyRangeRef keyRange = applier.second;
 			UID nodeID = applier.first;
-			RestoreCommandInterface& cmdInterf = workers_interface[nodeID];
+			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
 			printf("[CMD] Finish assigning KeyRange %s to applier ID:%s\n", keyRange.toString().c_str(), nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange_Done, nodeID)) );
 
 		}
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] get restoreCommandReply value:%s for Assign_Applier_KeyRange_Done\n",
+			printf("[INFO] Assign_Applier_KeyRange_Done: Get restoreCommandReply value:%s\n",
 					reps[i].id.toString().c_str());
 		}
 
@@ -1308,13 +1540,13 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Database cx)  { //, VectorRef<Restor
 }
 
 // Handle restore command request on workers
-ACTOR Future<Void> assignKeyRangeToAppliersHandler(RestoreCommandInterface interf) {
-	if ( localNodeStatus.role != RestoreRole::Applier) {
+ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf) {
+	if ( restoreData->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
-				localNodeStatus.nodeID.toString().c_str(), localNodeStatus.role);
+				restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->localNodeStatus.role);
 	} else {
 		printf("[INFO][Worker] nodeID:%s (interface id:%s) waits for Assign_Applier_KeyRange cmd\n",
-				localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+				restoreData->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
 	}
 
 	loop {
@@ -1322,18 +1554,18 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(RestoreCommandInterface inter
 			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
 				printf("[INFO] Got Restore Command: cmd:%d UID:%s KeyRange:%s\n",
 						req.cmd, req.id.toString().c_str(), req.keyRange.toString().c_str());
-				if ( localNodeStatus.nodeID != req.id ) {
+				if ( restoreData->localNodeStatus.nodeID != req.id ) {
 						printf("[ERROR] node:%s receive request with a different id:%s\n",
-								localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
 				}
 				if ( req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange ) {
 					// The applier should remember the key range it is responsible for
-					applierState.id = req.id;
-					applierState.keyRange = req.keyRange;
+					restoreData->applierStatus.id = req.id;
+					restoreData->applierStatus.keyRange = req.keyRange;
 					req.reply.send(RestoreCommandReply(interf.id()));
 				} else if (req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done) {
 					printf("[INFO] Node:%s finish configure its key range:%s.\n",
-							localNodeStatus.nodeID.toString().c_str(), applierState.keyRange.toString().c_str());
+							restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->applierStatus.keyRange.toString().c_str());
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
@@ -1437,7 +1669,7 @@ std::vector<RestoreFile> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
 
 //TODO: collect back up files info
 // NOTE: This function can now get the backup file descriptors
-ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request) {
+ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -1476,23 +1708,23 @@ ACTOR static Future<Void> collectBackupFiles(Database cx, RestoreRequest request
 	}
 
 //	state std::vector<RestoreFile> files;
-	if (!files.empty()) {
-		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", files.size());
-		files.clear();
+	if (!restoreData->files.empty()) {
+		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", restoreData->files.size());
+		restoreData->files.clear();
 	}
 
-	printf("[INFO] Found backup files: num of files:%d\n", files.size());
+	printf("[INFO] Found backup files: num of files:%d\n", restoreData->files.size());
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
- 		files.push_back(file);
+ 		restoreData->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
 // 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
 		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
-		files.push_back(file);
+		restoreData->files.push_back(file);
  	}
 
 
@@ -1560,20 +1792,20 @@ int IncreaseKeyRef(KeyRef key, int step) {
 */
 
 // TODO WiP: Distribution workload
-ACTOR static Future<Void> distributeWorkload(Database cx, RestoreRequest request) {
+ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
 	state Version targetVersion = request.targetVersion;
 	state bool verbose = request.verbose;
-	state KeyRange range = request.range;
+	state KeyRange restoreRange = request.range;
 	state Key addPrefix = request.addPrefix;
 	state Key removePrefix = request.removePrefix;
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
 
 	// Determine the key range each applier is responsible for
-	std::pair<int, int> numWorkers = getNumLoaderAndApplier();
+	std::pair<int, int> numWorkers = getNumLoaderAndApplier(restoreData);
 	int numLoaders = numWorkers.first;
 	int numAppliers = numWorkers.second;
 	ASSERT( numLoaders > 0 );
@@ -1594,28 +1826,231 @@ ACTOR static Future<Void> distributeWorkload(Database cx, RestoreRequest request
 	printf("[INFO] distOfNormalKeyRange:%d, step:%d\n", distOfNormalKeyRange, step);
 
 	//Assign key range to applier ID
-	std::vector<UID> applierIDs = getApplierIDs();
+	std::vector<UID> applierIDs = getApplierIDs(restoreData);
 	KeyRef curLowerBound = minKey;
 	for (int i = 0; i < applierIDs.size(); ++i) {
 		printf("[INFO] Assign key-to-applier map: Key:%s -> applierID:%s\n",
 				curLowerBound.toHexString().c_str(), applierIDs[i].toString().c_str());
-		range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
+		restoreData->range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
 		uint8_t val = curLowerBound[0] + step;
 		curLowerBound = KeyRef(&val, 1);
 	}
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
-	wait( assignKeyRangeToAppliers(cx) );
+	wait( assignKeyRangeToAppliers(restoreData, cx) );
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
 	// Notify the loader about the data block and send the cmd to the loader to start loading the data
 	// Wait for the ack from loader and repeats
 
+	// Prepare the file's loading status
+	for (int i = 0; i < restoreData->files.size(); ++i) {
+		restoreData->files[i].cursor = 0;
+	}
+
+	// Send loading cmd to available loaders whenever loaders become available
+	// NOTE: We must split the workload in the correct boundary:
+	// For range file, it's the block boundary;
+	// For log file, it is the version boundary.
+	// This is because
+	// (1) The set of mutations at a version may be encoded in multiple KV pairs in log files.
+	// We need to concatenate the related KVs to a big KV before we can parse the value into a vector of mutations at that version
+	// (2) The backuped KV are arranged in blocks in range file.
+	// For simplicity, we distribute at the granularity of files for now.
+	int loadingSizeMB = 10;
+	state int loadSizeB = loadingSizeMB * 1024 * 1024;
+	state int loadingCmdIndex = 0;
+	state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
+	state bool allLoadReqsSent = false;
+	state std::vector<UID> loaderIDs = getLoaderIDs(restoreData);
+	state std::vector<UID> finishedLoaderIDs = loaderIDs;
+
+	try {
+		loop {
+			wait(delay(1.0));
+
+			state std::vector<Future<RestoreCommandReply>> cmdReplies;
+			for (auto &loaderID : loaderIDs) {
+				LoadingParam param;
+				param.url = request.url;
+				param.version = restoreData->files[curFileIndex].version;
+				param.filename = restoreData->files[curFileIndex].fileName;
+				param.offset = restoreData->files[curFileIndex].cursor;
+				//param.length = std::min(restoreData->files[curFileIndex].fileSize - restoreData->files[curFileIndex].cursor, loadSizeB);
+				param.length = restoreData->files[curFileIndex].fileSize;
+				param.restoreRange = restoreRange;
+				param.addPrefix = addPrefix;
+				param.removePrefix = removePrefix;
+				ASSERT( param.length > 0 );
+				ASSERT( param.offset >= 0 && param.offset < restoreData->files[curFileIndex].fileSize );
+				restoreData->files[curFileIndex].cursor = restoreData->files[curFileIndex].cursor +  param.length;
+				UID nodeID = loaderID;
+				// record the loading status
+				LoadingStatus loadingStatus(restoreData->files[curFileIndex], param.offset, param.length, nodeID);
+				restoreData->loadingStatus.insert(std::make_pair(loadingCmdIndex, loadingStatus));
+
+				ASSERT(restoreData->workers_interface.find(nodeID) != restoreData->workers_interface.end());
+				RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+				printf("[CMD] Loading %s on node %s\n", param.toString().c_str(), nodeID.toString().c_str());
+				RestoreCommandEnum cmdType = RestoreCommandEnum::Assign_Loader_Range_File;
+				if (!restoreData->files[curFileIndex].isRange) {
+					cmdType = RestoreCommandEnum::Assign_Loader_Log_File;
+				}
+				printf("[INFO] Master cmdType:%d isRange:%d\n", (int) cmdType, (int) restoreData->files[curFileIndex].isRange);
+				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, nodeID, loadingCmdIndex, param)) );
+				if (param.length <= loadSizeB) { // Reach the end of the file
+					ASSERT( restoreData->files[curFileIndex].cursor == restoreData->files[curFileIndex].fileSize );
+					curFileIndex++;
+				}
+				if ( curFileIndex >= restoreData->files.size() ) {
+					allLoadReqsSent = true;
+				}
+				++loadingCmdIndex;
+			}
+
+			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_Range_File\n", loaderIDs.size());
+			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+			finishedLoaderIDs.clear();
+			// Wait for loader to finish
+			printf("[INFO] wait for %d loaders to finish loading the file\n", loaderIDs.size());
+			loop {
+				choose {
+					when (RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+						printf("[INFO][Master] received cmd:%d from node:%s\n", req.cmd, req.id.toString().c_str());
+						if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
+							printf("[INFO][Master] Notified that node:%s finish loading for cmdIndex:%d\n", req.id.toString().c_str(), req.cmdIndex);
+							finishedLoaderIDs.push_back(req.id);
+							int64_t repLoadingCmdIndex = req.cmdIndex;
+							restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+							if (finishedLoaderIDs.size() == loaderIDs.size()) {
+								break;
+							} else if (finishedLoaderIDs.size() > loaderIDs.size()) {
+								printf("[ERROR] finishedLoaderIDs.size():%d > loaderIDs.size():%d\n",
+										finishedLoaderIDs.size(), loaderIDs.size());
+							}
+							// Handle all cmds for now
+						}
+					}
+				}
+			};
+//
+//			for (int i = 0; i < reps.size(); ++i) {
+//				printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
+//						reps[i].id.toString().c_str());
+//				finishedLoaderIDs.push_back(reps[i].id);
+//				int64_t repLoadingCmdIndex = reps[i].cmdIndex;
+//				restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+//			}
+			loaderIDs = finishedLoaderIDs;
+
+			if (allLoadReqsSent) {
+				break; // NOTE: need to change when change to wait on any cmdReplies
+			}
+		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream) {
+			printf("[ERROR] cmd: Assign_Loader_File has error:%s(code:%d)\n", e.what(), e.code());
+		}
+	}
+
+
+	//TODO: WiP Send cmd to Applier to apply the remaining mutations to DB
+
+
+
+	// Notify the end of the loading
+	loaderIDs = getLoaderIDs(restoreData);
+	cmdReplies.clear();
+	for (auto& loaderID : loaderIDs) {
+		UID nodeID = loaderID;
+		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+		printf("[CMD] Assign_Loader_File_Done for node ID:%s\n", nodeID.toString().c_str());
+		cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Loader_File_Done, nodeID)) );
+
+	}
+	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+	for (int i = 0; i < reps.size(); ++i) {
+		printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File_Done\n",
+				reps[i].id.toString().c_str());
+	}
 
 
 	return Void();
 
 }
+
+//TODO: loadingHandler
+ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+	printf("[INFO] Worker Node:%s Role:%s starts loadingHandler\n",
+			restoreData->localNodeStatus.nodeID.toString().c_str(),
+			getRoleStr(restoreData->localNodeStatus.role).c_str());
+	try {
+		loop {
+			//wait(delay(1.0));
+			choose {
+				when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+					printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s Role:%d(%s) localNodeStatus.role:%d\n",
+							req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str(),
+							restoreData->localNodeStatus.role);
+					if ( interf.id() != req.id ) {
+							printf("[WARNING] node:%s receive request with a different id:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+					}
+
+					state int64_t cmdIndex = req.cmdIndex;
+					LoadingParam param = req.loadingParam;
+					if ( req.cmd == RestoreCommandEnum::Assign_Loader_Range_File ) {
+						printf("[INFO][Worker] Assign_Loader_Range_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+						//TODO: WiP: Load files
+						Reference<IBackupContainer> bc = IBackupContainer::openContainer(param.url.toString());
+						printf("[INFO] node:%s open backup container for url:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.url.toString().c_str());
+						req.reply.send(RestoreCommandReply(interf.id()));
+
+						wait( _parseRangeFileToMutationsOnLoader(bc, param.version, param.filename, param.offset, param.length, param.restoreRange, param.addPrefix, param.removePrefix) );
+
+						//TODO: Send to applier to apply the mutations
+						printf("[INFO] Loader will send mutations to applier\n");
+
+						//TODO: Send ack to master that loader has finished loading the data
+						leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
+
+					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_Log_File) {
+						printf("[INFO][Worker] Assign_Loader_Log_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+
+						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+
+					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_File_Done) {
+							printf("[INFO][Worker] Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					} else {
+						printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					}
+				}
+			}
+		}
+
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream) {
+			printf("[ERROR] cmd: Assign_Loader_File has error:%s(code:%d)\n", e.what(), e.code());
+		}
+	}
+
+	return Void();
+}
+
 
 
 
@@ -1671,6 +2106,7 @@ ACTOR Future<Void> extractRestoreFileToMutations(Database cx, std::vector<Restor
  //	wait(waitForAll(futures));
  	printf("Wait for  futures of concatenate mutation logs, finish waiting\n");
 
+ 	//TODO: Tmp
  	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
  	registerBackupMutationForAll(Version());
  	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
@@ -1780,7 +2216,7 @@ ACTOR Future<Void> applyRestoreOpsToDB(Database cx) {
 
 
 
-static Future<Version> restoreMX(Database const &cx, RestoreRequest const &request);
+static Future<Version> restoreMX(RestoreCommandInterface const &interf, Reference<RestoreData> const &restoreData, Database const &cx, RestoreRequest const &request);
 
 
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
@@ -1788,6 +2224,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state RestoreCommandInterface interf;
 	interf.initEndpoints();
 	state Optional<RestoreCommandInterface> leaderInterf;
+	//Global data for the worker
+	state Reference<RestoreData> restoreData = Reference<RestoreData>(new RestoreData());
 
 	state Transaction tr(cx);
 	loop {
@@ -1825,17 +2263,20 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 		// Step: configure its role
 		printf("[INFO][Worker] Configure its role\n");
-		wait( configureRolesHandler(interf) );
+		wait( configureRolesHandler(restoreData, interf) );
 		printf("[INFO][Worker] NodeID:%s is configure to %s\n",
-				localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+				restoreData->localNodeStatus.nodeID.toString().c_str(), getRoleStr(restoreData->localNodeStatus.role).c_str());
 
 		// Step: prepare restore info: applier waits for the responsible keyRange,
 		// loader waits for the info of backup block it needs to load
-		if ( localNodeStatus.role == RestoreRole::Applier ) {
+		if ( restoreData->localNodeStatus.role == RestoreRole::Applier ) {
 			printf("[INFO][Worker][Applier] Waits for the assignment of key range\n");
-			wait( assignKeyRangeToAppliersHandler(interf) );
-		} else if ( localNodeStatus.role == RestoreRole::Loader ) {
-			//printf("[INFO][Worker:%s] role:Loader receives \n");
+			wait( assignKeyRangeToAppliersHandler(restoreData, interf) );
+		} else if ( restoreData->localNodeStatus.role == RestoreRole::Loader ) {
+			printf("[INFO][Worker][Loader] Waits for the backup file assignment\n");
+			wait( loadingHandler(restoreData, interf, leaderInterf.get()) );
+		} else {
+			printf("[ERROR][Worker] In an invalid role:%d\n", restoreData->localNodeStatus.role);
 		}
 
 
@@ -1856,7 +2297,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 		// The workers' logic ends here. Should not proceed
 		printf("[INFO][Worker:%s] LocalNodeID:%s Role:%s will exit now\n", interf.id().toString().c_str(),
-				localNodeStatus.nodeID.toString().c_str(), getRoleStr(localNodeStatus.role).c_str());
+				restoreData->localNodeStatus.nodeID.toString().c_str(), getRoleStr(restoreData->localNodeStatus.role).c_str());
 		return Void();
 	}
 
@@ -1869,9 +2310,9 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	printf("[INFO] MX: I'm the master\n");
 	printf("[INFO] Restore master waits for agents to register their workerKeys\n");
 
-	localNodeStatus.init(RestoreRole::Master);
-	localNodeStatus.nodeID = interf.id();
-	wait( configureRoles(cx) );
+	restoreData->localNodeStatus.init(RestoreRole::Master);
+	restoreData->localNodeStatus.nodeID = interf.id();
+	wait( configureRoles(restoreData, cx) );
 
 
 //	ASSERT(agents.size() > 0);
@@ -1898,7 +2339,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	printf("[INFO]---MX: Perform the restore in the master now---\n");
 
-	// ----------------Restore code START
+	// ----------------------------------------------------------------------
+	// ----------------OLD Restore code START
 	// Step: Collect restore requests
 	state int restoreId = 0;
 	state int checkNum = 0;
@@ -1914,7 +2356,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		// Step: Perform the restore requests
 		for ( auto &it : restoreRequests ) {
 			TraceEvent("LeaderGotRestoreRequest").detail("RestoreRequestInfo", it.toString());
-			Version ver = wait( restoreMX(cx, it) );
+			Version ver = wait( restoreMX(interf, restoreData, cx, it) );
 		}
 
 		// Step: Notify the finish of the restore by cleaning up the restore keys
@@ -2615,7 +3057,7 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
  	return Void();
  }
 
-ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
+ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -2686,10 +3128,10 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			wait( collectBackupFiles(cx, request) );
-			printBackupFilesInfo();
+			wait( collectBackupFiles(restoreData, cx, request) );
+			printBackupFilesInfo(restoreData);
 
-			wait( distributeWorkload(cx, request) );
+			wait( distributeWorkload(interf, restoreData, cx, request) );
 
 			/*
 			// prepareRestore will set the restoreConfig based on the other input parameters
@@ -2706,7 +3148,7 @@ ACTOR static Future<Version> restoreMX(Database cx, RestoreRequest request) {
 			// MX: Now execute the restore: Step 1 get the restore files (range and mutation log) name
 			// At the end of extractBackupData, we apply the mutation to DB
 			//wait( extractBackupData(cx, restoreConfig, randomUid, request) );
-			wait( extractRestoreFileToMutations(cx, files, request, restoreConfig, randomUid) );
+			wait( extractRestoreFileToMutations(cx, restoreData->files, request, restoreConfig, randomUid) );
 			wait( sanityCheckRestoreOps(cx, randomUid) );
 			wait( applyRestoreOpsToDB(cx) );
 
@@ -3216,6 +3658,8 @@ void registerBackupMutationForAll(Version empty) {
 	printf("[INFO] All mutation log files produces %d mutation operations\n", kvCount);
 
 }
+
+
 
 
 

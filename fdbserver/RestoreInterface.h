@@ -77,35 +77,70 @@ struct RestoreCommandInterface {
 };
 
 
-enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done};
+enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done,
+								Assign_Loader_Range_File = 4, Assign_Loader_Log_File = 5, Assign_Loader_File_Done = 6,
+								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
-	UID id; // Node id
+	int64_t cmdIndex; //monotonically increase index (for loading commands)
+	UID id; // Node id that will receive the command
 	RestoreRole role; // role of the command;
 	KeyRange keyRange;
+
+	struct LoadingParam {
+		Key url;
+		Version version;
+		std::string filename;
+		int64_t offset;
+		int64_t length;
+		KeyRange restoreRange;
+		Key addPrefix;
+		Key removePrefix;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			ar & url & version & filename & offset & length & restoreRange & addPrefix & removePrefix;
+		}
+
+		std::string toString() {
+			std::stringstream str;
+			str << "url:" << url.toString() << "version:" << version
+				<<  " filename:" << filename  << " offset:" << offset << " length:" << length
+				<< " restoreRange:" << restoreRange.toString()
+				<< " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
+			return str.str();
+		}
+	};
+	LoadingParam loadingParam;
+
 	ReplyPromise< struct RestoreCommandReply > reply;
 
 	RestoreCommand() : id(UID()), role(RestoreRole::Invalid) {}
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id): cmd(cmd), id(id) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex): cmd(cmd), id(id), cmdIndex(cmdIndex) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role) : cmd(cmd), id(id), role(role) {}
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRange keyRange): cmd(cmd), id(id), keyRange(keyRange), role(RestoreRole::Invalid) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRange keyRange): cmd(cmd), id(id), keyRange(keyRange) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, LoadingParam loadingParam): cmd(cmd), id(id), cmdIndex(cmdIndex), loadingParam(loadingParam) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & cmd & id & role & keyRange & reply;
+		ar & cmd  & cmdIndex & id & role & keyRange & loadingParam & reply;
 	}
 };
+typedef RestoreCommand::LoadingParam LoadingParam;
 
 struct RestoreCommandReply {
 	UID id; // placeholder, which reply the worker's node id back to master
+	int64_t cmdIndex;
 
 	RestoreCommandReply() : id(UID()) {}
 	explicit RestoreCommandReply(UID id) : id(id) {}
+	explicit RestoreCommandReply(UID id, int64_t cmdIndex) : id(id), cmdIndex(cmdIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & id;
+		ar & id & cmdIndex;
 	}
 };
 
@@ -230,6 +265,8 @@ struct RestoreReply {
 //int numRoles = RestoreRoleStr.size();
 std::string getRoleStr(RestoreRole role);
 
+
+
 struct RestoreNodeStatus {
 	// ConfigureKeyRange is to determine how to split the key range and apply the splitted key ranges to appliers
 	// NotifyKeyRange is to notify the Loaders and Appliers about the key range each applier is responsible for
@@ -279,10 +316,6 @@ struct RestoreNodeStatus {
 
 };
 
-struct ApplierState {
-	UID id;
-	KeyRange keyRange; // the key range the applier is responsible for
-};
 
 std::string getRoleStr(RestoreRole role);
 
