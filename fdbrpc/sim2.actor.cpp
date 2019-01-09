@@ -186,7 +186,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		this->peerEndpoint = peerEndpoint;
 
 		// Every one-way connection gets a random permanent latency and a random send buffer for the duration of the connection
-		auto latency = g_clogging.setPairLatencyIfNotSet( peerProcess->address.ip, process->address.ip, FLOW_KNOBS->MAX_CLOGGING_LATENCY*g_random->random01() );
+		auto latency = g_clogging.setPairLatencyIfNotSet( peerEndpoint.ip, process->address.ip, FLOW_KNOBS->MAX_CLOGGING_LATENCY*g_random->random01() );
 		sendBufSize = std::max<double>( g_random->randomInt(0, 5000000), 25e6 * (latency + .002) );
 		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
 	}
@@ -305,6 +305,7 @@ private:
 	}
 	ACTOR static Future<Void> receiver( Sim2Conn* self ) {
 		loop {
+			TraceEvent("Received from").detail("PeerAddr", self->peerEndpoint.toString());
 			if (self->sentBytes.get() != self->receivedBytes.get())
 				wait( g_simulator.onProcess( self->peerProcess ) );
 			while ( self->sentBytes.get() == self->receivedBytes.get() )
@@ -359,17 +360,17 @@ private:
 	}
 
 	void rollRandomClose() {
-		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && g_random->random01() < .00001) {
-			g_simulator.lastConnectionFailure = now();
-			double a = g_random->random01(), b = g_random->random01();
-			TEST(true);  // Simulated connection failure
-			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
-			if (a < .66 && peer) peer->closeInternal();
-			if (a > .33) closeInternal();
-			// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen but only after a delay.
-			if (b < .3)
-				throw connection_failed();
-		}
+		// if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && g_random->random01() < .00001) {
+		// 	g_simulator.lastConnectionFailure = now();
+		// 	double a = g_random->random01(), b = g_random->random01();
+		// 	TEST(true);  // Simulated connection failure
+		// 	TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
+		// 	if (a < .66 && peer) peer->closeInternal();
+		// 	if (a > .33) closeInternal();
+		// 	// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen but only after a delay.
+		// 	if (b < .3)
+		// 		throw connection_failed();
+		// }
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
@@ -702,7 +703,9 @@ private:
 		wait( delay( seconds ) );
 		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && g_random->random01()<0.5)
 			return;
-		TraceEvent("Sim2IncomingConn", conn->getDebugID());
+		TraceEvent("Sim2IncomingConn", conn->getDebugID())
+			.detail("ListenAddress", self->getListenAddress())
+			.detail("PeerAddress", conn->getPeerAddress());
 		self->nextConnection.send( conn );
 	}
 	ACTOR static Future<Reference<IConnection>> popOne( FutureStream< Reference<IConnection> > conns ) {

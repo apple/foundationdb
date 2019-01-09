@@ -48,12 +48,16 @@ public:
 		return addresses[0];
 	}
 
-	const NetworkAddress& getRandomAddress() const {
-		return addresses[g_random->randomChoice(addresses)];
+	const NetworkAddress& getCompatibleAddress() const {
+		if (addresses.size() < 2) {
+			// TraceEvent("VISHESHGetCompatibleAddress").detail("Size", addresses.size());
+			return addresses[0];
+		}
+		return addresses[0];
 	}
 
 	bool operator == (Endpoint const& r) const {
-		return addresses == r.addresses && token == r.token;
+		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
 	}
 	bool operator != (Endpoint const& r) const {
 		return !(*this == r);
@@ -61,8 +65,8 @@ public:
 
 	//TODO: (Vishesh) Figure out what to do for vector of addresses this.
 	bool operator < (Endpoint const& r) const {
-		const NetworkAddress& left = addresses[0];
-		const NetworkAddress& right = r.addresses[0];
+		const NetworkAddress& left = getPrimaryAddress();
+		const NetworkAddress& right = r.getPrimaryAddress();
 		if (left != right)
 			return left < right;
 		else
@@ -71,11 +75,15 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020002LL) {
-			ar & addresses[0] & token;
-		} else {
+		// if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+			// ar & addresses[0] & token;
+		// } else {
+		const char* msg = ar.isDeserializing ? "EndpointDeserializing" : "EndpointSerializing";
 			ar & addresses & token;
-		}
+			TraceEvent(msg).detail("Size", addresses.size())
+				.detail("Address", getPrimaryAddress())
+				.detail("CompatibleAddress", getCompatibleAddress());
+		// }
 	}
 };
 #pragma pack(pop)
@@ -155,9 +163,14 @@ public:
 		loadedEndpoint(e);
 	}
 
+	const Endpoint& findEndpoint(const NetworkAddress& addr) {
+		return addressToEndpointMap[addr];
+	}
+
 private:
 	class TransportData* self;
 
+	std::map<NetworkAddress, Endpoint> addressToEndpointMap;
 	void loadedEndpoint(Endpoint&);
 };
 

@@ -82,3 +82,5 @@ compile_commands.json
 .envrc
 .DS_Store
 temp/
+
+.cquery_cached_index

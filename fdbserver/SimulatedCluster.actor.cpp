@@ -380,6 +380,7 @@ ACTOR Future<Void> simulatedMachine(
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
 	state UID randomId = g_nondeterministic_random->randomUniqueID();
+	state int listenPerProcess = 2; // g_random->randomInt(1, 3);
 
 	try {
 		CSimpleIni ini;
@@ -415,8 +416,9 @@ ACTOR Future<Void> simulatedMachine(
 			for( int i = 0; i < ips.size(); i++ ) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
-				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, i*1 + 1, 1, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
-				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], i+1, true, false)).detailext("ZoneId", localities.zoneId()).detailext("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
+				const int listenPort = i*listenPerProcess + 1;
+				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
+				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detailext("ZoneId", localities.zoneId()).detailext("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
 			TEST( bootCount >= 1 ); // Simulated machine rebooted
@@ -1117,6 +1119,10 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_random->randomShuffle(coordinatorAddresses);
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
+	printf("Coordinator Address: %d\n", coordinatorAddresses.size());
+	for (const auto& coord : coordinatorAddresses) {
+		printf("Coordinator: %s\n", coord.toString().c_str());
+	}
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.

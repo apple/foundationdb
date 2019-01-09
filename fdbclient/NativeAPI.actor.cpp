@@ -2369,6 +2369,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", printable(range.begin)).detail("Retries", retries);
+			tr.debugTransaction(g_debug_random->randomUniqueID());
 			tr.options = options;
 			tr.info.taskID = info.taskID;
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );

@@ -62,7 +62,7 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
 
-private:
+protected:
 	Endpoint endpoint;
 	bool m_isLocalEndpoint;
 };
@@ -204,6 +204,9 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 
 	virtual void destroy() { delete this; }
 	virtual void receive(ArenaReader& reader) {
+		TraceEvent("NetNotifiedReceive").detail("Size", endpoint.addresses.size())
+			.detail("PrimaryAddress", endpoint.getPrimaryAddress())
+			.detail("CompatibleAddress", endpoint.getCompatibleAddress());
 		this->addPromiseRef();
 		T message;
 		reader >> message;

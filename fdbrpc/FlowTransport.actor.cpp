@@ -168,6 +168,10 @@ public:
 		if (localAddresses.empty()) {
 			return NetworkAddress();
 		}
+		if (localAddresses.size() < 2) {
+			// TraceEvent("VISHESHGetFirstLocalAddress").detail("Size", localAddresses.size());
+			return localAddresses[0];
+		}
 		return localAddresses[0];
 	}
 
@@ -877,31 +881,30 @@ void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
 	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
-	for (const NetworkAddress& address : endpoint.addresses) {
-		Peer* peer = self->getPeer(address);
-		if(peer->peerReferences == -1) {
-			peer->peerReferences = 1;
-		} else {
-			peer->peerReferences++;
-		}
+	const NetworkAddress& connectAddress = endpoint.getCompatibleAddress();
+	Peer* peer = self->getPeer(connectAddress);
+	if(peer->peerReferences == -1) {
+		peer->peerReferences = 1;
+	} else {
+		peer->peerReferences++;
 	}
 }
 
 void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
 	if (!receiver->isStream() || !endpoint.getPrimaryAddress().isValid()) return;
-	for (const NetworkAddress& address : endpoint.addresses) {
-		Peer* peer = self->getPeer(address, false);
-		if(peer) {
-			peer->peerReferences--;
-			if(peer->peerReferences < 0) {
-				TraceEvent(SevError, "InvalidPeerReferences")
-					.detail("References", peer->peerReferences)
-					.detail("Address", address)
-					.detail("Token", endpoint.token);
-			}
-			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				peer->incompatibleDataRead.trigger();
-			}
+	const NetworkAddress& connectAddress = endpoint.getCompatibleAddress();
+	Peer* peer = self->getPeer(connectAddress, false);
+	if(peer) {
+		peer->peerReferences--;
+		if(peer->peerReferences < 0) {
+			TraceEvent(SevError, "InvalidPeerReferences")
+				.detail("References", peer->peerReferences)
+				.detail("Address", endpoint.getPrimaryAddress())
+				.detail("ConnectAddress", connectAddress)
+				.detail("Token", endpoint.token);
+		}
+		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
+			peer->incompatibleDataRead.trigger();
 		}
 	}
 }
@@ -953,7 +956,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		++self->countPacketsGenerated;
 
-		Peer* peer = self->getPeer(destination.getRandomAddress(), openConnection);
+		const NetworkAddress& selectedAddress = destination.getCompatibleAddress();
+		Peer* peer = self->getPeer(selectedAddress, openConnection);
+		TraceEvent("SendPacket").detail("PeerAddress", selectedAddress.toString());
 
 		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 		if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) || (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
