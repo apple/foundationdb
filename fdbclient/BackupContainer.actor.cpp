@@ -1693,7 +1693,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	try {
 		Void _ = wait(c->deleteContainer());
 	} catch(Error &e) {
-		if(e.code() != error_code_backup_invalid_url)
+		if(e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
 			throw;
 	}
 
@@ -1798,10 +1798,9 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("DELETING\n");
 	Void _ = wait(c->deleteContainer());
 
-	BackupDescription d = wait(c->describeBackup());
-	printf("\n%s\n", d.toString().c_str());
-	ASSERT(d.snapshots.size() == 0);
-	ASSERT(!d.minLogBegin.present());
+	state Future<BackupDescription> d = c->describeBackup();
+	Void _ = wait(ready(d));
+	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
 
 	BackupFileList empty = wait(c->dumpFileList());
 	ASSERT(empty.ranges.size() == 0);
