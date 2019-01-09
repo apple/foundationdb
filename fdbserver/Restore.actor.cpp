@@ -1867,6 +1867,9 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 	try {
 		loop {
+			if ( allLoadReqsSent ) {
+				break; // All load requests have been handled
+			}
 			wait(delay(1.0));
 
 			state std::vector<Future<RestoreCommandReply>> cmdReplies;
@@ -1904,43 +1907,44 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				}
 				if ( curFileIndex >= restoreData->files.size() ) {
 					allLoadReqsSent = true;
+					break;
 				}
 				++loadingCmdIndex;
 			}
 
-			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_Range_File\n", loaderIDs.size());
+			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_Range_File\n", cmdReplies.size());
 			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
 			finishedLoaderIDs.clear();
-			// Wait for loader to finish
-			printf("[INFO] wait for %d loaders to finish loading the file\n", loaderIDs.size());
-			loop {
-				choose {
-					when (RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-						printf("[INFO][Master] received cmd:%d from node:%s\n", req.cmd, req.id.toString().c_str());
-						if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
-							printf("[INFO][Master] Notified that node:%s finish loading for cmdIndex:%d\n", req.id.toString().c_str(), req.cmdIndex);
-							finishedLoaderIDs.push_back(req.id);
-							int64_t repLoadingCmdIndex = req.cmdIndex;
-							restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
-							if (finishedLoaderIDs.size() == loaderIDs.size()) {
-								break;
-							} else if (finishedLoaderIDs.size() > loaderIDs.size()) {
-								printf("[ERROR] finishedLoaderIDs.size():%d > loaderIDs.size():%d\n",
-										finishedLoaderIDs.size(), loaderIDs.size());
-							}
-							// Handle all cmds for now
-						}
-					}
-				}
-			};
-//
-//			for (int i = 0; i < reps.size(); ++i) {
-//				printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
-//						reps[i].id.toString().c_str());
-//				finishedLoaderIDs.push_back(reps[i].id);
-//				int64_t repLoadingCmdIndex = reps[i].cmdIndex;
-//				restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
-//			}
+//			// Wait for loader to finish
+//			printf("[INFO] wait for %d loaders to finish loading the file\n", loaderIDs.size());
+//			loop {
+//				choose {
+//					when (RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+//						printf("[INFO][Master] received cmd:%d from node:%s\n", req.cmd, req.id.toString().c_str());
+//						if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
+//							printf("[INFO][Master] Notified that node:%s finish loading for cmdIndex:%d\n", req.id.toString().c_str(), req.cmdIndex);
+//							finishedLoaderIDs.push_back(req.id);
+//							int64_t repLoadingCmdIndex = req.cmdIndex;
+//							restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+//							if (finishedLoaderIDs.size() == loaderIDs.size()) {
+//								break;
+//							} else if (finishedLoaderIDs.size() > loaderIDs.size()) {
+//								printf("[ERROR] finishedLoaderIDs.size():%d > loaderIDs.size():%d\n",
+//										finishedLoaderIDs.size(), loaderIDs.size());
+//							}
+//							// Handle all cmds for now
+//						}
+//					}
+//				}
+//			};
+
+			for (int i = 0; i < reps.size(); ++i) {
+				printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
+						reps[i].id.toString().c_str());
+				finishedLoaderIDs.push_back(reps[i].id);
+				int64_t repLoadingCmdIndex = reps[i].cmdIndex;
+				restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+			}
 			loaderIDs = finishedLoaderIDs;
 
 			if (allLoadReqsSent) {
@@ -1988,10 +1992,9 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 		loop {
 			//wait(delay(1.0));
 			choose {
-				when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-					printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s Role:%d(%s) localNodeStatus.role:%d\n",
-							req.cmd, req.id.toString().c_str(), (int) req.role, getRoleStr(req.role).c_str(),
-							restoreData->localNodeStatus.role);
+				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+					printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
+							req.cmd, req.id.toString().c_str(), restoreData->localNodeStatus.role);
 					if ( interf.id() != req.id ) {
 							printf("[WARNING] node:%s receive request with a different id:%s\n",
 								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
@@ -2009,15 +2012,15 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 						printf("[INFO] node:%s open backup container for url:%s\n",
 								restoreData->localNodeStatus.nodeID.toString().c_str(),
 								param.url.toString().c_str());
-						req.reply.send(RestoreCommandReply(interf.id()));
 
 						wait( _parseRangeFileToMutationsOnLoader(bc, param.version, param.filename, param.offset, param.length, param.restoreRange, param.addPrefix, param.removePrefix) );
 
 						//TODO: Send to applier to apply the mutations
-						printf("[INFO] Loader will send mutations to applier\n");
+						printf("[INFO][TODO] Loader will send mutations to applier\n");
 
 						//TODO: Send ack to master that loader has finished loading the data
-						leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
+						req.reply.send(RestoreCommandReply(interf.id()));
+						//leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
 
 					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_Log_File) {
 						printf("[INFO][Worker] Assign_Loader_Log_File Node: %s, role: %s, loading param:%s\n",
@@ -2025,7 +2028,7 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								getRoleStr(restoreData->localNodeStatus.role).c_str(),
 								param.toString().c_str());
 
-
+						printf("[INFO][TODO] Loader will send mutations to applier\n");
 						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 
 					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_File_Done) {
@@ -2035,6 +2038,7 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								param.toString().c_str());
 
 							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+							break;
 					} else {
 						printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 					}
