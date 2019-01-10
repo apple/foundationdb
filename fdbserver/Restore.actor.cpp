@@ -574,6 +574,15 @@ typedef RestoreData::LoadingStatus LoadingStatus;
 typedef RestoreData::LoadingState LoadingState;
 
 
+void printAppliersKeyRange(Reference<RestoreData> rd) {
+	printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
+	// applier type: std::map<Standalone<KeyRef>, UID>
+	for (auto &applier : rd->range2Applier) {
+		printf("\t[INFO]%s -> %s\n", getHexString(applier.first).c_str(), applier.second.toString().c_str());
+	}
+}
+
+
 //Print out the works_interface info
 void printWorkersInterface(Reference<RestoreData> restoreData){
 	printf("[INFO] workers_interface info: num of workers:%d\n", restoreData->workers_interface.size());
@@ -1156,7 +1165,8 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  		if ( debug_verbose ) {
 			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
  		}
- 		printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
+		//printf("ApplyKVOPsToDB Version:%08lx num_of_ops:%d\n", it->first, it->second.size());
+
 
  		state MutationRef m;
  		state int index = 0;
@@ -1166,6 +1176,10 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  				typeStr = typeString[m.type];
  			else {
  				printf("ApplyKVOPsToDB MutationType:%d is out of range\n", m.type);
+ 			}
+
+ 			if ( count % 1000 == 1 ) {
+ 				printf("ApplyKVOPsToDB num_mutation:%d Version:%08lx num_of_ops:%d\n", count, it->first, it->second.size());
  			}
 
  			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -1486,6 +1500,94 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 				} else if (req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done) {
 					printf("[INFO] Node:%s finish configure its key range:%s.\n",
 							restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->applierStatus.keyRange.toString().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+// Notify loader about appliers' responsible key range
+ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> restoreData, Database cx)  {
+	state std::vector<UID> loaders = getLoaderIDs(restoreData);
+	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+	loop {
+		//wait(delay(1.0));
+		for (auto& nodeID : loaders) {
+			ASSERT(restoreData->workers_interface.find(nodeID) != restoreData->workers_interface.end());
+			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+			printf("[CMD] Notify node:%s about appliers key range\n", nodeID.toString().c_str());
+			state std::map<Standalone<KeyRef>, UID>::iterator applierRange;
+			for (applierRange = restoreData->range2Applier.begin(); applierRange != restoreData->range2Applier.end(); applierRange++) {
+				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Notify_Loader_ApplierKeyRange, nodeID, applierRange->first, applierRange->second)) );
+			}
+		}
+		printf("[INFO] Wait for %d loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] Get reply from Notify_Loader_ApplierKeyRange cmd for node:%s\n",
+					reps[i].id.toString().c_str());
+		}
+
+		cmdReplies.clear();
+		for (auto& nodeID : loaders) {
+			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+			printf("[CMD] Notify node:%s cmd Notify_Loader_ApplierKeyRange_Done\n", nodeID.toString().c_str());
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done, nodeID)) );
+
+		}
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		for (int i = 0; i < reps.size(); ++i) {
+			printf("[INFO] Get reply from Notify_Loader_ApplierKeyRange_Done cmd for node:%s\n",
+					reps[i].id.toString().c_str());
+		}
+
+		break;
+	}
+
+	return Void();
+}
+
+// Handle  Notify_Loader_ApplierKeyRange cmd
+ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf) {
+	if ( restoreData->localNodeStatus.role != RestoreRole::Loader) {
+		printf("[ERROR] non-loader node:%s (role:%d) is waiting for cmds for Loader\n",
+				restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->localNodeStatus.role);
+	} else {
+		printf("[INFO][Loader] nodeID:%s (interface id:%s) waits for Notify_Loader_ApplierKeyRange cmd\n",
+				restoreData->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				printf("[INFO] Got Restore Command: cmd:%d UID:%s\n",
+						req.cmd, req.id.toString().c_str());
+				if ( restoreData->localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] node:%s receive request with a different id:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange ) {
+					KeyRef applierKeyRangeLB = req.applierKeyRangeLB;
+					UID applierID = req.applierID;
+					if (restoreData->range2Applier.find(applierKeyRangeLB) != restoreData->range2Applier.end()) {
+						if ( restoreData->range2Applier[applierKeyRangeLB] != applierID) {
+							printf("[WARNING] key range to applier may be wrong for range:%s on applierID:%s!",
+									getHexString(applierKeyRangeLB).c_str(), applierID.toString().c_str());
+						}
+						restoreData->range2Applier[applierKeyRangeLB] = applierID;//always use the newest one
+					} else {
+						restoreData->range2Applier.insert(std::make_pair(applierKeyRangeLB, applierID));
+					}
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if (req.cmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done) {
+					printf("[INFO] Node:%s finish Notify_Loader_ApplierKeyRange, has range2Applier size:%d.\n",
+							restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->range2Applier.size());
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
@@ -1848,6 +1950,8 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
 	wait( assignKeyRangeToAppliers(restoreData, cx) );
+
+	wait( notifyAppliersKeyRangeToLoader(restoreData, cx) );
 
 	// Determine which backup data block (filename, offset, and length) each loader is responsible for and
 	// Notify the loader about the data block and send the cmd to the loader to start loading the data
@@ -2352,6 +2456,10 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			printf("[INFO][Applier] Waits for the cmd to apply mutations from loaders\n");
 			wait( applyMutationToDB(restoreData, interf, cx) );
 		} else if ( restoreData->localNodeStatus.role == RestoreRole::Loader ) {
+			printf("[INFO][Loader] Waits for appliers' key range\n");
+			wait( notifyAppliersKeyRangeToLoaderHandler(restoreData, interf) );
+			printAppliersKeyRange(restoreData);
+
 			printf("[INFO][Loader] Waits for the backup file assignment\n");
 			wait( loadingHandler(restoreData, interf, leaderInterf.get()) );
 

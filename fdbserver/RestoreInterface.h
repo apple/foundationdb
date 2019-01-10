@@ -82,7 +82,8 @@ enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRa
 								Assign_Loader_Range_File = 4, Assign_Loader_Log_File = 5, Assign_Loader_File_Done = 6,
 								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8,
 								Apply_Mutation_To_DB = 9, Apply_Mutation_To_DB_Skip = 10,
-								Loader_Notify_Appler_To_Apply_Mutation = 11};
+								Loader_Notify_Appler_To_Apply_Mutation = 11,
+								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
@@ -93,6 +94,8 @@ struct RestoreCommand {
 	KeyRange keyRange;
 	uint64_t commitVersion;
 	MutationRef mutation;
+	KeyRef applierKeyRangeLB;
+	UID applierID;
 
 
 	struct LoadingParam {
@@ -134,10 +137,12 @@ struct RestoreCommand {
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, LoadingParam loadingParam): cmd(cmd), id(id), cmdIndex(cmdIndex), loadingParam(loadingParam) {};
 	// For loader send mutation to applier
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), id(id), commitVersion(commitVersion), mutation(mutation) {};
+	// Notify loader about applier key ranges
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRef applierKeyRangeLB, UID applierID): cmd(cmd), id(id), applierKeyRangeLB(applierKeyRangeLB), applierID(applierID) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & loadingParam & reply;
+		ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & loadingParam & reply;
 	}
 };
 typedef RestoreCommand::LoadingParam LoadingParam;
