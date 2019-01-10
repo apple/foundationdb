@@ -1090,15 +1090,13 @@ fill_operations()
 class Cluster(_FDBBase):
     def __init__(self, cluster_file):
         self.cluster_file = cluster_file
+        self.options = None
 
     def open_database(self, name):
         if name != b'DB':
             raise FDBError(2013) # invalid_database_name
 
         return create_database(self.cluster_file)
-
-    def _set_option(self, option, param, length):
-        pass
 
 
 def create_database(cluster_file=None):

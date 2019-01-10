@@ -230,7 +230,7 @@ func StartNetwork() error {
 	return startNetwork()
 }
 
-// DefaultClusterFile should be passed to fdb.Open  to allow the FoundationDB C
+// DefaultClusterFile should be passed to fdb.Open to allow the FoundationDB C
 // library to select the platform-appropriate default cluster file on the current machine.
 const DefaultClusterFile string = ""
 
@@ -309,10 +309,6 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 	return db
 }
 
-func createCluster(clusterFile string) (Cluster, error) {
-	return Cluster{clusterFile}, nil
-}
-
 func createDatabase(clusterFile string) (Database, error) {
 	var cf *C.char
 
@@ -347,7 +343,7 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 		return Cluster{}, errNetworkNotSetup
 	}
 
-	return createCluster(clusterFile)
+	return Cluster{clusterFile}, nil
 }
 
 func byteSliceToPtr(b []byte) *C.uint8_t {

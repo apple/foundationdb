@@ -25,7 +25,7 @@ Bindings
 * C: Added `fdb_create_database` that creates a new `FDBDatabase` object synchronously and removed `fdb_future_get_database`.
 * Python: Removed `fdb.init`, `fdb.create_cluster`, and `fdb.Cluster`. `fdb.open` no longer accepts a `database_name` parameter.
 * Java: Deprecated `FDB.createCluster` and `Cluster`. The preferred way to get a `Database` is by using `FDB.open`, which should work in both new and old API versions.
-* Java: Removed `Cluster(long cPtr, Executor executor)` constructor. This is API breaking for any code that has subclassed the `Cluster` class, and is not protected by API versioning.
+* Java: Removed `Cluster(long cPtr, Executor executor)` constructor. This is API breaking for any code that has subclassed the `Cluster` class and is not protected by API versioning.
 * Ruby: Removed `FDB.init`, `FDB.create_cluster`, and `FDB.Cluster`. `FDB.open` no longer accepts a `database_name` parameter.
 * Golang: Deprecated `fdb.StartNetwork`, `fdb.Open`, `fdb.MustOpen`, and `fdb.CreateCluster` and added `fdb.OpenDatabase` and `fdb.MustOpenDatabase`. The preferred way to start the network and get a `Database` is by using `FDB.OpenDatabase` or `FDB.OpenDefault`.
 * Flow: Deprecated `API::createCluster` and `Cluster` and added `API::createDatabase`. The preferred way to get a `Database` is by using `API::createDatabase`.

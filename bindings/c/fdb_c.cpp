@@ -134,16 +134,6 @@ fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *ho
 	CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
 }
 
-
-extern "C" DLLEXPORT
-FDBFuture* fdb_cluster_configure_database_v12( FDBCluster* c, int config_type,
-											   int config_mode, uint8_t const* db_name,
-											   int db_name_length )
-{
-	// Obsolete, but needed for linker compatibility with api version 12 and below
-	return (FDBFuture*)ThreadFuture<Void>(client_invalid_operation()).extractPtr();
-}
-
 extern "C" DLLEXPORT
 void fdb_future_cancel( FDBFuture* f ) {
 	CATCH_AND_DIE(
@@ -693,7 +683,6 @@ fdb_error_t fdb_select_api_version_impl( int runtime_version, int header_version
 	FDB_API_CHANGED( fdb_transaction_get, 14 );
 	FDB_API_CHANGED( fdb_setup_network, 14 );
 	FDB_API_CHANGED( fdb_transaction_set_option, 14 );
-	FDB_API_REMOVED( fdb_cluster_configure_database, 13 );
 	/* End versioned API changes */
 
 	return error_code_success;

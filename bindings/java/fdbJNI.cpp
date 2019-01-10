@@ -38,14 +38,14 @@
 #error Missing thread local storage
 #endif
 
-static JavaVM* g_jvm = 0; 
-static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
+static JavaVM* g_jvm = nullptr; 
+static thread_local JNIEnv* g_thread_jenv = nullptr;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
 static thread_local bool is_external = false;
 
 void detachIfExternalThread(void *ignore) {
 	if(is_external && g_thread_jenv != 0) {
-		g_thread_jenv = 0;
+		g_thread_jenv = nullptr;
 		g_IFutureCallback_call_methodID = 0;
 		g_jvm->DetachCurrentThread();
 	}
@@ -533,7 +533,7 @@ JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIE
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
-	const char* fileName = 0;
+	const char* fileName = nullptr;
 	if(clusterFileName != 0) {
 		fileName = jenv->GetStringUTFChars(clusterFileName, 0);
 		if(jenv->ExceptionOccurred()) {

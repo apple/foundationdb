@@ -114,7 +114,7 @@ public class FDB {
 	 * Returns a set of options that can be set on a the FoundationDB API. Generally,
 	 *  these options to the top level of the API affect the networking engine and
 	 *  therefore must be set before the network engine is started. The network is started
-	 *  by calls to {@link #startNetwork()} and implicitly by a call to {@link #open()} and
+	 *  by calls to {@link #startNetwork()} or implicitly by a call to {@link #open()} and
 	 *  and its variants.
 	 *
 	 * @return a set of options affecting this instance of the FoundationDB API
@@ -218,7 +218,7 @@ public class FDB {
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
-	 * This function is deprecated. Use {@link #open()} instead.
+	 * @deprecated Use {@link #open()} instead.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
@@ -235,7 +235,7 @@ public class FDB {
 	 *  has not been started, it will be started in the course of this call as if
 	 *  {@link #startNetwork()} had been called.
 	 *
-	 * This function is deprecated. Use {@link #open(String)} instead.
+	 * @deprecated Use {@link #open(String)} instead.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -259,7 +259,7 @@ public class FDB {
 	 *  {@link Executor} will be used as the default for the execution of all callbacks that
 	 *  are produced from using the resulting {@link Cluster}.
 	 *
-	 * This function is deprecated. Use {@link #open(String, Executor)} instead.
+	 * @deprecated Use {@link #open(String, Executor)} instead.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
