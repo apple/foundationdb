@@ -2834,48 +2834,76 @@ void StorageServerDisk::changeLogProtocol(Version version, uint64_t protocol) {
 	data->addMutationToMutationLogOrStorage(version, MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-ACTOR Future<Void> applyByteSampleResult( StorageServer* data, KeyRange range, Future<Standalone<VectorRef<KeyValueRef>>> result) {
-	Standalone<VectorRef<KeyValueRef>> bs = wait( result );
-	for( int j = 0; j < bs.size(); j++ ) {
-		KeyRef key = bs[j].key.removePrefix(persistByteSampleKeys.begin);
-		if(!data->byteSampleClears.rangeContaining(key).value()) {
-			data->metrics.byteSample.sample.insert( key, BinaryReader::fromStringRef<int32_t>(bs[j].value, Unversioned()), false );
+ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = NULL) {
+	state int totalFetches = 0;
+	state int totalKeys = 0;
+	state int totalBytes = 0;
+	loop {
+		Standalone<VectorRef<KeyValueRef>> bs = wait( storage->readRange( KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES ) );
+		if(results) results->push_back(bs);
+		int rangeSize = bs.expectedSize();
+		totalFetches++;
+		totalKeys += bs.size();
+		totalBytes += rangeSize;
+		for( int j = 0; j < bs.size(); j++ ) {
+			KeyRef key = bs[j].key.removePrefix(persistByteSampleKeys.begin);
+			if(!data->byteSampleClears.rangeContaining(key).value()) {
+				data->metrics.byteSample.sample.insert( key, BinaryReader::fromStringRef<int32_t>(bs[j].value, Unversioned()), false );
+			}
+		}
+		if( rangeSize >= SERVER_KNOBS->STORAGE_LIMIT_BYTES ) {
+			Key nextBegin = keyAfter(bs.back().key);
+			data->byteSampleClears.insert(KeyRangeRef(begin, nextBegin).removePrefix(persistByteSampleKeys.begin), true);
+			data->byteSampleClearsTooLarge.set(data->byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
+			begin = nextBegin;
+			if(begin == end) {
+				break;
+			}
+		} else {
+			data->byteSampleClears.insert(KeyRangeRef(begin.removePrefix(persistByteSampleKeys.begin), end == persistByteSampleKeys.end ? LiteralStringRef("\xff\xff\xff") : end.removePrefix(persistByteSampleKeys.begin)), true);
+			data->byteSampleClearsTooLarge.set(data->byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
+			break;
+		}
+
+		if(!results) {
+			wait(delay(SERVER_KNOBS->BYTE_SAMPLE_LOAD_DELAY));
 		}
 	}
-	data->byteSampleClears.insert(range, true);
-	data->byteSampleClearsTooLarge.set(data->byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
-
+	TraceEvent("RecoveredByteSampleRange", data->thisServerID).detail("Begin", printable(begin)).detail("End", printable(end)).detail("Fetches", totalFetches).detail("Keys", totalKeys).detail("ReadBytes", totalBytes);
 	return Void();
 }
 
-ACTOR Future<Void> restoreByteSample(StorageServer* data, IKeyValueStore* storage, Standalone<VectorRef<KeyValueRef>> bsSample) {
+ACTOR Future<Void> restoreByteSample(StorageServer* data, IKeyValueStore* storage, Promise<Void> byteSampleSampleRecovered) {
+	state std::vector<Standalone<VectorRef<KeyValueRef>>> byteSampleSample;
+	wait( applyByteSampleResult(data, storage, persistByteSampleSampleKeys.begin, persistByteSampleSampleKeys.end, &byteSampleSample) );
+	byteSampleSampleRecovered.send(Void());
 	wait( delay( BUGGIFY ? g_random->random01() * 2.0 : 0.0001 ) );
-
-	TraceEvent("RecoveredByteSampleSample", data->thisServerID).detail("Keys", bsSample.size()).detail("ReadBytes", bsSample.expectedSize());
 
 	size_t bytes_per_fetch = 0;
 	// Since the expected size also includes (as of now) the space overhead of the container, we calculate our own number here
-	for( int i = 0; i < bsSample.size(); i++ )
-		bytes_per_fetch += BinaryReader::fromStringRef<int32_t>(bsSample[i].value, Unversioned());
-	bytes_per_fetch /= 32;
+	for( auto& it : byteSampleSample ) {
+		for( auto& kv : it ) {
+			bytes_per_fetch += BinaryReader::fromStringRef<int32_t>(kv.value, Unversioned());
+		}
+	}
+	bytes_per_fetch = (bytes_per_fetch/SERVER_KNOBS->BYTE_SAMPLE_LOAD_PARALLELISM) + 1;
 
 	state std::vector<Future<Void>> sampleRanges;
 	int accumulatedSize = 0;
-	std::string prefix = PERSIST_PREFIX "BS/";
-	Key lastStart = LiteralStringRef( PERSIST_PREFIX "BS/" ); // make sure the first range starts at the absolute beginning of the byte sample
-	for( auto it = bsSample.begin(); it != bsSample.end(); ++it ) {
-		if( accumulatedSize >= bytes_per_fetch ) {
-			accumulatedSize = 0;
-			Key realKey = it->key.removePrefix( prefix );
-			KeyRange sampleRange = KeyRangeRef( lastStart, realKey );
-			sampleRanges.push_back( applyByteSampleResult(data, sampleRange.removePrefix(persistByteSampleKeys.begin), storage->readRange( sampleRange )) );
-			lastStart = realKey;
+	Key lastStart = persistByteSampleKeys.begin; // make sure the first range starts at the absolute beginning of the byte sample
+	for( auto& it : byteSampleSample ) {
+		for( auto& kv : it ) {
+			if( accumulatedSize >= bytes_per_fetch ) {
+				accumulatedSize = 0;
+				Key realKey = kv.key.removePrefix(  persistByteSampleKeys.begin );
+				sampleRanges.push_back( applyByteSampleResult(data, storage, lastStart, realKey) );
+				lastStart = realKey;
+			}
+			accumulatedSize += BinaryReader::fromStringRef<int32_t>(kv.value, Unversioned());
 		}
-		accumulatedSize += BinaryReader::fromStringRef<int32_t>(it->value, Unversioned());
 	}
 	// make sure that the last range goes all the way to the end of the byte sample
-	KeyRange sampleRange = KeyRangeRef( lastStart, LiteralStringRef( PERSIST_PREFIX "BS0" ));
-	sampleRanges.push_back( applyByteSampleResult(data, KeyRangeRef(lastStart.removePrefix(persistByteSampleKeys.begin), LiteralStringRef("\xff\xff\xff")), storage->readRange( sampleRange )) );
+	sampleRanges.push_back( applyByteSampleResult(data, storage, lastStart, persistByteSampleKeys.end) );
 
 	wait( waitForAll( sampleRanges ) );
 	TraceEvent("RecoveredByteSampleChunkedRead", data->thisServerID).detail("Ranges",sampleRanges.size());
@@ -2893,11 +2921,14 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fByteSampleSample = storage->readRange(persistByteSampleSampleKeys);
+
+	state Promise<Void> byteSampleSampleRecovered;
+	data->byteSampleRecovery = restoreByteSample(data, storage, byteSampleSampleRecovered);
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
 	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fID, fVersion, fLogProtocol) ) );
-	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fShardAssigned, fShardAvailable, fByteSampleSample) ) );
+	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fShardAssigned, fShardAvailable) ) );
+	wait( byteSampleSampleRecovered.getFuture() );
 	TraceEvent("RestoringDurableState", data->thisServerID);
 
 	if (!fFormat.get().present()) {
@@ -2951,9 +2982,6 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 		if (!nowAssigned) ASSERT( data->newestAvailableVersion.allEqual(keys, invalidVersion) );
 		wait(yield());
 	}
-
-	wait( applyByteSampleResult(data, persistByteSampleSampleKeys.removePrefix(persistByteSampleKeys.begin), fByteSampleSample) );
-	data->byteSampleRecovery = restoreByteSample(data, storage, fByteSampleSample.get());
 
 	wait( delay( 0.0001 ) );
 
@@ -3556,7 +3584,7 @@ void versionedMapTest() {
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
 	const int ASIZE = NSIZE<=64 ? 64 : NextPowerOfTwo<NSIZE>::Result;
 
-	auto before = FastAllocator< ASIZE >::getMemoryUsed();
+	auto before = FastAllocator< ASIZE >::getTotalMemory();
 
 	for(int v=1; v<=1000; ++v) {
 		vm.createNewVersion(v);
@@ -3570,7 +3598,7 @@ void versionedMapTest() {
 		}
 	}
 
-	auto after = FastAllocator< ASIZE >::getMemoryUsed();
+	auto after = FastAllocator< ASIZE >::getTotalMemory();
 
 	int count = 0;
 	for(auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)

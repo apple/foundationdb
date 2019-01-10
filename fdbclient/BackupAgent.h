@@ -276,7 +276,7 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
+	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr);
 
 	static const Key keyLastRestorable;
 
