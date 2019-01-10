@@ -2,6 +2,23 @@
 Release Notes
 #############
 
+6.0.18
+======
+
+Fixes
+-----
+
+* Backup metadata could falsely indicate that a backup is not usable. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause backup expire and delete operations to skip some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause restore to fail to apply some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Storage servers with large amounts of data would pause for a short period of time after rebooting. `(PR #1001) <https://github.com/apple/foundationdb/pull/1001>`_
+* The client library could leak memory when a thread died. `(PR #1011) <https://github.com/apple/foundationdb/pull/1011>`_
+
+Features
+--------
+
+* Added the ability to specify versions as version-days ago from latest log in backup. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+
 6.0.17
 ======
 

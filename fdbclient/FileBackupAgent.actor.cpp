@@ -3381,8 +3381,9 @@ class FileBackupAgentImpl {
 public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
-	// This method will return the final status of the backup
-	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone) {
+	// This method will return the final status of the backup at tag, and return the URL that was used on the tag
+	// when that status value was read.
+	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr) {
 		state std::string backTrace;
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
@@ -3400,13 +3401,20 @@ public:
 				state BackupConfig config(oldUidAndAborted.get().first);
 				state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
-				// Break, if no longer runnable
-				if (!FileBackupAgent::isRunnable(status)) {
-					return status;
-				}
+				// Break, if one of the following is true
+				//  - no longer runnable
+				//  - in differential mode (restorable) and stopWhenDone is not enabled
+				if( !FileBackupAgent::isRunnable(status) || (!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) ) {
 
-				// Break, if in differential mode (restorable) and stopWhenDone is not enabled
-				if ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status)) {
+					if(pContainer != nullptr) {
+						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
+						*pContainer = c;
+					}
+
+					if(pUID != nullptr) {
+						*pUID = oldUidAndAborted.get().first;
+					}
+
 					return status;
 				}
 
@@ -4082,7 +4090,7 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	tr->set(lastRestorable.pack(tagName), BinaryWriter::toValue<Version>(version, Unversioned()));
 }
 
-Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone) {
-	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
+Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer, UID *pUID) {
+	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone, pContainer, pUID);
 }
 
