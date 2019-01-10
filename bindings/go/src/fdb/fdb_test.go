@@ -269,6 +269,7 @@ func TestKeyToString(t *testing.T) {
 		expect string
 	}{
 		{fdb.Key("plain-text"), "plain-text"},
+		{fdb.Key([]byte{0}), "\\x00"},
 		{fdb.Key("\xbdascii☻☺"), "\\xbdascii\\xe2\\x98\\xbb\\xe2\\x98\\xba"},
 	}
 

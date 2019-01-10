@@ -390,7 +390,7 @@ func (k Key) String() string {
 			sb.WriteString("\\\\")
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("\\x%x", b))
+		sb.WriteString(fmt.Sprintf("\\x%02x", b))
 	}
 	return sb.String()
 }
