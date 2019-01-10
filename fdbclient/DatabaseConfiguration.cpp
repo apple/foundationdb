@@ -269,6 +269,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "ssd-redwood-experimental";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-1";
+		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE ) {
+			result["storage_engine"] = "memory-radixtree";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-2";
 		} else {
@@ -409,10 +411,17 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		type = std::min((int)TLogVersion::MAX_SUPPORTED, type);
 		tLogVersion = (TLogVersion::Version)type;
 	}
-	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
+	else if (ck == LiteralStringRef("log_engine")) {
+		parse((&type), value);
+		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
 		// TODO:  Remove this once Redwood works as a log engine
-		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
+		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		}
+		// TODO:  Remove this once memroy radix tree works as a log engine
+		if(tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		}
 	}
 	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }

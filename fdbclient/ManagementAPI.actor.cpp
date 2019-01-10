@@ -100,6 +100,9 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
+	} else if (mode == "memory-radixtree") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType= KeyValueStoreType::MEMORY_RADIXTREE;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
@@ -474,7 +477,6 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					}
 				}
 			}
-
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
