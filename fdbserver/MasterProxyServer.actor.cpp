@@ -206,6 +206,7 @@ struct ProxyCommitData {
 	std::map<Tag, Version> tag_popped;
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
+	bool popRemoteTxs;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -228,12 +229,12 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-			logAdapter(NULL), txnStateStore(NULL),
+			logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false),
 			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
-			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), 
-			firstProxy(firstProxy), cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)), 
+			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+			firstProxy(firstProxy), cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)),
 			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0)
 	{}
 };
@@ -915,7 +916,7 @@ ACTOR Future<Void> commitBatch(
 	}
 	wait(yield());
 
-	if(!self->txsPopVersions.size() || msg.popTo > self->txsPopVersions.back().second) {
+	if( self->popRemoteTxs && msg.popTo > ( self->txsPopVersions.size() ? self->txsPopVersions.back().second : self->lastTxsPop ) ) {
 		if(self->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
 			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
 			self->txsPopVersions.pop_front();
@@ -1297,6 +1298,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<Async
 			wait(db->onChange());
 			continue;
 		}
+		self->popRemoteTxs = true;
 
 		state Future<Void> onChange = db->onChange();
 		loop {

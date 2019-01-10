@@ -39,7 +39,7 @@ struct ClientDBInfo {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & proxies & id & clientTxnInfoSampleRate & clientTxnInfoSizeLimit;
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit);
 	}
 };
 

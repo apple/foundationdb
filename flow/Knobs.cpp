@@ -20,6 +20,7 @@
 
 #include "flow/Knobs.h"
 #include "flow/flow.h"
+#include <cmath>
 
 FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 

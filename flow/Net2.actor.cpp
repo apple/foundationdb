@@ -164,7 +164,6 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
-	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -484,7 +483,6 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
-	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -841,11 +839,13 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	Promise<std::vector<NetworkAddress>> result;
+	state tcp::resolver tcpResolver(self->reactor.ios);
+	Promise<std::vector<NetworkAddress>> promise;
+	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+	tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {
-			result.sendError(lookup_failed());
+			promise.sendError(lookup_failed());
 			return;
 		}
 
@@ -853,18 +853,27 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		
 		tcp::resolver::iterator end;
 		while(iter != end) {
-			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
-			// endpoint::to_string doesn't exist but operator<< does.
-			std::stringstream s;
-			s << iter->endpoint();
-			addrs.push_back(NetworkAddress::parse(s.str()));
+			auto endpoint = iter->endpoint();
+			// Currently only ipv4 is supported by NetworkAddress
+			auto addr = endpoint.address();
+			if(addr.is_v4()) {
+				addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+			}
 			++iter;
 		}
-		result.send(addrs);
+
+		if(addrs.empty()) {
+			promise.sendError(lookup_failed());
+		}
+		else {
+			promise.send(addrs);
+		}
 	});
 
-	std::vector<NetworkAddress> addresses = wait(result.getFuture());
-	return addresses;
+	wait(ready(result));
+	tcpResolver.cancel();
+
+	return result.get();
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
@@ -1014,7 +1023,7 @@ struct TestGVR {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 
@@ -1094,7 +1103,7 @@ void net2_test() {
 
 	Endpoint destination;
 
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 
 	char junk[100];
 
@@ -1144,6 +1153,6 @@ void net2_test() {
 
 	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
 	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };

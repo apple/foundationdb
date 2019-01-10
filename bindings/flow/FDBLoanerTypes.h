@@ -87,7 +87,7 @@ namespace FDB {
 
 		template <class Ar>
 		void serialize( Ar& ar ) {
-			ar & key & orEqual & offset;
+			serializer(ar, key, orEqual, offset);
 		}
 	};
 	inline bool operator == (const KeySelectorRef& lhs, const KeySelectorRef& rhs) { return lhs.key == rhs.key && lhs.orEqual==rhs.orEqual && lhs.offset==rhs.offset; }
@@ -123,7 +123,7 @@ namespace FDB {
 		int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
 		template <class Ar>
-		force_inline void serialize(Ar& ar) { ar & key & value; }
+		force_inline void serialize(Ar& ar) { serializer(ar, key, value); }
 
 		struct OrderByKey {
 			bool operator()(KeyValueRef const& a, KeyValueRef const& b) const {
@@ -171,7 +171,7 @@ namespace FDB {
 
 		template <class Ar>
 		void serialize( Ar& ar ) {
-			ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
+			serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 		}
 	};
 
@@ -234,7 +234,7 @@ namespace FDB {
 
 		template <class Ar>
 		force_inline void serialize(Ar& ar) {
-			ar & const_cast<KeyRef&>(begin) & const_cast<KeyRef&>(end);
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 			if( begin > end ) {
 				throw inverted_range();
 			};

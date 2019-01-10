@@ -276,7 +276,7 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
+	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr);
 
 	static const Key keyLastRestorable;
 
@@ -415,7 +415,7 @@ struct RCGroup {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & items & version & groupKey;
+		serializer(ar, items, version, groupKey);
 	}
 };
 
@@ -615,6 +615,15 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Number of kv range files that were both committed to persistent storage AND inserted into
+	// the snapshotRangeFileMap.  Note that since insertions could replace 1 or more existing
+	// map entries this is not necessarily the number of entries currently in the map.
+	// This value exists to help with sizing of kv range folders for BackupContainers that 
+	// require it.
+	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
 	RangeDispatchMapT snapshotRangeDispatchMap() {
@@ -671,6 +680,7 @@ public:
 			
 			copy.snapshotBeginVersion().set(tr, beginVersion.get());
 			copy.snapshotTargetEndVersion().set(tr, endVersion);
+			copy.snapshotRangeFileCount().set(tr, 0);
 
 			return Void();
 		});

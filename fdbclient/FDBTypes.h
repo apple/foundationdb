@@ -53,7 +53,7 @@ struct Tag {
 
 	template <class Ar>
 	force_inline void serialize_unversioned(Ar& ar) { 
-		ar & locality & id;
+		serializer(ar, locality, id);
 	}
 };
 #pragma pack(pop)
@@ -193,7 +193,7 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		ar & const_cast<KeyRef&>(begin) & const_cast<KeyRef&>(end);
+		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		if( begin > end ) {
 			throw inverted_range();
 		};
@@ -227,7 +227,7 @@ struct KeyValueRef {
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
 	template <class Ar>
-	force_inline void serialize(Ar& ar) { ar & key & value; }
+	force_inline void serialize(Ar& ar) { serializer(ar, key, value); }
 
 	struct OrderByKey {
 		bool operator()(KeyValueRef const& a, KeyValueRef const& b) const {
@@ -385,7 +385,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & orEqual & offset;
+		serializer(ar, key, orEqual, offset);
 	}
 };
 
@@ -418,7 +418,7 @@ struct KeyRangeWith : KeyRange {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((KeyRange&)*this) & value;
+		serializer(ar, ((KeyRange&)*this), value);
 	}
 };
 template <class Val>
@@ -470,7 +470,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 };
 
@@ -492,7 +492,7 @@ struct KeyValueStoreType {
 	operator StoreType() const { return StoreType(type); }
 
 	template <class Ar>
-	void serialize(Ar& ar) { ar & type; }
+	void serialize(Ar& ar) { serializer(ar, type); }
 
 	std::string toString() const {
 		switch( type ) {
@@ -520,7 +520,7 @@ struct StorageBytes {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & free & total & used & available;
+		serializer(ar, free, total, used, available);
 	}
 };
 
@@ -639,7 +639,7 @@ struct ClusterControllerPriorityInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & processClassFitness & isExcluded & dcFitness;
+		serializer(ar, processClassFitness, isExcluded, dcFitness);
 	}
 };
 

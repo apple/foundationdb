@@ -48,7 +48,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & error_code;
+		serializer(ar, error_code);
 	}
 
 	Error() : error_code(invalid_error_code), flags(0) {}
@@ -67,6 +67,8 @@ private:
 
 	enum Flags { FLAG_INJECTED_FAULT=1 };
 };
+
+Error systemErrorCodeToError();
 
 #undef ERROR
 #define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };

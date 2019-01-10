@@ -33,7 +33,7 @@ struct GenerationRegVal {
 	Optional<Value> val;
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & readGen & writeGen & val;
+		serializer(ar, readGen, writeGen, val);
 	}
 };
 

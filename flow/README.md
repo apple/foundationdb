@@ -240,7 +240,7 @@ struct CountingServerInterface {
     // serialization code required for use on a network
     template <class Ar>
     void serialize( Ar& ar ) {
-        ar & addCount & subtractCount & getCount;
+        serializer(ar, addCount, subtractCount, getCount);
     }
 };
 ```

@@ -170,10 +170,10 @@ public:
 		// SOMEDAY: specialize for space efficiency?
 		if (valid && Ar::isDeserializing)
 			(*(T *)&value).~T();
-		ar & valid;
+		serializer(ar, valid);
 		if (valid) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
 	}
 
@@ -247,24 +247,11 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
-		ar & error;
+		serializer(ar, error);
 		if (present()) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
-	}
-
-	bool operator == (ErrorOr const& o) const {
-		return error == o.error && (!present() || get() == o.get());
-	}
-	bool operator != (ErrorOr const& o) const {
-		return !(*this == o);
-	}
-
-	bool operator < (ErrorOr const& o) const {
-		if (error != o.error) return error < o.error;
-		if (!present()) return false;
-		return get() < o.get();
 	}
 
 	bool isError() const { return error.code() != invalid_error_code; }

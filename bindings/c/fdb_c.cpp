@@ -297,10 +297,14 @@ fdb_error_t fdb_future_get_string_array(
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster_v609( const char* cluster_file_path ) {
-	char *path = NULL;
+	char *path;
 	if(cluster_file_path) {
 		path = new char[strlen(cluster_file_path) + 1];
 		strcpy(path, cluster_file_path);
+	}
+	else {
+		path = new char[1];
+		path[0] = '\0';
 	}
 	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
@@ -340,7 +344,7 @@ FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_na
 extern "C" DLLEXPORT
 fdb_error_t fdb_create_database( const char* cluster_file_path, FDBDatabase** out_database ) {
 	CATCH_AND_RETURN(
-		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ? cluster_file_path : "" ).extractPtr();
+		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ).extractPtr();
 	);
 }
 

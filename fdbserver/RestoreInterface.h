@@ -41,7 +41,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & test;
+		serializer(ar, test);
 	}
 };
 
@@ -54,7 +54,7 @@ struct TestRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & testData & reply;
+		serializer(ar, testData, reply);
 	}
 };
 
@@ -66,7 +66,7 @@ struct TestReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & replyData;
+		serializer(ar, replyData);
 	}
 };
 

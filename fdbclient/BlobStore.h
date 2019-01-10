@@ -36,7 +36,7 @@ public:
 	struct Stats {
 		Stats() : requests_successful(0), requests_failed(0), bytes_sent(0) {}
 		Stats operator-(const Stats &rhs);
-		void clear() { memset(this, sizeof(*this), 0); }
+		void clear() { memset(this, 0, sizeof(*this)); }
 		json_spirit::mObject getJSON();
 
 		int64_t requests_successful;
@@ -196,6 +196,9 @@ public:
 
 	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
 	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+
+	// Check if a bucket exists
+	Future<bool> bucketExists(std::string const &bucket);
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);

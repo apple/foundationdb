@@ -43,7 +43,7 @@ struct PerfMetric {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & m_name & m_format_code & m_value & m_averaged;
+		serializer(ar, m_name, m_format_code, m_value, m_averaged);
 	}
 
 private:

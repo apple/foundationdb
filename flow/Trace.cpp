@@ -22,10 +22,12 @@
 #include "flow/Trace.h"
 #include "flow/FileTraceLogWriter.h"
 #include "flow/XmlTraceLogFormatter.h"
+#include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
+#include <cctype>
 #include <time.h>
 
 #include "flow/IThreadPool.h"
@@ -40,6 +42,18 @@
 #undef max
 #undef min
 #endif
+
+namespace {
+	Reference<ITraceLogFormatter> createLogFormatter(const std::string& f) {
+		if (f == "json") {
+			return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+		} else if (f == "xml") {
+			return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+		} else {
+			UNREACHABLE();
+		}
+	}
+} // namespace
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -122,10 +136,10 @@ static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
 static int TRACE_EVENT_MAX_SIZE = 4000;
 
 struct TraceLog {
+	Reference<ITraceLogFormatter> formatter;
 
 private:
 	Reference<ITraceLogWriter> logWriter;
-	Reference<ITraceLogFormatter> formatter;
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
@@ -561,6 +575,17 @@ TraceEventFields LatestEventCache::getLatestError() {
 }
 
 static TraceLog g_traceLog;
+
+bool selectTraceFormatter(std::string format) {
+	ASSERT(!g_traceLog.isOpen());
+	std::transform(format.begin(), format.end(), format.begin(), ::tolower);
+	if (format == "xml" || format == "json") {
+		g_traceLog.formatter = createLogFormatter(format);
+		return true;
+	} else {
+		return false;
+	}
+}
 
 ThreadFuture<Void> flushTraceFile() {
 	if (!g_traceLog.isOpen())

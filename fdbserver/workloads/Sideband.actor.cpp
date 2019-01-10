@@ -32,7 +32,7 @@ struct SidebandMessage {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & commitVersion;
+		serializer(ar, key, commitVersion);
 	}
 };
 
@@ -43,7 +43,7 @@ struct SidebandInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & updates;
+		serializer(ar, updates);
 	}
 };
 

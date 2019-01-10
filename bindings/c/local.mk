@@ -24,7 +24,7 @@ fdb_c_CFLAGS := $(fdbclient_CFLAGS)
 fdb_c_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)
 fdb_c_STATIC_LIBS := $(TLS_LIBS)
-fdb_c_tests_LIBS := -shared -Llib -lfdb_c
+fdb_c_tests_LIBS := -Llib -lfdb_c
 fdb_c_tests_HEADERS := -Ibindings/c
 
 CLEAN_TARGETS += fdb_c_tests_clean
@@ -84,11 +84,11 @@ bindings/c/foundationdb/fdb_c_options.g.h: bin/vexillographer.exe fdbclient/vexi
 
 bin/fdb_c_performance_test: bindings/c/test/performance_test.c bindings/c/test/test.h fdb_c
 	@echo "Compiling      fdb_c_performance_test"
-	@$(CC) $(CFLAGS) $(fdb_c_tests_LIBS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c
+	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c $(fdb_c_tests_LIBS) 
 
 bin/fdb_c_ryw_benchmark: bindings/c/test/ryw_benchmark.c bindings/c/test/test.h fdb_c
 	@echo "Compiling      fdb_c_ryw_benchmark"
-	@$(CC) $(CFLAGS) $(fdb_c_tests_LIBS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/ryw_benchmark.c
+	@$(CC) $(CFLAGS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/ryw_benchmark.c $(fdb_c_tests_LIBS) 
 
 packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz: bin/fdb_c_performance_test bin/fdb_c_ryw_benchmark
 	@echo "Packaging      $@"

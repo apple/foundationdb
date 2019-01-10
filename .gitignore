@@ -84,3 +84,4 @@ compile_commands.json
 .envrc
 .DS_Store
 temp/
+/compile_commands.json
