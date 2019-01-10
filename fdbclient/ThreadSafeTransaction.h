@@ -52,7 +52,7 @@ public:  // Internal use only
 
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction( ThreadSafeDatabase *cx );
+	explicit ThreadSafeTransaction( Reference<ThreadSafeDatabase> db );
 	~ThreadSafeTransaction();
 
 	void cancel();

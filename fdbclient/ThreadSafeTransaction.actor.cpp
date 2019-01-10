@@ -47,7 +47,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(this));
+	return Reference<ITransaction>(new ThreadSafeTransaction(Reference<ThreadSafeDatabase>::addRef(this)));
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -74,10 +74,11 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
-	onMainThreadVoid( [this](){ db->delref(); }, NULL );
+	DatabaseContext *db = this->db;
+	onMainThreadVoid( [db](){ db->delref(); }, NULL );
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
+ThreadSafeTransaction::ThreadSafeTransaction( Reference<ThreadSafeDatabase> db ) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -87,7 +88,10 @@ ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
 	// these operations).
 	ReadYourWritesTransaction *tr = this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid( [tr,cx](){ cx->db->addref(); new (tr) ReadYourWritesTransaction( Database(cx->db) ); }, NULL );
+	onMainThreadVoid( [tr, db](){ 
+		db->db->addref(); 
+		new (tr) ReadYourWritesTransaction( Database(db->db) ); 
+	}, NULL );
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
