@@ -34,3 +34,6 @@ testTitle=BackupAndRestore
     machinesToLeave=3
     reboot=true
     testDuration=90.0
+
+; Disable buggify for parallel restore
+buggify=off
