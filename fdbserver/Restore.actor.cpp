@@ -43,15 +43,63 @@
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
 
+bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input);
+Future<Void> registerMutationsToApplier(Reference<RestoreData> const& rd);
+Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> const& rd);
+void parseSerializedMutation(Reference<RestoreData> rd);
+
+// Helper class for reading restore data from a buffer and throwing the right errors.
+struct StringRefReaderMX {
+	StringRefReaderMX(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e), str_size(s.size()) {}
+
+	// Return remainder of data as a StringRef
+	StringRef remainder() {
+		return StringRef(rptr, end - rptr);
+	}
+
+	// Return a pointer to len bytes at the current read position and advance read pos
+	//Consume a little-Endian data. Since we only run on little-Endian machine, the data on storage is little Endian
+	const uint8_t * consume(unsigned int len) {
+		if(rptr == end && len != 0)
+			throw end_of_stream();
+		const uint8_t *p = rptr;
+		rptr += len;
+		if(rptr > end) {
+			printf("[ERROR] StringRefReaderMX throw error! string length:%d\n", str_size);
+			throw failure_error;
+		}
+		return p;
+	}
+
+	// Return a T from the current read position and advance read pos
+	template<typename T> const T consume() {
+		return *(const T *)consume(sizeof(T));
+	}
+
+	// Functions for consuming big endian (network byte order) integers.
+	// Consumes a big endian number, swaps it to little endian, and returns it.
+	const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
+	const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
+
+	const int64_t  consumeNetworkInt64()  { return (int64_t)bigEndian64((uint32_t)consume< int64_t>());}
+	const uint64_t consumeNetworkUInt64() { return          bigEndian64(          consume<uint64_t>());}
+
+	bool eof() { return rptr == end; }
+
+	const uint8_t *rptr, *end;
+	const int str_size;
+	Error failure_error;
+};
+
 bool debug_verbose = false;
 
 
 ////-- Restore code declaration START
 //TODO: Move to RestoreData
-std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
-//std::map<Version, std::vector<MutationRef>> kvOps; //TODO: Must change to standAlone before run correctness test. otherwise, you will see the mutationref memory is corrupted
-std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; //key is the unique identifier for a batch of mutation logs at the same version
-std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most recent
+//std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
+////std::map<Version, std::vector<MutationRef>> kvOps; //TODO: Must change to standAlone before run correctness test. otherwise, you will see the mutationref memory is corrupted
+//std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; //key is the unique identifier for a batch of mutation logs at the same version
+//std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most recent
 // MXX: Important: Can not use std::vector because you won't have the arena and you will hold the reference to memory that will be freed.
 // Use push_back_deep() to copy data to the standalone arena.
 //Standalone<VectorRef<MutationRef>> mOps;
@@ -457,6 +505,7 @@ namespace parallelFileRestore {
 struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	//---- Declare status structure which records the progress and status of each worker in each role
 	std::map<UID, RestoreCommandInterface> workers_interface; // UID is worker's node id, RestoreCommandInterface is worker's communication interface
+	UID masterApplier; //TODO: Remove this variable. The first version uses 1 applier to apply the mutations
 
 	RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
 	std::vector<RestoreNodeStatus> globalNodeStatus; // status of all notes, excluding master node, stored in master node // May change to map, like servers_info
@@ -501,6 +550,20 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 
 
 	std::vector<RestoreFile> files; // backup files: range and log files
+
+	// Temporary data structure for parsing range and log files into (version, <K, V, mutationType>)
+	std::map<Version, Standalone<VectorRef<MutationRef>>> kvOps;
+	//std::map<Version, std::vector<MutationRef>> kvOps; //TODO: Must change to standAlone before run correctness test. otherwise, you will see the mutationref memory is corrupted
+	std::map<Standalone<StringRef>, Standalone<StringRef>> mutationMap; //key is the unique identifier for a batch of mutation logs at the same version
+	std::map<Standalone<StringRef>, uint32_t> mutationPartMap; //Record the most recent
+
+	std::string getRole() {
+		return getRoleStr(localNodeStatus.role);
+	}
+
+	std::string getNodeID() {
+		return localNodeStatus.nodeID.toString();
+	}
 
 	~RestoreData() {
 		printf("[Exit] RestoreData is deleted\n");
@@ -602,8 +665,8 @@ void printGlobalNodeStatus(Reference<RestoreData> restoreData) {
 
 void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input);
 void registerBackupMutationForAll(Version empty);
-bool isKVOpsSorted();
-bool allOpsAreKnown();
+bool isKVOpsSorted(Reference<RestoreData> rd);
+bool allOpsAreKnown(Reference<RestoreData> rd);
 
 
 
@@ -810,7 +873,8 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  }
 
 
- ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<IBackupContainer> bc, Version version,
+ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(Reference<RestoreData> rd,
+ 									Reference<IBackupContainer> bc, Version version,
  									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
  									KeyRange restoreRange, Key addPrefix, Key removePrefix) {
 //	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx)); // Used to clear the range where the KV will be applied.
@@ -897,13 +961,13 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
 			// TODO: we can commit the kv operation into DB.
 			// Right now, we cache all kv operations into kvOps, and apply all kv operations later in one place
-			if ( kvOps.find(version) == kvOps.end() ) { // Create the map's key if mutation m is the first on to be inserted
+			if ( rd->kvOps.find(version) == rd->kvOps.end() ) { // Create the map's key if mutation m is the first on to be inserted
 				//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
-				kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
+				rd->kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
 			}
 
-			ASSERT(kvOps.find(version) != kvOps.end());
-			kvOps[version].push_back_deep(kvOps[version].arena(), m);
+			ASSERT(rd->kvOps.find(version) != rd->kvOps.end());
+			rd->kvOps[version].push_back_deep(rd->kvOps[version].arena(), m);
 
 		}
 
@@ -912,7 +976,8 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
 		if(start == end) {
 			//TraceEvent("ExtraApplyRangeFileToDB_MX").detail("Progress", "DoneApplyKVToDB");
-			printf("[INFO] RangeFile:%s: the number of kv operations = %d\n", fileName.c_str(), kvCount);
+			printf("[INFO][Loader] NodeID:%s Parse RangeFile:%s: the number of kv operations = %d\n",
+					 rd->getNodeID().c_str(), fileName.c_str(), kvCount);
 			return Void();
 		}
  	}
@@ -920,54 +985,164 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  }
 
 
- ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<IBackupContainer> bc, Version version,
- 									std::string fileName, int64_t readOffset_input, int64_t readLen_input,
- 									KeyRange restoreRange, Key addPrefix, Key removePrefix) {
+ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(Reference<RestoreData> rd,
+ 									Reference<IBackupContainer> bc, Version version,
+ 									std::string fileName, int64_t readOffset, int64_t readLen,
+ 									KeyRange restoreRange, Key addPrefix, Key removePrefix,
+ 									Key mutationLogPrefix) {
 
-	// First concatenate the backuped param1 and param2 (KV) at the same version.
+	// Step: concatenate the backuped param1 and param2 (KV) at the same version.
+ 	//state Key mutationLogPrefix = mutationLogPrefix;
+ 	//TraceEvent("ReadLogFileStart").detail("LogFileName", fileName);
+ 	state Reference<IAsyncFile> inFile = wait(bc->readFile(fileName));
+ 	//TraceEvent("ReadLogFileFinish").detail("LogFileName", fileName);
 
-//
-//	wait( _executeApplyMutationLogFileToDB(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
-//
-//	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d start...\n", mutationMap.size());
-//
-// 	registerBackupMutationForAll(Version());
-// 	printf("Now parse concatenated mutation log and register it to kvOps, mutationMap size:%d done...\n", mutationMap.size());
-//
-// 	//Get the range file into the kvOps later
-// 	printf("ApplyRangeFiles\n");
-// 	futures.clear();
-// 	for ( fi = 0; fi < files.size(); ++fi ) {
-// 		f = files[fi];
-// 		printf("ApplyRangeFiles:id:%d\n", fi);
-// 		if ( f.isRange ) {
-// //			TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString());
-// 			printf("ApplyRangeFileToDB_MX FileInfo:%s\n", f.toString().c_str());
-// 			beginBlock = 0;
-// 			j = beginBlock *f.blockSize;
-// 			readLen = 0;
-// 			// For each block of the file
-// 			for(; j < f.fileSize; j += f.blockSize) {
-// 				readOffset = j;
-// 				readLen = std::min<int64_t>(f.blockSize, f.fileSize - j);
-// 				futures.push_back( _parseLogFileToMutations(cx, restore, f, readOffset, readLen, bc, restoreRange, addPrefix, removePrefix) );
-//
-// 				// Increment beginBlock for the file
-// 				++beginBlock;
-//// 				TraceEvent("ApplyRangeFileToDB_MX").detail("FileInfo", f.toString()).detail("ReadOffset", readOffset).detail("ReadLen", readLen);
-// 			}
-// 		}
-// 	}
-// 	if ( futures.size() != 0 ) {
-// 		printf("Wait for  futures of applyRangeFiles, start waiting\n");
-// 		wait(waitForAll(futures));
-// 		printf("Wait for  futures of applyRangeFiles, finish waiting\n");
-// 	}
+
+ 	printf("Parse log file:%s readOffset:%d readLen:%d\n", fileName.c_str(), readOffset, readLen);
+ 	//TODO: NOTE: decodeLogFileBlock() should read block by block! based on my serial version. This applies to decode range file as well
+ 	state Standalone<VectorRef<KeyValueRef>> data = wait(parallelFileRestore::decodeLogFileBlock(inFile, readOffset, readLen));
+ 	//state Standalone<VectorRef<MutationRef>> data = wait(fileBackup::decodeLogFileBlock_MX(inFile, readOffset, readLen)); //Decode log file
+ 	TraceEvent("ReadLogFileFinish").detail("LogFileName", fileName).detail("DecodedDataSize", data.contents().size());
+ 	printf("ReadLogFile, raw data size:%d\n", data.size());
+
+ 	state int start = 0;
+ 	state int end = data.size();
+ 	state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+	state int kvCount = 0;
+	state int numConcatenated = 0;
+	loop {
+ 		try {
+ 			printf("Process start:%d where end=%d\n", start, end);
+ 			if(start == end) {
+ 				printf("ReadLogFile: finish reading the raw data and concatenating the mutation at the same version\n");
+ 				break;
+ 			}
+
+ 			state int i = start;
+ 			state int txBytes = 0;
+ 			for(; i < end && txBytes < dataSizeLimit; ++i) {
+ 				Key k = data[i].key.withPrefix(mutationLogPrefix);
+ 				ValueRef v = data[i].value;
+ 				txBytes += k.expectedSize();
+ 				txBytes += v.expectedSize();
+ 				//MXX: print out the key value version, and operations.
+ 				//printf("LogFile [key:%s, value:%s, version:%ld, op:NoOp]\n", k.printable().c_str(), v.printable().c_str(), logFile.version);
+ //				printf("LogFile [KEY:%s, VALUE:%s, VERSION:%ld, op:NoOp]\n", getHexString(k).c_str(), getHexString(v).c_str(), logFile.version);
+ //				printBackupMutationRefValueHex(v, " |\t");
+ /*
+ 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
+ 				registerBackupMutation(data[i].value, logFile.version);
+ */
+ //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
+ 				bool concatenated = concatenateBackupMutationForLogFile(rd, data[i].value, data[i].key);
+ 				numConcatenated += ( concatenated ? 1 : 0);
+ //				//TODO: Decode the value to get the mutation type. Use NoOp to distinguish from range kv for now.
+ //				MutationRef m(MutationRef::Type::NoOp, data[i].key, data[i].value); //ASSUME: all operation in log file is NoOp.
+ //				if ( rd->kvOps.find(logFile.version) == rd->kvOps.end() ) {
+ //					rd->kvOps.insert(std::make_pair(logFile.version, std::vector<MutationRef>()));
+ //				} else {
+ //					rd->kvOps[logFile.version].push_back(m);
+ //				}
+ 			}
+
+ 			start = i;
+
+ 		} catch(Error &e) {
+ 			if(e.code() == error_code_transaction_too_large)
+ 				dataSizeLimit /= 2;
+ 		}
+ 	}
+
+ 	printf("[INFO] raw kv number:%d parsed from log file, concatenated:%d kv, num_log_versions:%d\n", data.size(), numConcatenated, rd->mutationMap.size());
 
 	return Void();
  }
 
+ // Parse the kv pair (version, serialized_mutation), which are the results parsed from log file.
+ void parseSerializedMutation(Reference<RestoreData> rd) {
+	// Step: Parse the concatenated KV pairs into (version, <K, V, mutationType>) pair
+ 	printf("[INFO] Parse the concatenated log data\n");
+ 	std::string prefix = "||\t";
+	std::stringstream ss;
+	const int version_size = 12;
+	const int header_size = 12;
+	int kvCount = 0;
 
+	for ( auto& m : rd->mutationMap ) {
+		StringRef k = m.first.contents();
+		StringRefReaderMX readerVersion(k, restore_corrupted_data());
+		uint64_t commitVersion = readerVersion.consume<uint64_t>(); // Consume little Endian data
+
+
+		StringRef val = m.second.contents();
+		StringRefReaderMX reader(val, restore_corrupted_data());
+
+		int count_size = 0;
+		// Get the include version in the batch commit, which is not the commitVersion.
+		// commitVersion is in the key
+		uint64_t includeVersion = reader.consume<uint64_t>();
+		count_size += 8;
+		uint32_t val_length_decode = reader.consume<uint32_t>(); //Parse little endian value, confirmed it is correct!
+		count_size += 4;
+
+		if ( rd->kvOps.find(commitVersion) == rd->kvOps.end() ) {
+			rd->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+		}
+
+		if ( debug_verbose ) {
+			printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", commitVersion);
+			printf("To decode value:%s\n", getHexString(val).c_str());
+		}
+		if ( val_length_decode != (val.size() - 12) ) {
+			//IF we see val.size() == 10000, It means val should be concatenated! The concatenation may fail to copy the data
+			fprintf(stderr, "[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
+					commitVersion, commitVersion);
+		} else {
+			if ( debug_verbose ) {
+				printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
+			}
+		}
+
+		// Get the mutation header
+		while (1) {
+			// stop when reach the end of the string
+			if(reader.eof() ) { //|| *reader.rptr == 0xFF
+				//printf("Finish decode the value\n");
+				break;
+			}
+
+
+			uint32_t type = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
+			uint32_t kLen = reader.consume<uint32_t>();//reader.consumeNetworkUInkvOps[t32();
+			uint32_t vLen = reader.consume<uint32_t>();//reader.consumeNetworkUInt32();
+			const uint8_t *k = reader.consume(kLen);
+			const uint8_t *v = reader.consume(vLen);
+			count_size += 4 * 3 + kLen + vLen;
+
+			MutationRef mutation((MutationRef::Type) type, KeyRef(k, kLen), KeyRef(v, vLen));
+			rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
+			kvCount++;
+
+			if ( kLen < 0 || kLen > val.size() || vLen < 0 || vLen > val.size() ) {
+				printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
+			}
+
+			if ( debug_verbose ) {
+				printf("%s---RegisterBackupMutation[%d]: Version:%016lx Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
+					   kvCount,
+					   commitVersion, type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
+			}
+
+		}
+		//	printf("----------------------------------------------------------\n");
+	}
+
+	printf("[INFO] Produces %d mutation operations from concatenated kv pairs that are parsed from log\n",  kvCount);
+
+}
+
+ //TO BE DELETED
+/*
  ACTOR static Future<Void> _parseRangeFileToMutations(Database cx, Reference<RestoreConfig> restore_input,
  													 RestoreFile rangeFile_input, int64_t readOffset_input, int64_t readLen_input,
  													 Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
@@ -1147,8 +1322,10 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  	}
 
  }
+*/
 
-
+// TO BE DELETED
+/*
  ACTOR static Future<Void> _parseLogFileToMutations(Database cx, Reference<RestoreConfig> restore_input,
  														   RestoreFile logFile_input, int64_t readOffset_input, int64_t readLen_input,
  														   Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
@@ -1208,13 +1385,13 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  				//printf("LogFile [key:%s, value:%s, version:%ld, op:NoOp]\n", k.printable().c_str(), v.printable().c_str(), logFile.version);
  //				printf("LogFile [KEY:%s, VALUE:%s, VERSION:%ld, op:NoOp]\n", getHexString(k).c_str(), getHexString(v).c_str(), logFile.version);
  //				printBackupMutationRefValueHex(v, " |\t");
- /*
- 				TraceEvent("PrintMutationLogFile_MX").detail("Key",  getHexString(k)).detail("Value", getHexString(v))
- 						.detail("Version", logFile.version).detail("Op", "NoOps");
-
- 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
- 				registerBackupMutation(data[i].value, logFile.version);
- */
+//
+// 				TraceEvent("PrintMutationLogFile_MX").detail("Key",  getHexString(k)).detail("Value", getHexString(v))
+// 						.detail("Version", logFile.version).detail("Op", "NoOps");
+//
+// 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
+// 				registerBackupMutation(data[i].value, logFile.version);
+//
  //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
  				concatenateBackupMutation(data[i].value, data[i].key);
  			}
@@ -1254,20 +1431,21 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
  	// return is in the above code
  }
+ */
 
 
 
- ACTOR Future<Void> applyKVOpsToDB(Database cx) {
+ ACTOR Future<Void> applyKVOpsToDB(Reference<RestoreData> rd, Database cx) {
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
 
  	if ( debug_verbose ) {
-		TraceEvent("ApplyKVOPsToDB").detail("MapSize", kvOps.size());
-		printf("ApplyKVOPsToDB num_of_version:%d\n", kvOps.size());
+		TraceEvent("ApplyKVOPsToDB").detail("MapSize", rd->kvOps.size());
+		printf("ApplyKVOPsToDB num_of_version:%d\n", rd->kvOps.size());
  	}
- 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = kvOps.begin();
+ 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator it = rd->kvOps.begin();
  	state int count = 0;
- 	for ( ; it != kvOps.end(); ++it ) {
+ 	for ( ; it != rd->kvOps.end(); ++it ) {
 
  		if ( debug_verbose ) {
 			TraceEvent("ApplyKVOPsToDB\t").detail("Version", it->first).detail("OpNum", it->second.size());
@@ -1323,10 +1501,40 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  		}
  	}
 
- 	printf("ApplyKVOPsToDB number of kv mutations:%d\n", count);
+ 	printf("[INFO] ApplyKVOPsToDB number of kv mutations:%d\n", count);
 
  	return Void();
 }
+
+ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> restoreData, Database cx) {
+ 	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
+	printf("[INFO][Master] Start configuring roles for workers\n");
+	loop {
+		try {
+			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!agentValues.more);
+			if(agentValues.size()) {
+				for(auto& it : agentValues) {
+					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
+					// Save the RestoreCommandInterface for the later operations
+					restoreData->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
+				}
+				break;
+			}
+			wait( delay(5.0) );
+		} catch( Error &e ) {
+			printf("[WARNING] configureRoles transaction error:%s\n", e.what());
+			wait( tr.onError(e) );
+		}
+		printf("[WARNING] setWorkerInterface should always succeeed in the first loop! Something goes wrong!\n");
+	};
+
+	return Void();
+ }
 
 
 ////--- Restore Functions for the master role
@@ -1378,6 +1586,9 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 		restoreData->globalNodeStatus.back().init(RestoreRole::Applier);
 		restoreData->globalNodeStatus.back().nodeID = agents[i].id();
 	}
+	// Set the last Applier as the master applier
+	restoreData->masterApplier = restoreData->globalNodeStatus.back().nodeID;
+	printf("[INFO][Master] masterApplier ID:%s\n", restoreData->masterApplier.toString().c_str());
 
 	state int index = 0;
 	state RestoreRole role;
@@ -1391,7 +1602,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 			nodeID = restoreData->globalNodeStatus[index].nodeID;
 			printf("[CMD] Set role (%s) to node (index=%d uid=%s)\n",
 					getRoleStr(role).c_str(), index, nodeID.toString().c_str());
-			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, nodeID, role)));
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, nodeID, role, restoreData->masterApplier)));
 			index++;
 		}
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
@@ -1427,6 +1638,8 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 		break;
 	}
 
+
+
 	printf("Role:%s finish configure roles\n", getRoleStr(restoreData->localNodeStatus.role).c_str());
 	return Void();
 
@@ -1448,6 +1661,7 @@ ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, Res
 				if ( req.cmd == RestoreCommandEnum::Set_Role ) {
 					restoreData->localNodeStatus.init(req.role);
 					restoreData->localNodeStatus.nodeID = interf.id();
+					restoreData->masterApplier = req.masterApplier;
 					printf("[INFO][Worker] Set localNodeID to %s, set role to %s\n",
 							restoreData->localNodeStatus.nodeID.toString().c_str(), getRoleStr(restoreData->localNodeStatus.role).c_str());
 					req.reply.send(RestoreCommandReply(interf.id()));
@@ -1545,7 +1759,7 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->localNodeStatus.role);
 	} else {
-		printf("[INFO][Worker] nodeID:%s (interface id:%s) waits for Assign_Applier_KeyRange cmd\n",
+		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Assign_Applier_KeyRange cmd\n",
 				restoreData->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
 	}
 
@@ -1577,6 +1791,93 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 
 	return Void();
 }
+
+// Receive mutations sent from loader
+ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
+		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), rd->localNodeStatus.role);
+	} else {
+		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Loader_Send_Mutations_To_Applier cmd\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	state int numMutations = 0;
+
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+//				printf("[INFO][Applier] Got Restore Command: cmd:%d UID:%s\n",
+//						req.cmd, req.id.toString().c_str());
+				if ( rd->localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] node:%s receive request with a different id:%s\n",
+								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier ) {
+					// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+					state uint64_t commitVersion = req.commitVersion;
+					MutationRef mutation(req.mutation);
+					if ( rd->kvOps.find(commitVersion) == rd->kvOps.end() ) {
+						rd->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+					}
+					rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
+					numMutations++;
+					if ( numMutations % 1000 == 1 ) {
+						printf("[INFO][Applier] Receives %d mutations\n", numMutations);
+					}
+
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
+					printf("[INFO][Applier] NodeID:%s receive all mutations\n", rd->localNodeStatus.nodeID.toString().c_str());
+					req.reply.send(RestoreCommandReply(interf.id()));
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandInterface interf, Database cx) {
+	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
+		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), rd->localNodeStatus.role);
+	} else {
+		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Loader_Notify_Appler_To_Apply_Mutation cmd\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	state int numMutations = 0;
+
+	loop {
+		choose {
+			when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+//				printf("[INFO][Applier] Got Restore Command: cmd:%d UID:%s\n",
+//						req.cmd, req.id.toString().c_str());
+				if ( rd->localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] node:%s receive request with a different id:%s\n",
+								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation ) {
+					// Applier apply mutations to DB
+					printf("[INFO][Applier] apply KV ops to DB starts...");
+					wait( applyKVOpsToDB(rd, cx) );
+					printf("[INFO][Applier] apply KV ops to DB finishes...");
+					req.reply.send(RestoreCommandReply(interf.id()));
+					break;
+				} else {
+					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
 
 //TODO: DONE: collectRestoreRequests
 ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
@@ -1792,7 +2093,7 @@ int IncreaseKeyRef(KeyRef key, int step) {
 */
 
 // TODO WiP: Distribution workload
-ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
+ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -1803,6 +2104,9 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	state Key removePrefix = request.removePrefix;
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
+	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
+
+	printf("[NOTE] mutationLogPrefix:%s (hex value:%s)\n", mutationLogPrefix.toString().c_str(), getHexString(mutationLogPrefix).c_str());
 
 	// Determine the key range each applier is responsible for
 	std::pair<int, int> numWorkers = getNumLoaderAndApplier(restoreData);
@@ -1863,6 +2167,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded
 	state bool allLoadReqsSent = false;
 	state std::vector<UID> loaderIDs = getLoaderIDs(restoreData);
+	state std::vector<UID> applierIDs;
 	state std::vector<UID> finishedLoaderIDs = loaderIDs;
 
 	try {
@@ -1874,6 +2179,16 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 			state std::vector<Future<RestoreCommandReply>> cmdReplies;
 			for (auto &loaderID : loaderIDs) {
+				while ( restoreData->files[curFileIndex].fileSize == 0 ) {
+					// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
+					printf("[INFO] File:%s filesize:%d skip the file\n",
+							restoreData->files[curFileIndex].fileName.c_str(), restoreData->files[curFileIndex].fileSize);
+					curFileIndex++;
+				}
+				if ( curFileIndex >= restoreData->files.size() ) {
+					allLoadReqsSent = true;
+					break;
+				}
 				LoadingParam param;
 				param.url = request.url;
 				param.version = restoreData->files[curFileIndex].version;
@@ -1881,9 +2196,11 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				param.offset = restoreData->files[curFileIndex].cursor;
 				//param.length = std::min(restoreData->files[curFileIndex].fileSize - restoreData->files[curFileIndex].cursor, loadSizeB);
 				param.length = restoreData->files[curFileIndex].fileSize;
+				param.blockSize = restoreData->files[curFileIndex].blockSize;
 				param.restoreRange = restoreRange;
 				param.addPrefix = addPrefix;
 				param.removePrefix = removePrefix;
+				param.mutationLogPrefix = mutationLogPrefix;
 				ASSERT( param.length > 0 );
 				ASSERT( param.offset >= 0 && param.offset < restoreData->files[curFileIndex].fileSize );
 				restoreData->files[curFileIndex].cursor = restoreData->files[curFileIndex].cursor +  param.length;
@@ -1951,6 +2268,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				break; // NOTE: need to change when change to wait on any cmdReplies
 			}
 		}
+
 	} catch(Error &e) {
 		if(e.code() != error_code_end_of_stream) {
 			printf("[ERROR] cmd: Assign_Loader_File has error:%s(code:%d)\n", e.what(), e.code());
@@ -1960,9 +2278,8 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 	//TODO: WiP Send cmd to Applier to apply the remaining mutations to DB
 
-
-
-	// Notify the end of the loading
+	// Notify loaders the end of the loading
+	printf("[INFO][Master] Notify loaders the end of loading\n");
 	loaderIDs = getLoaderIDs(restoreData);
 	cmdReplies.clear();
 	for (auto& loaderID : loaderIDs) {
@@ -1970,11 +2287,46 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
 		printf("[CMD] Assign_Loader_File_Done for node ID:%s\n", nodeID.toString().c_str());
 		cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Loader_File_Done, nodeID)) );
-
 	}
 	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 	for (int i = 0; i < reps.size(); ++i) {
-		printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File_Done\n",
+		printf("[INFO] Get restoreCommandReply value:%s for Assign_Loader_File_Done\n",
+				reps[i].id.toString().c_str());
+	}
+
+	// Notify appliers the end of the loading
+	printf("[INFO][Master] Notify appliers the end of loading\n");
+	applierIDs = getApplierIDs(restoreData);
+	cmdReplies.clear();
+	for (auto& id : applierIDs) {
+		UID nodeID = id;
+		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+		printf("[CMD] Loader_Send_Mutations_To_Applier_Done for node ID:%s\n", nodeID.toString().c_str());
+		cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, nodeID)) );
+	}
+	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+	for (int i = 0; i < reps.size(); ++i) {
+		printf("[INFO] get restoreCommandReply value:%s for Loader_Send_Mutations_To_Applier_Done\n",
+				reps[i].id.toString().c_str());
+	}
+
+	// Notify to apply mutation to DB: ask loader to notify applier to do so
+	state int loaderIndex = 0;
+	for (auto& loaderID : loaderIDs) {
+		UID nodeID = loaderID;
+		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+		printf("[CMD] Apply_Mutation_To_DB for node ID:%s\n", nodeID.toString().c_str());
+		if (loaderIndex == 0) {
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB, nodeID)) );
+		} else {
+			// Only apply mutation to DB once
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB_Skip, nodeID)) );
+		}
+		loaderIndex++;
+	}
+	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+	for (int i = 0; i < reps.size(); ++i) {
+		printf("[INFO] Finish Apply_Mutation_To_DB on nodes:%s\n",
 				reps[i].id.toString().c_str());
 	}
 
@@ -1986,6 +2338,131 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 //TODO: loadingHandler
 ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
 	printf("[INFO] Worker Node:%s Role:%s starts loadingHandler\n",
+			restoreData->localNodeStatus.nodeID.toString().c_str(),
+			getRoleStr(restoreData->localNodeStatus.role).c_str());
+
+	try {
+		state int64_t cmdIndex = 0;
+		state LoadingParam param;
+		state int64_t beginBlock = 0;
+		state int64_t j = 0;
+		state int64_t readLen = 0;
+		state int64_t readOffset = 0;
+		state Reference<IBackupContainer> bc;
+		loop {
+			//wait(delay(1.0));
+			choose {
+				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+					printf("[INFO][Loader] Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
+							req.cmd, req.id.toString().c_str(), restoreData->localNodeStatus.role);
+					if ( interf.id() != req.id ) {
+							printf("[WARNING] node:%s receive request with a different id:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+					}
+
+					cmdIndex = req.cmdIndex;
+					param = req.loadingParam;
+					beginBlock = 0;
+					j = 0;
+					readLen = 0;
+					readOffset = 0;
+					readOffset = param.offset;
+					if ( req.cmd == RestoreCommandEnum::Assign_Loader_Range_File ) {
+						printf("[INFO][Loader] Assign_Loader_Range_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+						bc = IBackupContainer::openContainer(param.url.toString());
+						printf("[INFO] node:%s open backup container for url:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.url.toString().c_str());
+
+
+						ASSERT( param.blockSize > 0 );
+						//state std::vector<Future<Void>> fileParserFutures;
+						if (param.offset % param.blockSize != 0) {
+							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+						}
+						for (j = param.offset; j < param.length; j += param.blockSize) {
+							readOffset = j;
+							readLen = std::min<int64_t>(param.blockSize, param.length - j);
+							wait( _parseRangeFileToMutationsOnLoader(restoreData, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
+							++beginBlock;
+						}
+
+						printf("[INFO][Loader] Node:%s finishes process Range file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						// TODO: Send to applier to apply the mutations
+						printf("[INFO][Loader] Node:%s will send range mutations to applier\n", restoreData->getNodeID().c_str());
+						wait( registerMutationsToApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
+
+
+						//TODO: Send ack to master that loader has finished loading the data
+						req.reply.send(RestoreCommandReply(interf.id()));
+						//leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
+
+					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_Log_File) {
+						printf("[INFO][Loader] Assign_Loader_Log_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+						bc = IBackupContainer::openContainer(param.url.toString());
+						printf("[INFO][Loader] Node:%s open backup container for url:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.url.toString().c_str());
+						printf("[INFO][Loader] Node:%s filename:%s blockSize:%d\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.filename.c_str(), param.blockSize);
+
+						ASSERT( param.blockSize > 0 );
+						//state std::vector<Future<Void>> fileParserFutures;
+						if (param.offset % param.blockSize != 0) {
+							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+						}
+						for (j = param.offset; j < param.length; j += param.blockSize) {
+							readOffset = j;
+							readLen = std::min<int64_t>(param.blockSize, param.length - j);
+							// NOTE: Log file holds set of blocks of data. We need to parse the data block by block and get the kv pair(version, serialized_mutations)
+							// The set of mutations at the same version may be splitted into multiple kv pairs ACROSS multiple data blocks when the size of serialized_mutations is larger than 20000.
+							wait( _parseLogFileToMutationsOnLoader(restoreData, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix, param.mutationLogPrefix) );
+							++beginBlock;
+						}
+						printf("[INFO][Loader] Node:%s finishes parsing the data block into kv pairs (version, serialized_mutations) for file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						parseSerializedMutation(restoreData);
+
+						printf("[INFO][Loader] Node:%s finishes process Log file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						printf("[INFO][Loader] Node:%s will send log mutations to applier\n", restoreData->getNodeID().c_str());
+						wait( registerMutationsToApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
+
+						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_File_Done) {
+							printf("[INFO][Loader] Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+							break;
+					} else {
+						printf("[ERROR][Loader] Restore command %d is invalid. Master will be stuck\n", req.cmd);
+					}
+				}
+			}
+		}
+
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream) {
+			printf("[ERROR][Loader] Node:%s loadingHandler has error:%s(code:%d)\n", restoreData->getNodeID().c_str(), e.what(), e.code());
+		}
+	}
+
+	return Void();
+}
+
+
+ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+	printf("[INFO] Worker Node:%s Role:%s starts applyToDBHandler\n",
 			restoreData->localNodeStatus.nodeID.toString().c_str(),
 			getRoleStr(restoreData->localNodeStatus.role).c_str());
 	try {
@@ -2001,43 +2478,19 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 					}
 
 					state int64_t cmdIndex = req.cmdIndex;
-					LoadingParam param = req.loadingParam;
-					if ( req.cmd == RestoreCommandEnum::Assign_Loader_Range_File ) {
-						printf("[INFO][Worker] Assign_Loader_Range_File Node: %s, role: %s, loading param:%s\n",
-								restoreData->localNodeStatus.nodeID.toString().c_str(),
-								getRoleStr(restoreData->localNodeStatus.role).c_str(),
-								param.toString().c_str());
-						//TODO: WiP: Load files
-						Reference<IBackupContainer> bc = IBackupContainer::openContainer(param.url.toString());
-						printf("[INFO] node:%s open backup container for url:%s\n",
-								restoreData->localNodeStatus.nodeID.toString().c_str(),
-								param.url.toString().c_str());
+					if (req.cmd == RestoreCommandEnum::Apply_Mutation_To_DB) {
+							printf("[INFO][Worker] Node: %s, role: %s, receive cmd Apply_Mutation_To_DB \n",
+								restoreData->localNodeStatus.nodeID.toString().c_str());
 
-						wait( _parseRangeFileToMutationsOnLoader(bc, param.version, param.filename, param.offset, param.length, param.restoreRange, param.addPrefix, param.removePrefix) );
-
-						//TODO: Send to applier to apply the mutations
-						printf("[INFO][TODO] Loader will send mutations to applier\n");
-
-						//TODO: Send ack to master that loader has finished loading the data
-						req.reply.send(RestoreCommandReply(interf.id()));
-						//leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
-
-					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_Log_File) {
-						printf("[INFO][Worker] Assign_Loader_Log_File Node: %s, role: %s, loading param:%s\n",
-								restoreData->localNodeStatus.nodeID.toString().c_str(),
-								getRoleStr(restoreData->localNodeStatus.role).c_str(),
-								param.toString().c_str());
-
-						printf("[INFO][TODO] Loader will send mutations to applier\n");
-						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
-
-					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_File_Done) {
-							printf("[INFO][Worker] Node: %s, role: %s, loading param:%s\n",
-								restoreData->localNodeStatus.nodeID.toString().c_str(),
-								getRoleStr(restoreData->localNodeStatus.role).c_str(),
-								param.toString().c_str());
+							wait( notifyApplierToApplyMutations(restoreData) );
 
 							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+							break;
+					} else if (req.cmd == RestoreCommandEnum::Apply_Mutation_To_DB_Skip) {
+						printf("[INFO][Worker] Node: %s, role: %s, receive cmd Apply_Mutation_To_DB_Skip \n",
+								restoreData->localNodeStatus.nodeID.toString().c_str());
+
+						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 							break;
 					} else {
 						printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
@@ -2048,16 +2501,15 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 
 	} catch(Error &e) {
 		if(e.code() != error_code_end_of_stream) {
-			printf("[ERROR] cmd: Assign_Loader_File has error:%s(code:%d)\n", e.what(), e.code());
+			printf("[ERROR] cmd: Apply_Mutation_To_DB has error:%s(code:%d)\n", e.what(), e.code());
 		}
 	}
 
 	return Void();
 }
 
-
-
-
+//TO BE DELETED
+/*
 ACTOR Future<Void> extractRestoreFileToMutations(Database cx, std::vector<RestoreFile> files, RestoreRequest request,
 													Reference<RestoreConfig> restore, UID uid ) {
 	state Key tagName = request.tagName;
@@ -2148,8 +2600,9 @@ ACTOR Future<Void> extractRestoreFileToMutations(Database cx, std::vector<Restor
  	return Void();
 
 }
+ */
 
-ACTOR Future<Void> sanityCheckRestoreOps(Database cx, UID uid) {
+ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx, UID uid) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2159,14 +2612,14 @@ ACTOR Future<Void> sanityCheckRestoreOps(Database cx, UID uid) {
 
  //	printf("Now sort KVOps in increasing order of commit version\n");
  //	sort(kvOps.begin(), kvOps.end()); //sort in increasing order of key using default less_than comparator
- 	if ( isKVOpsSorted() ) {
+ 	if ( isKVOpsSorted(rd) ) {
  		printf("[CORRECT] KVOps is sorted by version\n");
  	} else {
  		printf("[ERROR]!!! KVOps is NOT sorted by version\n");
  //		assert( 0 );
  	}
 
- 	if ( allOpsAreKnown() ) {
+ 	if ( allOpsAreKnown(rd) ) {
  		printf("[CORRECT] KVOps all operations are known.\n");
  	} else {
  		printf("[ERROR]!!! KVOps has unknown mutation op. Exit...\n");
@@ -2183,9 +2636,9 @@ ACTOR Future<Void> sanityCheckRestoreOps(Database cx, UID uid) {
 
 }
 
-ACTOR Future<Void> applyRestoreOpsToDB(Database cx) {
+ACTOR Future<Void> applyRestoreOpsToDB(Reference<RestoreData> rd, Database cx) {
 	//Apply the kv operations to DB
-	wait( applyKVOpsToDB(cx) );
+	wait( applyKVOpsToDB(rd, cx) );
 	printf("Now apply KVOps to DB, Done\n");
 
 	return Void();
@@ -2265,6 +2718,9 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			}
 		}
 
+		//Find other worker's interfaces
+		wait( setWorkerInterface(restoreData, cx) );
+
 		// Step: configure its role
 		printf("[INFO][Worker] Configure its role\n");
 		wait( configureRolesHandler(restoreData, interf) );
@@ -2274,11 +2730,20 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		// Step: prepare restore info: applier waits for the responsible keyRange,
 		// loader waits for the info of backup block it needs to load
 		if ( restoreData->localNodeStatus.role == RestoreRole::Applier ) {
-			printf("[INFO][Worker][Applier] Waits for the assignment of key range\n");
+			printf("[INFO][Applier] Waits for the assignment of key range\n");
 			wait( assignKeyRangeToAppliersHandler(restoreData, interf) );
+
+			printf("[INFO][Applier] Waits for the mutations parsed from loaders\n");
+			wait( receiveMutations(restoreData, interf) );
+
+			printf("[INFO][Applier] Waits for the cmd to apply mutations from loaders\n");
+			wait( applyMutationToDB(restoreData, interf, cx) );
 		} else if ( restoreData->localNodeStatus.role == RestoreRole::Loader ) {
-			printf("[INFO][Worker][Loader] Waits for the backup file assignment\n");
+			printf("[INFO][Loader] Waits for the backup file assignment\n");
 			wait( loadingHandler(restoreData, interf, leaderInterf.get()) );
+
+			printf("[INFO][Loader] Waits for the backup file assignment\n");
+			wait( applyToDBHandler(restoreData, interf, leaderInterf.get()) );
 		} else {
 			printf("[ERROR][Worker] In an invalid role:%d\n", restoreData->localNodeStatus.role);
 		}
@@ -2406,8 +2871,8 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
 	Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST,locality);
-	Future<Void> ret = _restoreWorker(cx, locality);
-	return ret.get();
+	wait(_restoreWorker(cx, locality));
+	return Void();
 }
 
 ////--- Restore functions
@@ -2454,6 +2919,7 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 
 
 //--- Extract backup range and log file and get the mutation list
+/*
 ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<RestoreConfig> restore_input,
  													 RestoreFile rangeFile_input, int64_t readOffset_input, int64_t readLen_input,
  													 Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
@@ -2635,7 +3101,9 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
 
 
  }
+ */
 
+/*
  ACTOR static Future<Void> _executeApplyMutationLogFileToDB(Database cx, Reference<RestoreConfig> restore_input,
  														   RestoreFile logFile_input, int64_t readOffset_input, int64_t readLen_input,
  														   Reference<IBackupContainer> bc, KeyRange restoreRange, Key addPrefix, Key removePrefix
@@ -2697,13 +3165,13 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  				//printf("LogFile [key:%s, value:%s, version:%ld, op:NoOp]\n", k.printable().c_str(), v.printable().c_str(), logFile.version);
  //				printf("LogFile [KEY:%s, VALUE:%s, VERSION:%ld, op:NoOp]\n", getHexString(k).c_str(), getHexString(v).c_str(), logFile.version);
  //				printBackupMutationRefValueHex(v, " |\t");
- /*
- 				TraceEvent("PrintMutationLogFile_MX").detail("Key",  getHexString(k)).detail("Value", getHexString(v))
- 						.detail("Version", logFile.version).detail("Op", "NoOps");
-
- 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
- 				registerBackupMutation(data[i].value, logFile.version);
- */
+//
+// 				TraceEvent("PrintMutationLogFile_MX").detail("Key",  getHexString(k)).detail("Value", getHexString(v))
+// 						.detail("Version", logFile.version).detail("Op", "NoOps");
+//
+// 				printf("||Register backup mutation:file:%s, data:%d\n", logFile.fileName.c_str(), i);
+// 				registerBackupMutation(data[i].value, logFile.version);
+//
  //				printf("[DEBUG]||Concatenate backup mutation:fileInfo:%s, data:%d\n", logFile.toString().c_str(), i);
  				concatenateBackupMutation(data[i].value, data[i].key);
  //				//TODO: Decode the value to get the mutation type. Use NoOp to distinguish from range kv for now.
@@ -2754,8 +3222,10 @@ ACTOR static Future<Void> _executeApplyRangeFileToDB(Database cx, Reference<Rest
  	}
 
  }
+ */
 
 
+ /*
 
 ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL,
 		Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid,
@@ -2832,8 +3302,10 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
 
  	return Void();
  }
+  */
 
  // ACTOR static Future<Void> _executeMX(Database cx,  Reference<Task> task, UID uid, RestoreRequest request) is rename to this function
+ /*
  ACTOR static Future<Void> extractBackupData(Database cx, Reference<RestoreConfig> restore_input, UID uid, RestoreRequest request) {
  	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
  	state Reference<RestoreConfig> restore = restore_input;
@@ -3060,6 +3532,8 @@ ACTOR static Future<Void> prepareRestore(Database cx, Reference<ReadYourWritesTr
 
  	return Void();
  }
+*/
+
 
 ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
@@ -3135,7 +3609,9 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 			wait( collectBackupFiles(restoreData, cx, request) );
 			printBackupFilesInfo(restoreData);
 
-			wait( distributeWorkload(interf, restoreData, cx, request) );
+			wait( distributeWorkload(interf, restoreData, cx, request, restoreConfig) );
+
+
 
 			/*
 			// prepareRestore will set the restoreConfig based on the other input parameters
@@ -3152,9 +3628,9 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 			// MX: Now execute the restore: Step 1 get the restore files (range and mutation log) name
 			// At the end of extractBackupData, we apply the mutation to DB
 			//wait( extractBackupData(cx, restoreConfig, randomUid, request) );
-			wait( extractRestoreFileToMutations(cx, restoreData->files, request, restoreConfig, randomUid) );
-			wait( sanityCheckRestoreOps(cx, randomUid) );
-			wait( applyRestoreOpsToDB(cx) );
+			//wait( extractRestoreFileToMutations(cx, restoreData->files, request, restoreConfig, randomUid) );
+//			wait( sanityCheckRestoreOps(restoreData, cx, randomUid) );
+//			wait( applyRestoreOpsToDB(restoreData, cx) );
 
 			printf("Finish my restore now!\n");
 
@@ -3185,45 +3661,6 @@ struct cmpForKVOps {
 };
 
 
-// Helper class for reading restore data from a buffer and throwing the right errors.
-struct StringRefReaderMX {
-	StringRefReaderMX(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
-
-	// Return remainder of data as a StringRef
-	StringRef remainder() {
-		return StringRef(rptr, end - rptr);
-	}
-
-	// Return a pointer to len bytes at the current read position and advance read pos
-	//Consume a little-Endian data. Since we only run on little-Endian machine, the data on storage is little Endian
-	const uint8_t * consume(unsigned int len) {
-		if(rptr == end && len != 0)
-			throw end_of_stream();
-		const uint8_t *p = rptr;
-		rptr += len;
-		if(rptr > end)
-			throw failure_error;
-		return p;
-	}
-
-	// Return a T from the current read position and advance read pos
-	template<typename T> const T consume() {
-		return *(const T *)consume(sizeof(T));
-	}
-
-	// Functions for consuming big endian (network byte order) integers.
-	// Consumes a big endian number, swaps it to little endian, and returns it.
-	const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-	const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
-
-	const int64_t  consumeNetworkInt64()  { return (int64_t)bigEndian64((uint32_t)consume< int64_t>());}
-	const uint64_t consumeNetworkUInt64() { return          bigEndian64(          consume<uint64_t>());}
-
-	bool eof() { return rptr == end; }
-
-	const uint8_t *rptr, *end;
-	Error failure_error;
-};
 
 //-------Helper functions
 std::string getHexString(StringRef input) {
@@ -3389,11 +3826,11 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	printf("----------------------------------------------------------\n");
 }
 
-void printKVOps() {
+void printKVOps(Reference<RestoreData> rd) {
 	std::string typeStr = "MSet";
-	TraceEvent("PrintKVOPs").detail("MapSize", kvOps.size());
-	printf("PrintKVOPs num_of_version:%d\n", kvOps.size());
-	for ( auto it = kvOps.begin(); it != kvOps.end(); ++it ) {
+	TraceEvent("PrintKVOPs").detail("MapSize", rd->kvOps.size());
+	printf("PrintKVOPs num_of_version:%d\n", rd->kvOps.size());
+	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		TraceEvent("PrintKVOPs\t").detail("Version", it->first).detail("OpNum", it->second.size());
 		printf("PrintKVOPs Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
 		for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
@@ -3416,10 +3853,10 @@ void printKVOps() {
 }
 
 // Sanity check if KVOps is sorted
-bool isKVOpsSorted() {
+bool isKVOpsSorted(Reference<RestoreData> rd) {
 	bool ret = true;
-	auto prev = kvOps.begin();
-	for ( auto it = kvOps.begin(); it != kvOps.end(); ++it ) {
+	auto prev = rd->kvOps.begin();
+	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		if ( prev->first > it->first ) {
 			ret = false;
 			break;
@@ -3429,9 +3866,9 @@ bool isKVOpsSorted() {
 	return ret;
 }
 
-bool allOpsAreKnown() {
+bool allOpsAreKnown(Reference<RestoreData> rd) {
 	bool ret = true;
-	for ( auto it = kvOps.begin(); it != kvOps.end(); ++it ) {
+	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
 			if ( m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange  )
 				continue;
@@ -3449,7 +3886,7 @@ bool allOpsAreKnown() {
 
 
 //version_input is the file version
-void registerBackupMutation(Standalone<StringRef> val_input, Version file_version) {
+void registerBackupMutation(Reference<RestoreData> rd, Standalone<StringRef> val_input, Version file_version) {
 	std::string prefix = "||\t";
 	std::stringstream ss;
 	const int version_size = 12;
@@ -3464,9 +3901,9 @@ void registerBackupMutation(Standalone<StringRef> val_input, Version file_versio
 	uint32_t val_length_decode = reader.consume<uint32_t>();
 	count_size += 4;
 
-	if ( kvOps.find(file_version) == kvOps.end() ) {
+	if ( rd->kvOps.find(file_version) == rd->kvOps.end() ) {
 		//kvOps.insert(std::make_pair(rangeFile.version, Standalone<VectorRef<MutationRef>>(VectorRef<MutationRef>())));
-		kvOps.insert(std::make_pair(file_version, VectorRef<MutationRef>()));
+		rd->kvOps.insert(std::make_pair(file_version, VectorRef<MutationRef>()));
 	}
 
 	printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", file_version);
@@ -3494,7 +3931,7 @@ void registerBackupMutation(Standalone<StringRef> val_input, Version file_versio
 		count_size += 4 * 3 + kLen + vLen;
 
 		MutationRef m((MutationRef::Type) type, KeyRef(k, kLen), KeyRef(v, vLen)); //ASSUME: all operation in range file is set.
-		kvOps[file_version].push_back_deep(kvOps[file_version].arena(), m);
+		rd->kvOps[file_version].push_back_deep(rd->kvOps[file_version].arena(), m);
 
 		//		if ( kLen < 0 || kLen > val.size() || vLen < 0 || vLen > val.size() ) {
 		//			printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
@@ -3509,7 +3946,10 @@ void registerBackupMutation(Standalone<StringRef> val_input, Version file_versio
 	//	printf("----------------------------------------------------------\n");
 }
 
+
+//TO BE DELETED
 //key_input format: [logRangeMutation.first][hash_value_of_commit_version:1B][bigEndian64(commitVersion)][bigEndian32(part)]
+/*
 void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<StringRef> key_input) {
 	std::string prefix = "||\t";
 	std::stringstream ss;
@@ -3584,6 +4024,92 @@ void concatenateBackupMutation(Standalone<StringRef> val_input, Standalone<Strin
 		mutationPartMap[id] = part;
 	}
 }
+*/
+
+//key_input format: [logRangeMutation.first][hash_value_of_commit_version:1B][bigEndian64(commitVersion)][bigEndian32(part)]
+bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input) {
+	std::string prefix = "||\t";
+	std::stringstream ss;
+	const int version_size = 12;
+	const int header_size = 12;
+	StringRef val = val_input.contents();
+	StringRefReaderMX reader(val, restore_corrupted_data());
+	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); //read key_input!
+	int logRangeMutationFirstLength = key_input.size() - 1 - 8 - 4;
+	bool concatenated = false;
+
+	if ( logRangeMutationFirstLength < 0 ) {
+		printf("[ERROR]!!! logRangeMutationFirstLength:%d < 0, key_input.size:%d\n", logRangeMutationFirstLength, key_input.size());
+	}
+
+	if ( debug_verbose ) {
+		printf("[DEBUG] Process key_input:%s\n", getHexKey(key_input, logRangeMutationFirstLength).c_str());
+	}
+
+	//PARSE key
+	Standalone<StringRef> id_old = key_input.substr(0, key_input.size() - 4); //Used to sanity check the decoding of key is correct
+	Standalone<StringRef> partStr = key_input.substr(key_input.size() - 4, 4); //part
+	StringRefReaderMX readerPart(partStr, restore_corrupted_data());
+	uint32_t part_direct = readerPart.consumeNetworkUInt32(); //Consume a bigEndian value
+	if ( debug_verbose  ) {
+		printf("[DEBUG] Process prefix:%s and partStr:%s part_direct:%08x fromm key_input:%s, size:%d\n",
+			   getHexKey(id_old, logRangeMutationFirstLength).c_str(),
+			   getHexString(partStr).c_str(),
+			   part_direct,
+			   getHexKey(key_input, logRangeMutationFirstLength).c_str(),
+			   key_input.size());
+	}
+
+	StringRef longRangeMutationFirst;
+
+	if ( logRangeMutationFirstLength > 0 ) {
+		printf("readerKey consumes %dB\n", logRangeMutationFirstLength);
+		longRangeMutationFirst = StringRef(readerKey.consume(logRangeMutationFirstLength), logRangeMutationFirstLength);
+	}
+
+	uint8_t hashValue = readerKey.consume<uint8_t>();
+	uint64_t commitVersion = readerKey.consumeNetworkUInt64(); // Consume big Endian value encoded in log file, commitVersion is in littleEndian
+	uint64_t commitVersionBE = bigEndian64(commitVersion);
+	uint32_t part = readerKey.consumeNetworkUInt32(); //Consume big Endian value encoded in log file
+	uint32_t partBE = bigEndian32(part);
+	Standalone<StringRef> id2 = longRangeMutationFirst.withSuffix(StringRef(&hashValue,1)).withSuffix(StringRef((uint8_t*) &commitVersion, 8));
+
+	//Use commitVersion as id
+	Standalone<StringRef> id = StringRef((uint8_t*) &commitVersion, 8);
+
+	if ( debug_verbose ) {
+		printf("[DEBUG] key_input_size:%d longRangeMutationFirst:%s hashValue:%02x commitVersion:%016lx (BigEndian:%016lx) part:%08x (BigEndian:%08x), part_direct:%08x mutationMap.size:%d\n",
+			   key_input.size(), longRangeMutationFirst.printable().c_str(), hashValue,
+			   commitVersion, commitVersionBE,
+			   part, partBE,
+			   part_direct, rd->mutationMap.size());
+	}
+
+	if ( rd->mutationMap.find(id) == rd->mutationMap.end() ) {
+		rd->mutationMap.insert(std::make_pair(id, val_input));
+		if ( part_direct != 0 ) {
+			printf("[ERROR]!!! part:%d != 0 for key_input:%s\n", part, getHexString(key_input).c_str());
+		}
+		rd->mutationPartMap.insert(std::make_pair(id, part));
+	} else { // concatenate the val string
+		printf("[INFO] Concatenate the log's val string at version:%ld\n", id.toString().c_str());
+		rd->mutationMap[id] = rd->mutationMap[id].contents().withSuffix(val_input.contents()); //Assign the new Areana to the map's value
+		if ( part_direct != (rd->mutationPartMap[id] + 1) ) {
+			printf("[ERROR]!!! current part id:%d new part_direct:%d is not the next integer of key_input:%s\n", rd->mutationPartMap[id], part_direct, getHexString(key_input).c_str());
+		}
+		if ( part_direct != part ) {
+			printf("part_direct:%08x != part:%08x\n", part_direct, part);
+		}
+		rd->mutationPartMap[id] = part;
+		concatenated = true;
+	}
+
+	return concatenated;
+}
+
+
+//TO BE DELETED
+/*
 
 void registerBackupMutationForAll(Version empty) {
 	std::string prefix = "||\t";
@@ -3662,9 +4188,70 @@ void registerBackupMutationForAll(Version empty) {
 	printf("[INFO] All mutation log files produces %d mutation operations\n", kvCount);
 
 }
+*/
 
 
+//TODO: WiP: send to applier the mutations
+ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
+	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+			rd->getNodeID().c_str(), rd->masterApplier.toString().c_str(),
+			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+	state int packMutationNum = 0;
+	state int packMutationThreshold = 1;
+	state int kvCount = 0;
+	state std::vector<Future<RestoreCommandReply>> cmdReplies;
 
+	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
+	for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
+		state uint64_t commitVersion = kvOp->first;
+		state int mIndex;
+		state MutationRef kvm;
+		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
+			kvm = kvOp->second[mIndex];
+			// Send the mutation to applier
+			cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, rd->masterApplier, commitVersion, kvm)));
+
+			packMutationNum++;
+			kvCount++;
+			if (packMutationNum >= packMutationThreshold) {
+				ASSERT( packMutationNum == packMutationThreshold );
+				//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+				std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
+				cmdReplies.clear();
+				packMutationNum = 0;
+			}
+		}
+
+	}
+
+	if (!cmdReplies.empty()) {
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		cmdReplies.clear();
+	}
+	printf("[INFO][Loader] Node:%s produces %d mutation operations\n", rd->getNodeID().c_str(), kvCount);
+
+	return Void();
+}
+
+
+ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
+	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+			rd->getNodeID().c_str(), rd->masterApplier.toString().c_str(),
+			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+	state int packMutationNum = 0;
+	state int packMutationThreshold = 1;
+	state int kvCount = 0;
+	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+
+	cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, rd->masterApplier)));
+	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+
+	printf("[INFO][Loader] Node:%s finish Loader_Notify_Appler_To_Apply_Mutation cmd\n", rd->getNodeID().c_str());
+
+	return Void();
+}
 
 
 
