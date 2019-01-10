@@ -29,6 +29,8 @@ set(FLOW_SRCS
   IndexedSet.actor.h
   IndexedSet.cpp
   IndexedSet.h
+  JsonTraceLogFormatter.cpp
+  JsonTraceLogFormatter.h
   Knobs.cpp
   Knobs.h
   MetricSample.h
