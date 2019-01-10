@@ -210,7 +210,7 @@ Requirements can be placed on the fields of the Issuer and Subject DNs in the pe
 Field    Well known name
 =======  ===================
 ``CN``   Common Name
-``C``    County
+``C``    Country
 ``L``    Locality
 ``ST``   State
 ``O``    Organization
