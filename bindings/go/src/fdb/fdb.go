@@ -380,8 +380,15 @@ func (k Key) FDBKey() Key {
 
 // String describes the key as a hexadecimal encoded string.
 func (k Key) String() string {
+	return Printable(k)
+}
+
+// Printable returns a human readable version of a byte array. The bytes that correspond with
+// ASCII printable characters [32-127) are passed through. Other bytes are
+// replaced with \x followed by a two character zero-padded hex code for byte.
+func Printable(d []byte) string {
 	var sb strings.Builder
-	for _, b := range k {
+	for _, b := range d {
 		if b >= 32 && b < 127 && b != '\\' {
 			sb.WriteByte(b)
 			continue

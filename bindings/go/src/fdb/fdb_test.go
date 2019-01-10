@@ -268,8 +268,8 @@ func TestKeyToString(t *testing.T) {
 		key    fdb.Key
 		expect string
 	}{
-		{fdb.Key("plain-text"), "plain-text"},
 		{fdb.Key([]byte{0}), "\\x00"},
+		{fdb.Key("plain-text"), "plain-text"},
 		{fdb.Key("\xbdascii☻☺"), "\\xbdascii\\xe2\\x98\\xbb\\xe2\\x98\\xba"},
 	}
 
@@ -278,4 +278,9 @@ func TestKeyToString(t *testing.T) {
 			t.Errorf("got '%v', want '%v' at case %v", s, c.expect, i)
 		}
 	}
+}
+
+func ExamplePrintable() {
+	fmt.Println(fdb.Printable([]byte{0, 1, 2, 'a', 'b', 'c', '1', '2', '3', '!', '?', 255}))
+	// Output: \x00\x01\x02abc123!?\xff
 }
