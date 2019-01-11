@@ -1442,8 +1442,8 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> restoreData, 
 			UID nodeID = applier.first;
 			ASSERT(restoreData->workers_interface.find(nodeID) != restoreData->workers_interface.end());
 			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
-			printf("[CMD] Assign KeyRange:%s [begin:%s (%d), end:%s (%d)] to applier ID:%s\n", keyRange.toString().c_str(),
-					getHexString(keyRange.begin).c_str(), keyRange.begin[0], getHexString(keyRange.end).c_str(), keyRange.end[0],
+			printf("[CMD] Assign KeyRange:%s [begin:%s end:%s] to applier ID:%s\n", keyRange.toString().c_str(),
+					getHexString(keyRange.begin).c_str(), getHexString(keyRange.end).c_str(),
 					nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange, nodeID, keyRange)) );
 
@@ -1993,10 +1993,11 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 			wait(delay(1.0));
 
 			state std::vector<Future<RestoreCommandReply>> cmdReplies;
+			printf("[INFO] number of backup files:%d\n", restoreData->files.size());
 			for (auto &loaderID : loaderIDs) {
 				while ( restoreData->files[curFileIndex].fileSize == 0 ) {
 					// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
-					printf("[INFO] File:%s filesize:%d skip the file\n",
+					printf("[INFO] File %d:%s filesize:%d skip the file\n", curFileIndex,
 							restoreData->files[curFileIndex].fileName.c_str(), restoreData->files[curFileIndex].fileSize);
 					curFileIndex++;
 				}
@@ -2045,39 +2046,21 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 			}
 
 			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_Range_File\n", cmdReplies.size());
-			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
-			finishedLoaderIDs.clear();
-//			// Wait for loader to finish
-//			printf("[INFO] wait for %d loaders to finish loading the file\n", loaderIDs.size());
-//			loop {
-//				choose {
-//					when (RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-//						printf("[INFO][Master] received cmd:%d from node:%s\n", req.cmd, req.id.toString().c_str());
-//						if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
-//							printf("[INFO][Master] Notified that node:%s finish loading for cmdIndex:%d\n", req.id.toString().c_str(), req.cmdIndex);
-//							finishedLoaderIDs.push_back(req.id);
-//							int64_t repLoadingCmdIndex = req.cmdIndex;
-//							restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
-//							if (finishedLoaderIDs.size() == loaderIDs.size()) {
-//								break;
-//							} else if (finishedLoaderIDs.size() > loaderIDs.size()) {
-//								printf("[ERROR] finishedLoaderIDs.size():%d > loaderIDs.size():%d\n",
-//										finishedLoaderIDs.size(), loaderIDs.size());
-//							}
-//							// Handle all cmds for now
-//						}
-//					}
-//				}
-//			};
 
-			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
-						reps[i].id.toString().c_str());
-				finishedLoaderIDs.push_back(reps[i].id);
-				int64_t repLoadingCmdIndex = reps[i].cmdIndex;
-				restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+			// Question: How to set reps to different value based on cmdReplies.empty()?
+			if ( !cmdReplies.empty() ) {
+				std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+
+				finishedLoaderIDs.clear();
+				for (int i = 0; i < reps.size(); ++i) {
+					printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
+							reps[i].id.toString().c_str());
+					finishedLoaderIDs.push_back(reps[i].id);
+					int64_t repLoadingCmdIndex = reps[i].cmdIndex;
+					restoreData->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
+				}
+				loaderIDs = finishedLoaderIDs;
 			}
-			loaderIDs = finishedLoaderIDs;
 
 			if (allLoadReqsSent) {
 				break; // NOTE: need to change when change to wait on any cmdReplies
