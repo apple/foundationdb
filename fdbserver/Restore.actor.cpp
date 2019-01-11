@@ -47,6 +47,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 Future<Void> registerMutationsToApplier(Reference<RestoreData> const& rd);
 Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> const& rd);
 void parseSerializedMutation(Reference<RestoreData> rd);
+void sanityCheckMutationOps(Reference<RestoreData> rd);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReaderMX {
@@ -1670,10 +1671,12 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
 				}
 				if ( req.cmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation ) {
+					printf("[INFO][Applier] node:%s sanity check mutations to be applied...\n", rd->getNodeID().c_str());
+					sanityCheckMutationOps(rd);
 					// Applier apply mutations to DB
-					printf("[INFO][Applier] apply KV ops to DB starts...");
+					printf("[INFO][Applier] apply KV ops to DB starts...\n");
 					wait( applyKVOpsToDB(rd, cx) );
-					printf("[INFO][Applier] apply KV ops to DB finishes...");
+					printf("[INFO][Applier] apply KV ops to DB finishes...\n");
 					req.reply.send(RestoreCommandReply(interf.id()));
 					break;
 				} else {
@@ -2189,6 +2192,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								param.url.toString().c_str());
 
 
+						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+
 						ASSERT( param.blockSize > 0 );
 						//state std::vector<Future<Void>> fileParserFutures;
 						if (param.offset % param.blockSize != 0) {
@@ -2224,6 +2229,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 						printf("[INFO][Loader] Node:%s filename:%s blockSize:%d\n",
 								restoreData->localNodeStatus.nodeID.toString().c_str(),
 								param.filename.c_str(), param.blockSize);
+
+						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
 
 						ASSERT( param.blockSize > 0 );
 						//state std::vector<Future<Void>> fileParserFutures;
@@ -2318,18 +2325,14 @@ ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> restoreData, RestoreC
 	return Void();
 }
 
+void sanityCheckMutationOps(Reference<RestoreData> rd) {
+	 //	printf("Now print KVOps\n");
+	 //	printKVOps();
 
-ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx, UID uid) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	 //	printf("Now sort KVOps in increasing order of commit version\n");
+	 //	sort(kvOps.begin(), kvOps.end()); //sort in increasing order of key using default less_than comparator
 
- //	printf("Now print KVOps\n");
- //	printKVOps();
-
- //	printf("Now sort KVOps in increasing order of commit version\n");
- //	sort(kvOps.begin(), kvOps.end()); //sort in increasing order of key using default less_than comparator
- 	if ( isKVOpsSorted(rd) ) {
+	if ( isKVOpsSorted(rd) ) {
  		printf("[CORRECT] KVOps is sorted by version\n");
  	} else {
  		printf("[ERROR]!!! KVOps is NOT sorted by version\n");
@@ -2342,6 +2345,14 @@ ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx,
  		printf("[ERROR]!!! KVOps has unknown mutation op. Exit...\n");
  //		assert( 0 );
  	}
+}
+
+ACTOR Future<Void> sanityCheckRestoreOps(Reference<RestoreData> rd, Database cx, UID uid) {
+	sanityCheckMutationOps(rd);
+
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
  	printf("Now apply KVOps to DB. start...\n");
  	printf("DB lock status:%d\n");
@@ -3139,6 +3150,8 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
 			rd->getNodeID().c_str(), rd->masterApplier.toString().c_str(),
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+	printAppliersKeyRange(rd);
+
 	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 1;
