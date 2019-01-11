@@ -67,6 +67,7 @@ struct StringRefReaderMX {
 		rptr += len;
 		if(rptr > end) {
 			printf("[ERROR] StringRefReaderMX throw error! string length:%d\n", str_size);
+			printf("!!!!!!!!!!!![ERROR]!!!!!!!!!!!!!! Worker may die due to the error. Master will stuck when a worker die\n");
 			throw failure_error;
 		}
 		return p;
@@ -503,7 +504,7 @@ namespace parallelFileRestore {
 
 }
 
-//TODO: RestoreData
+// TODO: RestoreData
 // RestoreData is the context for each restore process (worker and master)
 struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	//---- Declare status structure which records the progress and status of each worker in each role
@@ -551,6 +552,9 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	};
 	std::map<int64_t, LoadingStatus> loadingStatus; // first is the global index of the loading cmd, starting from 0
 
+	 //Loader's state to handle the duplicate delivery of loading commands
+	std::map<std::string, int> processedFiles; //first is filename of processed file, second is not used
+
 
 	std::vector<RestoreFile> files; // backup files: range and log files
 
@@ -569,7 +573,7 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	}
 
 	~RestoreData() {
-		printf("[Exit] RestoreData is deleted\n");
+		printf("[Exit] NodeID:%s RestoreData is deleted\n", localNodeStatus.nodeID.toString().c_str());
 	}
 };
 
@@ -1238,6 +1242,7 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> restoreData, Databa
 	printf("[INFO][Worker] Node:%s Get the interface for all workers\n", restoreData->getNodeID().c_str());
 	loop {
 		try {
+			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1252,7 +1257,7 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> restoreData, Databa
 			}
 			wait( delay(5.0) );
 		} catch( Error &e ) {
-			printf("[WARNING] configureRoles transaction error:%s\n", e.what());
+			printf("[WARNING] Node:%s setWorkerInterface() transaction error:%s\n", restoreData->getNodeID().c_str(), e.what());
 			wait( tr.onError(e) );
 		}
 		printf("[WARNING] setWorkerInterface should always succeeed in the first loop! Something goes wrong!\n");
@@ -1273,6 +1278,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 	printf("[INFO][Master] Start configuring roles for workers\n");
 	loop {
 		try {
+			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<RangeResultRef> agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
@@ -2195,6 +2201,14 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								getRoleStr(restoreData->localNodeStatus.role).c_str(),
 								param.toString().c_str());
 
+						//Note: handle duplicate message delivery
+						if (restoreData->processedFiles.find(param.filename) != restoreData->processedFiles.end()) {
+							printf("[WARNING] CMD for file:%s is delivered more than once! Reply directly without loading the file\n",
+									param.filename.c_str());
+							req.reply.send(RestoreCommandReply(interf.id()));
+							continue;
+						}
+
 						bc = IBackupContainer::openContainer(param.url.toString());
 						printf("[INFO] node:%s open backup container for url:%s\n",
 								restoreData->localNodeStatus.nodeID.toString().c_str(),
@@ -2202,6 +2216,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 
 
 						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+						restoreData->mutationMap.clear();
+						restoreData->mutationPartMap.clear();
 
 						ASSERT( param.blockSize > 0 );
 						//state std::vector<Future<Void>> fileParserFutures;
@@ -2220,6 +2236,7 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 						printf("[INFO][Loader] Node:%s will send range mutations to applier\n", restoreData->getNodeID().c_str());
 						wait( registerMutationsToApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
+						restoreData->processedFiles.insert(std::make_pair(param.filename, 1));
 
 						//TODO: Send ack to master that loader has finished loading the data
 						req.reply.send(RestoreCommandReply(interf.id()));
@@ -2231,6 +2248,14 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								getRoleStr(restoreData->localNodeStatus.role).c_str(),
 								param.toString().c_str());
 
+						//Note: handle duplicate message delivery
+						if (restoreData->processedFiles.find(param.filename) != restoreData->processedFiles.end()) {
+							printf("[WARNING] CMD for file:%s is delivered more than once! Reply directly without loading the file\n",
+									param.filename.c_str());
+							req.reply.send(RestoreCommandReply(interf.id()));
+							continue;
+						}
+
 						bc = IBackupContainer::openContainer(param.url.toString());
 						printf("[INFO][Loader] Node:%s open backup container for url:%s\n",
 								restoreData->localNodeStatus.nodeID.toString().c_str(),
@@ -2240,6 +2265,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								param.filename.c_str(), param.blockSize);
 
 						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+						restoreData->mutationMap.clear();
+						restoreData->mutationPartMap.clear();
 
 						ASSERT( param.blockSize > 0 );
 						//state std::vector<Future<Void>> fileParserFutures;
@@ -2260,6 +2287,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 						printf("[INFO][Loader] Node:%s finishes process Log file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
 						printf("[INFO][Loader] Node:%s will send log mutations to applier\n", restoreData->getNodeID().c_str());
 						wait( registerMutationsToApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
+
+						restoreData->processedFiles.insert(std::make_pair(param.filename, 1));
 
 						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					} else if (req.cmd == RestoreCommandEnum::Assign_Loader_File_Done) {
@@ -2531,26 +2560,6 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 
 //	ASSERT(agents.size() > 0);
-
-	/*
-	// Handle the dummy workload that increases a counter
-	state int testData = 0;
-	loop {
-		wait(delay(1.0));
-		printf("Sending Request: %d\n", testData);
-		std::vector<Future<TestReply>> replies;
-		for(auto& it : agents) {
-			replies.push_back( it.test.getReply(TestRequest(testData)) );
-		}
-		std::vector<TestReply> reps = wait( getAll(replies ));
-		testData = reps[0].replyData;
-		if ( testData >= 10 ) {
-			break;
-		}
-	}
-	 */
-
-	
 
 	printf("[INFO]---MX: Perform the restore in the master now---\n");
 
@@ -3095,19 +3104,20 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	if ( rd->mutationMap.find(id) == rd->mutationMap.end() ) {
 		rd->mutationMap.insert(std::make_pair(id, val_input));
 		if ( part_direct != 0 ) {
-			printf("[ERROR]!!! part:%d != 0 for key_input:%s\n", part, getHexString(key_input).c_str());
+			printf("[ERROR]!!! part:%d != 0 for key_input:%s\n", part_direct, getHexString(key_input).c_str());
 		}
-		rd->mutationPartMap.insert(std::make_pair(id, part));
+		rd->mutationPartMap.insert(std::make_pair(id, part_direct));
 	} else { // concatenate the val string
 		printf("[INFO] Concatenate the log's val string at version:%ld\n", id.toString().c_str());
 		rd->mutationMap[id] = rd->mutationMap[id].contents().withSuffix(val_input.contents()); //Assign the new Areana to the map's value
 		if ( part_direct != (rd->mutationPartMap[id] + 1) ) {
 			printf("[ERROR]!!! current part id:%d new part_direct:%d is not the next integer of key_input:%s\n", rd->mutationPartMap[id], part_direct, getHexString(key_input).c_str());
+			printf("[HINT] Check if the same range or log file has been processed more than once!\n");
 		}
 		if ( part_direct != part ) {
 			printf("part_direct:%08x != part:%08x\n", part_direct, part);
 		}
-		rd->mutationPartMap[id] = part;
+		rd->mutationPartMap[id] = part_direct;
 		concatenated = true;
 	}
 

@@ -25,17 +25,18 @@ testTitle=BackupAndRestore
     meanDelay=90.0
     testDuration=90.0
 
-    testName=Attrition
-    machinesToKill=10
-    machinesToLeave=3
-    reboot=true
-    testDuration=90.0
+; Do NOT consider machine crash yet
+;    testName=Attrition
+;    machinesToKill=10
+;    machinesToLeave=3
+;    reboot=true
+;    testDuration=90.0
 
-    testName=Attrition
-    machinesToKill=10
-    machinesToLeave=3
-    reboot=true
-    testDuration=90.0
+;    testName=Attrition
+;    machinesToKill=10
+;    machinesToLeave=3
+;    reboot=true
+;    testDuration=90.0
 
 ; Disable buggify for parallel restore
 buggify=off
