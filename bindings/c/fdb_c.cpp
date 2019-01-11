@@ -334,7 +334,7 @@ FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_na
 extern "C" DLLEXPORT
 fdb_error_t fdb_create_database( const char* cluster_file_path, FDBDatabase** out_database ) {
 	CATCH_AND_RETURN(
-		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ).extractPtr();
+		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ? cluster_file_path : "" ).extractPtr();
 	);
 }
 
