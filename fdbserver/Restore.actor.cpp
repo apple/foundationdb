@@ -40,6 +40,8 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+const int min_num_workers = 3; // TODO: This can become a configuration param later
+
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
 
@@ -1030,7 +1032,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 	state int numConcatenated = 0;
 	loop {
  		try {
- 			printf("Process start:%d where end=%d\n", start, end);
+// 			printf("Process start:%d where end=%d\n", start, end);
  			if(start == end) {
  				printf("ReadLogFile: finish reading the raw data and concatenating the mutation at the same version\n");
  				break;
@@ -1272,7 +1274,6 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> restoreData, Databa
 // The master node's localNodeStatus has been set outside of this function
 ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	state Transaction tr(cx);
-	state int min_num_workers = 2; // TODO: This can become a configuration param later
 
 	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
 	printf("[INFO][Master] Start configuring roles for workers\n");
@@ -1486,7 +1487,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> restoreData, 
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange_Done, nodeID)) );
 
 		}
-		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
 		for (int i = 0; i < reps.size(); ++i) {
 			printf("[INFO] Assign_Applier_KeyRange_Done: Get restoreCommandReply value:%s\n",
 					reps[i].id.toString().c_str());
@@ -1643,7 +1644,7 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 //				printf("[INFO][Applier] Got Restore Command: cmd:%d UID:%s\n",
 //						req.cmd, req.id.toString().c_str());
 				if ( rd->localNodeStatus.nodeID != req.id ) {
-						printf("[ERROR] node:%s receive request with a different id:%s\n",
+						printf("[ERROR] Node:%s receive request with a different id:%s\n",
 								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
 				}
 				if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier ) {
@@ -1656,12 +1657,13 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 					rd->kvOps[commitVersion].push_back_deep(rd->kvOps[commitVersion].arena(), mutation);
 					numMutations++;
 					if ( numMutations % 1000 == 1 ) {
-						printf("[INFO][Applier] Receives %d mutations\n", numMutations);
+						printf("[INFO][Applier] Node:%s Receives %d mutations. cur_mutation:%s\n",
+								rd->getNodeID().c_str(), numMutations, mutation.toString().c_str());
 					}
 
 					req.reply.send(RestoreCommandReply(interf.id()));
 				} else if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
-					printf("[INFO][Applier] NodeID:%s receive all mutations\n", rd->localNodeStatus.nodeID.toString().c_str());
+					printf("[INFO][Applier] NodeID:%s receive all mutations, num_versions:%d\n", rd->localNodeStatus.nodeID.toString().c_str(), rd->kvOps.size());
 					req.reply.send(RestoreCommandReply(interf.id()));
 					break;
 				} else {
@@ -2138,25 +2140,29 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				reps[i].id.toString().c_str());
 	}
 
+	// Notify the applier to applly mutation to DB
+	wait( notifyApplierToApplyMutations(restoreData) );
+
+
 	// Notify to apply mutation to DB: ask loader to notify applier to do so
-	state int loaderIndex = 0;
-	for (auto& loaderID : loaderIDs) {
-		UID nodeID = loaderID;
-		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
-		printf("[CMD] Apply_Mutation_To_DB for node ID:%s\n", nodeID.toString().c_str());
-		if (loaderIndex == 0) {
-			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB, nodeID)) );
-		} else {
-			// Only apply mutation to DB once
-			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB_Skip, nodeID)) );
-		}
-		loaderIndex++;
-	}
-	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
-	for (int i = 0; i < reps.size(); ++i) {
-		printf("[INFO] Finish Apply_Mutation_To_DB on nodes:%s\n",
-				reps[i].id.toString().c_str());
-	}
+//	state int loaderIndex = 0;
+//	for (auto& loaderID : loaderIDs) {
+//		UID nodeID = loaderID;
+//		RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
+//		printf("[CMD] Apply_Mutation_To_DB for node ID:%s\n", nodeID.toString().c_str());
+//		if (loaderIndex == 0) {
+//			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB, nodeID)) );
+//		} else {
+//			// Only apply mutation to DB once
+//			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Apply_Mutation_To_DB_Skip, nodeID)) );
+//		}
+//		loaderIndex++;
+//	}
+//	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+//	for (int i = 0; i < reps.size(); ++i) {
+//		printf("[INFO] Finish Apply_Mutation_To_DB on nodes:%s\n",
+//				reps[i].id.toString().c_str());
+//	}
 
 
 	return Void();
@@ -2506,7 +2512,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			printf("[INFO][Applier] Waits for the mutations parsed from loaders\n");
 			wait( receiveMutations(restoreData, interf) );
 
-			printf("[INFO][Applier] Waits for the cmd to apply mutations from loaders\n");
+			printf("[INFO][Applier] Waits for the cmd to apply mutations\n");
 			wait( applyMutationToDB(restoreData, interf, cx) );
 		} else if ( restoreData->localNodeStatus.role == RestoreRole::Loader ) {
 			printf("[INFO][Loader] Waits for appliers' key range\n");
@@ -2516,27 +2522,11 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			printf("[INFO][Loader] Waits for the backup file assignment\n");
 			wait( loadingHandler(restoreData, interf, leaderInterf.get()) );
 
-			printf("[INFO][Loader] Waits for the backup file assignment\n");
-			wait( applyToDBHandler(restoreData, interf, leaderInterf.get()) );
+			//printf("[INFO][Loader] Waits for the command to ask applier to apply mutations to DB\n");
+			//wait( applyToDBHandler(restoreData, interf, leaderInterf.get()) );
 		} else {
 			printf("[ERROR][Worker] In an invalid role:%d\n", restoreData->localNodeStatus.role);
 		}
-
-
-		/*
-		// Handle the dummy workload that increases a counter
-		loop {
-			choose {
-				when(TestRequest req = waitNext(interf.test.getFuture())) {
-					printf("Got Request: %d\n", req.testData);
-					req.reply.send(TestReply(req.testData + 1));
-					if (req.testData + 1 >= 10) {
-						break;
-					}
-				}o
-			}
-		}
-		 */
 
 		// The workers' logic ends here. Should not proceed
 		printf("[INFO][Worker:%s] LocalNodeID:%s Role:%s will exit now\n", interf.id().toString().c_str(),
@@ -3108,7 +3098,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 		}
 		rd->mutationPartMap.insert(std::make_pair(id, part_direct));
 	} else { // concatenate the val string
-		printf("[INFO] Concatenate the log's val string at version:%ld\n", id.toString().c_str());
+//		printf("[INFO] Concatenate the log's val string at version:%ld\n", id.toString().c_str());
 		rd->mutationMap[id] = rd->mutationMap[id].contents().withSuffix(val_input.contents()); //Assign the new Areana to the map's value
 		if ( part_direct != (rd->mutationPartMap[id] + 1) ) {
 			printf("[ERROR]!!! current part id:%d new part_direct:%d is not the next integer of key_input:%s\n", rd->mutationPartMap[id], part_direct, getHexString(key_input).c_str());
@@ -3124,6 +3114,68 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	return concatenated;
 }
 
+/*
+ */
+bool isRangeMutation(MutationRef m) {
+	if (m.type == MutationRef::Type::ClearRange) {
+		if (m.type == MutationRef::Type::DebugKeyRange) {
+			printf("[ERROR] DebugKeyRange mutation is in backup data unexpectedly. We still handle it as a range mutation; the suspicious mutation:%s\n", m.toString().c_str());
+		}
+		return true;
+	} else {
+		if ( !(m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::AddValue ||
+				m.type == MutationRef::Type::DebugKey || m.type == MutationRef::Type::NoOp ||
+				m.type == MutationRef::Type::And || m.type == MutationRef::Type::Or) ) {
+			printf("[ERROR] %s mutation is in backup data unexpectedly. We still handle it as a key mutation; the suspicious mutation:%s\n", typeString[m.type], m.toString().c_str());
+
+		}
+		return false;
+	}
+}
+
+void splitMutation(Reference<RestoreData> rd,  MutationRef m, Arena& mvector_arena,VectorRef<MutationRef> mvector, Arena& nodeIDs_arena, VectorRef<UID> nodeIDs) {
+	// mvector[i] should be mapped to nodeID[i]
+	ASSERT(mvector.empty());
+	ASSERT(nodeIDs.empty());
+	// key range [m->param1, m->param2)
+	//std::map<Standalone<KeyRef>, UID>;
+	std::map<Standalone<KeyRef>, UID>::iterator itlow, itup; //we will return [itlow, itup)
+	itlow = rd->range2Applier.lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
+	if ( itlow != rd->range2Applier.begin()) { // m.param1 is not the smallest key \00
+		// (itlow-1) is the node whose key range includes m.param1
+		--itlow;
+	} else {
+		if (m.param1 != LiteralStringRef("\00")) {
+			printf("[ERROR] splitMutation has bug on range mutation:%s\n", m.toString().c_str());
+		}
+	}
+
+	itup = rd->range2Applier.upper_bound(m.param2); // upper_bound returns the iterator that is > m.param2; return rmap::end if no keys are considered to go after m.param2.
+	ASSERT( itup == rd->range2Applier.end() || itup->first >= m.param2 );
+	// Now adjust for the case: example: mutation range is [a, d); we have applier's ranges' inclusive lower bound values are: a, b, c, d, e; upper_bound(d) returns itup to e, but we want itup to d.
+	--itup;
+	ASSERT( itup->first <= m.param2 );
+	if ( itup->first < m.param2 ) {
+		++itup; //make sure itup is >= m.param2, that is, itup is the next key range >= m.param2
+	}
+
+	while (itlow->first < itup->first) {
+		MutationRef curm; //current mutation
+		curm.type = m.type;
+		curm.param1 = itlow->first;
+		itlow++;
+		if (itlow == rd->range2Applier.end()) {
+			curm.param2 = normalKeys.end;
+		} else {
+			curm.param2 = itlow->first;
+		}
+		mvector.push_back(mvector_arena, curm);
+
+		nodeIDs.push_back(nodeIDs_arena, itlow->second);
+	}
+
+	return;
+}
 
 
 //TODO: WiP: send to applier the mutations
@@ -3133,11 +3185,15 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 	printAppliersKeyRange(rd);
 
-	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+	state RestoreCommandInterface applierCmdInterf; // = rd->workers_interface[rd->masterApplier];
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 1;
 	state int kvCount = 0;
 	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+
+	state int splitMutationIndex = 0;
+
+	printAppliersKeyRange(rd);
 
 	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
 	for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
@@ -3147,16 +3203,52 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 			kvm = kvOp->second[mIndex];
 			// Send the mutation to applier
-			cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, rd->masterApplier, commitVersion, kvm)));
+			if (isRangeMutation(kvm)) {
+				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
+				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
+				state Standalone<VectorRef<MutationRef>> mvector;
+				state Standalone<VectorRef<UID>> nodeIDs;
+				splitMutation(rd, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
+				ASSERT(mvector.size() == nodeIDs.size());
 
-			packMutationNum++;
-			kvCount++;
-			if (packMutationNum >= packMutationThreshold) {
-				ASSERT( packMutationNum == packMutationThreshold );
-				//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
-				std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
-				cmdReplies.clear();
-				packMutationNum = 0;
+				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++ ) {
+					MutationRef mutation = mvector[splitMutationIndex];
+					UID applierID = nodeIDs[splitMutationIndex];
+					applierCmdInterf = rd->workers_interface[applierID];
+
+					cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, applierID, commitVersion, mutation)));
+
+					packMutationNum++;
+					kvCount++;
+					if (packMutationNum >= packMutationThreshold) {
+						ASSERT( packMutationNum == packMutationThreshold );
+						//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+						std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
+						cmdReplies.clear();
+						packMutationNum = 0;
+					}
+				}
+			} else { // mutation operates on a particular key
+				std::map<Standalone<KeyRef>, UID>::iterator itlow = rd->range2Applier.lower_bound(kvm.param1); // lower_bound returns the iterator that is >= m.param1
+				// make sure itlow->first <= m.param1
+				if ( itlow == rd->range2Applier.end() || itlow->first > kvm.param1 ) {
+					--itlow;
+				}
+				ASSERT( itlow->first <= kvm.param1 );
+				MutationRef mutation = kvm;
+				UID applierID = itlow->second;
+				applierCmdInterf = rd->workers_interface[applierID];
+
+				cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, applierID, commitVersion, mutation)));
+				packMutationNum++;
+				kvCount++;
+				if (packMutationNum >= packMutationThreshold) {
+					ASSERT( packMutationNum == packMutationThreshold );
+					//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+					std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
+					cmdReplies.clear();
+					packMutationNum = 0;
+				}
 			}
 		}
 
@@ -3166,26 +3258,37 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 		cmdReplies.clear();
 	}
-	printf("[INFO][Loader] Node:%s produces %d mutation operations\n", rd->getNodeID().c_str(), kvCount);
+	printf("[Summary][Loader] Node:%s produces %d mutation operations\n", rd->getNodeID().c_str(), kvCount);
 
 	return Void();
 }
 
 
 ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
-	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+	printf("[INFO][Role:%s] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+			rd->getRole().c_str(),
 			rd->getNodeID().c_str(), rd->masterApplier.toString().c_str(),
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
-	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 1;
 	state int kvCount = 0;
 	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+	state std::vector<UID> applierIDs = getApplierIDs(rd);
+	state int applierIndex = 0;
+	state UID applierID;
+	state RestoreCommandInterface applierCmdInterf;
 
-	cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, rd->masterApplier)));
+	printf("Num_ApplierID:%d\n", applierIDs.size());
+	for (applierIndex = 0; applierIndex < applierIDs.size(); applierIndex++) {
+		applierID = applierIDs[applierIndex];
+		applierCmdInterf = rd->workers_interface[applierID];
+		cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, applierID)));
+	}
+
 	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
 
-	printf("[INFO][Loader] Node:%s finish Loader_Notify_Appler_To_Apply_Mutation cmd\n", rd->getNodeID().c_str());
+	printf("[INFO][Role:%s] Node:%s finish Loader_Notify_Appler_To_Apply_Mutation cmd\n", rd->getRole().c_str(), rd->getNodeID().c_str());
 
 	return Void();
 }
