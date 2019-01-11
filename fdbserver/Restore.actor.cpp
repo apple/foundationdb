@@ -1394,7 +1394,7 @@ ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, Res
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[ERROR] configureRolesHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1442,7 +1442,9 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> restoreData, 
 			UID nodeID = applier.first;
 			ASSERT(restoreData->workers_interface.find(nodeID) != restoreData->workers_interface.end());
 			RestoreCommandInterface& cmdInterf = restoreData->workers_interface[nodeID];
-			printf("[CMD] Assign KeyRange %s to applier ID:%s\n", keyRange.toString().c_str(), nodeID.toString().c_str());
+			printf("[CMD] Assign KeyRange:%s [begin:%s (%d), end:%s (%d)] to applier ID:%s\n", keyRange.toString().c_str(),
+					getHexString(keyRange.begin).c_str(), keyRange.begin[0], getHexString(keyRange.end).c_str(), keyRange.end[0],
+					nodeID.toString().c_str());
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange, nodeID, keyRange)) );
 
 		}
@@ -1504,7 +1506,7 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[ERROR] assignKeyRangeToAppliersHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1592,7 +1594,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> 
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[ERROR] notifyAppliersKeyRangeToLoaderHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1641,7 +1643,7 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 					req.reply.send(RestoreCommandReply(interf.id()));
 					break;
 				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[ERROR] receiveMutations() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1680,7 +1682,7 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 					req.reply.send(RestoreCommandReply(interf.id()));
 					break;
 				} else {
-					printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[ERROR] applyMutationToDB() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1942,10 +1944,10 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 	//Assign key range to applier ID
 	std::vector<UID> applierIDs = getApplierIDs(restoreData);
-	KeyRef curLowerBound = minKey;
+	Standalone<KeyRef> curLowerBound = minKey;
 	for (int i = 0; i < applierIDs.size(); ++i) {
-		printf("[INFO] Assign key-to-applier map: Key:%s -> applierID:%s\n",
-				curLowerBound.toHexString().c_str(), applierIDs[i].toString().c_str());
+		printf("[INFO] Assign key-to-applier map: Key:%s (%d) -> applierID:%s\n",
+				getHexString(curLowerBound).c_str(), curLowerBound[0], applierIDs[i].toString().c_str());
 		restoreData->range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
 		uint8_t val = curLowerBound[0] + step;
 		curLowerBound = KeyRef(&val, 1);
@@ -2310,7 +2312,7 @@ ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> restoreData, RestoreC
 						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 							break;
 					} else {
-						printf("[ERROR] Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+						printf("[ERROR] applyToDBHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 					}
 				}
 			}
