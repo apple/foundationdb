@@ -204,7 +204,8 @@ public:
 					.append(isRange)
 					.append(fileSize)
 					.append(blockSize)
-					.append(endVersion);
+					.append(endVersion)
+					.append(cursor);
 		}
 		static RestoreFile unpack(Tuple const &t) {
 			RestoreFile r;
@@ -215,6 +216,7 @@ public:
 			r.fileSize = t.getInt(i++);
 			r.blockSize = t.getInt(i++);
 			r.endVersion = t.getInt(i++);
+			r.cursor = t.getInt(i++);
 			return r;
 		}
 
@@ -222,7 +224,7 @@ public:
 //			return "UNSET4TestHardness";
 			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
 				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
-				   + " endVersion:" + std::to_string(endVersion);
+				   + " endVersion:" + std::to_string(endVersion) + " cursor:" + std::to_string(cursor);
 		}
 	};
 
@@ -1831,13 +1833,13 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> restoreData,
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
+		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize, 0};
  		restoreData->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
 // 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
+		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, 0};
 		restoreData->files.push_back(file);
  	}
 
@@ -1993,9 +1995,9 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 			wait(delay(1.0));
 
 			state std::vector<Future<RestoreCommandReply>> cmdReplies;
-			printf("[INFO] number of backup files:%d\n", restoreData->files.size());
+			printf("[INFO] Number of backup files:%d\n", restoreData->files.size());
 			for (auto &loaderID : loaderIDs) {
-				while ( restoreData->files[curFileIndex].fileSize == 0 ) {
+				while ( restoreData->files[curFileIndex].fileSize == 0 && curFileIndex < restoreData->files.size()) {
 					// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
 					printf("[INFO] File %d:%s filesize:%d skip the file\n", curFileIndex,
 							restoreData->files[curFileIndex].fileName.c_str(), restoreData->files[curFileIndex].fileSize);
@@ -2018,7 +2020,8 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				param.removePrefix = removePrefix;
 				param.mutationLogPrefix = mutationLogPrefix;
 				ASSERT( param.length > 0 );
-				ASSERT( param.offset >= 0 && param.offset < restoreData->files[curFileIndex].fileSize );
+				ASSERT( param.offset >= 0 );
+				ASSERT( param.offset < restoreData->files[curFileIndex].fileSize );
 				restoreData->files[curFileIndex].cursor = restoreData->files[curFileIndex].cursor +  param.length;
 				UID nodeID = loaderID;
 				// record the loading status
