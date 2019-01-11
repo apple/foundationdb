@@ -622,7 +622,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		dbState->db->setOption(option, value);
 	}
 
-	dbState->options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
+	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
 }
 
 void MultiVersionDatabase::Connector::connect() {
@@ -727,7 +727,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	optionLock.enter();
 	for(auto option : options) {
 		try {
-			newDb->setOption(option.first, option.second.cast_to<StringRef>()); // In practice, this will set a deferred error instead of throwing. If that happens, the database will be unusable (attempts to use it will throw errors).
+			newDb->setOption(option.first, option.second.castTo<StringRef>()); // In practice, this will set a deferred error instead of throwing. If that happens, the database will be unusable (attempts to use it will throw errors).
 		}
 		catch(Error &e) {
 			optionLock.leave();
@@ -982,7 +982,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 				});
 			}
 			else {
-				options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
+				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
 			}
 		}
 	}
@@ -1026,7 +1026,7 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		runOnExternalClients([this, transportId](Reference<ClientInfo> client) {
 			for(auto option : options) {
-				client->api->setNetworkOption(option.first, option.second.cast_to<StringRef>());
+				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
 

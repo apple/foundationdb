@@ -136,7 +136,7 @@ public:
 	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
 		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
-			tr->setOption(itr->first, itr->second.cast_to<StringRef>());
+			tr->setOption(itr->first, itr->second.castTo<StringRef>());
 	}
 
 	//Returns true if any options have been set
@@ -174,7 +174,7 @@ private:
 		if(intrans)
 			tr->setOption(option, arg);
 
-		transactionOptions.setOption(option, enabled, arg.cast_to<StringRef>());
+		transactionOptions.setOption(option, enabled, arg.castTo<StringRef>());
 	}
 
 	//A group of enabled options (of type T::Option) as well as a legal options map from string to T::Option
@@ -189,8 +189,8 @@ private:
 		//Enable or disable an option. Returns true if option value changed
 		bool setOption(typename T::Option option, bool enabled, Optional<StringRef> arg) {
 			auto optionItr = options.find(option);
-			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).cast_to< StringRef >() != arg)) {
-				options[option] = arg.cast_to<Standalone<StringRef>>();
+			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).castTo< StringRef >() != arg)) {
+				options[option] = arg.castTo<Standalone<StringRef>>();
 				return true;
 			}
 			else if(!enabled && optionItr != options.end()) {

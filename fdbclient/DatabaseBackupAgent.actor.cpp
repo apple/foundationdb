@@ -1197,7 +1197,7 @@ namespace dbBackup {
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
- 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					Key tagPath = srcDrAgent.states.get(task->params[DatabaseBackupAgent::keyConfigLogUid]).pack(BackupAgentBase::keyConfigBackupTag);
 					Optional<Key> tagName = wait(tr->get(tagPath));
 					if (!tagName.present()) {
