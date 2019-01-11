@@ -123,7 +123,7 @@ public:
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
 	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
-	Use .cast_to<>() instead.
+	Use .castTo<>() instead.
 	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
 	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
@@ -131,11 +131,17 @@ public:
 	}
 	int expectedSize() const { return valid ? get().expectedSize() : 0; }
 
-	template <class R> Optional<R> cast_to() const {
-		if (present())
-			return Optional<R>(get());
-		else
+	template <class R> Optional<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> Optional<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return Optional<R>(f(get()));
+		}
+		else {
 			return Optional<R>();
+		}
 	}
 
 	~Optional() {
@@ -211,11 +217,17 @@ public:
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
-	template <class R> ErrorOr<R> cast_to() const {
-		if (present())
-			return ErrorOr<R>(get());
-		else
-			return ErrorOr<R>();
+	template <class R> ErrorOr<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> ErrorOr<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return ErrorOr<R>(f(get()));
+		}
+		else {
+			return ErrorOr<R>(error);
+		}
 	}
 
 	~ErrorOr() {

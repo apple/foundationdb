@@ -145,12 +145,17 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
-std::string printable( const Optional<StringRef>& val );
-std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
+
+template <class T>
+std::string printable( const Optional<T>& val ) {
+	if( val.present() )
+		return printable( val.get() );
+	return "[not set]";
+}
 
 inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
 	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )

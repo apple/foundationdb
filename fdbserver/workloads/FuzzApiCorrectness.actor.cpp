@@ -1098,7 +1098,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		void callback(Reference<ITransaction> tr) {
-			tr->setOption((FDBTransactionOptions::Option) op, val.cast_to<StringRef>());
+			tr->setOption((FDBTransactionOptions::Option) op, val.castTo<StringRef>());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
