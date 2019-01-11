@@ -660,6 +660,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	if( spec.phases & TestWorkload::EXECUTION ) {
 		TraceEvent("TestStarting").detail("WorkloadTitle", printable(spec.title));
 		printf("running test...\n");
+		printf("test WorkloadTitle:%s\n", printable(spec.title).c_str());
 		std::vector< Future<Void> > starts;
 		for(int i= 0; i < workloads.size(); i++)
 			starts.push_back( workloads[i].start.template getReply<Void>() );
