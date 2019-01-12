@@ -40,7 +40,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = 3; // TODO: This can become a configuration param later
+const int min_num_workers = 10; // TODO: This can become a configuration param later
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
@@ -1190,7 +1190,8 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  			}
 
  			if ( count % 1000 == 1 ) {
- 				printf("ApplyKVOPsToDB num_mutation:%d Version:%08lx num_of_ops:%d\n", count, it->first, it->second.size());
+ 				printf("ApplyKVOPsToDB Node:%s num_mutation:%d Version:%08lx num_of_ops:%d\n",
+ 						rd->getNodeID().c_str(), count, it->first, it->second.size());
  			}
 
  			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -1232,6 +1233,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  		}
  	}
 
+ 	rd->kvOps.clear();
  	printf("[INFO] ApplyKVOPsToDB number of kv mutations:%d\n", count);
 
  	return Void();
@@ -1293,6 +1295,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 				}
 				break;
 			}
+			printf("Wait for enough workers. Current num_workers:%d target num_workers:%d\n", agentValues.size(), min_num_workers);
 			wait( delay(5.0) );
 		} catch( Error &e ) {
 			printf("[WARNING] configureRoles transaction error:%s\n", e.what());
@@ -1389,6 +1392,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 }
 
 // Handle restore command request on workers
+//ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, Promise<Void> setRoleDone) {
 ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf) {
 	printf("[INFO][Worker] Node: ID_unset yet, starts configureRolesHandler\n");
 	loop {
@@ -1416,13 +1420,19 @@ ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> restoreData, Res
 							getRoleStr(restoreData->localNodeStatus.role).c_str());
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
+//					if (setRoleDone.canBeSet()) {
+//						setRoleDone.send(Void());
+//					}
 				} else {
-					printf("[ERROR] configureRolesHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[WARNING] configureRolesHandler() master is wating on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, restoreData->getNodeID().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					printf("[WARNING] configureRolesHandler() Restore command %d is invalid. Master will be stuck IF we don't send the reply\n", req.cmd);
 				}
 			}
 		}
 	}
 
+	// This actor never returns. You may cancel it in master
 	return Void();
 }
 
@@ -1529,7 +1539,11 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					printf("[ERROR] assignKeyRangeToAppliersHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
+						req.reply.send(RestoreCommandReply(interf.id())); // the send() for cmd Set_Role_Done didn't delivery to master
+					} else {
+						printf("[ERROR] assignKeyRangeToAppliersHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					}
 				}
 			}
 		}
@@ -1617,7 +1631,9 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> 
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					printf("[ERROR] notifyAppliersKeyRangeToLoaderHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					printf("[WARNING]notifyAppliersKeyRangeToLoaderHandler() master is wating on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, restoreData->getNodeID().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					printf("[WARNING]notifyAppliersKeyRangeToLoaderHandler() notifyAppliersKeyRangeToLoaderHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1667,7 +1683,11 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 					req.reply.send(RestoreCommandReply(interf.id()));
 					break;
 				} else {
-					printf("[ERROR] receiveMutations() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					if ( req.cmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done ) {
+						req.reply.send(RestoreCommandReply(interf.id()));
+					} else {
+						printf("[ERROR] receiveMutations() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					}
 				}
 			}
 		}
@@ -1704,15 +1724,20 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 					wait( applyKVOpsToDB(rd, cx) );
 					printf("[INFO][Applier] apply KV ops to DB finishes...\n");
 					req.reply.send(RestoreCommandReply(interf.id()));
-					break;
+					// Applier should wait in the loop in case the send message is lost. This actor will be cancelled when the test finishes
+					//break;
 				} else {
-					printf("[ERROR] applyMutationToDB() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					if ( req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done ) {
+						req.reply.send(RestoreCommandReply(interf.id())); // master is waiting on the previous command
+					} else {
+						printf("[ERROR] applyMutationToDB() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+					}
 				}
 			}
 		}
 	}
 
-	return Void();
+	//return Void();
 }
 
 
@@ -2306,7 +2331,12 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 							break;
 					} else {
-						printf("[ERROR][Loader] Restore command %d is invalid. Master will be stuck\n", req.cmd);
+						if (req.cmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done) {
+							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting on Set_Role_Done
+						} else {
+							printf("[ERROR][Loader] Restore command %d is invalid. Master will be stuck\n", req.cmd);
+						}
+
 					}
 				}
 			}
@@ -2352,9 +2382,13 @@ ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> restoreData, RestoreC
 								restoreData->localNodeStatus.nodeID.toString().c_str());
 
 						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
-							break;
+						break;
 					} else {
-						printf("[ERROR] applyToDBHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+						if (req.cmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done) {
+							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+						} else {
+							printf("[ERROR] applyToDBHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
+						}
 					}
 				}
 			}
@@ -2495,7 +2529,11 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 		// Step: configure its role
 		printf("[INFO][Worker] Configure its role\n");
-		wait( configureRolesHandler(restoreData, interf) );
+		state Promise<Void> setRoleDone;
+//		state Future<Void> roleHandler = configureRolesHandler(restoreData, interf, setRoleDone);
+//		wait(setRoleDone.getFuture());
+		wait( configureRolesHandler(restoreData, interf));
+
 		printf("[INFO][Worker] NodeID:%s is configure to %s\n",
 				restoreData->localNodeStatus.nodeID.toString().c_str(), getRoleStr(restoreData->localNodeStatus.role).c_str());
 
@@ -2690,6 +2728,19 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+//
+//			printf("MX: lockDB:%d before we finish prepareRestore()\n", lockDB);
+//			lockDatabase(tr, uid)
+//			if (lockDB)
+//				wait(lockDatabase(tr, uid));
+//			else
+//				wait(checkDatabaseLock(tr, uid));
+//
+//			tr->commit();
+//
+//			tr->reset();
+//			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+//			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			wait( collectBackupFiles(restoreData, cx, request) );
 			printBackupFilesInfo(restoreData);
@@ -2697,29 +2748,7 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 			wait( distributeWorkload(interf, restoreData, cx, request, restoreConfig) );
 
 
-
-			/*
-			// prepareRestore will set the restoreConfig based on the other input parameters
-			wait(prepareRestore(cx, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid, restoreConfig));
-			printf("[INFO] After prepareRestore() restoreConfig becomes :%s\n", restoreConfig->toString().c_str());
-			printf("[INFO] TargetVersion:%ld (0x%lx)\n", targetVersion, targetVersion);
-
-			TraceEvent("SetApplyEndVersion_MX").detail("TargetVersion", targetVersion);
-			restoreConfig->setApplyEndVersion(tr, targetVersion); //MX: TODO: This may need to be set at correct position and may be set multiple times?
-
-			wait(tr->commit());
-			*/
-
-			// MX: Now execute the restore: Step 1 get the restore files (range and mutation log) name
-			// At the end of extractBackupData, we apply the mutation to DB
-			//wait( extractBackupData(cx, restoreConfig, randomUid, request) );
-			//wait( extractRestoreFileToMutations(cx, restoreData->files, request, restoreConfig, randomUid) );
-//			wait( sanityCheckRestoreOps(restoreData, cx, randomUid) );
-//			wait( applyRestoreOpsToDB(restoreData, cx) );
-
 			printf("Finish my restore now!\n");
-
-
 			// MX: Unlock DB after restore
 			state Reference<ReadYourWritesTransaction> tr_unlockDB(new ReadYourWritesTransaction(cx));
 			printf("Finish restore cleanup. Start\n");
@@ -3133,7 +3162,7 @@ bool isRangeMutation(MutationRef m) {
 	}
 }
 
-void splitMutation(Reference<RestoreData> rd,  MutationRef m, Arena& mvector_arena,VectorRef<MutationRef> mvector, Arena& nodeIDs_arena, VectorRef<UID> nodeIDs) {
+void splitMutation(Reference<RestoreData> rd,  MutationRef m, Arena& mvector_arena, VectorRef<MutationRef> mvector, Arena& nodeIDs_arena, VectorRef<UID> nodeIDs) {
 	// mvector[i] should be mapped to nodeID[i]
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());

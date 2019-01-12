@@ -44,9 +44,16 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
+		int num_myWorkers = 10;
 		TraceEvent("RunParallelRestoreWorkerWorkloadMX").detail("Start", "RestoreAgentDB");
-		printf("RunParallelRestoreWorkerWorkloadMX\n");
-		worker = _restoreWorker(cx, LocalityData());
+		printf("RunParallelRestoreWorkerWorkloadMX, we will start %d restore workers\n", num_myWorkers);
+		std::vector<Future<Void>> myWorkers;
+		for (int i = 0; i < num_myWorkers; ++i) {
+			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
+		}
+		printf("RunParallelRestoreWorkerWorkloadMX, wait on reply from %d restore workers\n", myWorkers.size());
+		worker = waitForAll(myWorkers);
+		printf("RunParallelRestoreWorkerWorkloadMX, got all replies from restore workers\n");
 		return Void();
 	}
 
