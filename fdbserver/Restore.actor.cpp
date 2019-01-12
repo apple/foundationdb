@@ -1198,6 +1198,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
  			loop {
  				try {
+ 					tr->reset();
  					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
  					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2503,6 +2504,9 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreCommandInterface>(leader.get(), IncludeVersion());
+				printf("[Worker] Worker restore interface id:%s\n", interf.id().toString().c_str());
+				tr.set(restoreWorkerKeyFor(interf.id()), restoreCommandInterfaceValue(interf));
+				wait(tr.commit());
 				break;
 			}
 			tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
@@ -2516,20 +2520,22 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	//we are not the leader, so put our interface in the agent list
 	if(leaderInterf.present()) {
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				//tr.set(restoreWorkerKeyFor(interf.id()), BinaryWriter::toValue(interf, IncludeVersion()));
-				printf("[Worker] Worker restore interface id:%s\n", interf.id().toString().c_str());
-				tr.set(restoreWorkerKeyFor(interf.id()), restoreCommandInterfaceValue(interf));
-				wait(tr.commit());
-				break;
-			} catch( Error &e ) {
-				printf("[WARNING][Worker] Transaction of register worker interface fails for worker:%s\n", interf.id().toString().c_str());
-				wait( tr.onError(e) );
-			}
-		}
+		// Writing the restoreWorkerKeyFor must in the same transaction with reading the leaderInter.
+		// The transaction may fail!
+//		loop {
+//			try {
+//				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+//				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+//				//tr.set(restoreWorkerKeyFor(interf.id()), BinaryWriter::toValue(interf, IncludeVersion()));
+//				printf("[Worker] Worker restore interface id:%s\n", interf.id().toString().c_str());
+//				tr.set(restoreWorkerKeyFor(interf.id()), restoreCommandInterfaceValue(interf));
+//				wait(tr.commit());
+//				break;
+//			} catch( Error &e ) {
+//				printf("[WARNING][Worker] Transaction of register worker interface fails for worker:%s\n", interf.id().toString().c_str());
+//				wait( tr.onError(e) );
+//			}
+//		}
 
 		// Step: configure its role
 		printf("[INFO][Worker] Configure its role\n");
@@ -2614,10 +2620,10 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		// Step: Notify the finish of the restore by cleaning up the restore keys
 		state ReadYourWritesTransaction tr3(cx);
 		loop {
-			tr3.reset();
-			tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
+				tr3.reset();
+				tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr3.clear(restoreRequestTriggerKey);
 				tr3.clear(restoreRequestKeys);
 				tr3.set(restoreRequestDoneKey, restoreRequestDoneValue(restoreRequests.size()));
@@ -2677,26 +2683,30 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  //	restore.clearApplyMutationsKeys(tr);
 
 
- 	try {
-		printf("CheckDBlock:%s START\n", uid.toString().c_str());
-		wait(checkDatabaseLock(tr, uid));
-		printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
+	 loop {
+		try {
+			tr.reset();
+			printf("CheckDBlock:%s START\n", uid.toString().c_str());
+			wait(checkDatabaseLock(tr, uid));
+			printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
 
- 		printf("UnlockDB now. Start.\n");
- 		wait(unlockDatabase(tr, uid)); //NOTE: unlockDatabase didn't commit inside the function!
+			printf("UnlockDB now. Start.\n");
+			wait(unlockDatabase(tr, uid)); //NOTE: unlockDatabase didn't commit inside the function!
 
- 		printf("CheckDBlock:%s START\n", uid.toString().c_str());
- 		wait(checkDatabaseLock(tr, uid));
- 		printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
+			printf("CheckDBlock:%s START\n", uid.toString().c_str());
+			wait(checkDatabaseLock(tr, uid));
+			printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
 
- 		printf("UnlockDB now. Commit.\n");
- 		wait( tr->commit() );
+			printf("UnlockDB now. Commit.\n");
+			wait( tr->commit() );
 
- 		printf("UnlockDB now. Done.\n");
- 	} catch( Error &e ) {
- 		printf("Error when we unlockDB. Error:%s\n", e.what());
- 		wait(tr->onError(e));
- 	}
+			printf("UnlockDB now. Done.\n");
+			break;
+		} catch( Error &e ) {
+			printf("Error when we unlockDB. Error:%s\n", e.what());
+			wait(tr->onError(e));
+		}
+	 };
 
  	return Void();
  }
@@ -2726,6 +2736,7 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 	state Reference<RestoreConfig> restoreConfig(new RestoreConfig(randomUid));
 	loop {
 		try {
+			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 //
