@@ -1752,8 +1752,12 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 
 	loop {
 		try {
+			tr2.reset(); // The transaction may fail! Must full reset the transaction
 			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+			// Assumption: restoreRequestTriggerKey has not beeen set
+			// Note: restoreRequestTriggerKey may be set before the watch is set or may have a conflict when the client sets the same key
+			// when it happens, will we  stuck at wait on the watch?
 			state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
 			wait(tr2.commit());
 			printf("[INFO] set up watch for restoreRequestTriggerKey\n");
@@ -2579,8 +2583,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	//state vector<RestoreInterface> agents;
 	state VectorRef<RestoreInterface> agents;
 
-	printf("[INFO] MX: I'm the master\n");
-	printf("[INFO] Restore master waits for agents to register their workerKeys\n");
+	printf("[INFO][Master] Restore master waits for agents to register their workerKeys\n");
 
 	restoreData->localNodeStatus.init(RestoreRole::Master);
 	restoreData->localNodeStatus.nodeID = interf.id();
@@ -2589,20 +2592,17 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 //	ASSERT(agents.size() > 0);
 
-	printf("[INFO]---MX: Perform the restore in the master now---\n");
 
-	// ----------------------------------------------------------------------
-	// ----------------OLD Restore code START
-	// Step: Collect restore requests
 	state int restoreId = 0;
 	state int checkNum = 0;
 	loop {
+		printf("[INFO][Master]---Wait on restore requests...---\n");
 		state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait( collectRestoreRequests(cx) );
 
-		printf("[INFO] ---Print out the restore requests we received---\n");
+		printf("[INFO][Master] ---Received  restore requests as follows---\n");
 		// Print out the requests info
 		for ( auto &it : restoreRequests ) {
-			printf("[INFO] ---RestoreRequest info:%s\n", it.toString().c_str());
+			printf("\t[INFO][Master]RestoreRequest info:%s\n", it.toString().c_str());
 		}
 
 		// Step: Perform the restore requests
