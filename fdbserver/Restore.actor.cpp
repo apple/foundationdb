@@ -1313,7 +1313,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> restoreData, Database c
 		ASSERT( numApplier > 0 );
 		fprintf(stderr, "[ERROR] not enough nodes for loader and applier. numLoader:%d, numApplier:%d\n", numLoader, numApplier);
 	} else {
-		printf("[INFO] numWorkders:%d numLoader:%d numApplier:%d\n", numNodes, numLoader, numApplier);
+		printf("[INFO][Master] Configure roles numWorkders:%d numLoader:%d numApplier:%d\n", numNodes, numLoader, numApplier);
 	}
 	// The first numLoader nodes will be loader, and the rest nodes will be applier
 	for (int i = 0; i < numLoader; ++i) {
@@ -2528,16 +2528,34 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreCommandInterface>(leader.get(), IncludeVersion());
-				printf("[Worker] Worker restore interface id:%s\n", interf.id().toString().c_str());
+				// NOTE: Handle the situation that the leader's commit of its key causes error(commit_unknown_result)
+				// In this situation, the leader will try to register its key again, which will never succeed.
+				// We should let leader escape from the infinite loop
+				if ( leaderInterf.get().id() == interf.id() ) {
+					printf("[Worker] NodeID:%s is the leader and has registered its key in commit_unknown_result error. Let it set the key again\n",
+							leaderInterf.get().id().toString().c_str());
+					tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
+					wait(tr.commit());
+					 // reset leaderInterf to invalid for the leader process
+					 // because a process will not execute leader's logic unless leaderInterf is invalid
+					leaderInterf = Optional<RestoreCommandInterface>();
+					break;
+				}
+				printf("[Worker] Leader key exists:%s. Worker registers its restore interface id:%s\n",
+						leaderInterf.get().id().toString().c_str(), interf.id().toString().c_str());
 				tr.set(restoreWorkerKeyFor(interf.id()), restoreCommandInterfaceValue(interf));
 				wait(tr.commit());
 				break;
 			}
+			printf("[Worker] NodeID:%s tries to register its interface as leader\n", interf.id().toString().c_str());
 			tr.set(restoreLeaderKey, BinaryWriter::toValue(interf, IncludeVersion()));
 			wait(tr.commit());
 			break;
 		} catch( Error &e ) {
-			printf("restoreWorker select leader error, error code:%d error info:%s\n", e.code(), e.what());
+			// ATTENTION: We may have error commit_unknown_result, the commit may or may not succeed!
+			// We must handle this error, otherwise, if the leader does not know its key has been registered, the leader will stuck here!
+			printf("[INFO] NodeID:%s restoreWorker select leader error, error code:%d error info:%s\n",
+					interf.id().toString().c_str(), e.code(), e.what());
 			wait( tr.onError(e) );
 		}
 	}
@@ -2562,7 +2580,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 //		}
 
 		// Step: configure its role
-		printf("[INFO][Worker] Configure its role\n");
+		printf("[INFO][Worker] NodeID:%s Configure its role\n", interf.id().toString().c_str());
 		state Promise<Void> setRoleDone;
 //		state Future<Void> roleHandler = configureRolesHandler(restoreData, interf, setRoleDone);
 //		wait(setRoleDone.getFuture());
@@ -2608,15 +2626,17 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 
 	//we are the leader
 	// We must wait for enough time to make sure all restore workers have registered their interfaces into the DB
+
+	printf("[INFO][Master] NodeID:%s Restore master waits for agents to register their workerKeys\n",
+			interf.id().toString().c_str());
 	wait( delay(10.0) );
 
 	//state vector<RestoreInterface> agents;
 	state VectorRef<RestoreInterface> agents;
 
-	printf("[INFO][Master] Restore master waits for agents to register their workerKeys\n");
-
 	restoreData->localNodeStatus.init(RestoreRole::Master);
 	restoreData->localNodeStatus.nodeID = interf.id();
+	printf("[INFO][Master]  NodeID:%s starts configuring roles for workers\n", interf.id().toString().c_str());
 	wait( configureRoles(restoreData, cx) );
 
 
