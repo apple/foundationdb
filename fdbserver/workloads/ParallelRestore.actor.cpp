@@ -44,7 +44,7 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		int num_myWorkers = 10;
+		int num_myWorkers = 3;
 		TraceEvent("RunParallelRestoreWorkerWorkloadMX").detail("Start", "RestoreAgentDB");
 		printf("RunParallelRestoreWorkerWorkloadMX, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;

@@ -240,6 +240,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state int retryCount = 0;
 		loop {
 			try {
+				tr.reset();
 				state Version v = wait( tr.getReadVersion() );
 				state Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, keyPrefix)), std::numeric_limits<int>::max()));
 				printf("dump DB, at %s. retryCount:%d Data size:%d, rangeResultInfo:%s\n", when.c_str(), retryCount,
@@ -607,7 +608,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						wait( tr1.onError(e) );
 					}
 				};
-				printf("MX:Test workload triggers the restore\n");
+				printf("MX:Test workload triggers the restore by setting up restoreRequestTriggerKey\n");
 
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
@@ -632,40 +633,59 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				printf("Wait for restore to finish\n");
 				state int waitNum = 0;
 				state ReadYourWritesTransaction tr2(cx);
+				state Future<Void> watch4RestoreRequestDone;
 				loop {
-					tr2.reset();
-					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
+						tr2.reset();
+						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						//TraceEvent("CheckRestoreRequestDoneMX");
-						state Optional<Value> restoreRequestDoneValue = wait(tr2.get(restoreRequestDoneKey));
-						if ( restoreRequestDoneValue.present()) {
-							printf("[ERROR] restoreRequest was unexpectedly set somewhere\n");
-							tr2.clear(restoreRequestDoneKey);
-							wait( tr2.commit() );
-							tr2.reset();
-							tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-							tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						}
+//						state Optional<Value> restoreRequestDoneValue = wait(tr2.get(restoreRequestDoneKey));
+//						if ( restoreRequestDoneValue.present()) {
+//							printf("[ERROR] restoreRequest was unexpectedly set somewhere\n");
+//							tr2.clear(restoreRequestDoneKey);
+//							wait( tr2.commit() );
+//							tr2.reset();
+//							tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+//							tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+//						}
 
-						state Future<Void> watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
+						watch4RestoreRequestDone = tr2.watch(restoreRequestDoneKey);
 						wait( tr2.commit() );
-						printf("[INFO] set up watch for restoreRequestDoneKey\n");
-						wait(watch4RestoreRequestDone);
-						printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
+						printf("[INFO] Finish setting up watch for restoreRequestDoneKey\n");
 						break;
 					} catch( Error &e ) {
 						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						printf("[WARNING] watch for restoreRequestDoneKey, error:%s\n", e.what());
+						printf("[WARNING] Transaction error: setting up watch for restoreRequestDoneKey, error:%s\n", e.what());
 						wait( tr2.onError(e) );
 					}
 				}
 
 				loop {
-					tr2.reset();
-					tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 					try {
+						tr2.reset();
+						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+						Optional<Value> restoreRequestDoneKeyValue = wait( tr2.get(restoreRequestDoneKey) );
+						if ( restoreRequestDoneKeyValue.present() ) {
+							printf("!!! restoreRequestTriggerKey has been set before we wait on the key: Restore has been done before restore agent waits for the done key\n");
+							break;
+						}
+						wait(watch4RestoreRequestDone);
+						printf("[INFO] watch for restoreRequestDoneKey is triggered\n");
+						break;
+					} catch( Error &e ) {
+						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
+						printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
+						wait( tr2.onError(e) );
+					}
+				}
+
+				loop {
+					try {
+						tr2.reset();
+						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
 						ASSERT(numFinished.present());
 						int num = decodeRestoreRequestDoneValue(numFinished.get());
@@ -728,9 +748,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
 
 				try {
+					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-
 
 					// Check the left over tasks
 					// We have to wait for the list to empty since an abort and get status

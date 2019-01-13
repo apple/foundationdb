@@ -1756,14 +1756,38 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 			tr2.reset(); // The transaction may fail! Must full reset the transaction
 			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-			// Assumption: restoreRequestTriggerKey has not beeen set
+			// Assumption: restoreRequestTriggerKey has not been set
+			// Question: What if  restoreRequestTriggerKey has been set? we will stuck here?
+			// Question: Can the following code handle the situation?
 			// Note: restoreRequestTriggerKey may be set before the watch is set or may have a conflict when the client sets the same key
 			// when it happens, will we  stuck at wait on the watch?
+
 			state Future<Void> watch4RestoreRequest = tr2.watch(restoreRequestTriggerKey);
 			wait(tr2.commit());
-			printf("[INFO] set up watch for restoreRequestTriggerKey\n");
+			printf("[INFO][Master] Finish setting up watch for restoreRequestTriggerKey\n");
+			break;
+		} catch(Error &e) {
+			printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
+			wait(tr2.onError(e));
+		}
+	};
+
+
+	loop {
+		try {
+			tr2.reset(); // The transaction may fail! Must full reset the transaction
+			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+			// Assumption: restoreRequestTriggerKey has not been set
+			// Before we wait on the watch, we must make sure the key is not there yet!
+			printf("[INFO][Master] Make sure restoreRequestTriggerKey does not exist before we wait on the key\n");
+			Optional<Value> triggerKey = wait( tr2.get(restoreRequestTriggerKey) );
+			if ( triggerKey.present() ) {
+				printf("!!! restoreRequestTriggerKey (and restore requests) is set before restore agent waits on the request. Restore agent can immediately proceed\n");
+				break;
+			}
 			wait(watch4RestoreRequest);
-			printf("[INFO] restoreRequestTriggerKey watch is triggered\n");
+			printf("[INFO][Master] restoreRequestTriggerKey watch is triggered\n");
 			break;
 		} catch(Error &e) {
 			printf("[WARNING] Transaction for restore request. Error:%s\n", e.name());
@@ -2685,7 +2709,9 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 
 	 loop {
 		try {
-			tr.reset();
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			printf("CheckDBlock:%s START\n", uid.toString().c_str());
 			wait(checkDatabaseLock(tr, uid));
 			printf("CheckDBlock:%s DONE\n", uid.toString().c_str());
