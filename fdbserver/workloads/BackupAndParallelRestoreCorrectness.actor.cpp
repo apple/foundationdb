@@ -687,16 +687,19 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						state Optional<Value> numFinished = wait(tr2.get(restoreRequestDoneKey));
-						ASSERT(numFinished.present());
-						int num = decodeRestoreRequestDoneValue(numFinished.get());
-						TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
-						printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
+						if (numFinished.present()) {
+							int num = decodeRestoreRequestDoneValue(numFinished.get());
+							TraceEvent("RestoreRequestKeyDoneFinished").detail("NumFinished", num);
+							printf("[INFO] RestoreRequestKeyDone, numFinished:%d\n", num);
+						}
+						printf("[INFO] RestoreRequestKeyDone: clear the key in a transaction");
 						tr2.clear(restoreRequestDoneKey);
+						// NOTE: The clear transaction may fail in uncertain state. We need to retry to clear the key
 						wait( tr2.commit() );
 						break;
 					} catch( Error &e ) {
 						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						printf("[WARNING] CheckRestoreRequestDoneError: %s\n", e.what());
+						printf("[WARNING] Clearing the restoreRequestDoneKey has error in transaction: %s. We will retry to clear the key\n", e.what());
 						wait( tr2.onError(e) );
 					}
 
