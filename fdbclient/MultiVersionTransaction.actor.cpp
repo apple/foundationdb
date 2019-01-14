@@ -212,6 +212,21 @@ void DLTransaction::reset() {
 }
 
 // DLDatabase
+DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
+	ready = mapThreadFuture<FdbCApi::FDBDatabase*, Void>(dbFuture, [this](ErrorOr<FdbCApi::FDBDatabase*> db){ 
+		if(db.isError()) {
+			return ErrorOr<Void>(db.getError());
+		}
+
+		this->db = db.get();
+		return ErrorOr<Void>(Void());
+	});
+}
+
+ThreadFuture<Void> DLDatabase::onReady() {
+	return ready;
+}
+
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction *tr;
 	api->databaseCreateTransaction(db, &tr);
@@ -346,7 +361,7 @@ void DLApi::stopNetwork() {
 	}
 }
 
-ThreadFuture<Reference<IDatabase>> DLApi::createDatabase609(const char *clusterFilePath) {
+Reference<IDatabase> DLApi::createDatabase609(const char *clusterFilePath) {
 	FdbCApi::FDBFuture *f = api->createCluster(clusterFilePath);
 
 	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
@@ -356,22 +371,24 @@ ThreadFuture<Reference<IDatabase>> DLApi::createDatabase609(const char *clusterF
 	});
 
 	Reference<FdbCApi> innerApi = api;
-	return flatMapThreadFuture<FdbCApi::FDBCluster*, Reference<IDatabase>>(clusterFuture, [innerApi](ErrorOr<FdbCApi::FDBCluster*> cluster) {
+	auto dbFuture = flatMapThreadFuture<FdbCApi::FDBCluster*, FdbCApi::FDBDatabase*>(clusterFuture, [innerApi](ErrorOr<FdbCApi::FDBCluster*> cluster) {
 		if(cluster.isError()) {
-			return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.getError());
+			return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(cluster.getError());
 		}
 
-		auto dbFuture = toThreadFuture<Reference<IDatabase>>(innerApi, innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2), [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		auto innerDbFuture = toThreadFuture<FdbCApi::FDBDatabase*>(innerApi, innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2), [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 			FdbCApi::FDBDatabase *db;
 			api->futureGetDatabase(f, &db);
-			return Reference<IDatabase>(new DLDatabase(Reference<FdbCApi>::addRef(api), db));
+			return db;
 		});
 
-		return ErrorOr<ThreadFuture<Reference<IDatabase>>>(mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(dbFuture, [cluster, innerApi](ErrorOr<Reference<IDatabase>> db) {
+		return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(mapThreadFuture<FdbCApi::FDBDatabase*, FdbCApi::FDBDatabase*>(innerDbFuture, [cluster, innerApi](ErrorOr<FdbCApi::FDBDatabase*> db) {
 			innerApi->clusterDestroy(cluster.get());
 			return db;
 		}));
 	});
+
+	return Reference<DLDatabase>(new DLDatabase(api, dbFuture));
 }
 
 Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
@@ -381,14 +398,7 @@ Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	}
 	else {
-		auto f = DLApi::createDatabase609(clusterFilePath);
-
-		f.blockUntilReady();
-		if(f.isError()) {
-			throw f.getError();
-		}
-
-		return f.get();
+		return DLApi::createDatabase609(clusterFilePath);
 	}
 }
 
@@ -653,16 +663,30 @@ void MultiVersionDatabase::Connector::connect() {
 			}
 			
 			candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
-			tr = candidateDatabase->createTransaction();
-			connectionFuture = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
-				// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-				if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
-					return ErrorOr<Void>(v.getError());
+			if(client->external) {
+				connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
+			}
+			else { 
+				connectionFuture = ThreadFuture<Void>(Void());
+			}
+
+			connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
+				if(ready.isError()) {
+					return ErrorOr<ThreadFuture<Void>>(ready.getError());
 				}
-				else {
-					return ErrorOr<Void>(Void());
-				}
+
+				tr = candidateDatabase->createTransaction();
+				return ErrorOr<ThreadFuture<Void>>(mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
+					// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
+					if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
+						return ErrorOr<Void>(v.getError());
+					}
+					else {
+						return ErrorOr<Void>(Void());
+					}
+				}));
 			});
+
 
 			int userParam;
 			connectionFuture.callOrSetAsCallback(this, userParam, 0);

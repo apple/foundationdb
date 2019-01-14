@@ -159,8 +159,11 @@ private:
 
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
-	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db) {}
+	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
+	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
 	~DLDatabase() { api->databaseDestroy(db); }
+
+	ThreadFuture<Void> onReady();
 
 	Reference<ITransaction> createTransaction();
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
@@ -170,7 +173,8 @@ public:
 
 private:
 	const Reference<FdbCApi> api;
-	FdbCApi::FDBDatabase* const db;
+	FdbCApi::FDBDatabase* db; // Always set if API version >= 610, otherwise guaranteed to be set when onReady future is set
+	ThreadFuture<Void> ready;
 };
 
 class DLApi : public IClientApi {
@@ -186,7 +190,7 @@ public:
 	void stopNetwork();
 
 	Reference<IDatabase> createDatabase(const char *clusterFilePath);
-	ThreadFuture<Reference<IDatabase>> createDatabase609(const char *clusterFilePath); // legacy database creation
+	Reference<IDatabase> createDatabase609(const char *clusterFilePath); // legacy database creation
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
@@ -328,7 +332,6 @@ private:
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
 
-		ThreadFuture<Reference<IDatabase>> dbFuture;
 		ThreadFuture<Void> changed;
 
 		bool cancelled;
