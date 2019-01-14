@@ -81,6 +81,8 @@ def api_version(ver):
     elif err != 0:
         raise RuntimeError('FoundationDB API error')
 
+    fdb.impl.init_c_api()
+
     list = (
         'FDBError',
         'predicates',

@@ -64,58 +64,60 @@ module FDB
     typedef :int, :fdb_error
     typedef :int, :fdb_bool
 
-    attach_function :fdb_get_error, [ :fdb_error ], :string
-
-    attach_function :fdb_network_set_option, [ :int, :pointer, :int ], :fdb_error
-    attach_function :fdb_setup_network, [ ], :fdb_error
-    attach_function :fdb_run_network, [ ], :fdb_error, :blocking => true
-    attach_function :fdb_stop_network, [ ], :fdb_error
-
-    attach_function :fdb_future_cancel, [ :pointer ], :void
-    attach_function :fdb_future_release_memory, [ :pointer ], :void
-    attach_function :fdb_future_destroy, [ :pointer ], :void
-    attach_function :fdb_future_block_until_ready, [ :pointer ], :fdb_error, :blocking => true
-    attach_function :fdb_future_is_ready, [ :pointer ], :fdb_bool
-
-    callback :fdb_future_callback, [ :pointer, :pointer ], :void
-    attach_function :fdb_future_set_callback, [ :pointer, :fdb_future_callback, :pointer ], :fdb_error
-
-    attach_function :fdb_future_get_error, [ :pointer ], :fdb_error
-    attach_function :fdb_future_get_version, [ :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
-    attach_function :fdb_future_get_string_array, [ :pointer, :pointer, :pointer ], :fdb_error
-
-    attach_function :fdb_create_database, [ :string, :pointer ], :fdb_error
-
-    attach_function :fdb_database_destroy, [ :pointer ], :void
-    attach_function :fdb_database_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
-
-    attach_function :fdb_database_create_transaction, [ :pointer, :pointer ], :fdb_error
-    attach_function :fdb_transaction_destroy, [ :pointer ], :void
-    attach_function :fdb_transaction_cancel, [ :pointer ], :void
-    attach_function :fdb_transaction_atomic_op, [ :pointer, :pointer, :int, :pointer, :int, :int ], :void
-    attach_function :fdb_transaction_add_conflict_range, [ :pointer, :pointer, :int, :pointer, :int, :int ], :int
-    attach_function :fdb_transaction_get_addresses_for_key, [ :pointer, :pointer, :int ], :pointer
-    attach_function :fdb_transaction_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
-    attach_function :fdb_transaction_set_read_version, [ :pointer, :int64 ], :void
-    attach_function :fdb_transaction_get_read_version, [ :pointer ], :pointer
-    attach_function :fdb_transaction_get, [ :pointer, :pointer, :int, :int ], :pointer
-    attach_function :fdb_transaction_get_key, [ :pointer, :pointer, :int, :int, :int, :int ], :pointer
-    attach_function :fdb_transaction_get_range, [ :pointer, :pointer, :int, :int, :int, :pointer, :int, :int, :int, :int, :int, :int, :int, :int, :int ], :pointer
-    attach_function :fdb_transaction_set, [ :pointer, :pointer, :int, :pointer, :int ], :void
-    attach_function :fdb_transaction_clear, [ :pointer, :pointer, :int ], :void
-    attach_function :fdb_transaction_clear_range, [ :pointer, :pointer, :int, :pointer, :int ], :void
-    attach_function :fdb_transaction_watch, [ :pointer, :pointer, :int ], :pointer
-    attach_function :fdb_transaction_commit, [ :pointer ], :pointer
-    attach_function :fdb_transaction_get_committed_version, [ :pointer, :pointer ], :fdb_error
-    attach_function :fdb_transaction_get_versionstamp, [ :pointer ], :pointer
-    attach_function :fdb_transaction_on_error, [ :pointer, :fdb_error ], :pointer
-    attach_function :fdb_transaction_reset, [ :pointer ], :void
-
     attach_function :fdb_select_api_version_impl, [ :int, :int ], :fdb_error
     attach_function :fdb_get_max_api_version, [ ], :int
+
+    def self.init_c_api
+      attach_function :fdb_get_error, [ :fdb_error ], :string
+
+      attach_function :fdb_network_set_option, [ :int, :pointer, :int ], :fdb_error
+      attach_function :fdb_setup_network, [ ], :fdb_error
+      attach_function :fdb_run_network, [ ], :fdb_error, :blocking => true
+      attach_function :fdb_stop_network, [ ], :fdb_error
+
+      attach_function :fdb_future_cancel, [ :pointer ], :void
+      attach_function :fdb_future_release_memory, [ :pointer ], :void
+      attach_function :fdb_future_destroy, [ :pointer ], :void
+      attach_function :fdb_future_block_until_ready, [ :pointer ], :fdb_error, :blocking => true
+      attach_function :fdb_future_is_ready, [ :pointer ], :fdb_bool
+
+      callback :fdb_future_callback, [ :pointer, :pointer ], :void
+      attach_function :fdb_future_set_callback, [ :pointer, :fdb_future_callback, :pointer ], :fdb_error
+
+      attach_function :fdb_future_get_error, [ :pointer ], :fdb_error
+      attach_function :fdb_future_get_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_string_array, [ :pointer, :pointer, :pointer ], :fdb_error
+
+      attach_function :fdb_create_database, [ :string, :pointer ], :fdb_error
+
+      attach_function :fdb_database_destroy, [ :pointer ], :void
+      attach_function :fdb_database_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
+
+      attach_function :fdb_database_create_transaction, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_transaction_destroy, [ :pointer ], :void
+      attach_function :fdb_transaction_cancel, [ :pointer ], :void
+      attach_function :fdb_transaction_atomic_op, [ :pointer, :pointer, :int, :pointer, :int, :int ], :void
+      attach_function :fdb_transaction_add_conflict_range, [ :pointer, :pointer, :int, :pointer, :int, :int ], :int
+      attach_function :fdb_transaction_get_addresses_for_key, [ :pointer, :pointer, :int ], :pointer
+      attach_function :fdb_transaction_set_option, [ :pointer, :int, :pointer, :int ], :fdb_error
+      attach_function :fdb_transaction_set_read_version, [ :pointer, :int64 ], :void
+      attach_function :fdb_transaction_get_read_version, [ :pointer ], :pointer
+      attach_function :fdb_transaction_get, [ :pointer, :pointer, :int, :int ], :pointer
+      attach_function :fdb_transaction_get_key, [ :pointer, :pointer, :int, :int, :int, :int ], :pointer
+      attach_function :fdb_transaction_get_range, [ :pointer, :pointer, :int, :int, :int, :pointer, :int, :int, :int, :int, :int, :int, :int, :int, :int ], :pointer
+      attach_function :fdb_transaction_set, [ :pointer, :pointer, :int, :pointer, :int ], :void
+      attach_function :fdb_transaction_clear, [ :pointer, :pointer, :int ], :void
+      attach_function :fdb_transaction_clear_range, [ :pointer, :pointer, :int, :pointer, :int ], :void
+      attach_function :fdb_transaction_watch, [ :pointer, :pointer, :int ], :pointer
+      attach_function :fdb_transaction_commit, [ :pointer ], :pointer
+      attach_function :fdb_transaction_get_committed_version, [ :pointer, :pointer ], :fdb_error
+      attach_function :fdb_transaction_get_versionstamp, [ :pointer ], :pointer
+      attach_function :fdb_transaction_on_error, [ :pointer, :fdb_error ], :pointer
+      attach_function :fdb_transaction_reset, [ :pointer ], :void
+    end
 
     class KeyValueStruct < FFI::Struct
       pack 4

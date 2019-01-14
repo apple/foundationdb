@@ -1285,159 +1285,160 @@ def optionalParamToBytes(v):
 
 _FDBBase.capi = _capi
 
-_capi.fdb_select_api_version_impl.argtypes = [ctypes.c_int, ctypes.c_int]
-_capi.fdb_select_api_version_impl.restype = ctypes.c_int
+def init_c_api():
+    _capi.fdb_select_api_version_impl.argtypes = [ctypes.c_int, ctypes.c_int]
+    _capi.fdb_select_api_version_impl.restype = ctypes.c_int
 
-_capi.fdb_get_error.argtypes = [ctypes.c_int]
-_capi.fdb_get_error.restype = ctypes.c_char_p
+    _capi.fdb_get_error.argtypes = [ctypes.c_int]
+    _capi.fdb_get_error.restype = ctypes.c_char_p
 
-_capi.fdb_error_predicate.argtypes = [ctypes.c_int, ctypes.c_int]
-_capi.fdb_error_predicate.restype = ctypes.c_int
+    _capi.fdb_error_predicate.argtypes = [ctypes.c_int, ctypes.c_int]
+    _capi.fdb_error_predicate.restype = ctypes.c_int
 
-_capi.fdb_setup_network.argtypes = []
-_capi.fdb_setup_network.restype = ctypes.c_int
-_capi.fdb_setup_network.errcheck = check_error_code
+    _capi.fdb_setup_network.argtypes = []
+    _capi.fdb_setup_network.restype = ctypes.c_int
+    _capi.fdb_setup_network.errcheck = check_error_code
 
-_capi.fdb_network_set_option.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_network_set_option.restype = ctypes.c_int
-_capi.fdb_network_set_option.errcheck = check_error_code
+    _capi.fdb_network_set_option.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_network_set_option.restype = ctypes.c_int
+    _capi.fdb_network_set_option.errcheck = check_error_code
 
-_capi.fdb_run_network.argtypes = []
-_capi.fdb_run_network.restype = ctypes.c_int
-_capi.fdb_run_network.errcheck = check_error_code
+    _capi.fdb_run_network.argtypes = []
+    _capi.fdb_run_network.restype = ctypes.c_int
+    _capi.fdb_run_network.errcheck = check_error_code
 
-_capi.fdb_stop_network.argtypes = []
-_capi.fdb_stop_network.restype = ctypes.c_int
-_capi.fdb_stop_network.errcheck = check_error_code
+    _capi.fdb_stop_network.argtypes = []
+    _capi.fdb_stop_network.restype = ctypes.c_int
+    _capi.fdb_stop_network.errcheck = check_error_code
 
-_capi.fdb_future_destroy.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_destroy.restype = None
+    _capi.fdb_future_destroy.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_destroy.restype = None
 
-_capi.fdb_future_release_memory.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_release_memory.restype = None
+    _capi.fdb_future_release_memory.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_release_memory.restype = None
 
-_capi.fdb_future_cancel.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_cancel.restype = None
+    _capi.fdb_future_cancel.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_cancel.restype = None
 
-_capi.fdb_future_block_until_ready.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_block_until_ready.restype = ctypes.c_int
-_capi.fdb_future_block_until_ready.errcheck = check_error_code
+    _capi.fdb_future_block_until_ready.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_block_until_ready.restype = ctypes.c_int
+    _capi.fdb_future_block_until_ready.errcheck = check_error_code
 
-_capi.fdb_future_is_ready.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_is_ready.restype = ctypes.c_int
+    _capi.fdb_future_is_ready.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_is_ready.restype = ctypes.c_int
 
-_CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+    _CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
-_capi.fdb_future_set_callback.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
-_capi.fdb_future_set_callback.restype = int
-_capi.fdb_future_set_callback.errcheck = check_error_code
+    _capi.fdb_future_set_callback.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _capi.fdb_future_set_callback.restype = int
+    _capi.fdb_future_set_callback.errcheck = check_error_code
 
-_capi.fdb_future_get_error.argtypes = [ctypes.c_void_p]
-_capi.fdb_future_get_error.restype = int
-_capi.fdb_future_get_error.errcheck = check_error_code
+    _capi.fdb_future_get_error.argtypes = [ctypes.c_void_p]
+    _capi.fdb_future_get_error.restype = int
+    _capi.fdb_future_get_error.errcheck = check_error_code
 
-_capi.fdb_future_get_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
-_capi.fdb_future_get_version.restype = ctypes.c_int
-_capi.fdb_future_get_version.errcheck = check_error_code
+    _capi.fdb_future_get_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
+    _capi.fdb_future_get_version.restype = ctypes.c_int
+    _capi.fdb_future_get_version.errcheck = check_error_code
 
-_capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
-                                     ctypes.POINTER(ctypes.c_int)]
-_capi.fdb_future_get_key.restype = ctypes.c_int
-_capi.fdb_future_get_key.errcheck = check_error_code
+    _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
+                                         ctypes.POINTER(ctypes.c_int)]
+    _capi.fdb_future_get_key.restype = ctypes.c_int
+    _capi.fdb_future_get_key.errcheck = check_error_code
 
-_capi.fdb_future_get_value.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
-                                       ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)), ctypes.POINTER(ctypes.c_int)]
-_capi.fdb_future_get_value.restype = ctypes.c_int
-_capi.fdb_future_get_value.errcheck = check_error_code
+    _capi.fdb_future_get_value.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
+                                           ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)), ctypes.POINTER(ctypes.c_int)]
+    _capi.fdb_future_get_value.restype = ctypes.c_int
+    _capi.fdb_future_get_value.errcheck = check_error_code
 
-_capi.fdb_future_get_keyvalue_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(
-    ctypes.POINTER(KeyValueStruct)), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
-_capi.fdb_future_get_keyvalue_array.restype = int
-_capi.fdb_future_get_keyvalue_array.errcheck = check_error_code
+    _capi.fdb_future_get_keyvalue_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(
+        ctypes.POINTER(KeyValueStruct)), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+    _capi.fdb_future_get_keyvalue_array.restype = int
+    _capi.fdb_future_get_keyvalue_array.errcheck = check_error_code
 
-_capi.fdb_future_get_string_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char_p)), ctypes.POINTER(ctypes.c_int)]
-_capi.fdb_future_get_string_array.restype = int
-_capi.fdb_future_get_string_array.errcheck = check_error_code
+    _capi.fdb_future_get_string_array.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char_p)), ctypes.POINTER(ctypes.c_int)]
+    _capi.fdb_future_get_string_array.restype = int
+    _capi.fdb_future_get_string_array.errcheck = check_error_code
 
-_capi.fdb_create_database.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
-_capi.fdb_create_database.restype = ctypes.c_int
-_capi.fdb_create_database.errcheck = check_error_code
+    _capi.fdb_create_database.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
+    _capi.fdb_create_database.restype = ctypes.c_int
+    _capi.fdb_create_database.errcheck = check_error_code
 
-_capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
-_capi.fdb_database_destroy.restype = None
+    _capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
+    _capi.fdb_database_destroy.restype = None
 
-_capi.fdb_database_create_transaction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-_capi.fdb_database_create_transaction.restype = ctypes.c_int
-_capi.fdb_database_create_transaction.errcheck = check_error_code
+    _capi.fdb_database_create_transaction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    _capi.fdb_database_create_transaction.restype = ctypes.c_int
+    _capi.fdb_database_create_transaction.errcheck = check_error_code
 
-_capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_database_set_option.restype = ctypes.c_int
-_capi.fdb_database_set_option.errcheck = check_error_code
+    _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_database_set_option.restype = ctypes.c_int
+    _capi.fdb_database_set_option.errcheck = check_error_code
 
-_capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_destroy.restype = None
+    _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_destroy.restype = None
 
-_capi.fdb_transaction_cancel.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_cancel.restype = None
+    _capi.fdb_transaction_cancel.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_cancel.restype = None
 
-_capi.fdb_transaction_set_read_version.argtypes = [ctypes.c_void_p, ctypes.c_int64]
-_capi.fdb_transaction_set_read_version.restype = None
+    _capi.fdb_transaction_set_read_version.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+    _capi.fdb_transaction_set_read_version.restype = None
 
-_capi.fdb_transaction_get_read_version.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_get_read_version.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_read_version.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_get_read_version.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_get.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-_capi.fdb_transaction_get.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_get.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_get_key.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-_capi.fdb_transaction_get_key.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_key.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_get_key.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_get_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
-                                            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                            ctypes.c_int, ctypes.c_int]
-_capi.fdb_transaction_get_range.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                                                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                                ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_get_range.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-_capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int
-_capi.fdb_transaction_add_conflict_range.errcheck = check_error_code
+    _capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int
+    _capi.fdb_transaction_add_conflict_range.errcheck = check_error_code
 
-_capi.fdb_transaction_get_addresses_for_key.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_get_addresses_for_key.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_addresses_for_key.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_get_addresses_for_key.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_set_option.restype = ctypes.c_int
-_capi.fdb_transaction_set_option.errcheck = check_error_code
+    _capi.fdb_transaction_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_set_option.restype = ctypes.c_int
+    _capi.fdb_transaction_set_option.errcheck = check_error_code
 
-_capi.fdb_transaction_atomic_op.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-_capi.fdb_transaction_atomic_op.restype = None
+    _capi.fdb_transaction_atomic_op.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_transaction_atomic_op.restype = None
 
-_capi.fdb_transaction_set.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_set.restype = None
+    _capi.fdb_transaction_set.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_set.restype = None
 
-_capi.fdb_transaction_clear.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_clear.restype = None
+    _capi.fdb_transaction_clear.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_clear.restype = None
 
-_capi.fdb_transaction_clear_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_clear_range.restype = None
+    _capi.fdb_transaction_clear_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_clear_range.restype = None
 
-_capi.fdb_transaction_watch.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_watch.restype = ctypes.c_void_p
+    _capi.fdb_transaction_watch.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_watch.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_commit.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_commit.restype = ctypes.c_void_p
+    _capi.fdb_transaction_commit.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_commit.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_get_committed_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
-_capi.fdb_transaction_get_committed_version.restype = ctypes.c_int
-_capi.fdb_transaction_get_committed_version.errcheck = check_error_code
+    _capi.fdb_transaction_get_committed_version.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
+    _capi.fdb_transaction_get_committed_version.restype = ctypes.c_int
+    _capi.fdb_transaction_get_committed_version.errcheck = check_error_code
 
-_capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_on_error.argtypes = [ctypes.c_void_p, ctypes.c_int]
-_capi.fdb_transaction_on_error.restype = ctypes.c_void_p
+    _capi.fdb_transaction_on_error.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_on_error.restype = ctypes.c_void_p
 
-_capi.fdb_transaction_reset.argtypes = [ctypes.c_void_p]
-_capi.fdb_transaction_reset.restype = None
+    _capi.fdb_transaction_reset.argtypes = [ctypes.c_void_p]
+    _capi.fdb_transaction_reset.restype = None
 
 if hasattr(ctypes.pythonapi, 'Py_IncRef'):
     def _pin_callback(cb):
