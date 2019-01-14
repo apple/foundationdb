@@ -1725,6 +1725,9 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 					wait( applyKVOpsToDB(rd, cx) );
 					printf("[INFO][Applier] apply KV ops to DB finishes...\n");
 					req.reply.send(RestoreCommandReply(interf.id()));
+					printf("[INFO][Applier] Node: %s, role: %s, At the end of its functionality! Hang here to make sure master proceeds!\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str());
 					// Applier should wait in the loop in case the send message is lost. This actor will be cancelled when the test finishes
 					//break;
 				} else {
@@ -2358,7 +2361,10 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 								param.toString().c_str());
 
 							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
-							break;
+							printf("[INFO][Loader] Node: %s, role: %s, At the end of its functionality! Hang here to make sure master proceeds!\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str());
+							//break;
 					} else {
 						if (req.cmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done) {
 							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting on Set_Role_Done

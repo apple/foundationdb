@@ -1,19 +1,36 @@
 testTitle=BackupAndRestore
     testName=Cycle
-    nodeCount=30000
-    transactionsPerSecond=2500.0
-    testDuration=30.0
+;    nodeCount=30000
+    nodeCount=1000
+    transactionsPerSecond=250.0
+    testDuration=10.0
     expectedRate=0
     clearAfterTest=false
 	keyPrefix=!
 
     testName=Cycle
-    nodeCount=30000
-    transactionsPerSecond=2500.0
-    testDuration=30.0
+;    nodeCount=1000
+    transactionsPerSecond=250.0
+    testDuration=10.0
     expectedRate=0
     clearAfterTest=false
 	keyPrefix=z
+
+    testName=Cycle
+;    nodeCount=1000
+    transactionsPerSecond=250.0
+    testDuration=10.0
+    expectedRate=0
+    clearAfterTest=false
+	keyPrefix=A
+
+    testName=Cycle
+;    nodeCount=1000
+    transactionsPerSecond=250.0
+    testDuration=10.0
+    expectedRate=0
+    clearAfterTest=false
+	keyPrefix=Z
 
 ; Each testName=RunRestoreWorkerWorkload creates a restore worker
 ; We need at least 3 restore workers: master, loader, and applier
