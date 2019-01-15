@@ -13,6 +13,7 @@ import xml.sax.handler
 import functools
 import multiprocessing
 import re
+import shutil
 
 
 _logger = None
@@ -297,6 +298,8 @@ def run_simulation_test(basedir,
                              return_codes)
         f.seek(pos)
         os.lockf(f.fileno(), os.F_ULOCK, 0)
+    if res:
+        shutil.rmtree(wd)
     return res
 
 
