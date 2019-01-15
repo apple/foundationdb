@@ -53,7 +53,7 @@ class LogParser:
         pass
 
     def applyAddr2line(self, obj):
-        addresses = sanitize_backtrace(obj)
+        addresses = self.sanitizeBacktrace(obj)
         assert addresses is not None
         fdbbin = os.path.join(basedir, 'bin', 'fdbserver')
         try:
