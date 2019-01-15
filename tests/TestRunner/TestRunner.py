@@ -288,7 +288,7 @@ def run_simulation_test(basedir,
         return_codes[command] = proc.returncode
         if proc.returncode != 0:
             break
-    outfile = os.path.join(basedir, 'traces.{}'.format(log_format))
+    outfile = os.path.join(test_dir, 'traces.{}'.format(log_format))
     res = True
     with open(outfile, 'a') as f:
         os.lockf(f.fileno(), os.F_LOCK, 0)
