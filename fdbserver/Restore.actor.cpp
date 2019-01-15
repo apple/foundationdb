@@ -48,6 +48,8 @@ struct RestoreData; // Only declare the struct exist but we cannot use its field
 bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<StringRef> val_input, Standalone<StringRef> key_input);
 Future<Void> registerMutationsToApplier(Reference<RestoreData> const& rd);
 Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> const& rd);
+Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> const& rd);
+Future<Void> sampleHandler(Reference<RestoreData> const& restoreData, RestoreCommandInterface const& interf, RestoreCommandInterface const& leaderInter);
 void parseSerializedMutation(Reference<RestoreData> rd);
 void sanityCheckMutationOps(Reference<RestoreData> rd);
 
@@ -518,6 +520,8 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 
 	// range2Applier is in master and loader node. Loader node uses this to determine which applier a mutation should be sent
 	std::map<Standalone<KeyRef>, UID> range2Applier; // KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Standalone<KeyRef>, int> keyOpsCount; // The number of operations per key which is used to determine the key-range boundary for appliers
+	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	struct ApplierStatus {
 		UID id;
@@ -1540,11 +1544,8 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> restor
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
-					if (req.cmd == RestoreCommandEnum::Set_Role_Done) {
-						req.reply.send(RestoreCommandReply(interf.id())); // the send() for cmd Set_Role_Done didn't delivery to master
-					} else {
-						printf("[ERROR] assignKeyRangeToAppliersHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
-					}
+					printf("[WARNING]assignKeyRangeToAppliersHandler() master is waiting on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, restoreData->getNodeID().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 				}
 			}
 		}
@@ -1629,12 +1630,12 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> 
 				} else if (req.cmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done) {
 					printf("[INFO] Node:%s finish Notify_Loader_ApplierKeyRange, has range2Applier size:%d.\n",
 							restoreData->localNodeStatus.nodeID.toString().c_str(), restoreData->range2Applier.size());
+					printAppliersKeyRange(restoreData);
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
 					break;
 				} else {
 					printf("[WARNING]notifyAppliersKeyRangeToLoaderHandler() master is wating on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, restoreData->getNodeID().c_str());
 					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
-					printf("[WARNING]notifyAppliersKeyRangeToLoaderHandler() notifyAppliersKeyRangeToLoaderHandler() Restore command %d is invalid. Master will be stuck at configuring roles\n", req.cmd);
 				}
 			}
 		}
@@ -1642,6 +1643,152 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> 
 
 	return Void();
 }
+
+
+// Receive sampled mutations sent from loader
+ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
+		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), rd->localNodeStatus.role);
+	} else {
+		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Loader_Send_Sample_Mutation_To_Applier cmd\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	state int numMutations = 0;
+	rd->numSampledMutations = 0;
+
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+//				printf("[INFO][Applier] Got Restore Command: cmd:%d UID:%s\n",
+//						req.cmd, req.id.toString().c_str());
+				if ( rd->localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] Node:%s receive request with a different id:%s\n",
+								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier ) {
+					// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
+					state uint64_t commitVersion = req.commitVersion;
+					MutationRef mutation(req.mutation);
+
+					if ( rd->keyOpsCount.find(mutation.param1) == rd->keyOpsCount.end() ) {
+						rd->keyOpsCount.insert(std::make_pair(mutation.param1, 0));
+					}
+					// NOTE: We may receive the same mutation more than once due to network package lost.
+					// Since sampling is just an estimation and the network should be stable enough, we do NOT handle the duplication for now
+					// In a very unreliable network, we may get many duplicate messages and get a bad key-range splits for appliers. But the restore should still work except for running slower.
+					rd->keyOpsCount[mutation.param1]++;
+					rd->numSampledMutations++;
+
+					if ( rd->numSampledMutations % 1000 == 1 ) {
+						printf("[INFO][Applier] Node:%s Receives %d sampled mutations. cur_mutation:%s\n",
+								rd->getNodeID().c_str(), rd->numSampledMutations, mutation.toString().c_str());
+					}
+
+					req.reply.send(RestoreCommandReply(interf.id()));
+				} else if ( req.cmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done ) {
+					printf("[INFO][Applier] NodeID:%s receive all sampled mutations, num_of_total_sampled_muations:%d\n", rd->localNodeStatus.nodeID.toString().c_str(), rd->numSampledMutations);
+					req.reply.send(RestoreCommandReply(interf.id()));
+					break;
+				} else {
+					printf("[WARNING] receiveSampledMutations() master is wating on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, rd->getNodeID().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
+std::vector<Standalone<KeyRef>> calculateAppliersKeyRanges(Reference<RestoreData> rd, int numAppliers) {
+	ASSERT(numAppliers > 0);
+	std::vector<Standalone<KeyRef>> lowerBounds;
+	int intervalLength = rd->numSampledMutations / numAppliers;
+	int curCount = 0;
+	int curInterval = 0;
+
+	for (auto &count : rd->keyOpsCount) {
+		if (curInterval <= curCount / intervalLength) {
+			lowerBounds.push_back(count.first); // The lower bound of the current key range
+			curInterval++;
+		}
+		curCount += count.second;
+	}
+
+	if ( lowerBounds.size() != numAppliers ) {
+		printf("[WARNING] calculateAppliersKeyRanges() WE MAY NOT USE ALL APPLIERS efficiently! num_keyRanges:%d numAppliers:%d\n",
+				lowerBounds.size(), numAppliers);
+	}
+
+	ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
+	if ( lowerBounds.size() > numAppliers ) {
+		printf("[WARNING] Key ranges number:%d > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
+		while ( lowerBounds.size() > numAppliers ) {
+			lowerBounds.pop_back();
+		}
+	}
+
+	return lowerBounds;
+}
+
+// Master applier calculate the key range for appliers
+ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
+		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), rd->localNodeStatus.role);
+	} else {
+		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Calculate_Applier_KeyRange cmd\n",
+				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
+	}
+
+	state int numMutations = 0;
+	state std::vector<Standalone<KeyRef>> keyRangeLowerBounds;
+
+	loop {
+		choose {
+			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				if ( rd->localNodeStatus.nodeID != req.id ) {
+						printf("[ERROR] Node:%s receive request with a different id:%s\n",
+								rd->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+				}
+				if ( req.cmd == RestoreCommandEnum::Calculate_Applier_KeyRange ) {
+					// Applier will calculate applier key range
+					printf("[INFO][Applier] Calculate key ranges for %d appliers\n", req.keyRangeIndex);
+					if ( keyRangeLowerBounds.empty() ) {
+						keyRangeLowerBounds = calculateAppliersKeyRanges(rd, req.keyRangeIndex); // keyRangeIndex is the number of key ranges requested
+					}
+					printf("[INFO][Applier] NodeID:%s: num of key ranges:%d\n",
+							rd->localNodeStatus.nodeID.toString().c_str(), keyRangeLowerBounds.size());
+					req.reply.send(RestoreCommandReply(interf.id(), req.cmdIndex, keyRangeLowerBounds.size()));
+
+				} else if ( req.cmd == RestoreCommandEnum::Get_Applier_KeyRange ) {
+					if ( req.keyRangeIndex < 0 || req.keyRangeIndex > keyRangeLowerBounds.size() ) {
+						printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%d\n",
+								rd->localNodeStatus.nodeID.toString().c_str(), req.keyRangeIndex,  keyRangeLowerBounds.size());
+					}
+
+					printf("[INFO][Applier] NodeID:%s replies Get_Applier_KeyRange. keyRangeIndex:%d lower_bound_of_keyRange:%s\n",
+							rd->localNodeStatus.nodeID.toString().c_str(), req.keyRangeIndex, getHexString(keyRangeLowerBounds[req.keyRangeIndex]).c_str());
+
+					req.reply.send(RestoreCommandReply(interf.id(), req.cmdIndex, keyRangeLowerBounds[req.keyRangeIndex]));
+				} else if ( req.cmd == RestoreCommandEnum::Get_Applier_KeyRange_Done ) {
+					printf("[INFO][Applier] NodeID:%s replies Get_Applier_KeyRange_Done\n",
+							rd->localNodeStatus.nodeID.toString().c_str());
+					req.reply.send(RestoreCommandReply(interf.id()));
+					break;
+				} else {
+					printf("[WARNING] calculateApplierKeyRange() master is waiting on cmd:%d for node:%s due to message lost, we reply to it.\n", req.cmd, rd->getNodeID().c_str());
+					req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+				}
+			}
+		}
+	}
+
+	return Void();
+}
+
 
 // Receive mutations sent from loader
 ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInterface interf) {
@@ -1973,18 +2120,225 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> restoreData,
 	return Void();
 }
 
-// Increase key value in the keyRange to get a spliced key range
-// The key range is (\x00, \xff)
-/*
-// This function is not compilable
-int IncreaseKeyRef(KeyRef key, int step) {
-	ASSERT(key.size() == 1);
-	//char* p = &key[0];
-	//*p = *p + step;
-	*mutateString(key) = key[0] + step;
-	return (int) key[0];
+ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
+	state Key tagName = request.tagName;
+	state Key url = request.url;
+	state bool waitForComplete = request.waitForComplete;
+	state Version targetVersion = request.targetVersion;
+	state bool verbose = request.verbose;
+	state KeyRange restoreRange = request.range;
+	state Key addPrefix = request.addPrefix;
+	state Key removePrefix = request.removePrefix;
+	state bool lockDB = request.lockDB;
+	state UID randomUid = request.randomUid;
+	state Key mutationLogPrefix = restoreConfig->mutationLogPrefix();
+
+	state bool allLoadReqsSent = false;
+	state std::vector<UID> loaderIDs = getLoaderIDs(rd);
+	state std::vector<UID> applierIDs = getApplierIDs(rd);
+	state std::vector<UID> finishedLoaderIDs;
+	state int sampleMB = 10;
+	state int sampleB = 10 * 1024 * 1024; // Sample a block for every sampleB bytes.
+	state int curFileIndex = 0;
+	state int curFileOffset = 0;
+	state int loadSizeB = 0;
+	state int loadingCmdIndex = 0;
+	state int sampleIndex = 0;
+
+	loop {
+		if ( allLoadReqsSent ) {
+			break; // All load requests have been handled
+		}
+		wait(delay(1.0));
+
+		state std::vector<Future<RestoreCommandReply>> cmdReplies;
+		printf("[INFO] We will sample the workload among %d backup files.\n", rd->files.size());
+		for (auto &loaderID : loaderIDs) {
+			while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
+				// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
+				printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
+						rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
+				curFileIndex++;
+			}
+			// Find the next sample point
+			while ( loadSizeB / sampleB < sampleIndex && curFileIndex < rd->files.size() ) {
+				while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
+					// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
+					printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
+							rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
+					curFileIndex++;
+				}
+				if ( loadSizeB / sampleB >= sampleIndex ) {
+					break;
+				}
+				loadSizeB += rd->files[curFileIndex].blockSize;
+				curFileOffset++;
+				if ( curFileOffset *  rd->files[curFileIndex].blockSize >= rd->files[curFileIndex].fileSize ) {
+					curFileOffset = 0;
+					curFileIndex++;
+				}
+			}
+			if ( curFileIndex >= rd->files.size() ) {
+				allLoadReqsSent = true;
+				break;
+			}
+
+			printf("[Sampling][File:%d] filename:%s offset:%d blockSize:%d filesize:%d\n",
+					curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
+					rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize);
+			sampleIndex++;
+
+
+			LoadingParam param;
+			param.url = request.url;
+			param.version = rd->files[curFileIndex].version;
+			param.filename = rd->files[curFileIndex].fileName;
+			param.offset = curFileOffset;
+			//param.length = std::min(restoreData->files[curFileIndex].fileSize - restoreData->files[curFileIndex].cursor, loadSizeB);
+			param.length = std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - curFileOffset);
+			//loadSizeB = param.length;
+			param.blockSize = rd->files[curFileIndex].blockSize;
+			param.restoreRange = restoreRange;
+			param.addPrefix = addPrefix;
+			param.removePrefix = removePrefix;
+			param.mutationLogPrefix = mutationLogPrefix;
+			if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < rd->files[curFileIndex].fileSize) ) {
+				printf("[ERROR] param: length:%d offset:%d fileSize:%d for %dth filename:%s\n",
+						param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
+						rd->files[curFileIndex].fileName.c_str());
+			}
+			ASSERT( param.length > 0 );
+			ASSERT( param.offset >= 0 );
+			ASSERT( param.offset < rd->files[curFileIndex].fileSize );
+			UID nodeID = loaderID;
+
+			ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
+			RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+			printf("[Sampling][CMD] Loading %s on node %s\n", param.toString().c_str(), nodeID.toString().c_str());
+			RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_Range_File;
+			if (!rd->files[curFileIndex].isRange) {
+				cmdType = RestoreCommandEnum::Sample_Log_File;
+			}
+			printf("[Sampling] Master cmdType:%d isRange:%d\n", (int) cmdType, (int) rd->files[curFileIndex].isRange);
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, nodeID, loadingCmdIndex, param)) );
+			if (param.length <= loadSizeB) { // Reach the end of the file
+				curFileIndex++;
+			}
+			if ( curFileIndex >= rd->files.size() ) {
+				allLoadReqsSent = true;
+				break;
+			}
+			++loadingCmdIndex;
+		}
+
+		printf("[Sampling] Wait for %d loaders to accept the cmd Sample_Range_File or Sample_Log_File\n", cmdReplies.size());
+
+
+		if ( !cmdReplies.empty() ) {
+			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+
+			finishedLoaderIDs.clear();
+			for (int i = 0; i < reps.size(); ++i) {
+				printf("[Sampling] Get restoreCommandReply value:%s for  Sample_Range_File or Sample_Log_File\n",
+						reps[i].id.toString().c_str());
+				finishedLoaderIDs.push_back(reps[i].id);
+				int64_t repLoadingCmdIndex = reps[i].cmdIndex;
+			}
+			loaderIDs = finishedLoaderIDs;
+		}
+
+		if (allLoadReqsSent) {
+			break; // NOTE: need to change when change to wait on any cmdReplies
+		}
+	}
+
+	// Signal the end of sampling for loaders
+	loaderIDs = getLoaderIDs(rd); // Reset loaderIDs
+	cmdReplies.clear();
+	loop {
+		for (auto &loaderID : loaderIDs) {
+			UID nodeID = loaderID;
+
+			ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
+			RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+			printf("[Sampling][CMD] Signal the end of sampling to node %s\n", nodeID.toString().c_str());
+			RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_File_Done;
+
+			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, nodeID)) );
+		}
+
+		printf("[Sampling] Wait for %d loaders to accept the cmd Sample_File_Done\n", cmdReplies.size());
+
+		if ( !cmdReplies.empty() ) {
+			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies )); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
+
+			for (int i = 0; i < reps.size(); ++i) {
+				printf("[Sampling] Get restoreCommandReply value:%s for Sample_File_Done\n",
+						reps[i].id.toString().c_str());
+			}
+		}
+
+		break;
+	}
+
+	printf("[Sampling][Master] Finish sampling the backup workload. Next: Ask the master applier for appliers key range boundaries.\n");
+	// Signal the end of sampling for the master applier and calculate the key ranges for appliers
+
+	cmdReplies.clear();
+	ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+ 	RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+	printf("[Sampling][CMD] Signal master applier %s Loader_Send_Sample_Mutation_To_Applier_Done\n", rd->masterApplier.toString().c_str());
+	RestoreCommandReply rep = wait( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, rd->masterApplier, loadingCmdIndex, applierIDs.size())) );
+	printf("[Sampling][CMDRep] Ack from master applier: %s  for Loader_Send_Sample_Mutation_To_Applier_Done\n",  rd->masterApplier.toString().c_str());
+
+
+	RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+	printf("[Sampling][CMD] Ask master applier %s for the key ranges for appliers\n", rd->masterApplier.toString().c_str());
+	ASSERT(applierIDs.size() > 0);
+	RestoreCommandReply rep = wait( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Calculate_Applier_KeyRange, rd->masterApplier, loadingCmdIndex, applierIDs.size())) );
+	printf("[Sampling][CMDRep] number of key ranges calculated by master applier\n", rep.num);
+	state int numKeyRanges = rep.num;
+
+	if ( numKeyRanges < applierIDs.size() ) {
+		printf("[WARNING][Sampling] numKeyRanges:%d < appliers number:%d. %d appliers will not be used!\n",
+				numKeyRanges, applierIDs.size(), applierIDs.size() - numKeyRanges);
+	}
+
+
+	for (int i = 0; i < applierIDs.size() && i < numKeyRanges; ++i) {
+		UID applierID = applierIDs[i];
+		printf("[Sampling][Master] Ask masterApplier:%s for the lower boundary of the key range for applier:%s\n", rd->masterApplier.toString().c_str(), applierID.toString().c_str());
+		ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+		RestoreCommandInterface& masterApplierCmdInterf = rd->workers_interface[rd->masterApplier];
+		cmdReplies.push_back( masterApplierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Get_Applier_KeyRange, rd->masterApplier, loadingCmdIndex, i)) );
+	}
+	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
+
+	for (int i = 0; i < applierIDs.size() && i < numKeyRanges; ++i) {
+		UID applierID = applierIDs[i];
+		Standalone<KeyRef> lowerBound;
+		if (i < numKeyRanges) {
+			lowerBound = reps[i].lowerBound;
+		} else {
+			lowerBound = normalKeys.end;
+		}
+
+		if (i == 0) {
+			lowerBound = LiteralStringRef("\x00"); // The first interval must starts with the smallest possible key
+		}
+		printf("[INFO] Assign key-to-applier map: Key:%s -> applierID:%s\n",
+				getHexString(lowerBound).c_str(), applierID.toString().c_str());
+		rd->range2Applier.insert(std::make_pair(lowerBound, applierID));
+	}
+
+	printf("[Sampling][CMD] Singal master applier the end of sampling\n");
+	RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+	RestoreCommandReply rep = wait( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Get_Applier_KeyRange_Done, rd->masterApplier, loadingCmdIndex, applierIDs.size())) );
+	printf("[Sampling][CMDRep] master applier has acked the cmd Get_Applier_KeyRange_Done\n");
+
+	return Void();
+
 }
-*/
 
 // TODO WiP: Distribution workload
 ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
@@ -2010,30 +2364,33 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	ASSERT( numLoaders > 0 );
 	ASSERT( numAppliers > 0 );
 
-	KeyRef maxKey = normalKeys.end;
-	KeyRef minKey = normalKeys.begin;
-	if (minKey.size() != 1) {
-		printf("[WARNING] normalKeys starts with a key with size %d! set the start key as \\00\n", minKey.size());
-		minKey= LiteralStringRef("\x00");
-	}
-	ASSERT(maxKey.size() == 1);
-	ASSERT(minKey.size() == 1);
-	KeyRange normalKeyRange(KeyRangeRef(minKey, maxKey)); // [empty, \ff)
-
-	int distOfNormalKeyRange = (int) (maxKey[0] - minKey[0]);
-	int step = distOfNormalKeyRange / numAppliers;
-	printf("[INFO] distOfNormalKeyRange:%d, step:%d\n", distOfNormalKeyRange, step);
-
-	//Assign key range to applier ID
-	std::vector<UID> applierIDs = getApplierIDs(restoreData);
-	Standalone<KeyRef> curLowerBound = minKey;
-	for (int i = 0; i < applierIDs.size(); ++i) {
-		printf("[INFO] Assign key-to-applier map: Key:%s (%d) -> applierID:%s\n",
-				getHexString(curLowerBound).c_str(), curLowerBound[0], applierIDs[i].toString().c_str());
-		restoreData->range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
-		uint8_t val = curLowerBound[0] + step;
-		curLowerBound = KeyRef(&val, 1);
-	}
+	// TODO: WiP Sample backup files to determine the key range for appliers
+	wait( sampleWorkload(restoreData, request, restoreConfig) );
+//
+//	KeyRef maxKey = normalKeys.end;
+//	KeyRef minKey = normalKeys.begin;
+//	if (minKey.size() != 1) {
+//		printf("[WARNING] normalKeys starts with a key with size %d! set the start key as \\00\n", minKey.size());
+//		minKey= LiteralStringRef("\x00");
+//	}
+//	ASSERT(maxKey.size() == 1);
+//	ASSERT(minKey.size() == 1);
+//	KeyRange normalKeyRange(KeyRangeRef(minKey, maxKey)); // [empty, \ff)
+//
+//	int distOfNormalKeyRange = (int) (maxKey[0] - minKey[0]);
+//	int step = distOfNormalKeyRange / numAppliers;
+//	printf("[INFO] distOfNormalKeyRange:%d, step:%d\n", distOfNormalKeyRange, step);
+//
+//	//Assign key range to applier ID
+//	std::vector<UID> applierIDs = getApplierIDs(restoreData);
+//	Standalone<KeyRef> curLowerBound = minKey;
+//	for (int i = 0; i < applierIDs.size(); ++i) {
+//		printf("[INFO] Assign key-to-applier map: Key:%s (%d) -> applierID:%s\n",
+//				getHexString(curLowerBound).c_str(), curLowerBound[0], applierIDs[i].toString().c_str());
+//		restoreData->range2Applier.insert(std::make_pair(curLowerBound, applierIDs[i]));
+//		uint8_t val = curLowerBound[0] + step;
+//		curLowerBound = KeyRef(&val, 1);
+//	}
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
 	wait( assignKeyRangeToAppliers(restoreData, cx) );
@@ -2134,7 +2491,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 				++loadingCmdIndex;
 			}
 
-			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_Range_File\n", cmdReplies.size());
+			printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_File\n", cmdReplies.size());
 
 			// Question: How to set reps to different value based on cmdReplies.empty()?
 			if ( !cmdReplies.empty() ) {
@@ -2142,7 +2499,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
-					printf("[INFO] get restoreCommandReply value:%s for Assign_Loader_File\n",
+					printf("[INFO] Get Ack from node:%s for Assign_Loader_File\n",
 							reps[i].id.toString().c_str());
 					finishedLoaderIDs.push_back(reps[i].id);
 					int64_t repLoadingCmdIndex = reps[i].cmdIndex;
@@ -2386,6 +2743,167 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> restoreData, RestoreCom
 	return Void();
 }
 
+// sample's loading handler
+ACTOR Future<Void> sampleHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+	printf("[INFO] Worker Node:%s Role:%s starts sampleHandler\n",
+			restoreData->localNodeStatus.nodeID.toString().c_str(),
+			getRoleStr(restoreData->localNodeStatus.role).c_str());
+
+	try {
+		state int64_t cmdIndex = 0;
+		state LoadingParam param;
+		state int64_t beginBlock = 0;
+		state int64_t j = 0;
+		state int64_t readLen = 0;
+		state int64_t readOffset = 0;
+		state Reference<IBackupContainer> bc;
+		loop {
+			//wait(delay(1.0));
+			choose {
+				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+					printf("[INFO][Loader] Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
+							req.cmd, req.id.toString().c_str(), restoreData->localNodeStatus.role);
+					if ( interf.id() != req.id ) {
+							printf("[WARNING] node:%s receive request with a different id:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(), req.id.toString().c_str());
+					}
+
+					cmdIndex = req.cmdIndex;
+					param = req.loadingParam;
+					beginBlock = 0;
+					j = 0;
+					readLen = 0;
+					readOffset = 0;
+					readOffset = param.offset;
+					if ( req.cmd == RestoreCommandEnum::Sample_Range_File ) {
+						printf("[INFO][Loader] Sample_Range_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+						// Note: handle duplicate message delivery
+						// Assume one file is only sampled once!
+//						if (restoreData->processedFiles.find(param.filename) != restoreData->processedFiles.end()) {
+//							printf("[WARNING] CMD for file:%s is delivered more than once! Reply directly without sampling the file again\n",
+//									param.filename.c_str());
+//							req.reply.send(RestoreCommandReply(interf.id()));
+//							continue;
+//						}
+
+						bc = IBackupContainer::openContainer(param.url.toString());
+						printf("[INFO] node:%s open backup container for url:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.url.toString().c_str());
+
+
+						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+						restoreData->mutationMap.clear();
+						restoreData->mutationPartMap.clear();
+
+						ASSERT( param.blockSize > 0 );
+						//state std::vector<Future<Void>> fileParserFutures;
+						if (param.offset % param.blockSize != 0) {
+							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+						}
+
+						ASSERT( param.offset + param.blockSize >= param.length ); // We only sample one data block or less (at the end of the file) of a file.
+						for (j = param.offset; j < param.length; j += param.blockSize) {
+							readOffset = j;
+							readLen = std::min<int64_t>(param.blockSize, param.length - j);
+							wait( _parseRangeFileToMutationsOnLoader(restoreData, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
+							++beginBlock;
+						}
+
+						printf("[INFO][Loader] Node:%s finishes sample Range file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						// TODO: Send to applier to apply the mutations
+						printf("[INFO][Loader] Node:%s will send sampled mutations to applier\n", restoreData->getNodeID().c_str());
+						wait( registerMutationsToMasterApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
+
+						//restoreData->processedFiles.insert(std::make_pair(param.filename, 1));
+
+						//TODO: Send ack to master that loader has finished loading the data
+						req.reply.send(RestoreCommandReply(interf.id()));
+						//leaderInter.cmd.send(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, restoreData->localNodeStatus.nodeID, cmdIndex));
+
+					} else if (req.cmd == RestoreCommandEnum::Sample_Log_File) {
+						printf("[INFO][Loader] Sample_Log_File Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+						//Note: handle duplicate message delivery
+//						if (restoreData->processedFiles.find(param.filename) != restoreData->processedFiles.end()) {
+//							printf("[WARNING] CMD for file:%s is delivered more than once! Reply directly without sampling the file again\n",
+//									param.filename.c_str());
+//							req.reply.send(RestoreCommandReply(interf.id()));
+//							continue;
+//						}
+
+						bc = IBackupContainer::openContainer(param.url.toString());
+						printf("[INFO][Loader] Node:%s open backup container for url:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.url.toString().c_str());
+						printf("[INFO][Loader] Node:%s filename:%s blockSize:%d\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								param.filename.c_str(), param.blockSize);
+
+						restoreData->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+						restoreData->mutationMap.clear();
+						restoreData->mutationPartMap.clear();
+
+						ASSERT( param.blockSize > 0 );
+						//state std::vector<Future<Void>> fileParserFutures;
+						if (param.offset % param.blockSize != 0) {
+							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+						}
+						ASSERT( param.offset + param.blockSize == param.length ); // Assumption: Only sample one data block.
+						for (j = param.offset; j < param.length; j += param.blockSize) {
+							readOffset = j;
+							readLen = std::min<int64_t>(param.blockSize, param.length - j);
+							// NOTE: Log file holds set of blocks of data. We need to parse the data block by block and get the kv pair(version, serialized_mutations)
+							// The set of mutations at the same version may be splitted into multiple kv pairs ACROSS multiple data blocks when the size of serialized_mutations is larger than 20000.
+							wait( _parseLogFileToMutationsOnLoader(restoreData, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix, param.mutationLogPrefix) );
+							++beginBlock;
+						}
+						printf("[INFO][Loader] Node:%s finishes parsing the data block into kv pairs (version, serialized_mutations) for file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						parseSerializedMutation(restoreData);
+
+						printf("[INFO][Loader] Node:%s finishes process Log file:%s\n", restoreData->getNodeID().c_str(), param.filename.c_str());
+						printf("[INFO][Loader] Node:%s will send log mutations to applier\n", restoreData->getNodeID().c_str());
+						wait( registerMutationsToMasterApplier(restoreData) ); // Send the parsed mutation to applier who will apply the mutation to DB
+
+						//restoreData->processedFiles.insert(std::make_pair(param.filename, 1));
+
+						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					} else if (req.cmd == RestoreCommandEnum::Sample_File_Done) {
+							printf("[INFO][Loader] Node: %s, role: %s, loading param:%s\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str(),
+								param.toString().c_str());
+
+							req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+							printf("[INFO][Loader] Node: %s, role: %s, At the end of sampling. Proceed to the next step!\n",
+								restoreData->localNodeStatus.nodeID.toString().c_str(),
+								getRoleStr(restoreData->localNodeStatus.role).c_str());
+							break;
+					} else {
+						printf("[ERROR][Loader] Expecting command:%d, %d, %d. Receive unexpected restore command %d. Directly reply to master to avoid stucking master\n",
+								RestoreCommandEnum::Sample_Range_File, RestoreCommandEnum::Sample_Log_File, RestoreCommandEnum::Sample_File_Done, req.cmd);
+						req.reply.send(RestoreCommandReply(interf.id())); // master node is waiting
+					}
+				}
+			}
+		}
+
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream) {
+			printf("[ERROR][Loader] Node:%s sampleHandler has error:%s(code:%d)\n", restoreData->getNodeID().c_str(), e.what(), e.code());
+		}
+	}
+
+	return Void();
+}
+
 
 ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> restoreData, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
 	printf("[INFO] Worker Node:%s Role:%s starts applyToDBHandler\n",
@@ -2602,6 +3120,12 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		// Step: prepare restore info: applier waits for the responsible keyRange,
 		// loader waits for the info of backup block it needs to load
 		if ( restoreData->localNodeStatus.role == RestoreRole::Applier ) {
+			if ( restoreData->masterApplier.toString() == restoreData->localNodeStatus.nodeID.toString() ) {
+				printf("[INFO][Master Applier] Waits for the mutations from the sampled backup data\n");
+				wait(receiveSampledMutations(restoreData, interf));
+				wait(calculateApplierKeyRange(restoreData, interf));
+			}
+
 			printf("[INFO][Applier] Waits for the assignment of key range\n");
 			wait( assignKeyRangeToAppliersHandler(restoreData, interf) );
 
@@ -2611,11 +3135,15 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			printf("[INFO][Applier] Waits for the cmd to apply mutations\n");
 			wait( applyMutationToDB(restoreData, interf, cx) );
 		} else if ( restoreData->localNodeStatus.role == RestoreRole::Loader ) {
+			printf("[INFO][Loader] Waits to sample backup data\n");
+			wait( sampleHandler(restoreData, interf, leaderInterf.get()) );
+
 			printf("[INFO][Loader] Waits for appliers' key range\n");
 			wait( notifyAppliersKeyRangeToLoaderHandler(restoreData, interf) );
 			printAppliersKeyRange(restoreData);
 
-			printf("[INFO][Loader] Waits for the backup file assignment\n");
+			printf("[INFO][Loader] Waits for the backup file assignment after reset processedFiles\n");
+			restoreData->processedFiles.clear();
 			wait( loadingHandler(restoreData, interf, leaderInterf.get()) );
 
 			//printf("[INFO][Loader] Waits for the command to ask applier to apply mutations to DB\n");
@@ -3351,6 +3879,50 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 		cmdReplies.clear();
 	}
 	printf("[Summary][Loader] Node:%s produces %d mutation operations\n", rd->getNodeID().c_str(), kvCount);
+
+	return Void();
+}
+
+ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
+	printf("[INFO][Loader] registerMutationsToMaster() Applier Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+			rd->getNodeID().c_str(), rd->masterApplier.toString().c_str(),
+			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
+	//printAppliersKeyRange(rd);
+
+	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+	state UID applierID = rd->masterApplier;
+	state int packMutationNum = 0;
+	state int packMutationThreshold = 1;
+	state int kvCount = 0;
+	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+
+	state int splitMutationIndex = 0;
+
+	state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
+	for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
+		state uint64_t commitVersion = kvOp->first;
+		state int mIndex;
+		state MutationRef kvm;
+		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
+			kvm = kvOp->second[mIndex];
+			cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier, applierID, commitVersion, kvm)));
+			packMutationNum++;
+			kvCount++;
+			if (packMutationNum >= packMutationThreshold) {
+				ASSERT( packMutationNum == packMutationThreshold );
+				//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+				std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
+				cmdReplies.clear();
+				packMutationNum = 0;
+			}
+		}
+	}
+
+	if (!cmdReplies.empty()) {
+		std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+		cmdReplies.clear();
+	}
+	printf("[Sample Summary][Loader] Node:%s produces %d mutation operations\n", rd->getNodeID().c_str(), kvCount);
 
 	return Void();
 }

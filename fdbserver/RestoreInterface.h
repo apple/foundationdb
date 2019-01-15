@@ -83,7 +83,10 @@ enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRa
 								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8,
 								Apply_Mutation_To_DB = 9, Apply_Mutation_To_DB_Skip = 10,
 								Loader_Notify_Appler_To_Apply_Mutation = 11,
-								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13};
+								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13,
+								Sample_Range_File = 14, Sample_Log_File = 15, Sample_File_Done = 16,
+								Loader_Send_Sample_Mutation_To_Applier = 17, Loader_Send_Sample_Mutation_To_Applier_Done = 18,
+								Calculate_Applier_KeyRange = 19, Get_Applier_KeyRange=20, Get_Applier_KeyRange_Done = 21};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
@@ -96,6 +99,7 @@ struct RestoreCommand {
 	MutationRef mutation;
 	KeyRef applierKeyRangeLB;
 	UID applierID;
+	int keyRangeIndex;
 
 
 	struct LoadingParam {
@@ -135,6 +139,7 @@ struct RestoreCommand {
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role, UID masterApplier) : cmd(cmd), id(id), role(role), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRange keyRange): cmd(cmd), id(id), keyRange(keyRange) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, LoadingParam loadingParam): cmd(cmd), id(id), cmdIndex(cmdIndex), loadingParam(loadingParam) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, int keyRangeIndex): cmd(cmd), id(id), cmdIndex(cmdIndex), keyRangeIndex(keyRangeIndex) {};
 	// For loader send mutation to applier
 	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), id(id), commitVersion(commitVersion), mutation(mutation) {};
 	// Notify loader about applier key ranges
@@ -142,7 +147,7 @@ struct RestoreCommand {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & loadingParam & reply;
+		ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
 	}
 };
 typedef RestoreCommand::LoadingParam LoadingParam;
@@ -150,14 +155,18 @@ typedef RestoreCommand::LoadingParam LoadingParam;
 struct RestoreCommandReply {
 	UID id; // placeholder, which reply the worker's node id back to master
 	int64_t cmdIndex;
+	int num; // num is the number of key ranges calculated for appliers
+	Standalone<KeyRef> lowerBound;
 
 	RestoreCommandReply() : id(UID()) {}
 	explicit RestoreCommandReply(UID id) : id(id) {}
 	explicit RestoreCommandReply(UID id, int64_t cmdIndex) : id(id), cmdIndex(cmdIndex) {}
+	explicit RestoreCommandReply(UID id, int64_t cmdIndex, int num) : id(id), cmdIndex(cmdIndex), num(num) {}
+	explicit RestoreCommandReply(UID id, int64_t cmdIndex, KeyRef lowerBound) : id(id), cmdIndex(cmdIndex), lowerBound(lowerBound) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & id & cmdIndex;
+		ar & id & cmdIndex & num & lowerBound;
 	}
 };
 
