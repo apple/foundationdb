@@ -474,7 +474,7 @@ public:
 		bool operator < (RoleFitness const& r) const {
 			if (worstFit != r.worstFit) return worstFit < r.worstFit;
 			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.  
-			if ((role != ProcessClass::TLog || role != ProcessClass::LogRouter) && bestFit != r.bestFit) return bestFit < r.bestFit;
+			if (role != ProcessClass::TLog && role != ProcessClass::LogRouter && bestFit != r.bestFit) return bestFit < r.bestFit;
 			return count > r.count;
 		}
 
