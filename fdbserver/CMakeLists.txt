@@ -247,7 +247,9 @@ function(add_fdb_test)
     ${BUGGIFY_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-  set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout})
+	get_filename_component(test_dir_full ${first_file} DIRECTORY)
+	get_filename_component(test_dir ${test_dir_full} NAME)
+	set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
 endfunction()
 
 add_fdb_test(TEST_FILES ${PROJECT_SOURCE_DIR}/tests/AsyncFileCorrectness.txt UNIT)
