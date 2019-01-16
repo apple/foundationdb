@@ -27,6 +27,10 @@ THIS SOFTWARE IS PROVIDED BY DMITRY VYUKOV "AS IS" AND ANY EXPRESS OR IMPLIED WA
 
 The views and conclusions contained in the software and documentation are those of the authors and should not be interpreted as representing official policies, either expressed or implied, of Dmitry Vyukov.*/
 
+#if VALGRIND
+#include <drd.h>
+#endif
+
 template <class T>
 class ThreadSafeQueue : NonCopyable {
 	struct BaseNode {
@@ -85,40 +89,81 @@ public:
 		this->stub.next = 0;
 		this->sleeping.next = 0;
 		this->sleepy = false;
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_CREATE(this)
+#endif
 	}
 	~ThreadSafeQueue() {
 		while (pop().present());
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_DESTROY(this)
+#endif
 	}
 
 	// If push() returns true, the consumer may be sleeping and should be woken
 	bool push( T const& data ) {
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_ACQUIRED(this, 1);
+#endif
 		Node* n = new Node(data);
 		n->data = data;
-		return pushNode( n ) == &sleeping;
+		bool result = pushNode( n ) == &sleeping;
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
+		return result;
 	}
 
 	///////////// The below functions may only be called by a single, consumer thread //////////////////
 
 	// If canSleep returns true, then the queue is empty and the next push() will return true
 	bool canSleep() {
-		if (sleepy) return false;  // We already have sleeping in the queue from a previous call to canSleep.  Pop it and then maybe you can sleep!
-		if (this->tail != &stub || this->tail->next != 0) return false;  // There is definitely something in the queue.  This is a rejection test not needed for correctness, but avoids calls to pushNode
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_ACQUIRED(this, 1);
+#endif
+		if (sleepy) {
+#ifdef VALGRIND
+			ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
+			return false;  // We already have sleeping in the queue from a previous call to canSleep.  Pop it and then maybe you can sleep!
+		}
+		if (this->tail != &stub || this->tail->next != 0) {
+#ifdef VALGRIND
+			ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
+			return false;  // There is definitely something in the queue.  This is a rejection test not needed for correctness, but avoids calls to pushNode
+		}
 		// sleeping is definitely not in the queue, so we can safely try...
 		bool ok = pushNode( &sleeping ) == &stub;
 		sleepy = true; // sleeping is in the queue, regardless of whether it's the first thing; we need to pop it before sleeping again
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
 		return ok;
 	}
 
 	Optional<T> pop() {
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_ACQUIRED(this, 1);
+#endif
 		BaseNode* b = popNode();
 		if (b == &sleeping) { sleepy = false; b = popNode(); }
 		if ( b == &sleeping ) ASSERT(false);
 		if ( b == &stub ) ASSERT(false);
-		if (!b) return Optional<T>();
+		if (!b) {
+#ifdef VALGRIND
+			ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
+			return Optional<T>();
+		}
 
 		Node* n = (Node*)b;
 		T data = std::move(n->data);
 		delete n;
+
+#ifdef VALGRIND
+		ANNOTATE_RWLOCK_RELEASED(this, 1);
+#endif
 		return Optional<T>( std::move(data) );
 	}
 };
