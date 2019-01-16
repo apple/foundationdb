@@ -115,5 +115,5 @@ void ErrorCodeTable::addCode(int code, const char *name, const char *description
 }
 
 bool isAssertDisabled(int line) {
-	return FLOW_KNOBS->DISABLE_ASSERTS == -1 || FLOW_KNOBS->DISABLE_ASSERTS == line;
+	return FLOW_KNOBS && (FLOW_KNOBS->DISABLE_ASSERTS == -1 || FLOW_KNOBS->DISABLE_ASSERTS == line);
 }

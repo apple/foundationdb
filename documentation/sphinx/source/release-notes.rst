@@ -2,7 +2,47 @@
 Release Notes
 #############
 
+6.0.18
+======
+
+Fixes
+-----
+
+* Backup metadata could falsely indicate that a backup is not usable. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause backup expire and delete operations to skip some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Blobstore request failures could cause restore to fail to apply some files. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+* Storage servers with large amounts of data would pause for a short period of time after rebooting. `(PR #1001) <https://github.com/apple/foundationdb/pull/1001>`_
+* The client library could leak memory when a thread died. `(PR #1011) <https://github.com/apple/foundationdb/pull/1011>`_
+
+Features
+--------
+
+* Added the ability to specify versions as version-days ago from latest log in backup. `(PR #1007) <https://github.com/apple/foundationdb/pull/1007>`_
+
+6.0.17
+======
+
+Fixes
+-----
+
+* Existing backups did not make progress when upgraded to 6.0.16. `(PR #962) <https://github.com/apple/foundationdb/pull/962>`_
+
 6.0.16
+======
+
+Performance
+-----------
+
+* Added a new backup folder scheme which results in far fewer kv range folders. `(PR #939) <https://github.com/apple/foundationdb/pull/939>`_
+
+Fixes
+-----
+
+* Blobstore REST client attempted to create buckets that already existed. `(PR #923) <https://github.com/apple/foundationdb/pull/923>`_
+* DNS would fail if IPv6 responses were received. `(PR #945) <https://github.com/apple/foundationdb/pull/945>`_
+* Backup expiration would occasionally fail due to an incorrect assert.  `(PR #926) <https://github.com/apple/foundationdb/pull/926>`_
+
+6.0.15
 ======
 
 Features
@@ -68,7 +108,6 @@ Fixes
 * HTTP client used by backup-to-blobstore now correctly treats response header field names as case insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
 * Blobstore REST client was not following the S3 API in several ways (bucket name, date, and response formats). [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
 * Data distribution could queue shard movements for restoring replication at a low priority. [6.0.15] `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
-* Blobstore REST client will no longer attempt to create a bucket that already exists. [6.0.16]  `(PR #923) <https://github.com/apple/foundationdb/pull/923>`_
 
 Fixes only impacting 6.0.0+
 ---------------------------

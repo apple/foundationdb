@@ -101,8 +101,9 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	   the directory we're deleting doesn't exist in the first
 	   place */
 	if (error && errno != ENOENT) {
-		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		throw e;
 	}
 #else
 #error Port me!
