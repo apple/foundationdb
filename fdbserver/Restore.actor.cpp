@@ -1702,15 +1702,28 @@ ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreCom
 	return Void();
 }
 
+void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
+	printf("[INFO] Print out %d keys in the lowerbounds\n", lowerBounds.size());
+	for (int i = 0; i < lowerBounds.size(); i++) {
+		printf("\t[INFO][%d] %s\n", i, getHexString(lowerBounds[i]).c_str());
+	}
+}
+
 std::vector<Standalone<KeyRef>> calculateAppliersKeyRanges(Reference<RestoreData> rd, int numAppliers) {
 	ASSERT(numAppliers > 0);
 	std::vector<Standalone<KeyRef>> lowerBounds;
-	int intervalLength = rd->numSampledMutations / numAppliers;
+	//intervalLength = (numSampledMutations - remainder) / (numApplier - 1)
+	int intervalLength = std::max(rd->numSampledMutations / numAppliers, 1); // minimal length is 1
 	int curCount = 0;
 	int curInterval = 0;
 
+
+
+	printf("[INFO] calculateAppliersKeyRanges(): numSampledMutations:%d numAppliers:%d intervalLength:%d\n",
+			rd->numSampledMutations, numAppliers, intervalLength);
 	for (auto &count : rd->keyOpsCount) {
 		if (curInterval <= curCount / intervalLength) {
+			printf("[INFO] calculateAppliersKeyRanges(): Add a new key range %d: curCount:%d\n", curInterval, curCount);
 			lowerBounds.push_back(count.first); // The lower bound of the current key range
 			curInterval++;
 		}
@@ -1720,14 +1733,17 @@ std::vector<Standalone<KeyRef>> calculateAppliersKeyRanges(Reference<RestoreData
 	if ( lowerBounds.size() != numAppliers ) {
 		printf("[WARNING] calculateAppliersKeyRanges() WE MAY NOT USE ALL APPLIERS efficiently! num_keyRanges:%d numAppliers:%d\n",
 				lowerBounds.size(), numAppliers);
+		printLowerBounds(lowerBounds);
 	}
 
-	ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
+	//ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
 	if ( lowerBounds.size() > numAppliers ) {
 		printf("[WARNING] Key ranges number:%d > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
-		while ( lowerBounds.size() > numAppliers ) {
-			lowerBounds.pop_back();
-		}
+	}
+
+	while ( lowerBounds.size() > numAppliers ) {
+		printf("[WARNING] Key ranges number:%d > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
+		lowerBounds.pop_back();
 	}
 
 	return lowerBounds;
@@ -2144,6 +2160,16 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state int loadSizeB = 0;
 	state int loadingCmdIndex = 0;
 	state int sampleIndex = 0;
+	state double totalBackupSizeB = 0;
+	state double samplePercent = 0.01;
+
+	// We should sample 1% data
+	for (int i = 0; i < rd->files.size(); i++) {
+		totalBackupSizeB += rd->files[i].fileSize;
+	}
+	sampleB = std::max((int) (samplePercent * totalBackupSizeB), 1024 * 1024); // The minimal sample size is 1MB
+	printf("[INFO] totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d\n",
+			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB);
 
 	loop {
 		if ( allLoadReqsSent ) {
@@ -2153,6 +2179,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 		state std::vector<Future<RestoreCommandReply>> cmdReplies;
 		printf("[INFO] We will sample the workload among %d backup files.\n", rd->files.size());
+		printf("[INFO] totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d\n",
+			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB);
 		for (auto &loaderID : loaderIDs) {
 			while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
 				// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
@@ -2162,16 +2190,21 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 			// Find the next sample point
 			while ( loadSizeB / sampleB < sampleIndex && curFileIndex < rd->files.size() ) {
-				while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
+				if (rd->files[curFileIndex].fileSize == 0) {
 					// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
 					printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
 							rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
 					curFileIndex++;
+					curFileOffset = 0;
+					continue;
 				}
 				if ( loadSizeB / sampleB >= sampleIndex ) {
 					break;
 				}
-				loadSizeB += rd->files[curFileIndex].blockSize;
+				if (curFileIndex >= rd->files.size()) {
+					break;
+				}
+				loadSizeB += std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - curFileOffset * rd->files[curFileIndex].blockSize);
 				curFileOffset++;
 				if ( curFileOffset *  rd->files[curFileIndex].blockSize >= rd->files[curFileIndex].fileSize ) {
 					curFileOffset = 0;
@@ -2186,6 +2219,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			printf("[Sampling][File:%d] filename:%s offset:%d blockSize:%d filesize:%d\n",
 					curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
 					rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize);
+
 			sampleIndex++;
 
 
@@ -2193,9 +2227,12 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			param.url = request.url;
 			param.version = rd->files[curFileIndex].version;
 			param.filename = rd->files[curFileIndex].fileName;
-			param.offset = curFileOffset;
+			param.offset = curFileOffset * rd->files[curFileIndex].blockSize; // The file offset in bytes
 			//param.length = std::min(restoreData->files[curFileIndex].fileSize - restoreData->files[curFileIndex].cursor, loadSizeB);
-			param.length = std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - curFileOffset);
+			param.length = std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - param.offset);
+			loadSizeB += param.length;
+			curFileOffset++;
+
 			//loadSizeB = param.length;
 			param.blockSize = rd->files[curFileIndex].blockSize;
 			param.restoreRange = restoreRange;
@@ -2203,9 +2240,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			param.removePrefix = removePrefix;
 			param.mutationLogPrefix = mutationLogPrefix;
 			if ( !(param.length > 0  &&  param.offset >= 0 && param.offset < rd->files[curFileIndex].fileSize) ) {
-				printf("[ERROR] param: length:%d offset:%d fileSize:%d for %dth filename:%s\n",
+				printf("[ERROR] param: length:%d offset:%d fileSize:%d for %dth file:%s\n",
 						param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
-						rd->files[curFileIndex].fileName.c_str());
+						rd->files[curFileIndex].toString().c_str());
 			}
 			ASSERT( param.length > 0 );
 			ASSERT( param.offset >= 0 );
@@ -2221,7 +2258,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 			printf("[Sampling] Master cmdType:%d isRange:%d\n", (int) cmdType, (int) rd->files[curFileIndex].isRange);
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, nodeID, loadingCmdIndex, param)) );
-			if (param.length <= loadSizeB) { // Reach the end of the file
+			if (param.offset + param.length >= rd->files[curFileIndex].fileSize) { // Reach the end of the file
 				curFileIndex++;
 			}
 			if ( curFileIndex >= rd->files.size() ) {
@@ -2856,7 +2893,7 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> restoreData, RestoreComm
 						if (param.offset % param.blockSize != 0) {
 							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
 						}
-						ASSERT( param.offset + param.blockSize == param.length ); // Assumption: Only sample one data block.
+						ASSERT( param.offset + param.blockSize >= param.length ); // Assumption: Only sample one data block or less
 						for (j = param.offset; j < param.length; j += param.blockSize) {
 							readOffset = j;
 							readLen = std::min<int64_t>(param.blockSize, param.length - j);
