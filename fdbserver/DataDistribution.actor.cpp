@@ -3294,6 +3294,7 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
@@ -3343,22 +3344,22 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state UID lastClusterControllerID(0,0);
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<AsyncVar<DatabaseConfiguration>> configuration( new AsyncVar<DatabaseConfiguration>(DatabaseConfiguration()) );
-	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id, addActor) );
+	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id(), addActor) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 	state Future<Void> trigger = self->configurationTrigger.onTrigger();
 	state Version recoveryTransactionVersion = invalidVersion;
 
-	TraceEvent("NewDataDistributorID", di.id);
+	TraceEvent("NewDataDistributorID", di.id());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
 		// Get configuration from the master. Can't use configurationMonitor for it
 		// because the transaction read needs ratekeeper, which is not started yet.
-		when ( GetRecoveryInfoReply infoReply = wait( brokenPromiseToNever(self->dbInfo->get().master.getRecoveryInfo.getReply(GetRecoveryInfoRequest(di.id)) )) ) {
+		when ( GetRecoveryInfoReply infoReply = wait( brokenPromiseToNever(self->dbInfo->get().master.getRecoveryInfo.getReply(GetRecoveryInfoRequest(di.id())) )) ) {
 			configuration->set( infoReply.configuration );
 			recoveryTransactionVersion = infoReply.recoveryTransactionVersion;
-			TraceEvent("DataDistributor", di.id)
+			TraceEvent("DataDistributor", di.id())
 				.detail("RecoveryVersion", infoReply.recoveryTransactionVersion)
 				.detail("Configuration", configuration->get().toString());
 			// TODO: is remoteRecovered.getFuture() as Void() in dataDistribution() correct?
@@ -3368,7 +3369,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 
 	const std::vector<RegionInfo>& regions = self->configuration->get().regions;
-	TraceEvent ev("DataDistributor", di.id);
+	TraceEvent ev("DataDistributor", di.id());
 	if ( regions.size() > 0 ) {
 		self->primaryDcId.push_back( regions[0].dcId );
 		ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
@@ -3381,16 +3382,16 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	try {
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		TraceEvent("DataDistributor", di.id).detail("StartDD", "RK");
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, di.id, self->configuration->get(), ddStorageServerChanges, recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, Void() ), "DataDistribution", di.id, &normalDataDistributorErrors() ) );
-		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id, &normalRateKeeperErrors() ) );
+		TraceEvent("DataDistributor", di.id()).detail("StartDD", "RK");
+		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, Void() ), "DataDistribution", di.id(), &normalDataDistributorErrors() ) );
+		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
-		state Future<bool> reply;
+		state Future<Void> reply;
 		loop {
 			if ( self->dbInfo->get().clusterInterface.id() != lastClusterControllerID ) {
 				// Rejoin the new cluster controller
 				DataDistributorRejoinRequest req(di);
-				TraceEvent("DataDistributorRejoining", di.id)
+				TraceEvent("DataDistributorRejoining", di.id())
 					.detail("OldClusterControllerID", lastClusterControllerID)
 					.detail("ClusterControllerID", self->dbInfo->get().clusterInterface.id());
 				reply = self->dbInfo->get().clusterInterface.dataDistributorRejoin.getReply(req);
@@ -3398,15 +3399,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				reply = Never();
 			}
 			choose {
-				when (bool success = wait(brokenPromiseToNever(reply))) {
-					if (success) {
-						lastClusterControllerID = self->dbInfo->get().clusterInterface.id();
-						TraceEvent("DataDistributorRejoined", di.id)
-							.detail("ClusterControllerID", lastClusterControllerID);
-					} else {
-						TraceEvent("DataDistributorRejoinFailed", di.id);  // Probably distributor exists.
-						break;
-					}
+				when (wait(brokenPromiseToNever(reply))) {
+					lastClusterControllerID = self->dbInfo->get().clusterInterface.id();
+					TraceEvent("DataDistributorRejoined", di.id())
+						.detail("ClusterControllerID", lastClusterControllerID);
 				}
 				when (wait(self->dbInfo->onChange())) {}
 				when (wait(trigger)) { break; }  // TODO: maybe break here? Since configuration changed.
@@ -3419,15 +3415,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
-			TraceEvent("DataDistributorError", di.id).error(err);
+			TraceEvent("DataDistributorError", di.id()).error(err);
 			throw err;
 		}
-		TraceEvent("DataDistributorTerminated", di.id).error(err);
+		TraceEvent("DataDistributorTerminated", di.id()).error(err);
 	}
 
-	while ( !self->addActor.isEmpty() ) {
-		self->addActor.getFuture().pop();
-	}
 	return Void();
 }
 

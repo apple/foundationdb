@@ -85,14 +85,14 @@ ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<A
 
 			for( int i = 0; i < workers.size(); i++ ) {
 				if( workers[i].first.address() == ddInterf.address() ) {
-					TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", ddInterf.id).detail("WorkerId", workers[i].first.id());
-					return std::make_pair(workers[i].first, ddInterf.id);
+					TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", ddInterf.id()).detail("WorkerId", workers[i].first.id());
+					return std::make_pair(workers[i].first, ddInterf.id());
 				}
 			}
 
 			TraceEvent(SevWarn, "GetDataDistributorWorker")
 				.detail("Error", "DataDistributorWorkerNotFound")
-				.detail("DataDistributorId", ddInterf.id)
+				.detail("DataDistributorId", ddInterf.id())
 				.detail("DataDistributorAddress", ddInterf.address())
 				.detail("WorkerCount", workers.size());
 		}

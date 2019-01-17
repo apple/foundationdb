@@ -260,7 +260,7 @@ struct GetDistributorInterfaceRequest {
 
 struct DataDistributorRejoinRequest {
 	DataDistributorInterface dataDistributor;
-	ReplyPromise<bool> reply;
+	ReplyPromise<Void> reply;
 
 	DataDistributorRejoinRequest() { }
 	explicit DataDistributorRejoinRequest(DataDistributorInterface di) : dataDistributor(di) {}

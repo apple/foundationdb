@@ -715,12 +715,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
 				DataDistributorInterface recruited;
-				recruited.id = req.reqId;
-				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address()).detail("WorkerId", interf.id());
-				startRole( Role::DATA_DISTRIBUTOR, req.reqId, interf.id());
+				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address()).detail("DataDistributorId", recruited.id());
+				startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 
 				Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
-				errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, req.reqId, dataDistributorProcess ) );
+				errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), dataDistributorProcess ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {

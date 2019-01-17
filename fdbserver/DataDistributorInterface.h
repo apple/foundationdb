@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,24 +24,23 @@
 #include "fdbrpc/fdbrpc.h"
 
 struct DataDistributorInterface {
-	UID id;
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream< struct GetRateInfoRequest > getRateInfo;
+	RequestStream<struct GetRateInfoRequest> getRateInfo;
 
 	DataDistributorInterface() {}
 
+	UID id() const { return getRateInfo.getEndpoint().token; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
 	bool operator== (const DataDistributorInterface& r) const {
-		return id == r.id;
+		return id() == r.id();
 	}
 	bool operator!= (const DataDistributorInterface& r) const {
 		return !(*this == r);
 	}
-	bool isValid() const { return id != UID(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, id, waitFailure, getRateInfo);
+		serializer(ar, waitFailure, getRateInfo);
 	}
 };
 
