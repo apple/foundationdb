@@ -2153,13 +2153,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state std::vector<UID> loaderIDs = getLoaderIDs(rd);
 	state std::vector<UID> applierIDs = getApplierIDs(rd);
 	state std::vector<UID> finishedLoaderIDs;
-	state int sampleMB = 10;
-	state int sampleB = 10 * 1024 * 1024; // Sample a block for every sampleB bytes.
-	state int curFileIndex = 0;
-	state int curFileOffset = 0;
-	state int loadSizeB = 0;
-	state int loadingCmdIndex = 0;
-	state int sampleIndex = 0;
+	state int64_t sampleMB = 10;
+	state int64_t sampleB = 10 * 1024 * 1024; // Sample a block for every sampleB bytes.
+	state int64_t curFileIndex = 0;
+	state int64_t curFileOffset = 0;
+	state int64_t loadSizeB = 0;
+	state int64_t loadingCmdIndex = 0;
+	state int64_t sampleIndex = 0;
 	state double totalBackupSizeB = 0;
 	state double samplePercent = 0.01;
 
@@ -2179,13 +2179,14 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 		state std::vector<Future<RestoreCommandReply>> cmdReplies;
 		printf("[INFO] We will sample the workload among %d backup files.\n", rd->files.size());
-		printf("[INFO] totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d\n",
-			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB);
+		printf("[INFO] totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d, loadSize:%dB sampleIndex:%d\n",
+			totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB, loadSizeB, sampleIndex);
 		for (auto &loaderID : loaderIDs) {
 			while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
 				// NOTE: && restoreData->files[curFileIndex].cursor >= restoreData->files[curFileIndex].fileSize
 				printf("[Sampling] File %d:%s filesize:%d skip the file\n", curFileIndex,
 						rd->files[curFileIndex].fileName.c_str(), rd->files[curFileIndex].fileSize);
+				curFileOffset = 0;
 				curFileIndex++;
 			}
 			// Find the next sample point
@@ -2216,11 +2217,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				break;
 			}
 
-			printf("[Sampling][File:%d] filename:%s offset:%d blockSize:%d filesize:%d\n",
-					curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
-					rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize);
-
-			sampleIndex++;
+			//sampleIndex++;
 
 
 			LoadingParam param;
@@ -2229,8 +2226,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			param.filename = rd->files[curFileIndex].fileName;
 			param.offset = curFileOffset * rd->files[curFileIndex].blockSize; // The file offset in bytes
 			//param.length = std::min(restoreData->files[curFileIndex].fileSize - restoreData->files[curFileIndex].cursor, loadSizeB);
-			param.length = std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - param.offset);
+			param.length = std::min(rd->files[curFileIndex].blockSize, std::max((int64_t)0, rd->files[curFileIndex].fileSize - param.offset));
 			loadSizeB += param.length;
+			sampleIndex = std::ceil(loadSizeB / sampleB);
 			curFileOffset++;
 
 			//loadSizeB = param.length;
@@ -2244,9 +2242,17 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 						param.length, param.offset, rd->files[curFileIndex].fileSize, curFileIndex,
 						rd->files[curFileIndex].toString().c_str());
 			}
+
+
+			printf("[Sampling][File:%d] filename:%s offset:%d blockSize:%d filesize:%d loadSize:%dB sampleIndex:%d\n",
+					curFileIndex, rd->files[curFileIndex].fileName.c_str(), curFileOffset,
+					rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize,
+					loadSizeB, sampleIndex);
+
+
 			ASSERT( param.length > 0 );
 			ASSERT( param.offset >= 0 );
-			ASSERT( param.offset < rd->files[curFileIndex].fileSize );
+			ASSERT( param.offset <= rd->files[curFileIndex].fileSize );
 			UID nodeID = loaderID;
 
 			ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
@@ -2260,6 +2266,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, nodeID, loadingCmdIndex, param)) );
 			if (param.offset + param.length >= rd->files[curFileIndex].fileSize) { // Reach the end of the file
 				curFileIndex++;
+				curFileOffset = 0;
 			}
 			if ( curFileIndex >= rd->files.size() ) {
 				allLoadReqsSent = true;
