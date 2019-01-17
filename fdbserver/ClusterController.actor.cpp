@@ -1334,7 +1334,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 					checkOutstandingRequests( cluster );
 				}
 			}
-			when( wait( failed ) ) {  // remote workers that have failed
+			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.priorityInfo) );
@@ -2220,7 +2220,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 ACTOR Future<Void> clusterGetDistributorInterface( ClusterControllerData *self, UID reqId, ReplyPromise<GetDistributorInterfaceReply> reqReply ) {
 	TraceEvent("CCGetDistributorInterfaceRequest", reqId);
-	state Future<Void> distributorOnchange = Never();
+	state Future<Void> distributorOnChange = Never();
 
 	while ( !self->dataDistributorInterface.get().isValid() ) {
 		wait( self->dataDistributorInterface.onChange() );
@@ -2238,11 +2238,9 @@ ACTOR Future<Void> clusterGetDistributorInterface( ClusterControllerData *self, 
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
-	while ( !dcId.present() || !self->masterProcessId.present() ) {
+	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
-		dcId = self->clusterControllerDcId;
 	}
-	ASSERT(dcId.present());
 
 	loop {
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
