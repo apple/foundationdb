@@ -1119,8 +1119,10 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 		}
 		if ( val_length_decode != (val.size() - 12) ) {
 			//IF we see val.size() == 10000, It means val should be concatenated! The concatenation may fail to copy the data
-			fprintf(stderr, "[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
+			printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
 					commitVersion, commitVersion);
+			printf("[PARSE ERROR] Skipped the mutation! OK for sampling workload but WRONG for restoring the workload\n");
+			continue;
 		} else {
 			if ( debug_verbose ) {
 				printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
