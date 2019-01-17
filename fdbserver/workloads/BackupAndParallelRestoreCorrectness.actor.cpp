@@ -676,7 +676,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						break;
 					} catch( Error &e ) {
 						TraceEvent("CheckRestoreRequestDoneErrorMX").detail("ErrorInfo", e.what());
-						printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
+						//printf("[WARNING]  Transaction error: waiting for the watch of the restoreRequestDoneKey, error:%s\n", e.what());
 						wait( tr2.onError(e) );
 					}
 				}

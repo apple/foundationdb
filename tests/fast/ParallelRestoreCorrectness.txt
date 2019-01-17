@@ -2,8 +2,8 @@ testTitle=BackupAndRestore
     testName=Cycle
 ;    nodeCount=30000
     nodeCount=1000
-    transactionsPerSecond=500.0
-;    transactionsPerSecond=2500.0
+;    transactionsPerSecond=500.0
+    transactionsPerSecond=2500.0
     testDuration=30.0
     expectedRate=0
     clearAfterTest=false
@@ -11,7 +11,7 @@ testTitle=BackupAndRestore
 
     testName=Cycle
 ;    nodeCount=1000
-    transactionsPerSecond=500.0
+    transactionsPerSecond=2500.0
     testDuration=30.0
     expectedRate=0
     clearAfterTest=false
@@ -19,7 +19,7 @@ testTitle=BackupAndRestore
 
     testName=Cycle
 ;    nodeCount=1000
-    transactionsPerSecond=500.0
+    transactionsPerSecond=2500.0
     testDuration=30.0
     expectedRate=0
     clearAfterTest=false
@@ -27,7 +27,7 @@ testTitle=BackupAndRestore
 
     testName=Cycle
 ;    nodeCount=1000
-    transactionsPerSecond=500.0
+    transactionsPerSecond=2500.0
     testDuration=30.0
     expectedRate=0
     clearAfterTest=false
