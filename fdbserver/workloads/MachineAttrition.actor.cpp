@@ -179,17 +179,17 @@ struct MachineAttritionWorkload : TestWorkload {
 					if( g_random->random01() > 0.5 ) {
 						g_simulator.rebootProcess( targetMachine.zoneId(), g_random->random01() > 0.5 );
 					} else {
-						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::Reboot );
+						g_simulator.killZone( targetMachine.zoneId(), ISimulator::Reboot );
 					}
 				} else {
 					auto randomDouble = g_random->random01();
 					TraceEvent("WorkerKill").detail("MachineCount", self->machines.size()).detail("RandomValue", randomDouble);
 					if (randomDouble < 0.33 ) {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::RebootAndDelete );
+						g_simulator.killZone( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {
 						auto kt = (g_random->random01() < 0.5 || !self->allowFaultInjection) ? ISimulator::KillInstantly : ISimulator::InjectFaults;
-						g_simulator.killMachine( targetMachine.zoneId(), kt );
+						g_simulator.killZone( targetMachine.zoneId(), kt );
 					}
 				}
 
