@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb-build:0.0.2
+    image: foundationdb-build:0.0.3
     build:
       context: .
       dockerfile: Dockerfile
