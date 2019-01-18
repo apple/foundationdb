@@ -505,7 +505,8 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		choose {
 			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id());
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
+				.detail("DataDistributorID", ni.distributor.id());
 				ServerDBInfo localInfo = ni;
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
@@ -714,8 +715,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
-				DataDistributorInterface recruited;
-				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address()).detail("DataDistributorId", recruited.id());
+				DataDistributorInterface recruited(true);
+				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address())
+				.detail("DataDistributorId", recruited.id());
 				startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 
 				Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );

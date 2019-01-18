@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RecoveryState.h"
@@ -36,6 +37,7 @@ struct ServerDBInfo {
 	UID id;  // Changes each time any other member changes
 	ClusterControllerFullInterface clusterInterface;
 	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
+	DataDistributorInterface distributor;  // The best guess of current data distributor, which might be unknown.
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
 	vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
@@ -53,7 +55,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, master, resolvers, recoveryCount, masterLifetime, logSystemConfig, priorCommittedLogServers, recoveryState, latencyBandConfig);
+		serializer(ar, id, clusterInterface, client, distributor, master, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig);
 	}
 };
 

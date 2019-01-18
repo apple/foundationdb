@@ -26,9 +26,12 @@
 struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
+	bool valid;
 
-	DataDistributorInterface() {}
+	DataDistributorInterface() : valid(false) {}
+	explicit DataDistributorInterface(bool v) : valid(v) {}
 
+	bool isValid() const { return valid; }
 	UID id() const { return getRateInfo.getEndpoint().token; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
 	bool operator== (const DataDistributorInterface& r) const {
@@ -40,7 +43,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo);
+		serializer(ar, waitFailure, getRateInfo, valid);
 	}
 };
 

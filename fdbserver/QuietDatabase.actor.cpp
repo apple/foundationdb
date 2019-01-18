@@ -68,34 +68,23 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 
 // Gets the WorkerInterface representing the data distributor.
 ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	state Future<vector<std::pair<WorkerInterface, ProcessClass>>> newWorkers = getWorkers( dbInfo );
-	state vector<std::pair<WorkerInterface, ProcessClass>> workers;
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
-	loop choose {
-		when ( wait( dbInfo->onChange() ) ) {
-			newWorkers = getWorkers( dbInfo );
-		}
-		when ( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( newWorkers ) ) {
-			workers = w;
-			newWorkers = Never();
-		}
-		when ( GetDistributorInterfaceReply reply = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest() ) ) ) ) {
-			const DataDistributorInterface& ddInterf = reply.distributorInterface;
+	loop {
+		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( dbInfo ) );
 
-			for( int i = 0; i < workers.size(); i++ ) {
-				if( workers[i].first.address() == ddInterf.address() ) {
-					TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", ddInterf.id()).detail("WorkerId", workers[i].first.id());
-					return std::make_pair(workers[i].first, ddInterf.id());
-				}
+		for( int i = 0; i < workers.size(); i++ ) {
+			if( workers[i].first.address() == dbInfo->get().distributor.address() ) {
+					TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", dbInfo->get().distributor.id()).detail("WorkerId", workers[i].first.id());
+				return std::make_pair(workers[i].first, dbInfo->get().distributor.id());
 			}
-
-			TraceEvent(SevWarn, "GetDataDistributorWorker")
-				.detail("Error", "DataDistributorWorkerNotFound")
-				.detail("DataDistributorId", ddInterf.id())
-				.detail("DataDistributorAddress", ddInterf.address())
-				.detail("WorkerCount", workers.size());
 		}
+
+		TraceEvent(SevWarn, "GetDataDistributorWorker")
+		.detail("Error", "DataDistributorWorkerNotFound")
+		.detail("DataDistributorId", dbInfo->get().distributor.id())
+		.detail("DataDistributorAddress", dbInfo->get().distributor.address())
+		.detail("WorkerCount", workers.size());
 	}
 }
 

@@ -87,53 +87,27 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 
 int getBytes(Promise<Version> const& r) { return 0; }
 
-ACTOR Future<Void> monitorDataDistributor(UID myID, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<DataDistributorInterface>> dataDistributor, bool *rejoined) {
-	state Future<Void> distributorFailure = Never();
-	state Future<GetDistributorInterfaceReply> reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
-
-	loop choose {
-		when ( GetDistributorInterfaceReply r = wait( reply ) ) {
-			reply = Never();
-			dataDistributor->set( r.distributorInterface );
-			*rejoined = true;
-			distributorFailure = waitFailureClient( dataDistributor->get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
-			TraceEvent("Proxy", myID).detail("DataDistributorChangedID", dataDistributor->get().id())
-				.detail("Endpoint", dataDistributor->get().waitFailure.getEndpoint().token);
-		}
-		when ( wait( db->onChange() ) ) {
-			distributorFailure = Never();
-			reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
-		}
-		when ( wait( distributorFailure ) ) {
-			distributorFailure = Never();
-			*rejoined = false;
-			TraceEvent("Proxy", myID)
-				.detail("CC", db->get().clusterInterface.id())
-				.detail("DataDistributorFailed", dataDistributor->get().id())
-				.detail("Token", dataDistributor->get().waitFailure.getEndpoint().token);
-			wait( delay(0.001) );
-			reply = brokenPromiseToNever( db->get().clusterInterface.getDistributorInterface.getReply( GetDistributorInterfaceRequest(myID) ) );
-		}
-	}
-}
-
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate, Reference<AsyncVar<DataDistributorInterface>> dataDistributor, bool *rejoined) {
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
 	loop choose {
-		when ( wait( dataDistributor->onChange() ) ) {
-			if ( *rejoined ) {
+		when ( wait( db->onChange() ) ) {
+			if ( db->get().distributor.isValid() ) {
+				TraceEvent("Proxy", myID)
+				.detail("DataDistributorChangedID", db->get().distributor.id());
 				nextRequestTimer = Void();  // trigger GetRate request
 			} else {
+				TraceEvent("Proxy", myID)
+				.detail("DataDistributorDied", db->get().distributor.id());
 				nextRequestTimer = Never();
 			}
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(dataDistributor->get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+			reply = brokenPromiseToNever(db->get().distributor.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
@@ -1132,6 +1106,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
+	addActor.send( getRate(proxy.id(), db, &transactionCount, &transactionRate) );
 	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1141,10 +1116,6 @@ ACTOR static Future<Void> transactionStarter(
 		if (mp != proxy)
 			otherProxies.push_back(mp);
 	}
-	state Reference<AsyncVar<DataDistributorInterface>> dataDistributor( new AsyncVar<DataDistributorInterface>(DataDistributorInterface()) );
-	bool rejoined = false;
-	addActor.send( getRate(proxy.id(), db, &transactionCount, &transactionRate, dataDistributor, &rejoined) );  // do this after correct CC is obtained.
-	addActor.send( monitorDataDistributor(proxy.id(), db, dataDistributor, &rejoined) );
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
 

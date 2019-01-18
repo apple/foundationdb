@@ -391,7 +391,7 @@ ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange ke
 	loop {
 		try {
 			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
-			if (rep.first >= minVersion && (recoveryVersion == invalidVersion || rep.second >= recoveryVersion)) {
+			if (rep.first >= minVersion) {
 				return Void();
 			}
 			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );

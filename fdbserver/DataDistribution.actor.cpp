@@ -3349,7 +3349,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Future<Void> trigger = self->configurationTrigger.onTrigger();
 	state Version recoveryTransactionVersion = invalidVersion;
 
-	TraceEvent("NewDataDistributorID", di.id());
+	TraceEvent("NewDataDistributorID", di.id()).detail("Valid", di.isValid());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 	self->addActor.send( configurationMonitor( self ) );
 
