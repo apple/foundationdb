@@ -739,9 +739,13 @@ void buildForbiddenVersionRange(Reference<RestoreData> restoreData) {
 
 bool isForbiddenVersionRangeOverlapped(Reference<RestoreData> restoreData) {
 	printf("[INFO] Check if forbidden version ranges is overlapped: num of ranges:%d\n", restoreData->forbiddenVersions.size());
+	if (restoreData->forbiddenVersions.empty()) {
+		return false;
+	}
+
 	std::map<Version, Version>::iterator prevRange = restoreData->forbiddenVersions.begin();
 	std::map<Version, Version>::iterator curRange = restoreData->forbiddenVersions.begin();
-	curRange++;
+	curRange++; // Assume restoreData->forbiddenVersions has at least one element!
 
 	while ( curRange != restoreData->forbiddenVersions.end() ) {
 		if ( curRange->first < prevRange->second ) {
@@ -3550,6 +3554,8 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 				bool isRange = restoreData->allFiles[curBackupFilesEndIndex].isRange;
 				bool validVersion = !isVersionInForbiddenRange(restoreData, endVersion, isRange);
 				curWorkloadSize += restoreData->allFiles[curBackupFilesEndIndex].fileSize;
+				printf("[DEBUG] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB\n",
+						endVersion, isRange, validVersion, curWorkloadSize);
 				if ((validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= restoreData->allFiles.size()-1)  {
 					//TODO: Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
 					restoreData->files.clear();
