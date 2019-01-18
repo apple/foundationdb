@@ -2227,22 +2227,6 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
-ACTOR Future<Void> clusterGetDistributorInterface( ClusterControllerData *self, UID reqId, ReplyPromise<GetDistributorInterfaceReply> reqReply ) {
-	TraceEvent("CCGetDistributorInterfaceRequest", reqId);
-	while ( !self->rejoined ) {
-		wait( self->dataDistributorInterface.onChange() );
-		TraceEvent("CCGetDistributorInterfaceID", self->dataDistributorInterface.get().id())
-			.detail("Endpoint", self->dataDistributorInterface.get().waitFailure.getEndpoint().token);
-	}
-
-	GetDistributorInterfaceReply reply(self->dataDistributorInterface.get());
-	TraceEvent("CCGetDistributorInterfaceReply", reqId)
-		.detail("DataDistributorId", reply.distributorInterface.id())
-		.detail("Endpoint", reply.distributorInterface.waitFailure.getEndpoint().token);
-	reqReply.send( reply );
-	return Void();
-}
-
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
@@ -2435,9 +2419,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		}
 		when( ReplyPromise<Void> ping = waitNext( interf.clientInterface.ping.getFuture() ) ) {
 			ping.send( Void() );
-		}
-		when ( GetDistributorInterfaceRequest req = waitNext( interf.getDistributorInterface.getFuture() ) ) {
-			self.addActor.send( clusterGetDistributorInterface( &self, req.reqId, req.reply ) );
 		}
 	}
 }

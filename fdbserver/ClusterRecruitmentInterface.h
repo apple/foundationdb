@@ -44,7 +44,6 @@ struct ClusterControllerFullInterface {
 	RequestStream< struct RegisterMasterRequest > registerMaster;
 	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo;
 	RequestStream< struct DataDistributorRejoinRequest > dataDistributorRejoin; // sent by dataDistributor (may or may not rebooted) to communicate with a new CC
-	RequestStream< struct GetDistributorInterfaceRequest > getDistributorInterface; // sent by proxies & QuietDatabase.actor.cpp
 
 	UID id() const { return clientInterface.id(); }
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -60,13 +59,12 @@ struct ClusterControllerFullInterface {
 		registerMaster.getEndpoint( TaskClusterController );
 		getServerDBInfo.getEndpoint( TaskClusterController );
 		dataDistributorRejoin.getEndpoint( TaskClusterController );
-		getDistributorInterface.getEndpoint( TaskClusterController );
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo, dataDistributorRejoin, getDistributorInterface);
+		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo, dataDistributorRejoin);
 	}
 };
 
@@ -231,30 +229,6 @@ struct GetServerDBInfoRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
-	}
-};
-
-struct GetDistributorInterfaceReply {
-	DataDistributorInterface distributorInterface;
-
-	GetDistributorInterfaceReply() {}
-	explicit GetDistributorInterfaceReply(DataDistributorInterface di): distributorInterface(di) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, distributorInterface);
-	}
-};
-
-struct GetDistributorInterfaceRequest {
-	UID reqId;
-	ReplyPromise< struct GetDistributorInterfaceReply > reply;
-
-	GetDistributorInterfaceRequest() {}
-	explicit GetDistributorInterfaceRequest(UID id) : reqId(id) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, reply);
 	}
 };
 
