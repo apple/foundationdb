@@ -2260,7 +2260,7 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
 			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinID", req.dataDistributor.id());
 			self->db.setDistributor( req.dataDistributor );
-			distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 			req.reply.send( Void() );
 			break;
 		}
@@ -2278,7 +2278,7 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 			const UID myDdId = self->db.serverInfo->get().distributor.id();
 			ev.detail("NewDataDistributorID", distributorInterf.id()).detail("Valid", distributorInterf.isValid());
 			self->db.setDistributor( distributorInterf );
-			distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 			newDistributor = Never();
 		}
 		when ( wait( distributorFailed ) ) {
@@ -2292,17 +2292,17 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
 			if ( !self->db.serverInfo->get().distributor.isValid() ) {
 				self->db.setDistributor( req.dataDistributor );
-				distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+				distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 				TraceEvent("ClusterController", self->id).detail("DataDistributorRejoined", req.dataDistributor.id());
 			} else {
 				const UID myDdId = self->db.serverInfo->get().distributor.id();
 				const bool success = myDdId == req.dataDistributor.id();
-				req.reply.send( Void() );
 				TraceEvent("ClusterController", self->id)
 				.detail("DataDistributorRejoin", success ? "OK" : "Failed")
 				.detail("OldDataDistributorID", myDdId)
 				.detail("ReqID", req.dataDistributor.id());
 			}
+			req.reply.send( Void() );
 		}
 	}
 }
