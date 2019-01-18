@@ -3507,7 +3507,7 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 	state long curBackupFilesBeginIndex = 0;
 	state long curBackupFilesEndIndex = 0;
 	state double curWorkloadSize = 0;
-	state double loadBatchSizeMB = 0.01;
+	state double loadBatchSizeMB = 1.0;
 	state double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 	state int restoreBatchIndex = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
