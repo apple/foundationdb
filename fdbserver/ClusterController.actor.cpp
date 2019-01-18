@@ -1025,8 +1025,6 @@ public:
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
-	AsyncVar<DataDistributorInterface> dataDistributorInterface;
-	bool rejoined = false;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
@@ -2261,17 +2259,15 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 	loop choose {
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
 			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinID", req.dataDistributor.id());
-			self->dataDistributorInterface.set( req.dataDistributor );
 			self->db.setDistributor( req.dataDistributor );
-			self->rejoined = true;
-			distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 			req.reply.send( Void() );
 			break;
 		}
 		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) ) ) { break; }
 	}
 
-	if ( !self->rejoined ) {
+	if ( !self->db.serverInfo->get().distributor.isValid() ) {
 		newDistributor = startDataDistributor( self );
 	}
 
@@ -2279,32 +2275,27 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 	loop choose {
 		when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
 			TraceEvent ev("ClusterController", self->id);
-			const UID myDdId = self->dataDistributorInterface.get().id();
+			const UID myDdId = self->db.serverInfo->get().distributor.id();
 			ev.detail("NewDataDistributorID", distributorInterf.id()).detail("Valid", distributorInterf.isValid());
-			self->dataDistributorInterface.set( distributorInterf );
-			self->rejoined = true;
 			self->db.setDistributor( distributorInterf );
-			distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
+			distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 			newDistributor = Never();
 		}
 		when ( wait( distributorFailed ) ) {
 			distributorFailed = Never();
 			TraceEvent("ClusterController", self->id)
-				.detail("DataDistributorFailed", self->dataDistributorInterface.get().id())
-				.detail("Endpoint", self->dataDistributorInterface.get().waitFailure.getEndpoint().token);
-			self->rejoined = false;
-			// self->db.setDistributor( DataDistributorInterface() );
+			.detail("DataDistributorFailed", self->db.serverInfo->get().distributor.id())
+			.detail("Endpoint", self->db.serverInfo->get().distributor.getRateInfo.getEndpoint().token);
+			self->db.setDistributor( DataDistributorInterface() );
 			newDistributor = startDataDistributor( self );
 		}
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-			if ( !self->rejoined ) {
-				self->dataDistributorInterface.set( req.dataDistributor );
-				distributorFailed = waitFailureClient( self->dataDistributorInterface.get().waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
-				self->rejoined = true;
+			if ( !self->db.serverInfo->get().distributor.isValid() ) {
 				self->db.setDistributor( req.dataDistributor );
+				distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME );
 				TraceEvent("ClusterController", self->id).detail("DataDistributorRejoined", req.dataDistributor.id());
 			} else {
-				const UID myDdId = self->dataDistributorInterface.get().id();
+				const UID myDdId = self->db.serverInfo->get().distributor.id();
 				const bool success = myDdId == req.dataDistributor.id();
 				req.reply.send( Void() );
 				TraceEvent("ClusterController", self->id)
