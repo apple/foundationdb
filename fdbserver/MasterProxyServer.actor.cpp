@@ -38,6 +38,7 @@
 #include "flow/Stats.h"
 #include "ApplyMetadataMutation.h"
 #include "RecoveryState.h"
+#include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 
@@ -72,16 +73,6 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
-
-		commitLatencyBands.addThreshold(0.001);
-		commitLatencyBands.addThreshold(0.01);
-		commitLatencyBands.addThreshold(0.1);
-		commitLatencyBands.addThreshold(1);
-
-		grvLatencyBands.addThreshold(0.001);
-		grvLatencyBands.addThreshold(0.01);
-		grvLatencyBands.addThreshold(0.1);
-		grvLatencyBands.addThreshold(1);
 	}
 };
 
@@ -221,6 +212,8 @@ struct ProxyCommitData {
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
 	bool popRemoteTxs;
+
+	Optional<LatencyBandConfig> latencyBandConfig;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -982,7 +975,10 @@ ACTOR Future<Void> commitBatch(
 		}
 
 		// TODO: filter if pipelined with large commit
-		self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime, maxTransactionBytes > 1e6);
+		if(self->latencyBandConfig.present()) {
+			bool filter = maxTransactionBytes > self->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
+			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime, filter);
+		}
 	}
 
 	++self->stats.commitBatchOut;
@@ -1439,6 +1435,34 @@ ACTOR Future<Void> masterProxyServerCore(
 				}
 				commitData.logSystem->pop(commitData.lastTxsPop, txsTag, 0, tagLocalityRemoteLog);
 			}
+
+			Optional<LatencyBandConfig> newLatencyBandConfig = db->get().latencyBandConfig;
+
+			if(newLatencyBandConfig.present() != commitData.latencyBandConfig.present()
+				|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().grvConfig != commitData.latencyBandConfig.get().grvConfig))
+			{
+				TraceEvent("LatencyBandGrvUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+				commitData.stats.grvLatencyBands.clearBands();
+				if(newLatencyBandConfig.present()) {
+					for(auto band : newLatencyBandConfig.get().grvConfig.bands) {
+						commitData.stats.grvLatencyBands.addThreshold(band);
+					}
+				}
+			}
+
+			if(newLatencyBandConfig.present() != commitData.latencyBandConfig.present()
+				|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().commitConfig != commitData.latencyBandConfig.get().commitConfig))
+			{
+				TraceEvent("LatencyBandCommitUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+				commitData.stats.commitLatencyBands.clearBands();
+				if(newLatencyBandConfig.present()) {
+					for(auto band : newLatencyBandConfig.get().commitConfig.bands) {
+						commitData.stats.commitLatencyBands.addThreshold(band);
+					}
+				}
+			}
+
+			commitData.latencyBandConfig = newLatencyBandConfig;
 		}
 		when(Void _ = wait(onError)) {}
 		when(std::pair<vector<CommitTransactionRequest>, int> batchedRequests = waitNext(batchedCommits.getFuture())) {

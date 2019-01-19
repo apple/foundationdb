@@ -121,39 +121,54 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 
 class LatencyBands {
 public:
-	LatencyBands(std::string name, CounterCollection &cc) : name(name), cc(cc) {
-		addThreshold(std::numeric_limits<double>::infinity());
-	}
+	LatencyBands(std::string name, CounterCollection &cc) : name(name), cc(cc), filteredCount(nullptr) {}
 
 	void addThreshold(double value) {
 		if(value > 0 && bands.count(value) == 0) {
-			bands.insert(std::make_pair(value, new Counter(format("%s%f", name.c_str(), value), cc)));
-			filteredBands.insert(std::make_pair(value, new Counter(format("Filtered%s%f", name.c_str(), value), cc)));
+			if(bands.size() == 0) {
+				filteredCount = new Counter(format("Filtered%s", name.c_str()), cc);
+				insertBand(std::numeric_limits<double>::infinity());
+			}
+
+			insertBand(value);
 		}
 	}
 
 	void addMeasurement(double measurement, bool filtered=false) {
-		const auto &targetBands = filtered ? filteredBands : bands;
-		auto itr = targetBands.upper_bound(measurement);
-		if(itr == targetBands.end()) {
-			fprintf(stderr, "Can't add measurement %lf\n", measurement);
+		if(filtered && filteredCount) {
+			++(*filteredCount);
 		}
-		ASSERT(itr != targetBands.end());
-		++(*itr->second);
+		else if(bands.size() > 0) {
+			auto itr = bands.upper_bound(measurement);
+			ASSERT(itr != bands.end());
+			++(*itr->second);
+		}
+	}
+
+	void clearBands() {
+		for(auto itr : bands) {
+			delete itr.second;
+		}
+		
+		bands.clear();
+
+		delete filteredCount;
 	}
 
 	~LatencyBands() {
-		for(auto itr = bands.begin(); itr != bands.end(); ++itr) {
-			delete itr->second;
-		}
+		clearBands();
 	}
 
 private:
 	std::map<double, Counter*> bands;
-	std::map<double, Counter*> filteredBands;
+	Counter *filteredCount;
 
 	std::string name;
 	CounterCollection &cc;
+
+	void insertBand(double value) {
+		bands.insert(std::make_pair(value, new Counter(format("%s%f", name.c_str(), value), cc)));
+	}
 };
 
 

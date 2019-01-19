@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ActorCompiler Include="ClusterController.actor.cpp" />
@@ -292,7 +292,6 @@
       <Filter>sqlite</Filter>
     </ClCompile>
     <ClCompile Include="VFSAsync.cpp" />
-    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ClCompile Include="workloads\AsyncFile.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
@@ -300,6 +299,7 @@
     <ClCompile Include="workloads\MemoryKeyValueStore.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
+    <ClCompile Include="LatencyBandConfig.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
@@ -362,6 +362,7 @@
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="template_fdb.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">

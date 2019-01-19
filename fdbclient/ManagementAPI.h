@@ -177,6 +177,6 @@ Future<Void> waitForPrimaryDC( Database const& cx, StringRef const& dcId );
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
 
 void schemaCoverage( std::string const& spath, bool covered=true );
-bool schemaMatch( StatusObject const schema, StatusObject const result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
+bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& result, std::string& errorStr, Severity sev=SevError, bool checkCoverage=false, std::string path = std::string(), std::string schema_path = std::string() );
 
 #endif

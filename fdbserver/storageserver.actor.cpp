@@ -47,6 +47,7 @@
 #include "LogSystem.h"
 #include "RecoveryState.h"
 #include "LogProtocolMessage.h"
+#include "fdbserver/LatencyBandConfig.h"
 #include "flow/TDMetric.actor.h"
 
 using std::make_pair;
@@ -54,9 +55,6 @@ using std::make_pair;
 #pragma region Data Structures
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
-
-int64_t MAX_RESULT_SIZE = 1e4;
-int64_t MAX_SELECTOR_OFFSET = 1e2;
 
 struct StorageServer;
 class ValueOrClearToRef {
@@ -406,6 +404,8 @@ public:
 		return val;
 	}
 
+	Optional<LatencyBandConfig> latencyBandConfig;
+
 	struct Counters {
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried, watchQueries;
@@ -465,12 +465,6 @@ public:
 			specialCounter(cc, "KvstoreBytesFree", [self](){ return self->storage.getStorageBytes().free; });
 			specialCounter(cc, "KvstoreBytesAvailable", [self](){ return self->storage.getStorageBytes().available; });
 			specialCounter(cc, "KvstoreBytesTotal", [self](){ return self->storage.getStorageBytes().total; });
-
-			readLatencyBands.addThreshold(0.0001);
-			readLatencyBands.addThreshold(0.001);
-			readLatencyBands.addThreshold(0.01);
-			readLatencyBands.addThreshold(0.1);
-			readLatencyBands.addThreshold(1);
 		}
 	} counters;
 
@@ -790,7 +784,10 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
-	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE);
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes);
+	}
 
 	return Void();
 };
@@ -1327,7 +1324,12 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
-	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE || abs(req.begin.offset) > MAX_SELECTOR_OFFSET || abs(req.end.offset) > MAX_SELECTOR_OFFSET);
+	
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset || abs(req.end.offset) > maxSelectorOffset);
+	}
 
 	return Void();
 }
@@ -1378,7 +1380,11 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
-	data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > MAX_RESULT_SIZE || abs(req.sel.offset > MAX_SELECTOR_OFFSET));
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+	}
 
 	return Void();
 }
@@ -3301,6 +3307,20 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					// cancelling it could cause problems (e.g. fetchKeys that already committed to transitioning to waiting state)
 					if (!updateReceived) {
 						doUpdate = Void();
+					}
+				}
+
+				Optional<LatencyBandConfig> newLatencyBandConfig = self->db->get().latencyBandConfig;
+				if(newLatencyBandConfig.present() != self->latencyBandConfig.present()
+					|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().readConfig != self->latencyBandConfig.get().readConfig))
+				{
+					self->latencyBandConfig = newLatencyBandConfig;
+					self->counters.readLatencyBands.clearBands();
+					TraceEvent("LatencyBandReadUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+					if(self->latencyBandConfig.present()) {
+						for(auto band : self->latencyBandConfig.get().readConfig.bands) {
+							self->counters.readLatencyBands.addThreshold(band);
+						}
 					}
 				}
 			}

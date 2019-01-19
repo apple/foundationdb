@@ -434,26 +434,27 @@ struct RolesInfo {
 			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
 
-			std::string regularPrefix = "ReadLatency";
-			std::string filteredPrefix = "FilteredReadLatency";
+			std::string latencyBandPrefix = "ReadLatency";
 
 			JsonBuilderObject latency;
 			std::map<std::string, JsonBuilderObject> bands;
 
+			bool found = false;
 			for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
-				bool regularMeasurement = itr->first.substr(0, regularPrefix.size()) == regularPrefix;
-				if(!regularMeasurement && itr->first.substr(0, filteredPrefix.size()) != filteredPrefix) {
-					continue;
-				}
+				if(itr->first.substr(0, latencyBandPrefix.size()) == latencyBandPrefix) {
+					found = true;
+					std::string band = itr->first.substr(latencyBandPrefix.size());
+					latency[band] = StatusCounter(itr->second).getCounter();
+				}	
 
-				std::string band = itr->first.substr(regularMeasurement ? regularPrefix.size() : filteredPrefix.size());
-				//bands[band][regularMeasurement ? "counted" : "filtered"] = StatusCounter(itr->second).getCounter();
-				latency[band] = StatusCounter(itr->second).getCounter();
+				std::string value;
+				if(metrics.tryGetValue("Filtered" + latencyBandPrefix, value)) {
+					latency["filtered"] = StatusCounter(value).getCounter();
+				}
 			}
-			/*for(auto itr : bands) {
-				latency[itr.first] = itr.second;
-			}*/
-			obj["read_latency_bands"] = latency;
+			if(found) {
+				obj["read_latency_bands"] = latency;
+			}
 
 			Version version = parseInt64(metrics.getValue("Version"));
 			Version durableVersion = parseInt64(metrics.getValue("DurableVersion"));
@@ -531,19 +532,37 @@ struct RolesInfo {
 			JsonBuilderObject grvLatency;
 			JsonBuilderObject commitLatency;
 
+			bool grvFound = false;
+			bool commitFound = false;
 			for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
 				if(itr->first.substr(0, grvPrefix.size()) == grvPrefix) {
+					grvFound = true;
 					std::string band = itr->first.substr(grvPrefix.size());
 					grvLatency[band] = StatusCounter(itr->second).getCounter();
 				}
 				else if(itr->first.substr(0, commitPrefix.size()) == commitPrefix) {
+					commitFound = true;
 					std::string band = itr->first.substr(commitPrefix.size());
 					commitLatency[band] = StatusCounter(itr->second).getCounter();
 				}
 			}
 
-			obj["grv_latency_bands"] = grvLatency;
-			obj["commit_latency_bands"] = commitLatency;
+			if(grvFound) {
+				std::string value;
+				if(metrics.tryGetValue("Filtered" + grvPrefix, value)) {
+					grvLatency["filtered"] = StatusCounter(value).getCounter();
+				}
+
+				obj["grv_latency_bands"] = grvLatency;
+			}
+			if(commitFound) {
+				std::string value;
+				if(metrics.tryGetValue("Filtered" + commitPrefix, value)) {
+					commitLatency["filtered"] = StatusCounter(value).getCounter();
+				}
+
+				obj["commit_latency_bands"] = commitLatency;
+			}
 		} catch (Error &e) {
 			if(e.code() != error_code_attribute_not_found) {
 				throw e;

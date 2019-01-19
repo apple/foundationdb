@@ -124,6 +124,27 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
+                  },
+                  "grv_latency_bands":{
+                     "0.01": {
+                        "hz":0.0,
+                        "counter":0,
+                        "roughness":0.0
+                     }
+                  },
+                  "read_latency_bands":{
+                     "0.01": {
+                        "hz":0.0,
+                        "counter":0,
+                        "roughness":0.0
+                     }
+                  },
+                  "commit_latency_bands":{
+                     "0.01": {
+                        "hz":0.0,
+                        "counter":0,
+                        "roughness":0.0
+                     }
                   }
                }
             ],
@@ -603,7 +624,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
    }
 })statusSchema");
 
-const KeyRef JSONSchemas::configurationSchema = LiteralStringRef(R"configSchema(
+const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"configSchema(
 {
     "create":{
     "$enum":[
@@ -669,4 +690,26 @@ const KeyRef JSONSchemas::configurationSchema = LiteralStringRef(R"configSchema(
     "auto_resolvers":1,
     "auto_logs":3,
     "proxies":5
+})configSchema");
+
+const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
+{
+    "get_read_version":{
+        "bands":[
+            0.0
+        ]
+    },
+    "read":{
+        "bands":[
+            0.0
+        ],
+        "max_key_selector_offset":0,
+        "max_read_bytes":0
+    },
+    "commit":{
+        "bands":[
+            0.0
+        ],
+        "max_commit_bytes":0
+    }
 })configSchema");
