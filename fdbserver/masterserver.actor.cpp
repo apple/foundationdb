@@ -911,16 +911,6 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> provideRecoveryInfo( Reference<MasterData> self ) {
-	loop choose {
-		when( GetRecoveryInfoRequest req = waitNext(self->myInterface.getRecoveryInfo.getFuture()) ) {
-			TraceEvent("MasterGetRecoveryInfo", self->dbgid).detail("ReqID", req.reqId);
-			GetRecoveryInfoReply reply(self->recoveryTransactionVersion, self->configuration);
-			req.reply.send( reply );
-		}
-	}
-}
-
 std::pair<KeyRangeRef, bool> findRange( CoalescedKeyRangeMap<int>& key_resolver, Standalone<VectorRef<ResolverMoveRef>>& movedRanges, int src, int dest ) {
 	auto ranges = key_resolver.ranges();
 	auto prev = ranges.begin();
@@ -1357,8 +1347,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StoreType", self->configuration.storageServerStoreType)
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
-
-	self->addActor.send( provideRecoveryInfo(self) );
 
 	if( self->resolvers.size() > 1 )
 		self->addActor.send( resolutionBalancing(self) );

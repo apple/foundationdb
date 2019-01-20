@@ -36,7 +36,6 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
-	RequestStream< struct GetRecoveryInfoRequest > getRecoveryInfo;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().address; }
 
@@ -44,7 +43,7 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, getRecoveryInfo);
+		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
@@ -131,31 +130,6 @@ struct GetCommitVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
-	}
-};
-
-struct GetRecoveryInfoReply {
-	Version recoveryTransactionVersion;
-	DatabaseConfiguration configuration;
-
-	GetRecoveryInfoReply() : recoveryTransactionVersion(invalidVersion) {}
-	explicit GetRecoveryInfoReply(Version v, DatabaseConfiguration c) : recoveryTransactionVersion(v), configuration(c) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, configuration);
-	}
-};
-
-struct GetRecoveryInfoRequest {
-	UID reqId;
-	ReplyPromise<GetRecoveryInfoReply> reply;
-
-	GetRecoveryInfoRequest() {}
-	explicit GetRecoveryInfoRequest(UID id) : reqId(id) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, reply);
 	}
 };
 
