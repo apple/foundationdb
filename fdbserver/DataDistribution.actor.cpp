@@ -3105,7 +3105,6 @@ ACTOR Future<Void> dataDistribution(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
 		UID myId, DatabaseConfiguration configuration,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
-		Version recoveryCommitVersion,
 		std::vector<Optional<Key>> primaryDcId,
 		std::vector<Optional<Key>> remoteDcIds,
 		double* lastLimited)
@@ -3244,7 +3243,7 @@ ACTOR Future<Void> dataDistribution(
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, myId ), "DDTracker", myId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, myId, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", myId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, myId, storageTeamSize, lastLimited, invalidVersion ), "DDQueue", myId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
@@ -3286,6 +3285,22 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id, PromiseStream<Future<Void>> const& addActor)
 		: dbInfo(db), configuration(dbConfig), ddId(id), addActor(addActor) {}
+
+	void refreshDcIds() {
+		primaryDcId.clear();
+		remoteDcIds.clear();
+
+		const std::vector<RegionInfo>& regions = configuration->get().regions;
+		TraceEvent ev("DataDistributor", ddId);
+		if ( regions.size() > 0 ) {
+			primaryDcId.push_back( regions[0].dcId );
+			ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
+		}
+		if ( regions.size() > 1 ) {
+			remoteDcIds.push_back( regions[1].dcId );
+			ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
+		}
+	}
 };
 
 ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
@@ -3349,42 +3364,21 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id(), addActor) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 	state Future<Void> trigger = self->configurationTrigger.onTrigger();
-	state Version recoveryTransactionVersion = invalidVersion;
 
-	TraceEvent("NewDataDistributorID", di.id()).detail("Valid", di.isValid());
+	TraceEvent("NewDataDistributorID", di.id());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
-		// Get configuration from the master. Can't use configurationMonitor for it
-		// because the transaction read needs ratekeeper, which is not started yet.
-		when ( GetRecoveryInfoReply infoReply = wait( brokenPromiseToNever(self->dbInfo->get().master.getRecoveryInfo.getReply(GetRecoveryInfoRequest(di.id())) )) ) {
-			configuration->set( infoReply.configuration );
-			recoveryTransactionVersion = infoReply.recoveryTransactionVersion;
-			TraceEvent("DataDistributor", di.id())
-				.detail("RecoveryVersion", infoReply.recoveryTransactionVersion)
-				.detail("Configuration", configuration->get().toString());
-			break;
-		}
+		when ( wait( trigger ) ) { break; }
 		when ( wait(self->dbInfo->onChange()) ) {}
 	}
-
-	const std::vector<RegionInfo>& regions = self->configuration->get().regions;
-	TraceEvent ev("DataDistributor", di.id());
-	if ( regions.size() > 0 ) {
-		self->primaryDcId.push_back( regions[0].dcId );
-		ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
-	}
-	if ( regions.size() > 1 ) {
-		self->remoteDcIds.push_back( regions[1].dcId );
-		ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
-	}
+	self->refreshDcIds();
 
 	try {
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
+		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		TraceEvent("DataDistributor", di.id()).detail("StartDD", "RK");
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() ) );
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
 		state Future<Void> reply;
@@ -3393,20 +3387,31 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				// Rejoin the new cluster controller
 				DataDistributorRejoinRequest req(di);
 				TraceEvent("DataDistributorRejoining", di.id())
-					.detail("OldClusterControllerID", lastClusterControllerID)
-					.detail("ClusterControllerID", self->dbInfo->get().clusterInterface.id());
+				.detail("OldClusterControllerID", lastClusterControllerID)
+				.detail("ClusterControllerID", self->dbInfo->get().clusterInterface.id());
 				reply = self->dbInfo->get().clusterInterface.dataDistributorRejoin.getReply(req);
+				lastClusterControllerID = self->dbInfo->get().clusterInterface.id();
 			} else {
 				reply = Never();
 			}
+
+			trigger = self->configurationTrigger.onTrigger();
 			choose {
 				when (wait(brokenPromiseToNever(reply))) {
-					lastClusterControllerID = self->dbInfo->get().clusterInterface.id();
 					TraceEvent("DataDistributorRejoined", di.id())
-						.detail("ClusterControllerID", lastClusterControllerID);
+					.detail("ClusterControllerID", lastClusterControllerID);
 				}
-				when (wait(self->dbInfo->onChange())) {}
-				when (wait(trigger)) { break; }  // TODO: maybe break here? Since configuration changed.
+				when (wait(self->dbInfo->onChange())) {
+					const DataDistributorInterface& distributor = self->dbInfo->get().distributor;
+					if ( distributor.isValid() && distributor.id() != di.id() ) {
+						TraceEvent("DataDistributor", di.id()).detail("FoundAnotherDdID", distributor.id());
+						break;
+					}
+				}
+				when (wait(trigger)) {
+					self->refreshDcIds();
+					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+				}
 				when (wait(collection)) {
 					ASSERT(false);
 					throw internal_error();
