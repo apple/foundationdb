@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <boost/dynamic_bitset.hpp>
 #include "flow/ActorCollection.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -953,7 +954,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		wait( quorum( alive, std::min(logSet->tLogReplicationFactor, numPresent - logSet->tLogWriteAntiQuorum) ) );
 
-		state Reference<LocalityGroup> locked(new LocalityGroup());
+		state boost::dynamic_bitset<> locked(logSet->tLogLocalities.size());
 		state std::vector<bool> responded(alive.size());
 		for (int i = 0; i < alive.size(); i++) {
 			responded[i] = false;
@@ -961,13 +962,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		loop {
 			for (int i = 0; i < alive.size(); i++) {
 				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-					locked->add(logSet->tLogLocalities[i]);
+					locked[i] = 1;
 					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked->satisfiesPolicy(logSet->tLogPolicy);
+			bool quorum_obtained = logSet->bitMembershipToLocalityGroup[locked.to_ulong()]->validate(logSet->tLogPolicy);
 			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
-			if (logSet->tLogReplicationFactor == 1 && locked->size() > 0) {
+			if (logSet->tLogReplicationFactor == 1 && locked.count() > 0) {
 				ASSERT(quorum_obtained);
 			}
 			if (quorum_obtained) {
@@ -1184,7 +1185,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<LocalityData> availableItems, badCombo;
 		std::vector<TLogLockResult> results;
 		std::string sServerState;
-		LocalityGroup unResponsiveSet;
+		boost::dynamic_bitset<> unResponsiveSet(logSet->tLogLocalities.size());
 
 		for(int t=0; t<logSet->logServers.size(); t++) {
 			if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
@@ -1193,7 +1194,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				sServerState += 'a';
 			}
 			else {
-				unResponsiveSet.add(logSet->tLogLocalities[t]);
+				unResponsiveSet[t] = 1;
 				sServerState += 'f';
 			}
 		}
@@ -1202,10 +1203,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		bool bTooManyFailures = (results.size() <= logSet->tLogWriteAntiQuorum);
 
 		// Check if failed logs complete the policy
-		bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor)	&& (unResponsiveSet.satisfiesPolicy(logSet->tLogPolicy)));
+		bTooManyFailures = bTooManyFailures || ((unResponsiveSet.count() >= logSet->tLogReplicationFactor)	&& (logSet->bitMembershipToLocalityGroup[unResponsiveSet.to_ulong()]->validate(logSet->tLogPolicy)));
 
 		// Check all combinations of the AntiQuorum within the failed
-		if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, unResponsiveSet, logSet->tLogPolicy, availableItems, logSet->tLogWriteAntiQuorum, false))) {
+		if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, *(logSet->bitMembershipToLocalityGroup[unResponsiveSet.to_ulong()]), logSet->tLogPolicy, availableItems, logSet->tLogWriteAntiQuorum, false))) {
 			TraceEvent("EpochEndBadCombo", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState);
 			bTooManyFailures = true;
 		}
