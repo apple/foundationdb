@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+
 struct SerializabilityWorkload : TestWorkload {
 	double testDuration;
 	bool adjacentKeys;
@@ -54,11 +55,18 @@ struct SerializabilityWorkload : TestWorkload {
 		bool snapshot;
 	};
 
+	struct ReadModifyWriteOperation {
+		Key key;
+		Value initialValue;
+		bool snapshot;
+	};
+
 	struct TransactionOperation {
 		Optional<Standalone<MutationRef>> mutationOp;
 		Optional<GetRangeOperation> getRangeOp;
 		Optional<GetKeyOperation> getKeyOp;
 		Optional<GetOperation> getOp;
+		Optional<ReadModifyWriteOperation> rmwOp;
 		Optional<Key> watchOp;
 		Optional<KeyRange> writeConflictOp;
 		Optional<KeyRange> readConflictOp;
@@ -127,7 +135,7 @@ struct SerializabilityWorkload : TestWorkload {
 		return KeyRangeRef( getKeyForIndex( startLocation ), getKeyForIndex( endLocation ) );
 	}
 
-	std::vector<TransactionOperation> randomTransaction() { 
+	std::vector<TransactionOperation> randomTransaction(const Standalone<VectorRef<KeyValueRef>>& initialData) {
 		int maxOps = g_random->randomInt( 1, numOps );
 		std::vector<TransactionOperation> result;
 		bool hasMutation = false;
@@ -199,7 +207,24 @@ struct SerializabilityWorkload : TestWorkload {
 				}
 				op.mutationOp = MutationRef(opType, key, value);
 				hasMutation = true;
-			} else if( operationType >= 9 ) {
+			}
+			else if (operationType == 9) {
+				if (!initialData.empty()) {
+					ReadModifyWriteOperation rmwOp;
+					int randIndex = g_random->randomInt(0, initialData.size());
+					int index = 0;
+					for (auto &kv : initialData) {
+						if (index == randIndex) {
+							rmwOp.key = kv.key;
+							rmwOp.initialValue = kv.value;
+							rmwOp.snapshot = g_random->random01() < 0.5;
+						}
+						index++;
+					}
+					op.rmwOp = rmwOp;
+					hasMutation = true;
+				} // else skip
+			} else if (operationType >= 10) {
 				Key key = getRandomKey();
 				Value value = getRandomValue();
 				op.mutationOp = MutationRef(MutationRef::SetValue, key, value);
@@ -227,7 +252,8 @@ struct SerializabilityWorkload : TestWorkload {
 		futures.back() = tag(::success(futures.back()), T());
 	}
 
-	ACTOR static Future<Void> runTransaction( ReadYourWritesTransaction* tr, 
+	ACTOR static Future<Void> runTransaction(SerializabilityWorkload *self,
+		ReadYourWritesTransaction* tr,
 		std::vector<TransactionOperation> ops, 
 		std::vector<Future<Optional<Value>>>* getFutures, 
 		std::vector<Future<Key>>* getKeyFutures,
@@ -279,6 +305,15 @@ struct SerializabilityWorkload : TestWorkload {
 				auto& op = ops[opNum].writeConflictOp.get();
 				//TraceEvent("SRL_WriteConflict").detail("Range", printable(op));
 				tr->addWriteConflictRange(op);
+			} else if (ops[opNum].rmwOp.present()) {
+				auto &op = ops[opNum].rmwOp.get();
+				//TraceEvent("SRL_RMWOp").detail("Key", printable(op);
+				Optional<Value> val = wait(tr->get(op.key, op.snapshot));
+				Value modifiedVal = val.present() && val.get().size() ? strinc(val.get()) : ops[opNum].rmwOp.get().initialValue;
+				tr->set(ops[opNum].rmwOp.get().key, modifiedVal);
+				if (ops[opNum].rmwOp.get().snapshot) {
+					tr->addReadConflictRange(KeyRangeRef(ops[opNum].rmwOp.get().key, strinc(ops[opNum].rmwOp.get().key)));
+				}
 			}
 
 			//sometimes wait for a random operation
@@ -358,24 +393,21 @@ struct SerializabilityWorkload : TestWorkload {
 				}
 		
 				//Generate three random transactions
-				state std::vector<TransactionOperation> a = self->randomTransaction();
-				state std::vector<TransactionOperation> b = self->randomTransaction();
-				state std::vector<TransactionOperation> c = self->randomTransaction();
+				state std::vector<TransactionOperation> a = self->randomTransaction(initialData);
+				state std::vector<TransactionOperation> b = self->randomTransaction(initialData);
+				state std::vector<TransactionOperation> c = self->randomTransaction(initialData);
 
 				//reset database to known state
 				wait( resetDatabase(cx, initialData) );
-
-				wait( runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( runTransaction(self, &tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
 				wait( tr[0].commit() );
 
 				//TraceEvent("SRL_FinishedA");
-		
-				wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( runTransaction(self, &tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
 				wait( tr[1].commit() );
 
 				//TraceEvent("SRL_FinishedB");
-
-				wait( runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
+				wait( runTransaction(self, &tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
 				wait( tr[2].commit() );
 
 				//get contents of database
@@ -383,10 +415,9 @@ struct SerializabilityWorkload : TestWorkload {
 
 				//reset database to known state
 				wait( resetDatabase(cx, initialData) );
-
-				wait( runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				wait( runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				wait( runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
+				wait( runTransaction(self, &tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(self, &tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(self, &tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
 				wait( tr[3].commit() );
 				wait( tr[4].commit() );
 

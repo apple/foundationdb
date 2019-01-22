@@ -1341,10 +1341,15 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 		return;
 	}
 
-	WriteMap::iterator it( &writes );
 	KeyRangeRef readRange( arena, r );
-	it.skip( readRange.begin );
-	updateConflictMap(readRange, it);
+	if (tr.apiVersionAtLeast(610)) {
+		readConflicts.insert(readRange, true);
+	}
+	else {
+		WriteMap::iterator it(&writes);
+		it.skip(readRange.begin);
+		updateConflictMap(readRange, it);
+	}
 }
 
 void ReadYourWritesTransaction::updateConflictMap( KeyRef const& key, WriteMap::iterator& it ) {
