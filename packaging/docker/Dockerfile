@@ -50,7 +50,7 @@ COPY download_multiversion_libraries.bash scripts/
 RUN wget $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -O /usr/lib/libfdb_c.so && \
 	bash scripts/download_multiversion_libraries.bash $FDB_WEBSITE $FDB_ADDITIONAL_VERSIONS
 
-# Set Up Runtime Scripts and Directoris
+# Set Up Runtime Scripts and Directories
 
 COPY fdb.bash scripts/
 COPY create_server_environment.bash scripts/
