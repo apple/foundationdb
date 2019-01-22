@@ -309,7 +309,9 @@ def _reduce_children(child_values):
 
 if sys.version_info < (2, 7):
     def _bit_length(x):
-        return len(bin(x)) - 2
+        s = bin(x)       # binary representation:  bin(-37) --> '-0b100101'
+        s = s.lstrip('-0b') # remove leading zeros and minus sign
+        return len(s)
 else:
     def _bit_length(x):
         return x.bit_length()
