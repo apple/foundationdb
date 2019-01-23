@@ -501,7 +501,7 @@ The ``start`` subcommand is used to start a DR backup.  If there is already a DR
 
 The ``switch`` subcommand is used to swap the source and destination database clusters of an active DR in differential mode.  This means the destination will be unlocked and start streaming data into the source database, which will subsequently be locked.
 
-This command requires both databases to be available.  While the switch command is working, both databases will be locked for a few seconds.
+This command requires both databases to be available.  On the destination cluster, a ``dr_agent`` that points to the source cluster must be running.  While the switch command is working, both databases will be locked for a few seconds.
 
 .. program:: fdbdr abort
 
