@@ -27,5 +27,5 @@ for version in $*; do
 	origin=$website/downloads/$version/linux/libfdb_c_$version.so
 	destination=/usr/lib/fdb/multiversion/libfdb_c_$version.so
 	echo "Downloading $origin to $destination"
-	wget $origin -o $destination
+	curl $origin -o $destination
 done
