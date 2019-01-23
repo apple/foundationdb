@@ -3379,6 +3379,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+		self->addActor.send( distributor );
 		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
 		state Future<Void> reply;
@@ -3397,22 +3398,25 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 			trigger = self->configurationTrigger.onTrigger();
 			choose {
-				when (wait(brokenPromiseToNever(reply))) {
+				when ( wait( brokenPromiseToNever(reply) ) ) {
 					TraceEvent("DataDistributorRejoined", di.id())
 					.detail("ClusterControllerID", lastClusterControllerID);
 				}
-				when (wait(self->dbInfo->onChange())) {
+				when ( wait( self->dbInfo->onChange() ) ) {
 					const DataDistributorInterface& distributor = self->dbInfo->get().distributor;
 					if ( distributor.isValid() && distributor.id() != di.id() ) {
-						TraceEvent("DataDistributor", di.id()).detail("FoundAnotherDdID", distributor.id());
+						TraceEvent("DataDistributorExit", di.id()).detail("CurrentLiveID", distributor.id());
 						break;
 					}
 				}
-				when (wait(trigger)) {
+				when ( wait( trigger ) ) {
+					TraceEvent("DataDistributorRestart", di.id())
+					.detail("ClusterControllerID", lastClusterControllerID);
 					self->refreshDcIds();
 					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+					self->addActor.send( distributor );
 				}
-				when (wait(collection)) {
+				when ( wait( collection ) ) {
 					ASSERT(false);
 					throw internal_error();
 				}
