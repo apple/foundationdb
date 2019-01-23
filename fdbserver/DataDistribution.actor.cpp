@@ -2919,6 +2919,15 @@ ACTOR Future<Void> serverGetTeamRequests(TeamCollectionInterface tci, DDTeamColl
 	}
 }
 
+ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	TraceEvent("DDTrackerStarting");
+	while ( db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
+		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
+		wait( db->onChange() );
+	}
+	return Void();
+}
+
 // Keep track of servers and teams -- serves requests for getRandomTeam
 ACTOR Future<Void> dataDistributionTeamCollection(
 	Reference<DDTeamCollection> teamCollection,
@@ -2938,9 +2947,6 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 
 		TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
 		wait( self->readyToStart || error );
-		while(!self->primary && db->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait( db->onChange() );
-		}
 		TraceEvent("DDTeamCollectionReadyToStart", self->distributorId).detail("Primary", self->primary);
 
 		if(self->badTeamRemover.isReady()) {
@@ -3249,7 +3255,7 @@ ACTOR Future<Void> dataDistribution(
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[1], false, processingUnhealthy) );
+				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered(db), zeroHealthyTeams[1], false, processingUnhealthy) );
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], db ), "DDTeamCollectionSecondary", myId, &normalDDQueueErrors() ) );
@@ -3370,10 +3376,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
-		when ( wait( trigger ) ) { break; }
+		when ( wait( trigger ) ) {
+			self->refreshDcIds();
+			break;
+		}
 		when ( wait(self->dbInfo->onChange()) ) {}
 	}
-	self->refreshDcIds();
 
 	try {
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
@@ -3398,12 +3406,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 			trigger = self->configurationTrigger.onTrigger();
 			choose {
-				when ( wait( brokenPromiseToNever(reply) ) ) {
-					TraceEvent("DataDistributorRejoined", di.id())
-					.detail("ClusterControllerID", lastClusterControllerID);
-				}
+				when ( wait( brokenPromiseToNever(reply) ) ) {}
 				when ( wait( self->dbInfo->onChange() ) ) {
 					const DataDistributorInterface& distributor = self->dbInfo->get().distributor;
+					TraceEvent("DataDistributor", di.id()).detail("IncomingID", distributor.id()).detail("Valid", distributor.isValid());
 					if ( distributor.isValid() && distributor.id() != di.id() ) {
 						TraceEvent("DataDistributorExit", di.id()).detail("CurrentLiveID", distributor.id());
 						break;
@@ -3413,6 +3419,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					TraceEvent("DataDistributorRestart", di.id())
 					.detail("ClusterControllerID", lastClusterControllerID);
 					self->refreshDcIds();
+					TraceEvent("DataDistributor", di.id()).detail("RestartDistribution", self->configuration->get().toString());
 					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 					self->addActor.send( distributor );
 				}

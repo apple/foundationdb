@@ -2290,6 +2290,8 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 			newDistributor = startDataDistributor( self );
 		}
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
+			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
+			/*
 			if ( !self->db.serverInfo->get().distributor.isValid() ) {
 				self->db.setDistributor( req.dataDistributor );
 				distributorFailed = waitFailureClient( req.dataDistributor.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
@@ -2302,6 +2304,7 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 				.detail("OldDataDistributorID", myDdId)
 				.detail("ReqID", req.dataDistributor.id());
 			}
+			*/
 			req.reply.send( Void() );
 		}
 	}

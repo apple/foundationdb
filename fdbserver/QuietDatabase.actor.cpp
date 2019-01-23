@@ -75,7 +75,7 @@ ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<A
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().distributor.address() ) {
-					TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", dbInfo->get().distributor.id()).detail("WorkerId", workers[i].first.id());
+				TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", dbInfo->get().distributor.id()).detail("WorkerId", workers[i].first.id());
 				return std::make_pair(workers[i].first, dbInfo->get().distributor.id());
 			}
 		}
@@ -88,7 +88,7 @@ ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<A
 	}
 }
 
-//Gets the number of bytes in flight from the master
+// Gets the number of bytes in flight from the data distributor.
 ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorWorker ) {
 	try {
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
@@ -104,8 +104,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 
 }
 
-//Gets the number of bytes in flight from the master
-//Convenience method that first finds the master worker from a zookeeper interface
+// Gets the number of bytes in flight from the data distributor.
 ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	DistributorPair distributorPair = wait( getDataDistributorWorker(cx, dbInfo) );
 	int64_t dataInFlight = wait(getDataInFlight(cx, distributorPair.first));
@@ -278,7 +277,7 @@ ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface distr
 }
 
 // Checks to see if any storage servers are being recruited
-ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface distributorWorker, UID distributorUID ) {
+ACTOR Future<bool> getStorageServersRecruiting( Database cx, WorkerInterface distributorWorker, UID distributorUID ) {
 	try {
 		TraceEvent("StorageServersRecruiting").detail("Stage", "ContactingDataDistributor");
 		TraceEventFields recruitingMessage = wait( timeoutError(distributorWorker.eventLogRequest.getReply(
@@ -346,7 +345,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<int64_t> dataDistributionQueueSize = getDataDistributionQueueSize( cx, distributorWorker, dataInFlightGate == 0);
 			state Future<int64_t> storageQueueSize = getMaxStorageServerQueueSize( cx, dbInfo );
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, distributorWorker );
-			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, dbInfo, distributorWorker, distributorUID );
+			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, distributorWorker, distributorUID );
 
 			wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
 							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
