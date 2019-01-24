@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ActorCollection.h"
-#include "workloads.h"
-
 #include <limits.h>
 #include <mutex>
 #include <functional>
 #include <sstream>
+
+#include "fdbserver/TesterInterface.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ActorCollection.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace ph = std::placeholders;
 
@@ -226,18 +226,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								}
 							}
 						}
-						Void _ = wait( unsafeThreadFutureToFuture( tr->commit() ) );
+						wait( unsafeThreadFutureToFuture( tr->commit() ) );
 						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( unsafeThreadFutureToFuture( tr->onError( e ) ) );
+						wait( unsafeThreadFutureToFuture( tr->onError( e ) ) );
 					}
 				}
 			}
 
 			loop {
 				try {
-					Void _ = wait( self->randomTransaction( cx, self ) && delay( self->numOps * .001 ) );
+					wait( self->randomTransaction( cx, self ) && delay( self->numOps * .001 ) );
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
 						throw e;
@@ -294,14 +294,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					// Wait for a random op to complete.
 					if( waitLocation < operations.size() ) {
 						int waitOp = g_random->randomInt(waitLocation,operations.size());
-						Void _ = wait( operations[waitOp] );
-						Void _ = wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
+						wait( operations[waitOp] );
+						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
-				Void _ = wait( waitForAll( operations ) );
+				wait( waitForAll( operations ) );
 				try {
-					Void _ = wait( timeoutError( unsafeThreadFutureToFuture( tr->commit() ), 30) );
+					wait( timeoutError( unsafeThreadFutureToFuture( tr->commit() ), 30) );
 				}
 				catch( Error &e ) {
 					if(e.code() == error_code_client_invalid_operation ||
@@ -322,7 +322,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					throw not_committed();
 				}
 				try {
-					Void _ = wait( unsafeThreadFutureToFuture( tr->onError(e) ) );
+					wait( unsafeThreadFutureToFuture( tr->onError(e) ) );
 				} catch( Error &e ) {
 					if( e.code() == error_code_transaction_timed_out ) {
 						throw not_committed();
@@ -358,7 +358,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			// we can get the result.
 			state std::vector<ThreadFuture<Void> >::iterator i;
 			for (i = self->pre_steps.begin(); i != self->pre_steps.end(); ++i) {
-				Void _ = wait(unsafeThreadFutureToFuture( *i ));
+				wait(unsafeThreadFutureToFuture( *i ));
 			}
 
 			value_type result = wait( future );
@@ -1098,7 +1098,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		void callback(Reference<ITransaction> tr) {
-			tr->setOption((FDBTransactionOptions::Option) op, val.cast_to<StringRef>());
+			tr->setOption((FDBTransactionOptions::Option) op, val.castTo<StringRef>());
 		}
 
 		void augmentTrace(TraceEvent &e) const {

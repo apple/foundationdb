@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 
 //Page caches used in non-simulated environments
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;
@@ -142,11 +142,30 @@ Future<Void> AsyncFileCached::readZeroCopy( void** data, int* length, int64_t of
 void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) {
 	ASSERT( length == pageCache->pageSize && !(offset & (pageCache->pageSize-1)) && offset + length <= this->length);
 	auto p = pages.find( offset );
-	ASSERT( p != pages.end() && p->second->data == data );
-	p->second->releaseZeroCopy();
+	// If the page is in the cache and the data pointer matches then release the page
+	if(p != pages.end() && p->second->data == data ) {
+		p->second->releaseZeroCopy();
+	}
+	else {
+		// Otherwise, the data pointer might exist in the orphaned pages map
+		auto o = orphanedPages.find(data);
+		if(o != orphanedPages.end()) {
+			if(o->second == 1) {
+				if (data) {
+					if (length == 4096)
+						FastAllocator<4096>::release(data);
+					else
+						aligned_free(data);
+				}
+			}
+			else {
+				--o->second;
+			}
+		}
+	}
 }
 
-Future<Void> AsyncFileCached::truncate( int64_t size ) {
+Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	++countFileCacheWrites;
 	++countCacheWrites;
 
@@ -217,7 +236,11 @@ Future<Void> AsyncFileCached::truncate( int64_t size ) {
 		}
 	}
 
-	return truncate_impl( this, size, waitForAll( actors ) );
+	// Wait for the page truncations to finish, then truncate the underlying file
+	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+	return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(waitForAll(actors), [=](Void _) -> Future<Void> {
+		return uncached->truncate(size);
+	});
 }
 
 Future<Void> AsyncFileCached::flush() {

@@ -22,10 +22,10 @@
 #define FLOW_INDEXEDSET_H
 #pragma once
 
-#include "Platform.h"
-#include "FastAlloc.h"
-#include "Trace.h"
-#include "Error.h"
+#include "flow/Platform.h"
+#include "flow/FastAlloc.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
 #include <deque>
 #include <vector>
@@ -1086,8 +1086,8 @@ Metric IndexedSet<T,Metric>::sumTo(typename IndexedSet<T,Metric>::iterator end) 
 	return m;
 }
 
-#include "flow.h"
-#include "IndexedSet.actor.h"
+#include "flow/flow.h"
+#include "flow/IndexedSet.actor.h"
 
 template <class T, class Metric>
 void IndexedSet<T,Metric>::erase(typename IndexedSet<T,Metric>::iterator begin, typename IndexedSet<T,Metric>::iterator end) {

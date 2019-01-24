@@ -22,8 +22,8 @@
 #define FDBCLIENT_RYWITERATOR_H
 #pragma once
 
-#include "SnapshotCache.h"
-#include "WriteMap.h"
+#include "fdbclient/SnapshotCache.h"
+#include "fdbclient/WriteMap.h"
 
 class RYWIterator {
 public:

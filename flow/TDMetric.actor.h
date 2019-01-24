@@ -23,19 +23,20 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
         #define FLOW_TDMETRIC_ACTOR_G_H
-        #include "TDMetric.actor.g.h"
+        #include "flow/TDMetric.actor.g.h"
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
         #define FLOW_TDMETRIC_ACTOR_H
 
-#include "actorcompiler.h"
-#include "flow.h"
-#include "IndexedSet.h"
-#include "network.h"
-#include "Knobs.h"
-#include "genericactors.actor.h"
-#include "CompressedInt.h"
+#include "flow/flow.h"
+#include "flow/IndexedSet.h"
+#include "flow/network.h"
+#include "flow/Knobs.h"
+#include "flow/genericactors.actor.h"
+#include "flow/CompressedInt.h"
 #include <algorithm>
 #include <functional>
+#include <cmath>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricNameRef {
 	MetricNameRef() {}
@@ -338,9 +339,9 @@ struct FieldHeader {
 		sum += v;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & sum;
+		serializer(ar, count, sum);
 	}
 };
 
@@ -1126,9 +1127,9 @@ struct FieldHeader<TimeAndValue<T>> {
 		previous_time = v.time;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & area;
+		serializer(ar, count, area);
 	}
 };
 
@@ -1369,5 +1370,7 @@ typedef MetricHandle<StringMetric> StringMetricHandle;
 
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
+
+#include "flow/unactorcompiler.h"
 
 #endif

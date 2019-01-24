@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
 
@@ -94,7 +94,7 @@ struct WatchesWorkload : TestWorkload {
 			if( i % self->clientCount == self->clientId )
 				setupActors.push_back( self->watcherInit( cx, self->keyForIndex(self->nodeOrder[i]), self->keyForIndex(self->nodeOrder[i+1]), self->extraPerNode ) );
 
-		Void _ = wait( waitForAll( setupActors ) );
+		wait( waitForAll( setupActors ) );
 		
 		for(int i=0; i<self->nodes; i++)
 			if( i % self->clientCount == self->clientId )
@@ -114,12 +114,12 @@ struct WatchesWorkload : TestWorkload {
 					tr.set(extraKey, extraValue);
 					//TraceEvent("WatcherInitialSetupExtra").detail("Key", printable(extraKey)).detail("Value", printable(extraValue));
 				}
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				extraLoc += 1000;
 				//TraceEvent("WatcherInitialSetup").detail("Watch", printable(watchKey)).detail("Ver", tr.getCommittedVersion());
 			} catch( Error &e ) {
 				//TraceEvent("WatcherInitialSetupError").error(e).detail("ExtraLoc", extraLoc);
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -148,19 +148,19 @@ struct WatchesWorkload : TestWorkload {
 						else
 							tr.clear( setKey );
 						//TraceEvent("WatcherSetStart").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) );
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr.getCommittedVersion());
 					} else {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
 						state Future<Void> watchFuture = tr.watch( Reference<Watch>( new Watch(watchKey, watchValue) ) );
-						Void _ = wait( tr.commit() );
-						Void _ = wait( watchFuture );
+						wait( tr.commit() );
+						wait( watchFuture );
 						if( watchValue.present() )
 							lastValue = watchValue;
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -198,11 +198,11 @@ struct WatchesWorkload : TestWorkload {
 					else
 						tr.clear( startKey );
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					//TraceEvent("WatcherInitialSet").detail("Start", printable(startKey)).detail("End", printable(endKey)).detail("Value", printable( expectedValue ) ).detail("Ver", tr.getCommittedVersion()).detail("ReadVer", readVer);
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 
@@ -222,12 +222,12 @@ struct WatchesWorkload : TestWorkload {
 							TraceEvent(SevError, "WatcherError").detail("FirstAttempt", firstAttempt).detail("StartValue", printable( startValue )).detail("EndValue", printable( endValue )).detail("ExpectedValue", printable(expectedValue)).detail("EndVersion", tr2.getReadVersion().get()); 
 						}
 						state Future<Void> watchFuture = tr2.watch( Reference<Watch>( new Watch(endKey, startValue) ) );
-						Void _ = wait( tr2.commit() );
-						Void _ = wait( watchFuture );
+						wait( tr2.commit() );
+						wait( watchFuture );
 						firstAttempt = false;
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr2.onError(e) );
+						wait( tr2.onError(e) );
 					}
 				}
 				if( finished )
@@ -237,7 +237,7 @@ struct WatchesWorkload : TestWorkload {
 			++self->cycles;
 
 			if( g_network->isSimulated() )
-				Void _ = wait( delay( g_random->random01() < 0.5 ? 0 : g_random->random01() * 60 ) );
+				wait( delay( g_random->random01() < 0.5 ? 0 : g_random->random01() * 60 ) );
 
 			if( now() - startTime > self->testDuration )
 				break;

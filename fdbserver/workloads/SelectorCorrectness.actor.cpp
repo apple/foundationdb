@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SelectorCorrectnessWorkload : TestWorkload {
 	int minOperationsPerTransaction,maxOperationsPerTransaction,maxKeySpace,maxOffset;
@@ -75,10 +75,10 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				try {
 					for(int i = 0; i < self->maxKeySpace; i+=2) tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		} else {
@@ -90,10 +90,10 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						if(g_random->random01() > 0.5)
 							tr.set(StringRef(format( "%010d", i ) ),myValue);
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -205,7 +205,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				trRYOW.reset();
 				++self->transactions;
 			} catch (Error& e) {
-				Void _ = wait( trRYOW.onError(e) );
+				wait( trRYOW.onError(e) );
 				trRYOW.reset();
 				++self->retries;
 			}

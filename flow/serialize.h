@@ -24,8 +24,8 @@
 
 #include <stdint.h>
 #include <set>
-#include "Error.h"
-#include "Arena.h"
+#include "flow/Error.h"
+#include "flow/Arena.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -62,15 +62,20 @@ inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::WRITER& operator & (Archive& ar, Item& item ) {
+template <class Archive>
+void serializer(Archive& ar) {}
+
+template <class Archive, class Item, class... Items>
+typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
 	save(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::READER& operator & (Archive& ar, Item& item ) {
+template <class Archive, class Item, class... Items>
+typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
 	load(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
@@ -121,7 +126,7 @@ template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
 	static void serialize( Archive& ar, std::pair<T1, T2>& p ) {
-		ar & p.first & p.second;
+		serializer(ar, p.first, p.second);
 	}
 };
 
@@ -185,9 +190,9 @@ static bool valgrindCheck( const void* data, int bytes, const char* context ) {
 static inline bool valgrindCheck( const void* data, int bytes, const char* context ) { return true; }
 #endif
 
-extern uint64_t currentProtocolVersion;
-extern uint64_t minValidProtocolVersion;
-extern uint64_t compatibleProtocolVersionMask;
+extern const uint64_t currentProtocolVersion;
+extern const uint64_t minValidProtocolVersion;
+extern const uint64_t compatibleProtocolVersionMask;
 
 struct _IncludeVersion {
 	uint64_t v;

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|X64">
@@ -74,7 +74,6 @@
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="crc32c.h" />
-    <ClInclude Include="EndpointGroup.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>
@@ -84,6 +83,9 @@
     </ActorCompiler>
     <ClInclude Include="linux_kaio.h" />
     <ClInclude Include="LoadPlugin.h" />
+    <ActorCompiler Include="networksender.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="IRateControl.h" />
     <ClInclude Include="Platform.h" />

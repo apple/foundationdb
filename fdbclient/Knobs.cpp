@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Knobs.h"
-#include "FDBTypes.h"
-#include "SystemData.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 

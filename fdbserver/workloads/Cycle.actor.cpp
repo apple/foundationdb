@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
@@ -93,7 +93,7 @@ struct CycleWorkload : TestWorkload {
 		state double lastTime = now();
 		try {
 			loop {
-				Void _ = wait( poisson( &lastTime, delay ) );
+				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
 				state int r = g_random->randomInt(0, self->nodeCount);
@@ -116,13 +116,13 @@ struct CycleWorkload : TestWorkload {
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
 
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						//TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 					++self->retries;
 				}
@@ -183,7 +183,7 @@ struct CycleWorkload : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}

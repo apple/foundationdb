@@ -1,4 +1,4 @@
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunTransaction.actor.h"
@@ -192,7 +192,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
 
-		Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
 						{
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -205,9 +205,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, ClientTransactionProfileCorrectnessWorkload* self) {
-		Void _ = wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0));  // Disable sampling
+		wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0));  // Disable sampling
 		// FIXME: Better way to ensure that all client profile data has been flushed to the database
-		Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+		wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 
 		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state int64_t counter;
@@ -241,7 +241,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old)
 					keysLimit = std::max(1, keysLimit / 2);
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 

@@ -1,3 +1,4 @@
+
 /*
  * MasterProxyInterface.h
  *
@@ -22,9 +23,10 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "StorageServerInterface.h"
-#include "CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/CommitTransaction.h"
+
 #include "flow/Stats.h"
 
 struct MasterProxyInterface {
@@ -51,7 +53,7 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & locality & commit & getConsistentReadVersion & getKeyServersLocations & waitFailure & getStorageServerRejoinInfo & getRawCommittedVersion & txnState;
+		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion, txnState);
 	}
 
 	void initEndpoints() {
@@ -68,7 +70,7 @@ struct CommitID {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & txnBatchId;
+		serializer(ar, version, txnBatchId);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
@@ -94,7 +96,7 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & *(TimedRequest*)this & transaction & reply & arena & flags & debugID;
+		serializer(ar, *(TimedRequest*)this, transaction, reply, arena, flags, debugID);
 	}
 };
 
@@ -117,7 +119,7 @@ struct GetReadVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & locked;
+		serializer(ar, version, locked);
 	}
 };
 
@@ -145,7 +147,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & transactionCount & flags & debugID & reply;
+		serializer(ar, transactionCount, flags, debugID, reply);
 	}
 };
 
@@ -155,7 +157,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & results & arena;
+		serializer(ar, results, arena);
 	}
 };
 
@@ -172,7 +174,7 @@ struct GetKeyServerLocationsRequest {
 	
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & begin & end & limit & reverse & reply & arena;
+		serializer(ar, begin, end, limit, reverse, reply, arena);
 	}
 };
 
@@ -184,7 +186,7 @@ struct GetRawCommittedVersionRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & debugID & reply;
+		serializer(ar, debugID, reply);
 	}
 };
 
@@ -197,7 +199,7 @@ struct GetStorageServerRejoinInfoReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & tag & newTag & newLocality & history;
+		serializer(ar, version, tag, newTag, newLocality, history);
 	}
 };
 
@@ -211,7 +213,7 @@ struct GetStorageServerRejoinInfoRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & dcId & reply;
+		serializer(ar, id, dcId, reply);
 	}
 };
 
@@ -224,7 +226,7 @@ struct TxnStateRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & data & sequence & last & reply & arena;
+		serializer(ar, data, sequence, last, reply, arena);
 	}
 };
 

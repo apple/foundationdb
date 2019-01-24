@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ManagementAPI.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ChangeConfigWorkload : TestWorkload {
 	double minDelayBeforeChange, maxDelayBeforeChange;
@@ -57,14 +57,13 @@ struct ChangeConfigWorkload : TestWorkload {
 	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload *self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
+			state Database extraDB = Database::createDatabase(extraFile, -1);
 
-			Void _ = wait(delay(5*g_random->random01()));
+			wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
 				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode, true));
 				TraceEvent("WaitForReplicasExtra");
-				Void _ = wait( waitForFullReplication( extraDB ) );
+				wait( waitForFullReplication( extraDB ) );
 				TraceEvent("WaitForReplicasExtraEnd");
 			} if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
@@ -72,24 +71,24 @@ struct ChangeConfigWorkload : TestWorkload {
 				else
 					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, specifiedQuorumChange(NetworkAddress::parseList(self->networkAddresses))));
 			}
-			Void _ = wait(delay(5*g_random->random01()));
+			wait(delay(5*g_random->random01()));
 		}
 		return Void();
 	}
 
 	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
-		Void _ = wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
+		wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
 
 		state bool extraConfigureBefore = g_random->random01() < 0.5;
 
 		if(extraConfigureBefore) {
-			Void _ = wait( self->extraDatabaseConfigure(self) );
+			wait( self->extraDatabaseConfigure(self) );
 		}
 
 		if( self->configMode.size() ) {
 			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode, true ) );
 			TraceEvent("WaitForReplicas");
-			Void _ = wait( waitForFullReplication( cx ) );
+			wait( waitForFullReplication( cx ) );
 			TraceEvent("WaitForReplicasEnd");
 		}
 		if( self->networkAddresses.size() ) {
@@ -100,7 +99,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if(!extraConfigureBefore) {
-			Void _ = wait( self->extraDatabaseConfigure(self) );
+			wait( self->extraDatabaseConfigure(self) );
 		}
 
 		return Void();

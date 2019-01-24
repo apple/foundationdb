@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.h"
 
@@ -59,7 +59,7 @@ struct KillRegionWorkload : TestWorkload {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disablePrimary, true ) );
 		TraceEvent("ForceRecovery_WaitForRemote");
-		Void _ = wait( waitForPrimaryDC(cx, LiteralStringRef("1")) );
+		wait( waitForPrimaryDC(cx, LiteralStringRef("1")) );
 		TraceEvent("ForceRecovery_DisablePrimaryComplete");
 		return Void();
 	}
@@ -69,11 +69,11 @@ struct KillRegionWorkload : TestWorkload {
 		TraceEvent("ForceRecovery_DisableRemoteBegin");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
 		TraceEvent("ForceRecovery_WaitForPrimary");
-		Void _ = wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
+		wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
 		TraceEvent("ForceRecovery_DisableRemoteComplete");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
 		TraceEvent("ForceRecovery_RestoreOriginalComplete");
-		Void _ = wait( delay( g_random->random01() * self->testDuration ) );
+		wait( delay( g_random->random01() * self->testDuration ) );
 
 		g_simulator.killDataCenter( LiteralStringRef("0"), ISimulator::RebootAndDelete, true );
 		g_simulator.killDataCenter( LiteralStringRef("2"), ISimulator::RebootAndDelete, true );
@@ -86,23 +86,23 @@ struct KillRegionWorkload : TestWorkload {
 				try {
 					tr.addWriteConflictRange(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\x00")));
 					choose {
-						when( Void _ = wait(tr.commit()) ) {
+						when( wait(tr.commit()) ) {
 							TraceEvent("ForceRecovery_Complete");
 							g_simulator.killDataCenter( LiteralStringRef("1"), ISimulator::Reboot );
 							g_simulator.killDataCenter( LiteralStringRef("3"), ISimulator::Reboot );
 							g_simulator.killDataCenter( LiteralStringRef("5"), ISimulator::Reboot );
 							return Void();
 						}
-						when( Void _ = wait(delay(first ? 30.0 : 300.0)) ) {
+						when( wait(delay(first ? 30.0 : 300.0)) ) {
 							break;
 						}
 					}
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 			TraceEvent("ForceRecovery_Begin");
-			Void _ = wait( forceRecovery(cx->cluster->getConnectionFile()) );
+			wait( forceRecovery(cx->cluster->getConnectionFile()) );
 			first = false;
 			TraceEvent("ForceRecovery_Attempted");
 		}

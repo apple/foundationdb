@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
 
@@ -69,7 +69,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, ConflictRangeWorkload *self) {
 		if( self->clientId == 0 )
-			Void _ = wait( timeout( self->conflictRangeClient( cx, self), self->testDuration, Void() ) );
+			wait( timeout( self->conflictRangeClient( cx, self), self->testDuration, Void() ) );
 		return Void();
 	}
 
@@ -95,7 +95,7 @@ struct ConflictRangeWorkload : TestWorkload {
 		state int clearedEnd;
 
 		if(g_network->isSimulated()) {
-			Void _ = wait( timeKeeperSetDisable(cx) );
+			wait( timeKeeperSetDisable(cx) );
 		}
 
 		loop {
@@ -130,10 +130,10 @@ struct ConflictRangeWorkload : TestWorkload {
 						}
 					}
 
-					Void _ = wait( tr0.commit() );
+					wait( tr0.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr0.onError(e) );
+					wait( tr0.onError(e) );
 				}
 			}
 
@@ -167,7 +167,7 @@ struct ConflictRangeWorkload : TestWorkload {
 				if( self->testReadYourWrites ) {
 					for( auto iter = clearedSet.begin(); iter != clearedSet.end(); ++iter )
 						tr1.set(StringRef( format( "%010d", (*iter) ) ),g_random->randomUniqueID().toString());
-					Void _ = wait( tr1.commit() );
+					wait( tr1.commit() );
 					tr1 = Transaction(cx);
 				}
 
@@ -207,7 +207,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					}
 				}
 
-				Void _ = wait( tr2.commit() );
+				wait( tr2.commit() );
 
 				state bool foundConflict = false;
 				try {
@@ -215,11 +215,11 @@ struct ConflictRangeWorkload : TestWorkload {
 					if( self->testReadYourWrites ) {
 						trRYOW.clear( KeyRangeRef( StringRef( format( "%010d", clearedBegin ) ), StringRef( format( "%010d", clearedEnd ) ) ) );
 						Standalone<RangeResultRef> res = wait( trRYOW.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB),randomLimit) );
-						Void _ = wait( trRYOW.commit() );
+						wait( trRYOW.commit() );
 					} else {
 						tr3.clear( StringRef( format( "%010d", self->maxKeySpace + 1 ) ) );
 						Standalone<RangeResultRef> res = wait( tr3.getRange(KeySelectorRef(StringRef(myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(myKeyB),onEqualB,offsetB),randomLimit) );
-						Void _ = wait( tr3.commit() );
+						wait( tr3.commit() );
 					}
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
@@ -231,7 +231,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					//If the commit fails, do the getRange again and check that the results are different from the first execution.
 					if( self->testReadYourWrites ) {
 						tr1.clear( KeyRangeRef( StringRef( format( "%010d", clearedBegin ) ), StringRef( format( "%010d", clearedEnd ) ) ) );
-						Void _ = wait( tr1.commit() );
+						wait( tr1.commit() );
 						tr1 = Transaction(cx);
 					}
 
@@ -323,11 +323,11 @@ struct ConflictRangeWorkload : TestWorkload {
 				if( e2.code() != error_code_not_committed )
 					++self->retries;
 
-				Void _ = wait( tr1.onError(e2) );
-				Void _ = wait( tr2.onError(e2) );
-				Void _ = wait( tr3.onError(e2) );
-				Void _ = wait( tr4.onError(e2) );
-				Void _ = wait( trRYOW.onError(e2) );
+				wait( tr1.onError(e2) );
+				wait( tr2.onError(e2) );
+				wait( tr3.onError(e2) );
+				wait( tr4.onError(e2) );
+				wait( trRYOW.onError(e2) );
 			}
 		}
 	}

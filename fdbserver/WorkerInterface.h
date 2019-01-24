@@ -22,13 +22,13 @@
 #define FDBSERVER_WORKERINTERFACE_H
 #pragma once
 
-#include "MasterInterface.h"
-#include "TLogInterface.h"
-#include "ResolverInterface.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "TesterInterface.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "LogSystemConfig.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
@@ -44,7 +44,6 @@ struct WorkerInterface {
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
 
-	RequestStream< struct DebugQueryRequest > debugQuery;
 	RequestStream< struct LoadedPingRequest > debugPing;
 	RequestStream< struct CoordinationPingMessage > coordinationPing;
 	RequestStream< ReplyPromise<Void> > waitFailure;
@@ -63,7 +62,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & logRouter & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & testerInterface & diskStoreRequest;
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
 	}
 };
 
@@ -88,7 +87,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & reply;
+		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags, storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply);
 	}
 };
 
@@ -103,7 +102,7 @@ struct InitializeLogRouterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & locality & reply;
+		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply);
 	}
 };
 
@@ -117,7 +116,7 @@ struct RecruitMasterRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & lifetime & forceRecovery & reply & arena;
+		serializer(ar, lifetime, forceRecovery, reply, arena);
 	}
 };
 
@@ -130,7 +129,7 @@ struct InitializeMasterProxyRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & master & recoveryCount & recoveryTransactionVersion & firstProxy & reply;
+		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
 	}
 };
 
@@ -142,7 +141,7 @@ struct InitializeResolverRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & proxyCount & resolverCount & reply;
+		serializer(ar, recoveryCount, proxyCount, resolverCount, reply);
 	}
 };
 
@@ -152,7 +151,7 @@ struct InitializeStorageReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & interf & addedVersion;
+		serializer(ar, interf, addedVersion);
 	}
 };
 
@@ -165,7 +164,7 @@ struct InitializeStorageRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & seedTag & reqId & interfaceId & storeType & reply;
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply);
 	}
 };
 
@@ -174,7 +173,7 @@ struct TraceBatchDumpRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -184,7 +183,7 @@ struct LoadedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & payload & id;
+		serializer(ar, payload, id);
 	}
 };
 
@@ -196,7 +195,7 @@ struct LoadedPingRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & id & loadReply & payload & reply;
+		serializer(ar, id, loadReply, payload, reply);
 	}
 };
 
@@ -209,7 +208,7 @@ struct CoordinationPingMessage {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clusterControllerId & timeStep;
+		serializer(ar, clusterControllerId, timeStep);
 	}
 };
 
@@ -221,7 +220,7 @@ struct SetMetricsLogRateRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & metricsLogsPerSecond;
+		serializer(ar, metricsLogsPerSecond);
 	}
 };
 
@@ -235,17 +234,7 @@ struct EventLogRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & getLastError & eventName & reply;
-	}
-};
-
-struct DebugQueryRequest {
-	Standalone<StringRef> search;
-	ReplyPromise< Standalone< VectorRef<struct DebugEntryRef> > > reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar & search & reply;
+		serializer(ar, getLastError, eventName, reply);
 	}
 };
 
@@ -265,7 +254,7 @@ struct DebugEntryRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & time & address & context & version & mutation;
+		serializer(ar, time, address, context, version, mutation);
 	}
 };
 
@@ -277,7 +266,7 @@ struct DiskStoreRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & includePartialStores & reply;
+		serializer(ar, includePartialStores, reply);
 	}
 };
 
@@ -338,7 +327,6 @@ Future<Void> storageServer(
 Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
 Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
 Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
-Future<Void> debugQueryServer( DebugQueryRequest const& req );
 Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& ccInterface, Reference<ClusterConnectionFile> const&, LocalityData const&, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> resolver( ResolverInterface const& proxy, InitializeResolverRequest const&, Reference<AsyncVar<ServerDBInfo>> const& db );
 Future<Void> logRouter( TLogInterface const& interf, InitializeLogRouterRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db );

@@ -69,7 +69,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & originatorFeed & messageId & data & data.arena();
+		serializer(ar, originatorFeed, messageId, data, data.arena());
 	}
 };
 

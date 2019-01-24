@@ -22,7 +22,7 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 
 static const char * typeString[] = { "SetValue", "ClearRange", "AddValue", "DebugKeyRange", "DebugKey", "NoOp", "And", "Or", "Xor", "AppendIfFits", "AvailableForReuse", "Reserved_For_LogProtocolMessage", "Max", "Min", "SetVersionstampedKey", "SetVersionstampedValue", "ByteMin", "ByteMax", "MinV2", "AndV2" };
 
@@ -50,7 +50,7 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & type & param1 & param2;
+		serializer(ar, type, param1, param2);
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement isSingleKeyMutation() etc)
@@ -101,7 +101,7 @@ struct CommitTransactionRef {
 
 	template <class Ar>
 	force_inline void serialize( Ar& ar ) {
-		ar & read_conflict_ranges & write_conflict_ranges & mutations & read_snapshot;
+		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API

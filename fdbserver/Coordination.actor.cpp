@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -33,7 +33,7 @@ struct GenerationRegVal {
 	Optional<Value> val;
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & readGen & writeGen & val;
+		serializer(ar, readGen, writeGen, val);
 	}
 };
 
@@ -111,7 +111,7 @@ private:
 
 	ACTOR static Future<Void> onErr( Future<Future<Void>> e ) {
 		Future<Void> f = wait(e);
-		Void _ = wait(f);
+		wait(f);
 		return Void();
 	}
 
@@ -136,7 +136,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			if (v.readGen < req.gen) {
 				v.readGen = req.gen;
 				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
-				Void _ = wait(store->commit());
+				wait(store->commit());
 			}
 			req.reply.send( GenerationRegReadReply( v.val, v.writeGen, v.readGen ) );
 		}
@@ -148,7 +148,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
 				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
-				Void _ = wait(store->commit());
+				wait(store->commit());
 				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
 				wrq.reply.send( v.writeGen );
@@ -161,7 +161,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 	}
 };
 
-TEST_CASE("fdbserver/Coordination/localGenerationReg/simple") {
+TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
 		g_random->randomUniqueID());
@@ -256,7 +256,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			req.reply.send( Void() );
 			return Void();
 		}
-		when ( Void _ = wait(nextInterval) ) {
+		when ( wait(nextInterval) ) {
 			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
 				!currentNominee.present())
 			{
@@ -312,7 +312,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				availableCandidates.clear();
 			}
 		}
-		when( Void _ = wait(notifyCheck) ) {
+		when( wait(notifyCheck) ) {
 			notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
 			if(!notify.empty() && currentNominee.present()) {
 				notify.front().send( currentNominee.get() );
@@ -366,7 +366,7 @@ struct LeaderRegisterCollection {
 		self->forward[ key ] = forwardInfo;
 		OnDemandStore &store = *self->pStore;
 		store->set( KeyValueRef( key.withPrefix( fwdKeys.begin ), conn.toString() ) );
-		Void _ = wait(store->commit());
+		wait(store->commit());
 		return Void();
 	}
 
@@ -387,7 +387,7 @@ struct LeaderRegisterCollection {
 	ACTOR static Future<Void> wrap( LeaderRegisterCollection* self, Key key, Future<Void> actor ) {
 		state Error e;
 		try { 
-			Void _ = wait(actor); 
+			wait(actor); 
 		} catch (Error& err) {
 			if (err.code() == error_code_actor_cancelled)
 				throw;
@@ -406,7 +406,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state LeaderRegisterCollection regs( pStore );
 	state ActorCollection forwarders(false);
 
-	Void _ = wait( LeaderRegisterCollection::init( &regs ) ); 
+	wait( LeaderRegisterCollection::init( &regs ) ); 
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
@@ -439,7 +439,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				regs.getInterface(req.key).forward.send(req);
 			}
 		}
-		when( Void _ = wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
+		when( wait( forwarders.getResult() ) ) { ASSERT(false); throw internal_error(); }
 	}
 }
 
@@ -452,7 +452,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().address).detail("Folder", dataFolder);
 
 	try {
-		Void _ = wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
+		wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).error(e, true);

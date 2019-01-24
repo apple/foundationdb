@@ -78,7 +78,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 600
+    FDB.api_version 610
     db = FDB.open
 
 .. function:: open( cluster_file=nil, db_name="DB" ) -> Database

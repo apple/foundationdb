@@ -23,7 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "Smoother.h"
+#include "fdbrpc/Smoother.h"
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
 

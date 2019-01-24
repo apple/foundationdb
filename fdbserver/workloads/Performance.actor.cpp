@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {
 	Value probeWorkload;
@@ -111,7 +111,7 @@ struct PerformanceWorkload : TestWorkload {
 					workers = w;
 					break; 
 				}
-				when( Void _ = wait( self->dbInfo->onChange() ) ) {}
+				when( wait( self->dbInfo->onChange() ) ) {}
 			}
 		}
 
@@ -131,7 +131,7 @@ struct PerformanceWorkload : TestWorkload {
 		TestSpec spec( LiteralStringRef("PerformanceSetup"), false, false );
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait( runWorkload( cx, testers, self->dbName, spec ) );
+		DistributedTestResults results = wait( runWorkload( cx, testers, spec ) );
 
 		return Void();
 	}
@@ -166,7 +166,7 @@ struct PerformanceWorkload : TestWorkload {
 				TestSpec spec( LiteralStringRef("PerformanceRun"), false, false );
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait( runWorkload( cx, self->testers, self->dbName, spec ) );
+				DistributedTestResults r = wait( runWorkload( cx, self->testers, spec ) );
 				results = r;
 			} catch(Error& e) {
 				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));
@@ -213,7 +213,7 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start( Database cx, PerformanceWorkload *self ) {
-		Void _ = wait( self->getSaturation( cx, self ) );
+		wait( self->getSaturation( cx, self ) );
 		TraceEvent("PerformanceSaturation").detail("SaturationRate", self->maxAchievedTPS.value())
 			.detail("SaturationLatency", self->latencySaturation.value());
 		return Void();

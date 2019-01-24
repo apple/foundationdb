@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;
@@ -57,7 +57,7 @@ struct LowLatencyWorkload : TestWorkload {
 		state double testStart = now();
 		try {
 			loop {
-				Void _ = wait( delay( self->checkDelay ) );
+				wait( delay( self->checkDelay ) );
 				state Transaction tr( cx );
 				state double operationStart = now();
 				++self->operations;
@@ -68,7 +68,7 @@ struct LowLatencyWorkload : TestWorkload {
 						Version _ = wait(tr.getReadVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 						++self->retries;
 					}
 				}

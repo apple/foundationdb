@@ -305,7 +305,7 @@ struct DirectoryRemoveFunc : InstructionFunc {
 		if(count.getInt(0) == 0) {
 			logOp(format("remove %s", pathToString(directory->getPath()).c_str()));
 
-			Void _ = wait(executeMutation(instruction, [this] () {
+			wait(executeMutation(instruction, [this] () {
 				return directory->remove(instruction->tr);
 			}));
 		}
@@ -313,7 +313,7 @@ struct DirectoryRemoveFunc : InstructionFunc {
 			IDirectory::Path path = wait(popPath(data));
 			logOp(format("remove %s", pathToString(combinePaths(directory->getPath(), path)).c_str()));
 
-			Void _ = wait(executeMutation(instruction, [this, path] () {
+			wait(executeMutation(instruction, [this, path] () {
 				return directory->remove(instruction->tr, path);
 			}));
 		}

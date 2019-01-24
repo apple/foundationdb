@@ -19,14 +19,14 @@
  */
 
 #include "flow/flow.h"
-#include "CoordinationInterface.h"
-#include "MonitorLeader.h"
-#include "FailureMonitorClient.h"
-#include "ClusterInterface.h"
-#include "StatusClient.h"
-#include "Status.h"
-#include "json_spirit/json_spirit_writer_template.h"
-#include "json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/StatusClient.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {
@@ -292,7 +292,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskCoordinationReply));
 
-		Void _ = wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
+		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
 
 		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
@@ -363,7 +363,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 	state Future<Void> clusterTimeout = delay(30.0);
 	state Optional<StatusObject> oStatusObj;
 
-	Void _ = wait(delay(0.0)); //make sure the cluster controller is marked as not failed
+	wait(delay(0.0)); //make sure the cluster controller is marked as not failed
 
 	state Future<ErrorOr<StatusReply>> statusReply = cI.databaseStatus.tryGetReply(req);
 	loop{
@@ -381,7 +381,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 				}
 				break;
 			}
-			when(Void _ = wait(clusterTimeout)){
+			when(wait(clusterTimeout)){
 				messages->push_back(makeMessage("status_incomplete_timeout", "Timed out fetching cluster status."));
 				break;
 			}
@@ -509,8 +509,8 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 					break;
 				}
 				choose{
-					when(Void _ = wait(clusterInterface->onChange())) {}
-					when(Void _ = wait(interfaceTimeout)) {
+					when(wait(clusterInterface->onChange())) {}
+					when(wait(interfaceTimeout)) {
 						clientMessages.push_back(makeMessage("no_cluster_controller", "Unable to locate a cluster controller within 2 seconds.  Check that there are server processes running."));
 						break;
 					}

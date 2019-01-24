@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RandomSelectorWorkload : TestWorkload {
 	int minOperationsPerTransaction,maxOperationsPerTransaction,maxKeySpace,maxOffset,minInitialAmount,maxInitialAmount;
@@ -81,10 +81,10 @@ struct RandomSelectorWorkload : TestWorkload {
 					tr.set(StringRef(clientID + "c/" + format( "%010d", i ) ),myValue);
 					tr.set(StringRef(clientID + "e/" + format( "%010d", i ) ),myValue);
 				}
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 				tr.reset();
 			}
 		}
@@ -126,10 +126,10 @@ struct RandomSelectorWorkload : TestWorkload {
 						tr.set(StringRef(clientID + "d/" + myKeyA),myValue);
 						//TraceEvent("RYOWInit").detail("Key",myKeyA).detail("Value",myValue);
 					}
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 			
@@ -148,10 +148,10 @@ struct RandomSelectorWorkload : TestWorkload {
 						loop {
 							try { 
 								tr.set(StringRef(clientID + "d/" + myKeyA),myValue);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 							}
 						}
 					} else if( j < 4 ) {
@@ -162,10 +162,10 @@ struct RandomSelectorWorkload : TestWorkload {
 						loop {
 							try {
 								tr.clear(StringRef(clientID + "d/" + myKeyA));
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 							}
 						}
 							
@@ -181,10 +181,10 @@ struct RandomSelectorWorkload : TestWorkload {
 						loop {
 							try {
 								tr.clear( KeyRangeRef( StringRef(clientID + "d/" + myKeyA), StringRef(clientID + "d/" + myKeyB) ) );
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 							}
 						}
 					} else if( j < 6 ) {
@@ -208,7 +208,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.reset();
 								break;
 							} catch (Error &e) {
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								tr.reset();
 							}
 						}
@@ -224,11 +224,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
 								error = e;
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								if(error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
 									if (thing.present()) break;
@@ -247,11 +247,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
 								error = e;
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								if(error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
 									if (thing.present()) break;
@@ -270,11 +270,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::And);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
 								error = e;
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								if(error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
 									if (thing.present()) break;
@@ -293,11 +293,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Or);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
 								error = e;
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								if(error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
 									if (thing.present()) break;
@@ -316,11 +316,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Xor);
-								Void _ = wait( tr.commit() );
+								wait( tr.commit() );
 								break;
 							} catch (Error& e) {
 								error = e;
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 								if(error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
 									if (thing.present()) break;
@@ -339,12 +339,12 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Max);
-								Void _ = wait(tr.commit());
+								wait(tr.commit());
 								break;
 							}
 							catch (Error& e) {
 								error = e;
-								Void _ = wait(tr.onError(e));
+								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present()) break;
@@ -363,12 +363,12 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Min);
-								Void _ = wait(tr.commit());
+								wait(tr.commit());
 								break;
 							}
 							catch (Error& e) {
 								error = e;
-								Void _ = wait(tr.onError(e));
+								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present()) break;
@@ -387,12 +387,12 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMin);
-								Void _ = wait(tr.commit());
+								wait(tr.commit());
 								break;
 							}
 							catch (Error& e) {
 								error = e;
-								Void _ = wait(tr.onError(e));
+								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
 								Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 								if (thing.present()) break;
@@ -411,12 +411,12 @@ struct RandomSelectorWorkload : TestWorkload {
 							try {
 							tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
 							tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMax);
-							Void _ = wait(tr.commit());
+							wait(tr.commit());
 							break;
 						}
 						catch (Error& e) {
 							error = e;
-							Void _ = wait(tr.onError(e));
+							wait(tr.onError(e));
 							if (error.code() == error_code_commit_unknown_result) {
 								Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 								if (thing.present()) break;
@@ -482,13 +482,13 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.reset();
 								break;
 							} catch (Error &e) {
-								Void _ = wait( tr.onError(e) );
+								wait( tr.onError(e) );
 							}
 						}
 					}
 				}
 				
-				Void _ = wait( trRYOW.commit() );
+				wait( trRYOW.commit() );
 							
 				++self->transactions;
 
@@ -510,11 +510,11 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						break;
 					} catch (Error &e) {
-						Void _ = wait( finalTransaction.onError(e) );
+						wait( finalTransaction.onError(e) );
 					}
 				}
 			} catch (Error& e) {
-				Void _ = wait( trRYOW.onError(e) );
+				wait( trRYOW.onError(e) );
 				++self->retries;
 			}
 		}

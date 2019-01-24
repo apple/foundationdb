@@ -22,8 +22,8 @@
 #define FDBSERVER_LOGSYSTEM_H
 #pragma once
 
-#include "TLogInterface.h"
-#include "WorkerInterface.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WorkerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"

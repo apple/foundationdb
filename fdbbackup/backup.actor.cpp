@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include "flow/flow.h"
 #include "flow/FastAlloc.h"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
@@ -68,6 +68,7 @@ using std::endl;
 #endif
 
 #include "flow/SimpleOpt.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 
 // Type of program being executed
@@ -111,7 +112,9 @@ enum {
 	//DB constants
 	OPT_SOURCE_CLUSTER,
 	OPT_DEST_CLUSTER,
-	OPT_CLEANUP
+	OPT_CLEANUP,
+
+	OPT_TRACE_FORMAT
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
@@ -127,6 +130,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
@@ -163,6 +167,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -193,6 +198,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -219,6 +225,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -247,6 +254,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -275,6 +283,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -299,6 +308,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -325,6 +335,7 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -359,6 +370,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -387,6 +399,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -445,6 +458,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_BASEURL,         "--base_url",       SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -483,6 +497,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_DBVERSION,       "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -517,6 +532,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
@@ -544,6 +560,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -574,6 +591,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
@@ -602,6 +620,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -631,6 +650,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -657,6 +677,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
@@ -700,7 +721,7 @@ static void printVersion() {
 	printf("protocol %llx\n", (long long) currentProtocolVersion);
 }
 
-const char *BlobCredentialInfo = 
+const char *BlobCredentialInfo =
 	"  BLOB CREDENTIALS\n"
 	"     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
 	"     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
@@ -727,6 +748,9 @@ static void printAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -808,7 +832,7 @@ static void printBackupUsage(bool devhelp) {
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
 		printf("  --deep         For describe operations, do not use cached metadata.  Warning: Very slow\n");
-		
+
 	}
 	printf("\n"
 		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
@@ -868,6 +892,9 @@ static void printDBAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
+		   "                 Has no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -1144,7 +1171,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
 
-		Void _ = wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
+		wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
 
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
@@ -1195,7 +1222,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID));
 		}
 
-		Void _ = wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) && waitForAll(tagLogBytesDR) && success(fDRPaused));
+		wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) && waitForAll(tagLogBytesDR) && success(fDRPaused));
 
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
@@ -1291,7 +1318,7 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 			return statusDoc;
 		}
 		catch (Error& e) {
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -1311,7 +1338,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 		} catch(Error &e) {
 			TraceEvent(SevWarn, "BackupAgentPollRateUpdateError").error(e);
 		}
-		Void _ = wait(delay(CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL));
+		wait(delay(CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL));
 	}
 }
 
@@ -1329,11 +1356,11 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->set(metaKey, rootKey);
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			break;
 		}
 		catch (Error& e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 
@@ -1346,18 +1373,18 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest);
-					Void _ = wait(cleanupStatus(tr, rootKey, name, id));
+					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
-					Void _ = wait(tr->commit());
+					wait(tr->commit());
 					break;
 				}
 				catch (Error& e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
-			Void _ = wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
+			wait(delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY * ( ( 1.0 - CLIENT_KNOBS->BACKUP_STATUS_JITTER ) + 2 * g_random->random01() * CLIENT_KNOBS->BACKUP_STATUS_JITTER )));
 
 			// Now that status was written at least once by this process (and hopefully others), start the poll rate control updater if it wasn't started yet
 			if(!pollRateUpdater.isValid() && pollDelay != nullptr)
@@ -1365,7 +1392,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 		}
 		catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
-			Void _ = wait(delay(10.0));
+			wait(delay(10.0));
 		}
 	}
 }
@@ -1379,7 +1406,7 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 
 	loop {
 		try {
-			state Void run = wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		}
 		catch (Error& e) {
@@ -1389,7 +1416,7 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 			TraceEvent(SevError, "DA_runAgent").error(e);
 			fprintf(stderr, "ERROR: DR agent encountered fatal error `%s'\n", e.what());
 
-			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		}
 	}
 
@@ -1404,7 +1431,7 @@ ACTOR Future<Void> runAgent(Database db) {
 
 	loop {
 		try {
-			state Void run = wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		}
 		catch (Error& e) {
@@ -1414,7 +1441,7 @@ ACTOR Future<Void> runAgent(Database db) {
 			TraceEvent(SevError, "BA_runAgent").error(e);
 			fprintf(stderr, "ERROR: backup agent encountered fatal error `%s'\n", e.what());
 
-			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		}
 	}
 
@@ -1432,7 +1459,7 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 		}
 
 
-		Void _ = wait(backupAgent.submitBackup(dest, KeyRef(tagName), backupRanges, false, StringRef(), StringRef(), true));
+		wait(backupAgent.submitBackup(dest, KeyRef(tagName), backupRanges, false, StringRef(), StringRef(), true));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -1515,7 +1542,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 		}
 
 		else {
-			Void _ = wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
+			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -1571,7 +1598,7 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 		}
 
 
-		Void _ = wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef()));
+		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef()));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
 	}
 
@@ -1638,8 +1665,8 @@ ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagNam
 	{
 		state DatabaseBackupAgent backupAgent(src);
 
-		Void _ = wait(backupAgent.abortBackup(dest, Key(tagName), partial));
-		Void _ = wait(backupAgent.unlockBackup(dest, Key(tagName)));
+		wait(backupAgent.abortBackup(dest, Key(tagName), partial));
+		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	}
@@ -1669,7 +1696,7 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 	{
 		state FileBackupAgent backupAgent;
 
-		Void _ = wait(backupAgent.abortBackup(db, tagName));
+		wait(backupAgent.abortBackup(db, tagName));
 
 		printf("The backup on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	}
@@ -1719,7 +1746,7 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 	{
 		state FileBackupAgent backupAgent;
 
-		Void _ = wait(backupAgent.discontinueBackup(db, StringRef(tagName)));
+		wait(backupAgent.discontinueBackup(db, StringRef(tagName)));
 
 		// Wait for the backup to complete, if requested
 		if (waitForCompletion) {
@@ -1758,7 +1785,7 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 ACTOR Future<Void> changeBackupResumed(Database db, bool pause) {
 	try {
 		state FileBackupAgent backupAgent;
-		Void _ = wait(backupAgent.taskBucket->changePause(db, pause));
+		wait(backupAgent.taskBucket->changePause(db, pause));
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
 	}
 	catch (Error& e) {
@@ -1774,7 +1801,7 @@ ACTOR Future<Void> changeBackupResumed(Database db, bool pause) {
 ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-		Void _ = wait(backupAgent.taskBucket->changePause(dest, pause));
+		wait(backupAgent.taskBucket->changePause(dest, pause));
 		printf("All DR agents have been %s.\n", pause ? "paused" : "resumed");
 	}
 	catch (Error& e) {
@@ -1812,7 +1839,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 				fprintf(stderr, "The specified backup is not restorable to any version.\n");
 				throw restore_error();
 			}
-			
+
 			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
@@ -1926,7 +1953,7 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 
 		loop {
 			choose {
-				when(Void _ = wait(delay(5))) {
+				when(wait(delay(5))) {
 					std::string p = progress.toString();
 					if(p != lastProgress) {
 						int spaces = lastProgress.size() - p.size();
@@ -1934,7 +1961,7 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 						lastProgress = p;
 					}
 				}
-				when(Void _ = wait(expire)) {
+				when(wait(expire)) {
 					break;
 				}
 			}
@@ -1973,10 +2000,10 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 
 		loop {
 			choose {
-				when ( Void _ = wait(done) ) {
+				when ( wait(done) ) {
 					break;
 				}
-				when ( Void _ = wait(delay(5)) ) {
+				when ( wait(delay(5)) ) {
 					if(numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
 						lastUpdate = numDeleted;
@@ -2002,7 +2029,7 @@ ACTOR Future<Void> describeBackup(const char *name, std::string destinationConta
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state BackupDescription desc = wait(c->describeBackup(deep));
 		if(cx.present())
-			Void _ = wait(desc.resolveVersionTimes(cx.get()));
+			wait(desc.resolveVersionTimes(cx.get()));
 		printf("%s\n", desc.toString().c_str());
 	}
 	catch (Error& e) {
@@ -2426,7 +2453,7 @@ int main(int argc, char* argv[]) {
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
-			return FDB_EXIT_ERROR; 
+			return FDB_EXIT_ERROR;
 		}
 
 	#ifdef _WIN32
@@ -2509,6 +2536,11 @@ int main(int argc, char* argv[]) {
 				case OPT_TRACE_DIR:
 					trace = true;
 					traceDir = args->OptionArg();
+					break;
+				case OPT_TRACE_FORMAT:
+					if (!selectTraceFormatter(args->OptionArg())) {
+						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
+					}
 					break;
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
@@ -2781,7 +2813,7 @@ int main(int argc, char* argv[]) {
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second )) 
+					!clientKnobs->setKnob( k->first, k->second ))
 				{
 					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
 					return FDB_EXIT_ERROR;
@@ -2821,13 +2853,10 @@ int main(int argc, char* argv[]) {
 				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
 
 
-		Reference<Cluster> cluster;
 		Reference<ClusterConnectionFile> ccf;
 		Database db;
-		Reference<Cluster> source_cluster;
-		Reference<ClusterConnectionFile> source_ccf;
-		Database source_db;
-		const KeyRef databaseKey = LiteralStringRef("DB");
+		Reference<ClusterConnectionFile> sourceCcf;
+		Database sourceDb;
 		FileBackupAgent ba;
 		Key tag;
 		Future<Optional<Void>> f;
@@ -2842,8 +2871,17 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
+		TraceEvent("ProgramStart")
+			.detail("SourceVersion", getHGVersion())
+			.detail("Version", FDB_VT_VERSION )
+			.detail("PackageName", FDB_VT_PACKAGE_NAME)
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detail("CommandLine", commandLine)
+			.detail("MemoryLimit", memLimit)
+			.trackLatest("ProgramStart");
+
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		TraceEvent::setNetworkThread();
 
 		// Add blob credentials files from the environment to the list collected from the command line.
 		const char *blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
@@ -2884,7 +2922,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				cluster = Cluster::createCluster(ccf, -1);
+				db = Database::createDatabase(ccf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -2892,23 +2930,13 @@ int main(int argc, char* argv[]) {
 				return false;
 			}
 
-			TraceEvent("ProgramStart")
-				.detail("SourceVersion", getHGVersion())
-				.detail("Version", FDB_VT_VERSION )
-				.detail("PackageName", FDB_VT_PACKAGE_NAME)
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-				.detail("CommandLine", commandLine)
-				.detail("MemoryLimit", memLimit)
-				.trackLatest("ProgramStart");
-
-			db = cluster->createDatabase(databaseKey, localities).get();
 			return true;
 		};
 
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
-				source_ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
+				sourceCcf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
 			}
 			catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
@@ -2916,15 +2944,13 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				source_cluster = Cluster::createCluster(source_ccf, -1);
+				sourceDb = Database::createDatabase(ccf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
-				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", source_ccf->getFilename().c_str());
+				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", sourceCcf->getFilename().c_str());
 				return FDB_EXIT_ERROR;
 			}
-
-			source_db = source_cluster->createDatabase(databaseKey, localities).get();
 		}
 
 		switch (programExe)
@@ -3049,7 +3075,7 @@ int main(int argc, char* argv[]) {
 					}) );
 					break;
 				case RESTORE_STATUS:
-					
+
 					// If no tag is specifically provided then print all tag status, don't just use "default"
 					if(tagProvided)
 						tag = tagName;
@@ -3065,7 +3091,7 @@ int main(int argc, char* argv[]) {
 		case EXE_DR_AGENT:
 			if(!initCluster())
 				return FDB_EXIT_ERROR;
-			f = stopAfter( runDBAgent(source_db, db) );
+			f = stopAfter( runDBAgent(sourceDb, db) );
 			break;
 		case EXE_DB_BACKUP:
 			if(!initCluster())
@@ -3073,22 +3099,22 @@ int main(int argc, char* argv[]) {
 			switch (dbType)
 			{
 			case DB_START:
-				f = stopAfter( submitDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter( submitDBBackup(sourceDb, db, backupKeys, tagName) );
 				break;
 			case DB_STATUS:
-				f = stopAfter( statusDBBackup(source_db, db, tagName, maxErrors) );
+				f = stopAfter( statusDBBackup(sourceDb, db, tagName, maxErrors) );
 				break;
 			case DB_SWITCH:
-				f = stopAfter( switchDBBackup(source_db, db, backupKeys, tagName) );
+				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName) );
 				break;
 			case DB_ABORT:
-				f = stopAfter( abortDBBackup(source_db, db, tagName, partial) );
+				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial) );
 				break;
 			case DB_PAUSE:
-				f = stopAfter( changeDBBackupResumed(source_db, db, true) );
+				f = stopAfter( changeDBBackupResumed(sourceDb, db, true) );
 				break;
 			case DB_RESUME:
-				f = stopAfter( changeDBBackupResumed(source_db, db, false) );
+				f = stopAfter( changeDBBackupResumed(sourceDb, db, false) );
 				break;
 			case DB_UNDEFINED:
 			default:

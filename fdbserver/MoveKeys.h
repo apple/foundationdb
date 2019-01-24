@@ -25,12 +25,12 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "MasterInterface.h"
+#include "fdbserver/MasterInterface.h"
 
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
 	template <class Ar>
-	void serialize(Ar& ar) { ar & prevOwner & myOwner & prevWrite; }
+	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
 };
 
 Future<MoveKeysLock> takeMoveKeysLock( Database const& cx, UID const& masterId );

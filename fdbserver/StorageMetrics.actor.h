@@ -24,7 +24,8 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -77,7 +78,7 @@ struct StorageMetricSample {
 	}
 };
 
-TEST_CASE("fdbserver/StorageMetricSample/simple") {
+TEST_CASE("/fdbserver/StorageMetricSample/simple") {
 	StorageMetricSample s( 1000 );
 	s.sample.insert(LiteralStringRef("Apple"), 1000);
 	s.sample.insert(LiteralStringRef("Banana"), 2000);
@@ -402,3 +403,5 @@ struct ByteSampleInfo {
 //Determines whether a key-value pair should be included in a byte sample
 //Also returns size information about the sample
 ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+
+#include "flow/unactorcompiler.h"

@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 
 struct WorkerErrorsWorkload : TestWorkload {
@@ -48,7 +48,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 			eventTraces.push_back( workers[c].first.eventLogRequest.getReply( EventLogRequest() ) );
 		}
 
-		Void _ = wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
+		wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
 
 		vector<TraceEventFields> results;
 		for(int i = 0; i < eventTraces.size(); i++) {

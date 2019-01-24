@@ -24,11 +24,12 @@
 // version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_THREADHELPER_ACTOR_G_H)
 		#define FLOW_THREADHELPER_ACTOR_G_H
-		#include "ThreadHelper.actor.g.h"
+		#include "flow/ThreadHelper.actor.g.h"
 #elif !defined(FLOW_THREADHELPER_ACTOR_H)
 		#define FLOW_THREADHELPER_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // template <class F>
 // void onMainThreadVoid( F f ) {
@@ -552,7 +553,7 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 
 ACTOR template <class R, class F> Future<Void> doOnMainThread( Future<Void> signal, F f, ThreadSingleAssignmentVar<R> *result ) {
 	try {
-		Void _ = wait( signal );
+		wait( signal );
 		R r = wait( f() );
 		result->send(r);
 	} catch (Error& e) {
@@ -567,7 +568,7 @@ ACTOR template <class R, class F> Future<Void> doOnMainThread( Future<Void> sign
 }
 
 ACTOR template <class F> void doOnMainThreadVoid( Future<Void> signal, F f, Error *err ) {
-	Void _ = wait( signal );
+	wait( signal );
 	if (err && err->code() != invalid_error_code)
 		return;
 	try {
@@ -629,4 +630,5 @@ private:
 	ThreadSpinLock lock;
 };
 
+#include "flow/unactorcompiler.h"
 #endif

@@ -18,18 +18,18 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "ManagementAPI.h"
+#include "fdbclient/ManagementAPI.h"
 
-#include "SystemData.h"
-#include "NativeAPI.h"
-#include "CoordinationInterface.h"
-#include "DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
-#include "StatusClient.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static Future<vector<AddressExclusion>> getExcludedServers( Transaction* const& tr );
 
@@ -86,6 +86,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		storeType= KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
+	} else if (mode == "ssd-redwood-experimental") {
+		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "memory") {
 		storeType= KeyValueStoreType::MEMORY;
 	}
@@ -255,14 +257,13 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
 			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
 			DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>) res);
 			return config;
 		} catch( Error &e ) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -294,7 +295,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			if(!creating && !force) {
 				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
-				Void _ = wait( success(fConfig) || tooLong );
+				wait( success(fConfig) || tooLong );
 
 				if(!fConfig.isReady()) {
 					return ConfigurationResult::DATABASE_UNAVAILABLE;
@@ -346,7 +347,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 								replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
 							}
 						}
-						Void _ = wait( waitForAll(replicasFutures) || tooLong );
+						wait( waitForAll(replicasFutures) || tooLong );
 
 						for(auto& it : replicasFutures) {
 							if(!it.isReady()) {
@@ -360,7 +361,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 
 					if(newConfig.regions.size()) {
 						//all storage servers must be in one of the regions
-						Void _ = wait( success(fServerList) || tooLong );
+						wait( success(fServerList) || tooLong );
 						if(!fServerList.isReady()) {
 							return ConfigurationResult::DATABASE_UNAVAILABLE;
 						}
@@ -379,7 +380,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						}
 					}
 
-					Void _ = wait( success(fWorkers) || tooLong );
+					wait( success(fWorkers) || tooLong );
 					if(!fWorkers.isReady()) {
 						return ConfigurationResult::DATABASE_UNAVAILABLE;
 					}
@@ -431,7 +432,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			for(auto i=m.begin(); i!=m.end(); ++i)
 				tr.set( StringRef(i->first), StringRef(i->second) );
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
@@ -449,11 +450,11 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						else
 							return ConfigurationResult::DATABASE_CREATED;
 					} catch (Error& e2) {
-						Void _ = wait( tr.onError(e2) );
+						wait( tr.onError(e2) );
 					}
 				}
 			}
-			Void _ = wait( tr.onError(e1) );
+			wait( tr.onError(e1) );
 		}
 	}
 	return ConfigurationResult::SUCCESS;
@@ -746,10 +747,10 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 					tr.set(kv.first, kv.second);
 			}
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return ConfigurationResult::SUCCESS;
 		} catch( Error &e ) {
-			Void _ = wait( tr.onError(e));
+			wait( tr.onError(e));
 		}
 	}
 }
@@ -779,7 +780,7 @@ ACTOR Future<vector<ProcessData>> getWorkers( Transaction* tr ) {
 	state Future<Standalone<RangeResultRef>> processClasses = tr->getRange( processClassKeys, CLIENT_KNOBS->TOO_MANY );
 	state Future<Standalone<RangeResultRef>> processData = tr->getRange( workerListKeys, CLIENT_KNOBS->TOO_MANY );
 
-	Void _ = wait( success(processClasses) && success(processData) );
+	wait( success(processClasses) && success(processData) );
 	ASSERT( !processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY );
 	ASSERT( !processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY );
 
@@ -814,7 +815,7 @@ ACTOR Future<vector<ProcessData>> getWorkers( Database cx ) {
 			vector<ProcessData> workers = wait( getWorkers(&tr) );
 			return workers;
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -830,7 +831,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 
 			return ClusterConnectionString( currentKey.get().toString() ).coordinators();
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -848,7 +849,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone deleted this key entirely?
 
 			state ClusterConnectionString old( currentKey.get().toString() );
-			if ( cx->cluster && old.clusterKeyName().toString() != cx->cluster->getConnectionFile()->getConnectionString().clusterKeyName() )
+			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
 			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
@@ -886,19 +887,19 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskCoordinationReply ) );
 
 			choose {
-				when( Void _ = wait( waitForAll( leaderServers ) ) ) {}
-				when( Void _ = wait( delay(5.0) ) ) {
+				when( wait( waitForAll( leaderServers ) ) ) {}
+				when( wait( delay(5.0) ) ) {
 					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 				}
 			}
 
 			tr.set( coordinatorsKey, conn.toString() );
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			ASSERT( false ); //commit should fail, but the value has changed
 		} catch (Error& e) {
 			TraceEvent("RetryQuorumChange").error(e).detail("Retries", retries);
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 			++retries;
 		}
 	}
@@ -946,7 +947,7 @@ struct AutoQuorumChange : IQuorumChange {
 	ACTOR static Future<int> getRedundancy( AutoQuorumChange* self, Transaction* tr ) {
 		state Future<Optional<Value>> fStorageReplicas = tr->get( LiteralStringRef("storage_replicas").withPrefix( configKeysPrefix ) );
 		state Future<Optional<Value>> fLogReplicas = tr->get( LiteralStringRef("log_replicas").withPrefix( configKeysPrefix ) );
-		Void _ = wait( success( fStorageReplicas ) && success( fLogReplicas ) );
+		wait( success( fStorageReplicas ) && success( fLogReplicas ) );
 		int redundancy = std::min(
 			atoi( fStorageReplicas.get().get().toString().c_str() ),
 			atoi( fLogReplicas.get().get().toString().c_str() ) );
@@ -1127,10 +1128,10 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 
 			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers));
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1164,11 +1165,11 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers));
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
 			TraceEvent("IncludeServersError").error(e, true);
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1198,10 +1199,10 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 			if(foundChange)
 				tr.set(processClassChangeKey, g_random->randomUniqueID().toString());
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1229,7 +1230,7 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 			vector<AddressExclusion> exclusions = wait( getExcludedServers(&tr) );
 			return exclusions;
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1258,11 +1259,11 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 
 			tr.set( dataDistributionModeKey, wr.toStringRef() );
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return oldMode;
 		} catch (Error& e) {
 			TraceEvent("SetDDModeRetrying").error(e);
-			Void _ = wait (tr.onError(e));
+			wait (tr.onError(e));
 		}
 	}
 }
@@ -1314,9 +1315,9 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 
 			if (ok) return Void();
 
-			Void _ = wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
+			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1338,7 +1339,7 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 			for(auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
-			Void _ = wait( waitForAll(replicasFutures) );
+			wait( waitForAll(replicasFutures) );
 
 			state std::vector<Future<Void>> watchFutures;
 			for(int i = 0; i < config.regions.size(); i++) {
@@ -1351,11 +1352,11 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 				return Void();
 			}
 
-			Void _ = wait( tr.commit() );
-			Void _ = wait( waitForAny(watchFutures) );
+			wait( tr.commit() );
+			wait( waitForAny(watchFutures) );
 			tr.reset();
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1367,10 +1368,10 @@ ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(timeKeeperDisableKey, StringRef());
-			Void _ = wait(tr.commit());
+			wait(tr.commit());
 			return Void();
 		} catch (Error &e) {
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -1417,13 +1418,13 @@ ACTOR Future<Void> lockDatabase( Database cx, UID id ) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			Void _ = wait( lockDatabase(&tr, id) );
-			Void _ = wait( tr.commit() );
+			wait( lockDatabase(&tr, id) );
+			wait( tr.commit() );
 			return Void();
 		} catch( Error &e ) {
 			if(e.code() == error_code_database_locked)
 				throw e;
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1466,13 +1467,13 @@ ACTOR Future<Void> unlockDatabase( Database cx, UID id ) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			Void _ = wait( unlockDatabase(&tr, id) );
-			Void _ = wait( tr.commit() );
+			wait( unlockDatabase(&tr, id) );
+			wait( tr.commit() );
 			return Void();
 		} catch( Error &e ) {
 			if(e.code() == error_code_database_locked)
 				throw e;
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1508,7 +1509,7 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
 	while(!clusterInterface->get().present()) {
-		Void _ = wait(clusterInterface->onChange());
+		wait(clusterInterface->onChange());
 	}
 
 	ErrorOr<Void> _ = wait(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() ));
@@ -1527,11 +1528,11 @@ ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
 			}
 
 			state Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
-			Void _ = wait(tr.commit());
-			Void _ = wait(watchFuture);
+			wait(tr.commit());
+			wait(watchFuture);
 			tr.reset();
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -1672,8 +1673,8 @@ bool schemaMatch( json_spirit::mValue const& schemaValue, json_spirit::mValue co
 	}
 }
 
-TEST_CASE("ManagementAPI/AutoQuorumChange/checkLocality") {
-	Void _ = wait(Future<Void>(Void()));
+TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
+	wait(Future<Void>(Void()));
 
 	std::vector<ProcessData> workers;
 	std::vector<NetworkAddress> chosen;

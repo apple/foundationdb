@@ -22,7 +22,7 @@
 #define FLOW_FDBCLIENT_ATOMIC_H
 #pragma once
 
-#include "CommitTransaction.h"
+#include "fdbclient/CommitTransaction.h"
 
 static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();

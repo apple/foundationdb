@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WatchAndWaitWorkload : TestWorkload {
 	uint64_t nodeCount, watchCount;
@@ -104,7 +104,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 			watches.push_back( self->watchAndWait( cx, self, i ) );
 			watchCounter++;
 		}
-		Void _ = wait( delay( self->testDuration )); // || waitForAll( watches )
+		wait( delay( self->testDuration )); // || waitForAll( watches )
 		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);
 		return Void();
 	}
@@ -116,12 +116,12 @@ struct WatchAndWaitWorkload : TestWorkload {
 				cx->maxOutstandingWatches = 1e6;
 				try {
 					state Future<Void> watch = tr.watch( self->keyForIndex( index ) );
-					Void _ = wait( tr.commit() );
-					Void _ = wait( watch );
+					wait( tr.commit() );
+					wait( watch );
 					++self->triggers;
 				} catch( Error &e ) {
 					++self->retries;
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		} catch( Error &e ) {

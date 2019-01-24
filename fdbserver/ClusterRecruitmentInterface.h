@@ -26,11 +26,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "MasterInterface.h"
-#include "RecoveryState.h"
-#include "TLogInterface.h"
-#include "WorkerInterface.h"
-#include "Knobs.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/Knobs.h"
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
 struct ClusterControllerFullInterface {
@@ -61,7 +61,7 @@ struct ClusterControllerFullInterface {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & clientInterface & recruitFromConfiguration & recruitRemoteFromConfiguration & recruitStorage & registerWorker & getWorkers & registerMaster & getServerDBInfo;
+		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 
@@ -77,7 +77,7 @@ struct RecruitFromConfigurationRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & recruitSeedServers & maxOldLogRouters & reply;
+		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
 	}
 };
 
@@ -95,7 +95,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId & satelliteFallback;
+		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
 	}
 };
 
@@ -110,7 +110,7 @@ struct RecruitRemoteFromConfigurationRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & dcId & logRouterCount & reply;
+		serializer(ar, configuration, dcId, logRouterCount, reply);
 	}
 };
 
@@ -120,7 +120,7 @@ struct RecruitRemoteFromConfigurationReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & remoteTLogs & logRouters;
+		serializer(ar, remoteTLogs, logRouters);
 	}
 };
 
@@ -130,7 +130,7 @@ struct RecruitStorageReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & worker & processClass;
+		serializer(ar, worker, processClass);
 	}
 };
 
@@ -143,7 +143,7 @@ struct RecruitStorageRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & excludeMachines & excludeAddresses & includeDCs & criticalRecruitment & reply;
+		serializer(ar, excludeMachines, excludeAddresses, includeDCs, criticalRecruitment, reply);
 	}
 };
 
@@ -156,7 +156,7 @@ struct RegisterWorkerReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & processClass & priorityInfo;
+		serializer(ar, processClass, priorityInfo);
 	}
 };
 
@@ -174,7 +174,7 @@ struct RegisterWorkerRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & initialClass & processClass & priorityInfo & generation & reply;
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, reply);
 	}
 };
 
@@ -189,12 +189,11 @@ struct GetWorkersRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & flags & reply;
+		serializer(ar, flags, reply);
 	}
 };
 
 struct RegisterMasterRequest {
-	Standalone<StringRef> dbName;
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
@@ -214,7 +213,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
+		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 
@@ -226,10 +225,10 @@ struct GetServerDBInfoRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & knownServerInfoID & issues & incompatiblePeers & reply;
+		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
 	}
 };
 
-#include "ServerDBInfo.h" // include order hack
+#include "fdbserver/ServerDBInfo.h" // include order hack
 
 #endif

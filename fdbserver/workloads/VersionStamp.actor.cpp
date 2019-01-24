@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
 	uint64_t nodeCount;
@@ -73,10 +73,10 @@ struct VersionStampWorkload : TestWorkload {
 			apiVersion = 520;
 		}
 		else {
-			apiVersion = Cluster::API_VERSION_LATEST;
+			apiVersion = Database::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
-		cx->cluster->apiVersion = apiVersion;
+		cx->apiVersion = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
@@ -151,8 +151,7 @@ struct VersionStampWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			cx = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
@@ -227,7 +226,7 @@ struct VersionStampWorkload : TestWorkload {
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 		TraceEvent("VST_CheckEnd");
@@ -242,13 +241,12 @@ struct VersionStampWorkload : TestWorkload {
 
 		if (g_simulator.extraDB != NULL) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			state Database extraDB = Database::createDatabase(extraFile, -1);
 		}
 
 		loop{
-			Void _ = wait(poisson(&lastTime, delay));
-			bool oldVSFormat = !cx->cluster->apiVersionAtLeast(520);
+			wait(poisson(&lastTime, delay));
+			bool oldVSFormat = !cx->apiVersionAtLeast(520);
 
 			state bool cx_is_primary = true;
 			state ReadYourWritesTransaction tr(cx);
@@ -276,7 +274,7 @@ struct VersionStampWorkload : TestWorkload {
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 
 					committedVersion = tr.getCommittedVersion();
 					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
@@ -317,7 +315,7 @@ struct VersionStampWorkload : TestWorkload {
 								}
 								break;
 							} catch (Error &e) {
-								Void _ = wait(cur_tr.onError(e));
+								wait(cur_tr.onError(e));
 							}
 						}
 					} else {
@@ -327,7 +325,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				if (error) {
 					TraceEvent("VST_CommitFailed").error(err).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
-					Void _ = wait(tr.onError(err));
+					wait(tr.onError(err));
 					continue;
 				}
 

@@ -18,18 +18,18 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <iostream>
+#include <sstream>
+#include <cctype>
+
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
-
-#include <iostream>
-#include <sstream>
-#include <cctype>
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SayHelloTaskFunc : TaskFuncBase {
 	static StringRef name;
@@ -47,9 +47,9 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		}
 
 		state Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-		Void _ = wait(taskBucket->finish(tr, task));
+		wait(taskBucket->finish(tr, task));
 
-		if (BUGGIFY) Void _ = wait(delay(10));
+		if (BUGGIFY) wait(delay(10));
 
 		state Key key = StringRef("Hello_" + g_random->randomUniqueID().toString());
 		state Key value;
@@ -63,7 +63,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		}
 
 		if (!task->params[LiteralStringRef("chained")].compare(LiteralStringRef("false"))) {
-			Void _ = wait(done->set(tr, taskBucket));
+			wait(done->set(tr, taskBucket));
 		} else {
 			int subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
 			int currTaskNumber = atoi(value.removePrefix(LiteralStringRef("task_")).toString().c_str());
@@ -79,9 +79,9 @@ struct SayHelloTaskFunc : TaskFuncBase {
 				new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
 				taskBucket->addTask(tr, new_task);
 				vectorFuture.push_back(taskDone);
-				Void _ = wait(done->join(tr, taskBucket, vectorFuture));
+				wait(done->join(tr, taskBucket, vectorFuture));
 			} else {
-				Void _ = wait(done->set(tr, taskBucket));
+				wait(done->set(tr, taskBucket));
 			}
 		}
 
@@ -120,8 +120,8 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 			vectorFuture.push_back(taskDone);
 		}
 
-		Void _ = wait(done->join(tr, taskBucket, vectorFuture));
-		Void _ = wait(taskBucket->finish(tr, task));
+		wait(done->join(tr, taskBucket, vectorFuture));
+		wait(taskBucket->finish(tr, task));
 
 		Key key = StringRef("Hello_" + g_random->randomUniqueID().toString());
 		Value value = LiteralStringRef("Hello, Everyone!");
@@ -143,7 +143,7 @@ struct SaidHelloTaskFunc : TaskFuncBase {
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-		Void _ = wait(taskBucket->finish(tr, task));
+		wait(taskBucket->finish(tr, task));
 
 		Key key = StringRef("Hello_" + g_random->randomUniqueID().toString());
 		Value value = LiteralStringRef("Said hello to everyone!");
@@ -196,7 +196,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		task->params[LiteralStringRef("subtaskCount")] = StringRef(format("%d", subtaskCount));
 		taskBucket->addTask(tr, task);
 		Reference<Task> taskDone(new Task(SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), g_random->randomInt(0, 2)));
-		Void _ = wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
+		wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
 		return Void();
 	}
 
@@ -209,10 +209,10 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		try {
 			if (self->clientId == 0){
 				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
-				Void _ = wait(taskBucket->clear(cx));
+				wait(taskBucket->clear(cx));
 
 				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
-				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount); }));
+				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount); }));
 
 				TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
 			}
@@ -223,17 +223,17 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 					if (!oneTaskDone) {
 						bool isEmpty = wait(taskBucket->isEmpty(cx));
 						if (isEmpty) {
-							Void _ = wait(delay(5.0));
+							wait(delay(5.0));
 							state bool isFutureEmpty = wait(futureBucket->isEmpty(cx));
 							if (isFutureEmpty)
 								break;
 							else {
-								Void _ = wait(TaskBucket::debugPrintRange(cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId))));
+								wait(TaskBucket::debugPrintRange(cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId))));
 								TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
 							}
 						}
 						else {
-							Void _ = wait(delay(1.0));
+							wait(delay(1.0));
 						}
 					}
 				}
@@ -241,18 +241,18 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 					if (e.code() == error_code_timed_out)
 						TraceEvent(SevWarn, "TaskBucketCorrectness").error(e);
 					else
-						Void _ = wait(tr->onError(e));
+						wait(tr->onError(e));
 				}
 			}
 
 			if (self->clientId == 0){
 				TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
-				Void _ = wait(TaskBucket::debugPrintRange(cx, StringRef(), StringRef()));
+				wait(TaskBucket::debugPrintRange(cx, StringRef(), StringRef()));
 			}
 		}
 		catch (Error &e) {
 			TraceEvent(SevError, "TaskBucketCorrectness").error(e);
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 
 		return Void();
@@ -297,7 +297,7 @@ void print_subspace_key(const Subspace& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
 }
 
-TEST_CASE("fdbclient/TaskBucket/Subspace") {
+TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	Subspace subspace_test;
 	print_subspace_key(subspace_test, 0);
 	ASSERT(subspace_test.key().toString() == "");

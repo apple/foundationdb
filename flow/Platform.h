@@ -53,8 +53,14 @@
 #error Compiling on unknown platform
 #endif
 
-#if defined(__linux__) && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
-#error GCC 4.5.0 or later required on this platform
+#if defined(__linux__)
+#  if defined(__clang__)
+#    if ((__clang_major__ * 100 + __clang_minor__) < 303)
+#      error Clang 3.3 or later is required on this platform
+#    endif
+#  elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
+#    error GCC 4.5.0 or later required on this platform
+#  endif
 #endif
 
 #if defined(_WIN32) && (_MSC_VER < 1600)
@@ -523,6 +529,18 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
 void* loadFunction(void* lib, const char* func_name);
+
+#ifdef _WIN32
+inline static int ctzll( uint64_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward64( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+#else
+#define ctzll __builtin_ctzll
+#endif
 
 // MSVC not support noexcept yet
 #ifndef __GNUG__

@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SerializabilityWorkload : TestWorkload {
 	double testDuration;
@@ -286,16 +286,16 @@ struct SerializabilityWorkload : TestWorkload {
 				state int waitType = g_random->randomInt(0, 4);
 				loop {
 					if(waitType == 0 && getFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getFutures) ) );
+						wait( ::success( g_random->randomChoice(*getFutures) ) );
 						break;
 					} else if(waitType == 1 && getKeyFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getKeyFutures) ) );
+						wait( ::success( g_random->randomChoice(*getKeyFutures) ) );
 						break;
 					} else if(waitType == 2 && getRangeFutures->size()) {
-						Void _ = wait( ::success( g_random->randomChoice(*getRangeFutures) ) );
+						wait( ::success( g_random->randomChoice(*getRangeFutures) ) );
 						break;
 					} else if(waitType == 3) {
-						Void _ = wait( delay(0.001*g_random->random01()));
+						wait( delay(0.001*g_random->random01()));
 						break;
 					}
 					waitType = (waitType + 1) % 4;
@@ -320,7 +320,7 @@ struct SerializabilityWorkload : TestWorkload {
 		tr.clear(normalKeys);
 		for(auto kv : data)
 			tr.set(kv.key, kv.value);
-		Void _ = wait( tr.commit() );
+		wait( tr.commit() );
 		//TraceEvent("SRL_Reset");
 		return Void();
 	}
@@ -363,32 +363,32 @@ struct SerializabilityWorkload : TestWorkload {
 				state std::vector<TransactionOperation> c = self->randomTransaction();
 
 				//reset database to known state
-				Void _ = wait( resetDatabase(cx, initialData) );
+				wait( resetDatabase(cx, initialData) );
 
-				Void _ = wait( runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
-				Void _ = wait( tr[0].commit() );
+				wait( runTransaction(&tr[0], a, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( tr[0].commit() );
 
 				//TraceEvent("SRL_FinishedA");
 		
-				Void _ = wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
-				Void _ = wait( tr[1].commit() );
+				wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
+				wait( tr[1].commit() );
 
 				//TraceEvent("SRL_FinishedB");
 
-				Void _ = wait( runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
-				Void _ = wait( tr[2].commit() );
+				wait( runTransaction(&tr[2], c, &getFutures[2], &getKeyFutures[2], &getRangeFutures[2], &watchFutures[2], false) );
+				wait( tr[2].commit() );
 
 				//get contents of database
 				state Standalone<RangeResultRef> result1 = wait( getDatabaseContents(cx, self->nodes) );
 
 				//reset database to known state
-				Void _ = wait( resetDatabase(cx, initialData) );
+				wait( resetDatabase(cx, initialData) );
 
-				Void _ = wait( runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				Void _ = wait( runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
-				Void _ = wait( runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
-				Void _ = wait( tr[3].commit() );
-				Void _ = wait( tr[4].commit() );
+				wait( runTransaction(&tr[3], a, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(&tr[3], b, &getFutures[3], &getKeyFutures[3], &getRangeFutures[3], &watchFutures[3], true) );
+				wait( runTransaction(&tr[4], c, &getFutures[4], &getKeyFutures[4], &getRangeFutures[4], &watchFutures[4], false) );
+				wait( tr[3].commit() );
+				wait( tr[4].commit() );
 
 				//get contents of database
 				Standalone<RangeResultRef> result2 = wait( getDatabaseContents(cx, self->nodes) );
@@ -501,7 +501,7 @@ struct SerializabilityWorkload : TestWorkload {
 				}
 			} catch( Error &e ) {
 				state ReadYourWritesTransaction trErr(cx);
-				Void _ = wait( trErr.onError(e) );
+				wait( trErr.onError(e) );
 			}
 		}
 	}

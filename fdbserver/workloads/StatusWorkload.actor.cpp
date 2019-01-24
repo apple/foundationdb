@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern bool noUnseed;
 
@@ -60,12 +60,8 @@ struct StatusWorkload : TestWorkload {
 	virtual Future<Void> start(Database const& cx) {
 		if (clientId != 0)
 			return Void();
-		Reference<Cluster> cluster = cx->cluster;
-		if (!cluster) {
-			TraceEvent(SevError, "StatusWorkloadStartError").detail("Reason", "NULL cluster");
-			return Void();
-		}
-		return success(timeout(fetcher(cluster->getConnectionFile(), this), testDuration));
+
+		return success(timeout(fetcher(cx->getConnectionFile(), this), testDuration));
 	}
 	virtual Future<bool> check(Database const& cx) {
 		return errors.getValue() == 0;
@@ -111,7 +107,7 @@ struct StatusWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop{
-			Void _ = wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;
@@ -140,7 +136,7 @@ struct StatusWorkload : TestWorkload {
 
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory("Status");
 
-TEST_CASE("fdbserver/status/schema/basic") {
+TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema = readJSONStrictly("{\"apple\":3,\"banana\":\"foo\",\"sub\":{\"thing\":true},\"arr\":[{\"a\":1,\"b\":2}],\"en\":{\"$enum\":[\"foo\",\"bar\"]},\"mapped\":{\"$map\":{\"x\":true}}}");
 	auto check = [&schema](bool expect_ok, std::string t) {
 		json_spirit::mValue test = readJSONStrictly(t);

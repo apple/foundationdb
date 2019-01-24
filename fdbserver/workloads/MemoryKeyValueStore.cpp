@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "MemoryKeyValueStore.h"
+#include "fdbserver/workloads/MemoryKeyValueStore.h"
 
 //Get the value associated with a key
 Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
@@ -37,7 +37,7 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 	//Update the iterator position if necessary based on the value of orEqual
 	int count = 0;
 	if(selector.offset <= 0) {
-		if((selector.getKey() == mapItr->first && !selector.orEqual) || selector.getKey() != mapItr->first) {
+		if(mapItr == store.end() || selector.getKey() != mapItr->first || !selector.orEqual) {
 			if(mapItr == store.begin())
 				return startKey();
 
@@ -45,10 +45,10 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 		}
 	}
 	else {
-		if(selector.getKey() == mapItr->first && selector.orEqual) {
-			if(mapItr == store.end())
-				return endKey();
+		if(mapItr == store.end())
+			return endKey();
 
+		if(selector.getKey() == mapItr->first && selector.orEqual) {
 			mapItr++;
 		}
 

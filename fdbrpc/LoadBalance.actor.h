@@ -23,18 +23,19 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
 	#define FLOW_LOADBALANCE_ACTOR_G_H
-	#include "LoadBalance.actor.g.h"
+	#include "fdbrpc/LoadBalance.actor.g.h"
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 	#define FLOW_LOADBALANCE_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
-#include "FailureMonitor.h"
-#include "fdbrpc.h"
-#include "Locality.h"
-#include "QueueModel.h"
-#include "MultiInterface.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/QueueModel.h"
+#include "fdbrpc/MultiInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
 
@@ -70,7 +71,7 @@ struct LoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar &ar) {
-		ar & penalty;
+		serializer(ar, penalty);
 	}
 };
 
@@ -116,7 +117,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 ACTOR template <class Request>
 Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce, bool triedAllOptions) {
 	if(backoff > 0.0) {
-		Void _ = wait(delay(backoff) || requestUnneeded);
+		wait(delay(backoff) || requestUnneeded);
 	}
 
 	if(requestUnneeded.isReady()) {
@@ -296,13 +297,13 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				g_network->networkMetrics.newestAlternativesFailure = now();
 
 				choose {
-					when ( Void _ = wait( quorum( ok, 1 ) ) ) {}
-					when ( Void _ = wait( ::delayJittered( delay ) ) ) {
+					when ( wait( quorum( ok, 1 ) ) ) {}
+					when ( wait( ::delayJittered( delay ) ) ) {
 						throw all_alternatives_failed();
 					}
 				}
 			} else {
-				Void _ = wait( quorum( ok, 1 ) );
+				wait( quorum( ok, 1 ) );
 			}
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff
@@ -383,7 +384,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						firstRequestEndpoint = Optional<uint64_t>();
 						break;
 					}
-					when(Void _ = wait(secondDelay)) {
+					when(wait(secondDelay)) {
 						secondDelay = Never();
 						if(model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
@@ -405,5 +406,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		secondDelay = Never();
 	}
 }
+
+#include "flow/unactorcompiler.h"
 
 #endif

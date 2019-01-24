@@ -22,7 +22,7 @@
 #define FLOW_IRANDOM_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
 #include <ext/hash_map>
@@ -51,7 +51,7 @@ public:
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		ar & part[0] & part[1];
+		serializer(ar, part[0], part[1]);
 	}
 };
 
@@ -84,8 +84,12 @@ public:
 	template <class C>
 	void randomShuffle( C& container ) {
 		int s = (int)container.size();
-		for(int i=0; i<s; i++)
-			std::swap( container[i], container[ randomInt( i, s ) ] );
+		for(int i=0; i<s; i++) {
+			int j = randomInt( i, s );
+			if (i != j) {
+				std::swap( container[i], container[j] );
+			}
+		}
 	}
 
 	bool coinflip() { return (this->random01() < 0.5); }

@@ -41,7 +41,7 @@ struct SatelliteInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & dcId & priority;
+		serializer(ar, dcId, priority);
 	}
 };
 
@@ -71,8 +71,8 @@ struct RegionInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & dcId & priority & satelliteTLogPolicy & satelliteDesiredTLogCount & satelliteTLogReplicationFactor & satelliteTLogWriteAntiQuorum & satelliteTLogUsableDcs &
-			satelliteTLogPolicyFallback & satelliteTLogReplicationFactorFallback & satelliteTLogWriteAntiQuorumFallback & satelliteTLogUsableDcsFallback & satellites;
+		serializer(ar, dcId, priority, satelliteTLogPolicy, satelliteDesiredTLogCount, satelliteTLogReplicationFactor, satelliteTLogWriteAntiQuorum, satelliteTLogUsableDcs,
+			satelliteTLogPolicyFallback, satelliteTLogReplicationFactorFallback, satelliteTLogWriteAntiQuorumFallback, satelliteTLogUsableDcsFallback, satellites);
 	}
 };
 
@@ -203,7 +203,7 @@ struct DatabaseConfiguration {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (!ar.isDeserializing) makeConfigurationImmutable();
-		ar & rawConfiguration;
+		serializer(ar, rawConfiguration);
 		if (ar.isDeserializing) {
 			for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
 				setInternal(c->key, c->value);

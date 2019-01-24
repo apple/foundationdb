@@ -24,7 +24,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 
 struct JSONSchemas {
 	static const KeyRef statusSchema;

@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/Atomic.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
 	double testDuration, slowModeStart;
@@ -77,8 +77,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		useExtraDB = g_simulator.extraDB != NULL;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}
 
@@ -331,12 +330,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 			state Optional<Value> memRes = self->memoryGet( &self->memoryDatabase, key );
 			*memLimit -= memRes.expectedSize();
 			choose {
-				when( Void _ = wait( tr->watch( key ) ) ) {
+				when( wait( tr->watch( key ) ) ) {
 					if( changeNum == self->changeCount[key] ) {
 						TraceEvent(SevError, "WDRWatchWrongResult", randomID).detail("Reason", "Triggered without changing").detail("Key", printable(key)).detail("Value", changeNum).detail("DuringCommit", *doingCommit);
 					}
 				}
-				when( Void _ = wait( self->finished.onTrigger() ) ) {
+				when( wait( self->finished.onTrigger() ) ) {
 					Optional<Value> memRes2 = self->memoryGet( &self->memoryDatabase, key );
 					if( memRes != memRes2 ) {
 						TraceEvent(SevError, "WDRWatchWrongResult", randomID).detail("Reason", "Changed without triggering").detail("Key", printable(key)).detail("Value1", printable(memRes)).detail("Value2", printable(memRes2));
@@ -398,7 +397,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 			state std::map<Key, Value> committedDB = self->memoryDatabase;
 			*doingCommit = true;
-			Void _ = wait( tr->commit() );
+			wait( tr->commit() );
 			*doingCommit = false;
 			self->finished.trigger();
 
@@ -471,11 +470,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 								}
 							}
 						}
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError( e ) );
+						wait( tr.onError( e ) );
 					}
 				}
 			}
@@ -484,9 +483,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			//TraceEvent("WDRInit");
 
 			loop {
-				Void _ = wait(delay( now() - startTime > self->slowModeStart || (g_network->isSimulated() && g_simulator.speedUpSimulation) ? 1.0 : 0.1 ));
+				wait(delay( now() - startTime > self->slowModeStart || (g_network->isSimulated() && g_simulator.speedUpSimulation) ? 1.0 : 0.1 ));
 				try {
-					Void _ = wait( self->randomTransaction( ( self->useExtraDB && g_random->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
+					wait( self->randomTransaction( ( self->useExtraDB && g_random->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
 						throw;
@@ -796,17 +795,17 @@ struct WriteDuringReadWorkload : TestWorkload {
 					if( waitLocation < operations.size() ) {
 						int waitOp = g_random->randomInt(waitLocation,operations.size());
 						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
-						Void _ = wait( operations[waitOp] );
-						Void _ = wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
+						wait( operations[waitOp] );
+						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
-				Void _ = wait( waitForAll( operations ) );
+				wait( waitForAll( operations ) );
 				ASSERT( timebomb == 0 || 1000*(now() - startTime) <= timebomb + 1 );
-				Void _ = wait( tr.debug_onIdle() );
-				Void _ = wait( delay(0.000001) ); //to ensure triggered watches have a change to register
+				wait( tr.debug_onIdle() );
+				wait( delay(0.000001) ); //to ensure triggered watches have a change to register
 				self->finished.trigger();
-				Void _ = wait( waitForAll( watches ) ); //only for errors, should have all returned
+				wait( waitForAll( watches ) ); //only for errors, should have all returned
 				self->changeCount.insert( allKeys, 0 );
 				break;
 			} catch( Error &e ) {
@@ -825,7 +824,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				if( e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large || e.code() == error_code_value_too_large || cancelled )
 					throw not_committed();
 				try {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				} catch( Error &e ) {
 					if( e.code() == error_code_transaction_timed_out ) {
 						ASSERT( timebomb != 0 && 1000*(now() - startTime) >= timebomb - 1 );

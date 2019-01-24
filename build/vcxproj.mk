@@ -58,6 +58,10 @@ GENNAME()_DEPS := $(addprefix $(DEPSDIR)/,$(GENNAME()_BUILD_SOURCES:=.d))
 
 GENNAME: GENTARGET
 
+$(CMDDIR)/GENDIR/compile_commands.json: build/project_commands.py ${GENNAME()_ALL_SOURCES}
+	@mkdir -p $(basename $@)
+	@build/project_commands.py --cflags="$(CFLAGS) $(GENNAME()_CFLAGS)" --cxxflags="$(CXXFLAGS) $(GENNAME()_CXXFLAGS)" --sources="$(GENNAME()_ALL_SOURCES)" --out="$@"
+
 -include $(GENNAME()_DEPS)
 
 $(OBJDIR)/GENDIR/%.actor.g.cpp: GENDIR/%.actor.cpp $(ACTORCOMPILER)

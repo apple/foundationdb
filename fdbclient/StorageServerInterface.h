@@ -22,7 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -69,11 +69,11 @@ struct StorageServerInterface {
 	void serialize( Ar& ar ) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
-		ar & uniqueID & locality & getVersion & getValue & getKey & getKeyValues & getShardState & waitMetrics 
-			& splitMetrics & getPhysicalMetrics & waitFailure & getQueuingMetrics & getKeyValueStoreType;
+		serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 
 		if( ar.protocolVersion() >= 0x0FDB00A200090001LL )
-			ar & watchValue;
+			serializer(ar, watchValue);
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
@@ -104,7 +104,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & *(LoadBalancedReply*)this & value;
+		serializer(ar, *(LoadBalancedReply*)this, value);
 	}
 };
 
@@ -119,7 +119,7 @@ struct GetValueRequest : TimedRequest {
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 
@@ -135,7 +135,7 @@ struct WatchValueRequest {
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & key & value & version & debugID & reply;
+		serializer(ar, key, value, version, debugID, reply);
 	}
 };
 
@@ -147,7 +147,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & *(LoadBalancedReply*)this & data & version & more & arena;
+		serializer(ar, *(LoadBalancedReply*)this, data, version, more, arena);
 	}
 };
 
@@ -163,7 +163,7 @@ struct GetKeyValuesRequest : TimedRequest {
 //	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & begin & end & version & limit & limitBytes & debugID & reply & arena;
+		serializer(ar, begin, end, version, limit, limitBytes, debugID, reply, arena);
 	}
 };
 
@@ -175,7 +175,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & *(LoadBalancedReply*)this & sel;
+		serializer(ar, *(LoadBalancedReply*)this, sel);
 	}
 };
 
@@ -190,7 +190,7 @@ struct GetKeyRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & sel & version & reply & arena;
+		serializer(ar, sel, version, reply, arena);
 	}
 };
 
@@ -209,7 +209,7 @@ struct GetShardStateRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & keys & mode & reply;
+		serializer(ar, keys, mode, reply);
 	}
 };
 
@@ -245,7 +245,7 @@ struct StorageMetrics {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & bytes & bytesPerKSecond & iosPerKSecond;
+		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -279,7 +279,7 @@ struct WaitMetricsRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & keys & min & max & reply & arena;
+		serializer(ar, keys, min, max, reply, arena);
 	}
 };
 
@@ -289,7 +289,7 @@ struct SplitMetricsReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & splits & used;
+		serializer(ar, splits, used);
 	}
 };
 
@@ -307,7 +307,7 @@ struct SplitMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & keys & limits & used & estimated & isLastShard & reply & arena;
+		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
 	}
 };
 
@@ -318,7 +318,7 @@ struct GetPhysicalMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & load & free & capacity;
+		serializer(ar, load, free, capacity);
 	}
 };
 
@@ -327,7 +327,7 @@ struct GetPhysicalMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -337,7 +337,7 @@ struct StorageQueuingMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -350,7 +350,7 @@ struct StorageQueuingMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & localTime & instanceID & bytesDurable & bytesInput & v & storageBytes;
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, v, storageBytes);
 	}
 };
 

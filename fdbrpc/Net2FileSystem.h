@@ -22,7 +22,7 @@
 #define FLOW_NET2FILESYSTEM_H
 #pragma once
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 
 class Net2FileSystem : public IAsyncFileSystem {
 public:

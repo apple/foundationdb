@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "IDiskQueue.h"
+#include "fdbserver/IDiskQueue.h"
 
 class LogSystemDiskQueueAdapter : public IDiskQueue {
 public:

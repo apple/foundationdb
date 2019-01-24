@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "LogSystem.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/ReplicationUtils.h"
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
@@ -134,7 +134,7 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
-		Void _ = wait( Future<Void>(Never()));
+		wait( Future<Void>(Never()));
 		throw internal_error();
 	}
 
@@ -167,7 +167,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when( Void _ = wait( self->interfaceChanged ) ) {
+				when( wait( self->interfaceChanged ) ) {
 					self->interfaceChanged = self->interf->onChange();
 					self->randomID = g_random->randomUniqueID();
 					self->sequence = 0;
@@ -193,7 +193,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 
 ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
-		Void _ = wait( Future<Void>(Never()));
+		wait( Future<Void>(Never()));
 		throw internal_error();
 	}
 	try {
@@ -212,7 +212,7 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int ta
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when( Void _ = wait( self->interf->onChange() ) ) {}
+				when( wait( self->interf->onChange() ) ) {}
 			}
 		}
 	} catch( Error &e ) {
@@ -237,8 +237,8 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
 ACTOR Future<Void> serverPeekOnFailed( ILogSystem::ServerPeekCursor* self ) {
 	loop {
 		choose {
-			when( Void _ = wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onDisconnectOrFailure( self->interf->get().interf().peekMessages.getEndpoint() ) : Never() ) ) { return Void(); }
-			when( Void _ = wait( self->interf->onChange() ) ) {}
+			when( wait( self->interf->get().present() ? IFailureMonitor::failureMonitor().onDisconnectOrFailure( self->interf->get().interf().peekMessages.getEndpoint() ) : Never() ) ) { return Void(); }
+			when( wait( self->interf->onChange() ) ) {}
 		}
 	}
 }
@@ -435,13 +435,13 @@ ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMess
 		//TraceEvent("MPC_GetMoreA", self->randomID).detail("Start", startVersion.toString());
 		if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestServer]->hasMessage());
-			Void _ = wait( self->serverCursors[self->bestServer]->getMore(taskID) || self->serverCursors[self->bestServer]->onFailed() );
+			wait( self->serverCursors[self->bestServer]->getMore(taskID) || self->serverCursors[self->bestServer]->onFailed() );
 		} else {
 			vector<Future<Void>> q;
 			for (auto& c : self->serverCursors)
 				if (!c->hasMessage())
 					q.push_back(c->getMore(taskID));
-			Void _ = wait(quorum(q, 1));
+			wait(quorum(q, 1));
 		}
 		self->calcHasMessage();
 		//TraceEvent("MPC_GetMoreB", self->randomID).detail("HasMessage", self->hasMessage()).detail("Start", startVersion.toString()).detail("Seq", self->version().toString());
@@ -698,7 +698,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestSet][self->bestServer]->hasMessage());
 			//TraceEvent("LPC_GetMore2", self->randomID).detail("Start", startVersion.toString()).detail("Tag", self->tag);
-			Void _ = wait( self->serverCursors[self->bestSet][self->bestServer]->getMore(taskID) || self->serverCursors[self->bestSet][self->bestServer]->onFailed() );
+			wait( self->serverCursors[self->bestSet][self->bestServer]->getMore(taskID) || self->serverCursors[self->bestSet][self->bestServer]->onFailed() );
 			self->useBestSet = true;
 		} else {
 			//FIXME: if best set is exhausted, do not peek remote servers
@@ -730,7 +730,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 						}
 					}
 				}
-				Void _ = wait(quorum(q, 1));
+				wait(quorum(q, 1));
 			} else {
 				//FIXME: this will peeking way too many cursors when satellites exist, and does not need to peek bestSet cursors since we cannot get anymore data from them
 				vector<Future<Void>> q;
@@ -742,7 +742,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 						}
 					}
 				}
-				Void _ = wait(quorum(q, 1));
+				wait(quorum(q, 1));
 				self->useBestSet = false;
 			}
 		}
@@ -965,7 +965,7 @@ void ILogSystem::BufferedCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, int taskID ) {
 	loop {
-		Void _ = wait(yield());
+		wait(yield());
 		if(cursor->version().version >= maxVersion) {
 			return Void();
 		}
@@ -976,13 +976,13 @@ ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Refe
 				return Void();
 			}
 		}
-		Void _ = wait(cursor->getMore(taskID));
+		wait(cursor->getMore(taskID));
 	}
 }
 
 ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID ) {
 	if( self->messageVersion.version >= self->end ) {
-		Void _ = wait( Future<Void>(Never()));
+		wait( Future<Void>(Never()));
 		throw internal_error();
 	}
 
@@ -994,8 +994,8 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 	for(auto& cursor : self->cursors) {
 		loaders.push_back(bufferedGetMoreLoader(self, cursor, targetVersion, taskID));
 	}
-	Void _ = wait( waitForAll(loaders) );
-	Void _ = wait(yield());
+	wait( waitForAll(loaders) );
+	wait(yield());
 
 	if(self->collectTags) {
 		std::sort(self->messages.begin(), self->messages.end());
@@ -1010,7 +1010,7 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 		self->combineMessages();
 	}
 
-	Void _ = wait(yield());
+	wait(yield());
 	return Void();
 }
 

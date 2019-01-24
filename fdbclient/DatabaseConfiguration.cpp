@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/SystemData.h"
 
 DatabaseConfiguration::DatabaseConfiguration()
@@ -247,8 +247,12 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "ssd-1";
 		} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
 			result["storage_engine"] = "ssd-2";
+		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1 ) {
+			result["storage_engine"] = "ssd-redwood-experimental";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory";
+		} else {
+			result["storage_engine"] = "custom";
 		}
 
 		if( remoteTLogReplicationFactor == 1 ) {
@@ -362,7 +366,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
-	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; }
+	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
+		// TODO:  Remove this once Redwood works as a log engine
+		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
+			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+	}
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
 	else if (ck == LiteralStringRef("auto_proxies")) parse(&autoMasterProxyCount, value);
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);

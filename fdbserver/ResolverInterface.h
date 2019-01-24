@@ -49,7 +49,7 @@ struct ResolverInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & uniqueID & locality & resolve & metrics & split & waitFailure;
+		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure);
 	}
 };
 
@@ -65,7 +65,7 @@ struct StateTransactionRef {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & committed & mutations;
+		serializer(ar, committed, mutations);
 	}
 };
 
@@ -77,7 +77,7 @@ struct ResolveTransactionBatchReply {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & committed & stateMutations & arena & debugID;
+		serializer(ar, committed, stateMutations, arena, debugID);
 	}
 
 };
@@ -95,7 +95,7 @@ struct ResolveTransactionBatchRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & prevVersion & version & lastReceivedVersion & transactions & txnStateTransactions & reply & arena & debugID;
+		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
 	}
 };
 
@@ -104,7 +104,7 @@ struct ResolutionMetricsRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -113,7 +113,7 @@ struct ResolutionSplitReply {
 	int64_t used;
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & key & used;
+		serializer(ar, key, used);
 	}
 
 };
@@ -126,7 +126,7 @@ struct ResolutionSplitRequest {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & range & offset & front & reply;
+		serializer(ar, range, offset, front, reply);
 	}
 };
 

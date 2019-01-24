@@ -24,8 +24,8 @@
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
-#include "FDBTypes.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -262,5 +262,13 @@ extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
 extern const KeyRef mustContainSystemMutationsKey;
+
+// Key range reserved for storing changes to monitor conf files
+extern const KeyRangeRef monitorConfKeys;
+
+extern const KeyRef restoreLeaderKey;
+extern const KeyRangeRef restoreWorkersKeys;
+
+const Key restoreWorkerKeyFor( UID const& agentID );
 
 #endif

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Schemas.h"
+#include "fdbclient/Schemas.h"
 
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
@@ -483,6 +483,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
+             "ssd-redwood-experimental",
              "memory"
          ]},
          "coordinators_count":1,

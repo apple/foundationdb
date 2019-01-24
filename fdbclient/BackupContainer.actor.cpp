@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupContainer.h"
+#include "fdbclient/BackupContainer.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
@@ -37,8 +37,8 @@ namespace IBackupFile_impl {
 
 	ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
 		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
-		Void _ = wait(file->append(&lenBuf, sizeof(lenBuf)));
-		Void _ = wait(file->append(s.begin(), s.size()));
+		wait(file->append(&lenBuf, sizeof(lenBuf)));
+		wait(file->append(s.begin(), s.size()));
 		return Void();
 	}
 }
@@ -420,7 +420,7 @@ public:
 			}
 			else
 				throw restore_unknown_file_type();
-			Void _ = wait(yield());
+			wait(yield());
 		}
 
 		state json_spirit::mValue json;
@@ -431,12 +431,12 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
-		Void _ = wait(yield());
+		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
 		state Reference<IBackupFile> f = wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
-		Void _ = wait(f->append(docString.data(), docString.size()));
-		Void _ = wait(f->finish());
+		wait(f->append(docString.data(), docString.size()));
+		wait(f->finish());
 
 		return Void();
 	}
@@ -553,7 +553,7 @@ public:
 		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(begin, end);
 		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(begin, end);
 
-		Void _ = wait(success(fRanges) && success(fSnapshots) && success(fLogs));
+		wait(success(fRanges) && success(fSnapshots) && success(fLogs));
 
 		return BackupFileList({fRanges.get(), fLogs.get(), fSnapshots.get()});
 	}
@@ -615,7 +615,7 @@ public:
 			metaReads.push_back(store(bc->logEndVersion().get(), metaLogEnd));
 		}
 
-		Void _ = wait(waitForAll(metaReads));
+		wait(waitForAll(metaReads));
 
 		TraceEvent("BackupContainerDescribe2")
 			.detail("URL", bc->getURL())
@@ -682,7 +682,7 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		Void _ = wait(store(bc->listLogFiles(scanBegin, scanEnd), logs) && store(bc->listKeyspaceSnapshots(), desc.snapshots));
+		wait(store(bc->listLogFiles(scanBegin, scanEnd), logs) && store(bc->listKeyspaceSnapshots(), desc.snapshots));
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -710,7 +710,6 @@ public:
 			}
 		}
 
-
 		// Only update stored contiguous log begin and end versions if we did NOT use a log start override.
 		// Otherwise, a series of describe operations can result in a version range which is actually missing data.
 		if(logStartVersionOverride == invalidVersion) {
@@ -729,7 +728,7 @@ public:
 					updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
 				}
 
-				Void _ = wait(updates);
+				wait(updates);
 			} catch(Error &e) {
 				if(e.code() == error_code_actor_cancelled)
 					throw;
@@ -843,7 +842,7 @@ public:
 			progress->step = "Listing files";
 		}
 		// Get log files or range files that contain any data at or before expireEndVersion
-		Void _ = wait(store(bc->listLogFiles(scanBegin, expireEndVersion - 1), logs) && store(bc->listRangeFiles(scanBegin, expireEndVersion - 1), ranges));
+		wait(store(bc->listLogFiles(scanBegin, expireEndVersion - 1), logs) && store(bc->listRangeFiles(scanBegin, expireEndVersion - 1), ranges));
 
 		// The new logBeginVersion will be taken from the last log file, if there is one
 		state Optional<Version> newLogBeginVersion;
@@ -906,7 +905,7 @@ public:
 		}
 		Optional<Version> metaUnreliableEnd = wait(bc->unreliableEndVersion().get());
 		if(metaUnreliableEnd.orDefault(0) < expireEndVersion) {
-			Void _ = wait(bc->unreliableEndVersion().set(expireEndVersion));
+			wait(bc->unreliableEndVersion().set(expireEndVersion));
 		}
 
 		if(progress != nullptr) {
@@ -933,7 +932,7 @@ public:
 			state int targetFuturesSize = toDelete.empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
 
 			while(deleteFutures.size() > targetFuturesSize) {
-				Void _ = wait(deleteFutures.front());
+				wait(deleteFutures.front());
 				if(progress != nullptr) {
 					++progress->done;
 				}
@@ -949,7 +948,7 @@ public:
 		// successfully deleted if the current version is lower or missing
 		Optional<Version> metaExpiredEnd = wait(bc->expiredEndVersion().get());
 		if(metaExpiredEnd.orDefault(0) < expireEndVersion) {
-			Void _ = wait(bc->expiredEndVersion().set(expireEndVersion));
+			wait(bc->expiredEndVersion().set(expireEndVersion));
 		}
 
 		return Void();
@@ -1052,8 +1051,8 @@ public:
 		try {
 			state Reference<IBackupFile> f = wait(bc->writeFile(path));
 			std::string s = format("%lld", v);
-			Void _ = wait(f->append(s.data(), s.size()));
-			Void _ = wait(f->finish());
+			wait(f->append(s.data(), s.size()));
+			wait(f->finish());
 			return Void();
 		} catch(Error &e) {
 			TraceEvent(SevWarn, "BackupContainerWritePropertyFailed")
@@ -1194,8 +1193,8 @@ public:
 		}
 
 		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
-			Void _ = wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
-			Void _ = wait(f->m_file->sync());
+			wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
+			wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
 			renameFile(name, f->m_finalFullPath);
@@ -1392,12 +1391,12 @@ public:
 	}
 
 	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
-		Void _ = wait(bc->m_bstore->createBucket(bc->m_bucket));
+		wait(bc->m_bstore->createBucket(bc->m_bucket));
 
 		// Check/create the index entry
 		bool exists = wait(bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry()));
 		if(!exists) {
-			Void _ = wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
+			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
 		}
 
 		return Void();
@@ -1420,10 +1419,10 @@ public:
 		}
 
 		// First delete everything under the data prefix in the bucket
-		Void _ = wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
+		wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
 
 		// Now that all files are deleted, delete the index entry
-		Void _ = wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
+		wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
 
 		return Void();
 	}
@@ -1576,7 +1575,7 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 			if (results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
-				Void _ = wait( store( versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1), results) );
+				wait( store( versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1), results) );
 
 				if(results.size() != 1) {
 					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
@@ -1589,7 +1588,7 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 			return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
 		} catch (Error& e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -1616,7 +1615,7 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 			if(mid == min) {
 				// There aren't any records having a version < v, so just look for any record having a time < now
 				// and base a result on it
-				Void _ = wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
+				wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
 
 				if (results.size() != 1) {
 					// There aren't any timekeeper records to base a result on so return nothing
@@ -1663,9 +1662,9 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 		for(int i = 0; i < content.size(); ++i)
 			mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
 
-		Void _ = wait(f->append(content.begin(), content.size()));
+		wait(f->append(content.begin(), content.size()));
 	}
-	Void _ = wait(f->finish());
+	wait(f->finish());
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
 	int64_t fileSize = wait(inputFile->size());
 	ASSERT(size == fileSize);
@@ -1691,13 +1690,13 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	// Make sure container doesn't exist, then create it.
 	try {
-		Void _ = wait(c->deleteContainer());
+		wait(c->deleteContainer());
 	} catch(Error &e) {
 		if(e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
 			throw;
 	}
 
-	Void _ = wait(c->create());
+	wait(c->create());
 
 	state std::vector<Future<Void>> writes;
 	state std::map<Version, std::vector<std::string>> snapshots;
@@ -1755,7 +1754,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		}
 	}
 
-	Void _ = wait(waitForAll(writes));
+	wait(waitForAll(writes));
 
 	state BackupFileList listing = wait(c->dumpFileList());
 	ASSERT(listing.ranges.size() == nRangeFiles);
@@ -1782,13 +1781,13 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		// Expire everything up to but not including the snapshot end version
 		printf("EXPIRE TO %lld\n", expireVersion);
 		state Future<Void> f = c->expireData(expireVersion);
-		Void _ = wait(ready(f));
+		wait(ready(f));
 
 		// If there is an error, it must be backup_cannot_expire and we have to be on the last snapshot
 		if(f.isError()) {
 			ASSERT(f.getError().code() == error_code_backup_cannot_expire);
 			ASSERT(i == listing.snapshots.size() - 1);
-			Void _ = wait(c->expireData(expireVersion, true));
+			wait(c->expireData(expireVersion, true));
 		}
 
 		BackupDescription d = wait(c->describeBackup());
@@ -1796,10 +1795,10 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	}
 
 	printf("DELETING\n");
-	Void _ = wait(c->deleteContainer());
+	wait(c->deleteContainer());
 
 	state Future<BackupDescription> d = c->describeBackup();
-	Void _ = wait(ready(d));
+	wait(ready(d));
 	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
 
 	BackupFileList empty = wait(c->dumpFileList());
@@ -1812,24 +1811,24 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	return Void();
 }
 
-TEST_CASE("backup/containers/localdir") {
+TEST_CASE("/backup/containers/localdir") {
 	if(g_network->isSimulated())
-		Void _ = wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
+		wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
 	else
-		Void _ = wait(testBackupContainer(format("file:///private/tmp/fdb_backups/%llx", timer_int())));
+		wait(testBackupContainer(format("file:///private/tmp/fdb_backups/%llx", timer_int())));
 	return Void();
 };
 
-TEST_CASE("backup/containers/url") {
+TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		Void _ = wait(testBackupContainer(url));
+		wait(testBackupContainer(url));
 	}
 	return Void();
 };
 
-TEST_CASE("backup/containers_list") {
+TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
 		state const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);

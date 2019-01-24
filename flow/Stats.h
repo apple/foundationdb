@@ -33,8 +33,10 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 
 */
 
-#include "flow.h"
-#include "TDMetric.actor.h"
+#include <cstdint>
+#include <cstddef>
+#include "flow/flow.h"
+#include "flow/TDMetric.actor.h"
 
 struct TimedRequest {
 	double requestTime;

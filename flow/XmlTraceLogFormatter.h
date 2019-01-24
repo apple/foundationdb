@@ -25,8 +25,8 @@
 
 #include <sstream>
 
-#include "FastRef.h"
-#include "Trace.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 
 struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
 	void addref();

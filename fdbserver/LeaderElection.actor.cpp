@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
-#include "ClusterRecruitmentInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees );
 
@@ -38,9 +38,9 @@ ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, L
 			nominees->set(v);
 
 			if( li.present() && li.get().forward )
-				Void _ = wait( Future<Void>(Never()) );
+				wait( Future<Void>(Never()) );
 
-			Void _ = wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
+			wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 		}
 	}
 }
@@ -48,9 +48,9 @@ ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, L
 ACTOR template <class T> Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out ) {
 	try {
 		loop {
-			Void _ = wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+			wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
 			out->set( in->get() );
-			Void _ = wait( in->onChange() );
+			wait( in->onChange() );
 		}
 	} catch (Error& e) {
 		out->set( in->get() );
@@ -71,7 +71,7 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	for( int i = 0; i < coordinators.leaderElectionServers.size(); i++ )
 		forwardRequests.push_back( retryBrokenPromise( coordinators.leaderElectionServers[i].forward, ForwardRequest( coordinators.clusterKey, forwardingInfo ) ) );
 	int quorum_size = forwardRequests.size()/2 + 1;
-	Void _ = wait( quorum( forwardRequests, quorum_size ) );
+	wait( quorum( forwardRequests, quorum_size ) );
 	return Void();
 }
 
@@ -84,9 +84,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 
 	if(asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad || asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote || asyncPriorityInfo->get().isExcluded) {
-		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) );
+		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) );
 	} else if( asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit ) {
-		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
 	nominees->set( vector<Optional<LeaderInfo>>( coordinators.clientLeaderServers.size() ) );
@@ -114,7 +114,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need to make
 				// sure that a majority of coordinators know that.
 				// SOMEDAY: Wait briefly to see if other coordinators will tell us they already know, to save communication?
-				Void _ = wait( changeLeaderCoordinators( coordinators, leader.get().first.serializedInfo ) );
+				wait( changeLeaderCoordinators( coordinators, leader.get().first.serializedInfo ) );
 
 				if(!hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection").detail("Filename", coordinators.ccf->getFilename())
@@ -153,14 +153,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 				badCandidateTimeout = Future<Void>();
 
 			choose {
-				when (Void _ = wait( nominees->onChange() )) {}
-				when (Void _ = wait( badCandidateTimeout.isValid() ? badCandidateTimeout : Never() )) {
+				when (wait( nominees->onChange() )) {}
+				when (wait( badCandidateTimeout.isValid() ? badCandidateTimeout : Never() )) {
 					TEST(true); // Bad candidate timeout
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID);
 					break;
 				}
-				when (Void _ = wait(candidacies)) { ASSERT(false); }
-				when (Void _ = wait( asyncPriorityInfo->onChange() )) {
+				when (wait(candidacies)) { ASSERT(false); }
+				when (wait( asyncPriorityInfo->onChange() )) {
 					break;
 				}
 			}
@@ -189,14 +189,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskCoordinationReply ) || asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
 
 		choose {
-			when ( Void _ = wait( quorum( true_heartbeats, true_heartbeats.size()/2+1 ) ) ) {
+			when ( wait( quorum( true_heartbeats, true_heartbeats.size()/2+1 ) ) ) {
 				//TraceEvent("StillLeader", myInfo.changeID);
 			} // We are still leader
-			when ( Void _ = wait( quorum( false_heartbeats, false_heartbeats.size()/2+1 ) ) ) {
+			when ( wait( quorum( false_heartbeats, false_heartbeats.size()/2+1 ) ) ) {
 				TraceEvent("ReplacedAsLeader", myInfo.changeID);
 				break;
 			} // We are definitely not leader
-			when ( Void _ = wait( delay(SERVER_KNOBS->POLLING_FREQUENCY) ) ) {
+			when ( wait( delay(SERVER_KNOBS->POLLING_FREQUENCY) ) ) {
 				for(int i = 0; i < coordinators.leaderElectionServers.size(); ++i) {
 					if(true_heartbeats[i].isReady())
 						TraceEvent("LeaderTrueHeartbeat", myInfo.changeID).detail("Coordinator", coordinators.leaderElectionServers[i].candidacy.getEndpoint().address);
@@ -208,13 +208,13 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 				TraceEvent("ReleasingLeadership", myInfo.changeID);
 				break;
 			} // Give up on being leader, because we apparently have poor communications
-			when ( Void _ = wait( asyncPriorityInfo->onChange() ) ) {}
+			when ( wait( asyncPriorityInfo->onChange() ) ) {}
 		}
 
-		Void _ = wait( rate );
+		wait( rate );
 	}
 
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) Void _ = wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
 
 	return Void(); // We are no longer leader
 }

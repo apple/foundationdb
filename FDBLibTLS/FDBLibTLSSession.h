@@ -23,12 +23,12 @@
 
 #pragma once
 
-#include "ITLSPlugin.h"
+#include "fdbrpc/ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPolicy.h"
-#include "FDBLibTLSVerify.h"
-#include "IRandom.h"
+#include "FDBLibTLS/FDBLibTLSPolicy.h"
+#include "FDBLibTLS/FDBLibTLSVerify.h"
+#include "flow/IRandom.h"
 
 #include <tls.h>
 

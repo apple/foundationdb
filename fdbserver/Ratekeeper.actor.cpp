@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/IndexedSet.h"
-#include "Ratekeeper.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/Smoother.h"
-#include "ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
 	unlimited,  // TODO: rename to workload?
@@ -117,7 +117,6 @@ struct Ratekeeper {
 	std::map<UID, std::pair<int64_t, double> > proxy_transactionCountAndTime;
 	Smoother smoothReleasedTransactions, smoothTotalDurableBytes;
 	double TPSLimit;
-	Standalone<StringRef> dbName;
 	DatabaseConfiguration configuration;
 
 	Int64MetricHandle tpsLimitMetric;
@@ -167,7 +166,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 				myQueueInfo->value.valid = false;
 			}
 
-			Void _ = wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
+			wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
 		}
 	} catch (...) {
 		// including cancellation
@@ -208,7 +207,7 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 				myQueueInfo->value.valid = false;
 			}
 
-			Void _ = wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
+			wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) && IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(), FailureStatus(false)));
 		}
 	} catch (...) {
 		// including cancellation
@@ -219,7 +218,7 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 
 ACTOR Future<Void> splitError( Future<Void> in, Promise<Void> errOut ) {
 	try {
-		Void _ = wait( in );
+		wait( in );
 		return Void();
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && !errOut.isSet())
@@ -236,7 +235,7 @@ ACTOR Future<Void> trackEachStorageServer(
 	state Promise<Void> err;
 	loop choose {
 		when (state std::pair< UID, Optional<StorageServerInterface> > change = waitNext(serverChanges) ) {
-			Void _ = wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
+			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 			if (change.second.present()) {
 				auto& a = actors[ change.first ];
 				a = Future<Void>();
@@ -244,7 +243,7 @@ ACTOR Future<Void> trackEachStorageServer(
 			} else
 				actors.erase( change.first );
 		}
-		when (Void _ = wait(err.getFuture())) {}
+		when (wait(err.getFuture())) {}
 	}
 }
 
@@ -502,7 +501,7 @@ void updateRate( Ratekeeper* self ) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.trackLatest(format("%s/RkUpdate", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("RkUpdate");
 	}
 }
 
@@ -510,7 +509,6 @@ ACTOR Future<Void> rateKeeper(
 	Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	FutureStream< struct GetRateInfoRequest > getRateInfo,
-	Standalone<StringRef> dbName,
 	DatabaseConfiguration configuration,
 	double* lastLimited)
 {
@@ -521,7 +519,6 @@ ACTOR Future<Void> rateKeeper(
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
-	self.dbName = dbName;
 	self.configuration = configuration;
 	self.lastLimited = lastLimited;
 
@@ -537,8 +534,8 @@ ACTOR Future<Void> rateKeeper(
 
 	loop{
 		choose {
-			when (Void _ = wait( track )) { break; }
-			when (Void _ = wait( timeout )) {
+			when (wait( track )) { break; }
+			when (wait( timeout )) {
 				updateRate( &self );
 				double tooOld = now() - 1.0;
 				for(auto p=self.proxy_transactionCountAndTime.begin(); p!=self.proxy_transactionCountAndTime.end(); ) {
@@ -564,8 +561,8 @@ ACTOR Future<Void> rateKeeper(
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 				req.reply.send( reply );
 			}
-			when (Void _ = wait(err.getFuture())) {}
-			when (Void _ = wait(dbInfo->onChange())) {
+			when (wait(err.getFuture())) {}
+			when (wait(dbInfo->onChange())) {
 				if( tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs() ) {
 					tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 					tlogTrackers = std::vector<Future<Void>>();

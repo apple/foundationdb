@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <algorithm>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -26,21 +26,21 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "actorcompiler.h"
-#include "network.h"
-#include "IThreadPool.h"
+#include "flow/network.h"
+#include "flow/IThreadPool.h"
 #include "boost/range.hpp"
 
-#include "ActorCollection.h"
-#include "ThreadSafeQueue.h"
-#include "ThreadHelper.actor.h"
-#include "TDMetric.actor.h"
-#include "AsioReactor.h"
+#include "flow/ActorCollection.h"
+#include "flow/ThreadSafeQueue.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
@@ -48,13 +48,19 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys
-//                                                 xyzdev
-//                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A570010001LL;
-uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
+//
+// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+//
+//                                                       xyzdev
+//                                                       vvvv
+const uint64_t currentProtocolVersion        = 0x0FDB00B061020001LL;
+const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
+// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
+static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -276,7 +282,7 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect( to, std::move(p) );
 
-			Void _ = wait( onConnected );
+			wait( onConnected );
 			self->init();
 			return self;
 		} catch (Error&) {
@@ -451,7 +457,7 @@ private:
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
-			Void _ = wait( f );
+			wait( f );
 			conn->accept( NetworkAddress(peer_endpoint.address().to_v4().to_ulong(), peer_endpoint.port()) );
 
 			return conn;
@@ -512,7 +518,7 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 		double processTime = timer_monotonic();
 		double systemTime = timer();
 		TraceEvent("ProcessTimeOffset").detailf("ProcessTime", "%lf", processTime).detailf("SystemTime", "%lf", systemTime).detailf("OffsetFromSystemTime", "%lf", processTime - systemTime);
-		Void _ = wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
+		wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
 	}
 }
 
@@ -864,7 +870,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		}
 	});
 
-	Void _ = wait(ready(result));
+	wait(ready(result));
 	tcpResolver.cancel();
 
 	return result.get();
@@ -1017,7 +1023,7 @@ struct TestGVR {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 

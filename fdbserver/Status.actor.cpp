@@ -18,21 +18,21 @@
  * limitations under the License.
  */
 
-#include "Status.h"
-#include "flow/actorcompiler.h"
+#include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
+#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
 #include <time.h>
-#include "CoordinationInterface.h"
-#include "DataDistribution.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/DataDistribution.h"
 #include "flow/UnitTest.h"
-#include "QuietDatabase.h"
-#include "RecoveryState.h"
+#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/RecoveryState.h"
 #include "fdbclient/JsonBuilder.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
@@ -107,7 +107,7 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 			eventTraces.push_back(errorOr(timeoutError(workers[c].first.eventLogRequest.getReply(req), 2.0)));
 		}
 
-		Void _ = wait(waitForAll(eventTraces));
+		wait(waitForAll(eventTraces));
 
 		std::set<std::string> failed;
 		WorkerEvents results;
@@ -610,7 +610,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
 	state WorkerEvents::iterator traceFileErrorsItr;
 	for(traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end(); ++traceFileErrorsItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		if (traceFileErrorsItr->second.size()){
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
@@ -631,7 +631,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
 	state std::vector<std::pair<WorkerInterface, ProcessClass>>::iterator workerItr;
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->first.locality.machineId(), MachineMemoryInfo())).first;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
@@ -659,7 +659,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::vector<std::pair<MasterProxyInterface, TraceEventFields>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
 		roles.addRole( "proxy", proxy->first, proxy->second );
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	state std::vector<std::pair<TLogInterface, TraceEventFields>>::iterator log;
@@ -670,7 +670,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		Version tLogVersion = 0;
 		roles.addRole( "log", log->first, log->second, &tLogVersion );
 		maxTLogVersion = std::max(maxTLogVersion, tLogVersion);
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	state std::vector<std::pair<StorageServerInterface, TraceEventFields>>::iterator ss;
@@ -681,18 +681,18 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
 		}
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	state std::vector<ResolverInterface>::const_iterator res;
 	state std::vector<ResolverInterface> resolvers = db->get().resolvers;
 	for(res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole( "resolver", *res );
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		state JsonBuilderObject statusObj;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
@@ -951,7 +951,7 @@ ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionO
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -971,7 +971,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		}
 	}
@@ -993,11 +993,11 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->makeSelfConflicting();
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -1015,7 +1015,7 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
 			}
 		}
-		when(Void _ = wait(delay(timeoutSeconds))) {
+		when(wait(delay(timeoutSeconds))) {
 			if(isAvailable != nullptr) {
 				*isAvailable = false;
 			}
@@ -1051,7 +1051,7 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 		probes.push_back(doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons, isAvailable));
 		probes.push_back(doProbe(commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons, isAvailable));
 
-		Void _ = wait(waitForAll(probes));
+		wait(waitForAll(probes));
 	}
 	catch (Error &e) {
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
@@ -1082,7 +1082,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 
 					result = configuration;
 				}
-				when(Void _ = wait(getConfTimeout)) {
+				when(wait(getConfTimeout)) {
 					if(!result.present()) {
 						messages->push_back(JsonString::makeMessage("unreadable_configuration", "Unable to read database configuration."));
 					} else {
@@ -1099,7 +1099,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 			}
 
 			choose {
-				when( Void _ = wait( waitForAll(replicasFutures) ) ) {
+				when( wait( waitForAll(replicasFutures) ) ) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
 						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
@@ -1109,14 +1109,14 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 
 					fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 				}
-				when(Void _ = wait(getConfTimeout)) {
+				when(wait(getConfTimeout)) {
 					messages->push_back(JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
 			}
 			break;
 		}
 		catch (Error &e) {
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 	return std::make_pair(result, fullReplication);
@@ -1148,16 +1148,16 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int *minReplicasRemaining) {
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int *minReplicasRemaining) {
 	state JsonBuilderObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/MovingData"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
 
@@ -1309,7 +1309,7 @@ static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vecto
 		futures.push_back(latestEventOnWorker(address_workers[s.address()], (useId ? s.id().toString() + "/" + eventName : eventName)));
 	}
 
-	Void _ = wait(waitForAll(futures));
+	wait(waitForAll(futures));
 
 	vector<std::pair<iface, TraceEventFields>> results;
 	for (int i = 0; i < servers.size(); i++) {
@@ -1383,7 +1383,7 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 }
 
 ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker,
-	std::string dbName, JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture)
+	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture)
 {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
@@ -1434,7 +1434,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Transactions
 	try {
-		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/RkUpdate") ) ), 1.0) );
+		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
 		double tpsLimit = parseDouble(md.getValue("TPSLimit"));
 		double transPerSec = parseDouble(md.getValue("ReleasedTPS"));
 		int ssCount = parseInt(md.getValue("StorageServers"));
@@ -1724,9 +1724,9 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 						state json_spirit::mValue doc;
 						try {
 							json_spirit::read_string(docs[j].value.toString(), doc);
-							Void _ = wait(yield());
+							wait(yield());
 							json.absorb(doc.get_obj());
-							Void _ = wait(yield());
+							wait(yield());
 						} catch(Error &e) {
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", printable(docs[j].key));
 						}
@@ -1735,7 +1735,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 				json.create("_valid") = true;
 				break;
 			} catch(Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	} catch(Error &e) {
@@ -1768,7 +1768,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 					statusObj["database_locked"] = false;
 				}
 
-				when(Void _ = wait(getTimeout)) {
+				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 				}
 			}
@@ -1781,7 +1781,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 			}
 			else {
 				try {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 				catch (Error &e) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
@@ -1806,8 +1806,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
 {
-	// since we no longer offer multi-database support, all databases must be named DB
-	state std::string dbName = "DB";
 	state double tStart = timer();
 
 	// Check if master worker is present
@@ -1926,8 +1924,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
-			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(dataStatusFetcher(mWorker, &minReplicasRemaining));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 
@@ -2093,7 +2091,7 @@ bool checkJson(const JsonBuilder &j, const char *expected) {
 	return js == expected;
 }
 
-TEST_CASE("status/json/builder") {
+TEST_CASE("/status/json/builder") {
 	JsonBuilder json;
 	ASSERT(checkJson(json, "null"));
 
@@ -2249,7 +2247,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string> &strings, int &l
 	return r;
 }
 
-TEST_CASE("status/json/builderPerf") {
+TEST_CASE("/status/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");
@@ -2302,7 +2300,7 @@ TEST_CASE("status/json/builderPerf") {
 	return Void();
 }
 
-TEST_CASE("status/json/merging") {
+TEST_CASE("/status/json/merging") {
 	StatusObject objA, objB, objC;
 	JSONDoc a(objA), b(objB), c(objC);
 

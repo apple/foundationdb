@@ -37,17 +37,17 @@ struct WorkloadInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & setup & start & check & metrics & stop;
+		serializer(ar, setup, start, check, metrics, stop);
 	}
 };
 
 struct WorkloadRequest {
 	Arena arena;
 	StringRef title;
-	StringRef database;
 	int timeout;
 	double databasePingDelay;
 	int64_t sharedRandomNumber;
+	bool useDatabase;
 
 	// The vector of option lists are to construct compound workloads.  If there
 	//  is only one workload to be run...pass just one list of options!
@@ -68,7 +68,7 @@ struct WorkloadRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & title & database & timeout & databasePingDelay & sharedRandomNumber & options & clientId & clientCount & reply & arena;
+		serializer(ar, title, timeout, databasePingDelay, sharedRandomNumber, useDatabase, options, clientId, clientCount, reply, arena);
 	}
 };
 
@@ -79,7 +79,7 @@ struct TesterInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recruitments;
+		serializer(ar, recruitments);
 	}
 };
 
@@ -88,6 +88,9 @@ Future<Void> testerServerCore( TesterInterface const& interf, Reference<ClusterC
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-Future<Void> runTests( Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun, test_location_t const& whereToRun, int const& minTestersExpected, std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(), LocalityData const& locality = LocalityData() );
+Future<Void> runTests(Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun,
+                      test_location_t const& whereToRun, int const& minTestersExpected,
+                      std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(),
+                      LocalityData const& locality = LocalityData());
 
 #endif

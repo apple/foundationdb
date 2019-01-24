@@ -42,12 +42,14 @@ packaging/msi/FDBInstaller.wix*
 .ccache
 .deps/
 .objs/
+.cmds/
 bindings/c/fdb_c.symbols
 bindings/go/build
 bindings/go/godoc
 bindings/java/.classstamp*
 bindings/java/classes*/
 bindings/java/javadoc*/
+packaging/docker/website
 
 # Testing and logging
 packaging/msi/*.log
@@ -71,6 +73,7 @@ FoundationDB.xcodeproj
 foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
+compile_commands.json
 
 # Temporary and user configuration files
 *~
@@ -80,3 +83,4 @@ ipch/
 .envrc
 .DS_Store
 temp/
+/compile_commands.json

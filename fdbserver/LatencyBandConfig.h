@@ -37,18 +37,18 @@ struct LatencyBandConfig {
 		template <class Ar>
 		void serialize(Ar& ar) {
 			uint64_t bandsSize = (uint64_t)bands.size();
-			ar & bandsSize;
+			serializer(ar, bandsSize);
 
 			if(ar.isDeserializing) {
 				double band;
 				for(uint64_t i = 0; i < bandsSize; i++) {
-					ar & band;
+					serializer(ar, band);
 					bands.insert(band);
 				}
 			}
 			else {
 				for(double band : bands) {
-					ar & band;
+					serializer(ar, band);
 				}
 			}
 		}
@@ -67,7 +67,7 @@ struct LatencyBandConfig {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			ar & *(RequestConfig*)this & maxReadBytes & maxKeySelectorOffset;
+			serializer(ar, *(RequestConfig*)this, maxReadBytes, maxKeySelectorOffset);
 		}
 
 	protected:
@@ -81,7 +81,7 @@ struct LatencyBandConfig {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			ar & *(RequestConfig*)this & maxCommitBytes;
+			serializer(ar, *(RequestConfig*)this, maxCommitBytes);
 		}
 
 	protected:
@@ -94,7 +94,7 @@ struct LatencyBandConfig {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & grvConfig & readConfig & commitConfig;
+		serializer(ar, grvConfig, readConfig, commitConfig);
 	}
 
 	static Optional<LatencyBandConfig> parse(ValueRef configurationString);

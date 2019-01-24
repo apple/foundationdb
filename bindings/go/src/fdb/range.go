@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 600
+ #define FDB_API_VERSION 610
  #include <foundationdb/fdb_c.h>
 */
 import "C"
@@ -90,7 +90,11 @@ type ExactRange interface {
 // that the default zero-value of KeyRange specifies an empty range before all
 // keys in the database.
 type KeyRange struct {
-	Begin, End KeyConvertible
+	// The (inclusive) beginning of the range
+	Begin KeyConvertible
+
+	// The (exclusive) end of the range
+	End KeyConvertible
 }
 
 // FDBRangeKeys allows KeyRange to satisfy the ExactRange interface.

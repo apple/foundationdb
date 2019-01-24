@@ -12,7 +12,7 @@
 #
 
 DESTDIR="${DESTDIR:-}"
-FDBVER="${FDBVER:-5.1.0}"
+FDBVER="${FDBVER:-}"
 REMOTE="${REMOTE:-github.com}"
 FDBREPO="${FDBREPO:-apple/foundationdb}"
 
@@ -63,15 +63,16 @@ function printUsage() {
     echo
     echo "cmd: One of the commands to run. The options are:"
     echo "     install         Download the FDB go bindings and install them"
-    echo "     localinstall    Install a into the go path a local copy of the repo"
+    echo "     localinstall    Install into the go path a local copy of the repo"
     echo "     download        Download but do not prepare the FoundationDB bindings"
     echo "     help            Print this help message and then quit"
     echo
     echo "Command Line Options:"
-    echo "     --fdbver <version>    FoundationDB semantic version (default is ${FDBVER})"
+    echo "     --fdbver <version>    FoundationDB semantic version to install or download (required if FDBVER environment variable is not set)"
     echo "     -d/--dest-dir <dest>  Local location for the repo (default is to place in go path)"
     echo
     echo "Environment Variable Options:"
+    echo "     FDBVER          Default FoundationDB semantic version to use if --fdbver flag is not set"
     echo "     REMOTE          Remote repository to download from (currently ${REMOTE})"
     echo "     FDBREPO         Repository of FoundationDB library to download (currently ${FDBREPO})"
     echo "     FDBLIBDIR       Directory within which should be the FoundationDB c library (currently ${FDBLIBDIR})"
@@ -125,6 +126,12 @@ function parseArgs() {
         esac
         shift
     done
+
+    if [[ -z "${FDBVER}" ]] ; then
+        echo "No FoundationDB version specified!"
+        echo "Please supply a version by setting the --fdbver flag or the FDBVER environment variable."
+        let status="${status} + 1"
+    fi
 
     return "${status}"
 }
@@ -210,18 +217,18 @@ else
             if [[ -d "${fdbdir}" ]] ; then
                 echo "Directory ${fdbdir} already exists ; checking out appropriate tag"
                 cmd1=( 'git' '-C' "${fdbdir}" 'fetch' 'origin' )
-                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "release-${FDBVER}" )
+                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "${FDBVER}" )
 
                 if ! echo "${cmd1[*]}" || ! "${cmd1[@]}" ; then
                     let status="${status} + 1"
                     echo "Could not pull latest changes from origin"
                 elif ! echo "${cmd2[*]}" ||  ! "${cmd2[@]}" ; then
                     let status="${status} + 1"
-                    echo "Could not checkout tag release-${FDBVER}."
+                    echo "Could not checkout tag ${FDBVER}."
                 fi
             else
                 echo "Downloading foundation repository into ${destdir}:"
-                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "release-${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
+                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
 
                 echo "${cmd[*]}"
                 if ! "${cmd[@]}" ; then

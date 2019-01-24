@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "FDBLibTLSSession.h"
-#include "Trace.h"
+#include "FDBLibTLS/FDBLibTLSSession.h"
+#include "flow/Trace.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>

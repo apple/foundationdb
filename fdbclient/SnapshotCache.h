@@ -22,9 +22,9 @@
 #define FDBCLIENT_SNAPSHOTCACHE_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "NativeAPI.h"
-#include "SystemData.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbclient/SystemData.h"
 #include "flow/IndexedSet.h"
 
 struct ExtStringRef {

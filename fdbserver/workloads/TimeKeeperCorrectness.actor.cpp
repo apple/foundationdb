@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Knobs.h"
@@ -56,12 +56,12 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					self->inMemTimeKeeper[curTime] = v;
 					break;
 				} catch (Error &e) {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 
 			// For every sample from Timekeeper collect two samples here.
-			Void _ = wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, (int64_t)1L)));
+			wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, (int64_t)1L)));
 		}
 
 		TraceEvent(SevInfo, "TKCorrectness_Completed");
@@ -120,7 +120,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				TraceEvent(SevInfo, "TKCorrectness_Passed");
 				return true;
 			} catch (Error & e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
