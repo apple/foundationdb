@@ -97,7 +97,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/foundationdb)
+set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
 set(GENERATED_JAVA_FILES
