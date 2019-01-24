@@ -64,6 +64,7 @@ CMD /var/fdb/scripts/fdb.bash
 # Runtime Configuration Options
 
 ENV FDB_PORT 4500
+ENV FDB_PUBLIC_PORT 4500
 ENV FDB_CLUSTER_FILE /var/fdb/fdb.cluster
 ENV FDB_NETWORKING_MODE container
 ENV FDB_COORDINATOR ""

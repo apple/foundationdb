@@ -37,7 +37,42 @@ This image supports several environment variables for run-time configuration.
 
 ### FDB_PORT
 
-The port that FoundationDB should bind to. The default is 4500. 
+The port that FoundationDB should bind to. The default is 4500.
+
+### FDB_PORT
+
+The publicly visible port of the process. The default is 4500.
+
+This can be used to expose multiple fdb servers on the host ip:
+
+```
+version: '3'
+services:
+  fdb-coordinator:
+    image: foundationdb:5.2.5
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
+      FDB_NETWORKING_MODE: host
+      FDB_PUBLIC_PORT: 4500
+    ports:
+      - 4500:4500
+  fdb-1:
+    image: foundationdb:5.2.5
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
+      FDB_NETWORKING_MODE: host
+      FDB_PUBLIC_PORT: 4501
+    ports:
+      - 4501:4500
+  fdb-2:
+    image: foundationdb:5.2.5
+    environment:
+      FDB_COORDINATOR: fdb-coordinator
+      FDB_NETWORKING_MODE: host
+      FDB_PUBLIC_PORT: 4502
+    ports:
+      - 4502:4500
+```
 
 ### FDB_NETWORKING_MODE
 
