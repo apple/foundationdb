@@ -101,7 +101,6 @@ set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundation
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
 set(GENERATED_JAVA_FILES
-  ${GENERATED_JAVA_DIR}/ClusterOptions.java
   ${GENERATED_JAVA_DIR}/ConflictRangeType.java
   ${GENERATED_JAVA_DIR}/DatabaseOptions.java
   ${GENERATED_JAVA_DIR}/MutationType.java
