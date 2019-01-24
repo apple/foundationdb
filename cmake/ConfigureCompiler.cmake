@@ -95,7 +95,7 @@ else()
     -mmmx
     -mavx
     -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++11>)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
