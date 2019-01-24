@@ -11,6 +11,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/CloseableAsyncIterator.java
   src/main/com/apple/foundationdb/async/package-info.java
   src/main/com/apple/foundationdb/Cluster.java
+  src/main/com/apple/foundationdb/ClusterOptions.java
   src/main/com/apple/foundationdb/Database.java
   src/main/com/apple/foundationdb/directory/Directory.java
   src/main/com/apple/foundationdb/directory/DirectoryAlreadyExistsException.java
@@ -28,8 +29,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
-  src/main/com/apple/foundationdb/FutureCluster.java
-  src/main/com/apple/foundationdb/FutureDatabase.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
