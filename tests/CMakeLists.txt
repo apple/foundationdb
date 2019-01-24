@@ -136,7 +136,7 @@ add_fdb_test(
              restarting/StorefrontTestRestart-2.txt)
 add_fdb_test(
   TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
-             restarting/from_5.1.7/DrUpgradeRestart-2.txt)
+             restarting/from_5.1.7/DrUpgradeRestart-2.txt IGNORE)
 add_fdb_test(
   TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
              restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
