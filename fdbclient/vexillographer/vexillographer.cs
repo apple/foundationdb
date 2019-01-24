@@ -30,7 +30,6 @@ namespace vexillographer
     public enum Scope
     {
         NetworkOption,
-        ClusterOption,
         DatabaseOption,
         TransactionOption,
         StreamingMode,
@@ -172,8 +171,6 @@ namespace vexillographer
             {
                 case Scope.NetworkOption:
                     return "NET_OPTION";
-                case Scope.ClusterOption:
-                    return "CLUSTER_OPTION";
                 case Scope.DatabaseOption:
                     return "DB_OPTION";
                 case Scope.TransactionOption:

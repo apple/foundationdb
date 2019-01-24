@@ -19,6 +19,7 @@
  */
 
 #define FDB_API_VERSION 610
+#define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"
@@ -31,16 +32,17 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
- *   FDBCluster -> char
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
 
-#define CLUSTER(c) ((char*)c)
 #define DB(d) ((IDatabase*)d)
 #define TXN(t) ((ITransaction*)t)
+
+// Legacy (pre API version 610)
+#define CLUSTER(c) ((char*)c)
 
 /* 
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi instance (e.g. from ThreadSafeApi)
@@ -130,16 +132,6 @@ fdb_error_t fdb_stop_network() {
 extern "C" DLLEXPORT
 fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter) {
 	CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
-}
-
-
-extern "C" DLLEXPORT
-FDBFuture* fdb_cluster_configure_database( FDBCluster* c, int config_type,
-											   int config_mode, uint8_t const* db_name,
-											   int db_name_length )
-{
-	// Obsolete, but needed for linker compatibility with api version 12 and below
-	return (FDBFuture*)ThreadFuture<Void>(client_invalid_operation()).extractPtr();
 }
 
 extern "C" DLLEXPORT
@@ -235,14 +227,14 @@ fdb_error_t fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster ) {
+fdb_error_t fdb_future_get_cluster_v609( FDBFuture* f, FDBCluster** out_cluster ) {
 	CATCH_AND_RETURN(
 		*out_cluster = (FDBCluster*)
 		( (TSAV( char*, f )->get() ) ); );
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_future_get_database( FDBFuture* f, FDBDatabase** out_database ) {
+fdb_error_t fdb_future_get_database_v609( FDBFuture* f, FDBDatabase** out_database ) {
 	CATCH_AND_RETURN(
 		*out_database = (FDBDatabase*)
 		( (TSAV( Reference<IDatabase>, f )->get() ).extractPtr() ); );
@@ -294,7 +286,7 @@ fdb_error_t fdb_future_get_string_array(
 }
 
 extern "C" DLLEXPORT
-FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
+FDBFuture* fdb_create_cluster_v609( const char* cluster_file_path ) {
 	char *path;
 	if(cluster_file_path) {
 		path = new char[strlen(cluster_file_path) + 1];
@@ -308,7 +300,7 @@ FDBFuture* fdb_create_cluster( const char* cluster_file_path ) {
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_cluster_set_option( FDBCluster* c,
+fdb_error_t fdb_cluster_set_option_v609( FDBCluster* c,
 							 FDBClusterOption option,
 							 uint8_t const* value,
 							 int value_length )
@@ -318,19 +310,32 @@ fdb_error_t fdb_cluster_set_option( FDBCluster* c,
 }
 
 extern "C" DLLEXPORT
-void fdb_cluster_destroy( FDBCluster* c ) {
+void fdb_cluster_destroy_v609( FDBCluster* c ) {
 	CATCH_AND_DIE( delete[] CLUSTER(c); );
 }
 
 extern "C" DLLEXPORT
-FDBFuture* fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
+FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_name,
 											int db_name_length ) 
 {
 	if(strncmp((const char*)db_name, "DB", db_name_length) != 0) {
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
-	return (FDBFuture*) API->createDatabase(CLUSTER(c)).extractPtr();
+	FDBDatabase *db;
+	fdb_error_t err = fdb_create_database(CLUSTER(c), &db);
+	if(err) {
+		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Error(err)).extractPtr();
+	}
+
+	return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>(DB(db))).extractPtr();
+}
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_create_database( const char* cluster_file_path, FDBDatabase** out_database ) {
+	CATCH_AND_RETURN(
+		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ? cluster_file_path : "" ).extractPtr();
+	);
 }
 
 extern "C" DLLEXPORT
@@ -663,6 +668,12 @@ fdb_error_t fdb_select_api_version_impl( int runtime_version, int header_version
 	// Versioned API changes -- descending order by version (new changes at top)
 	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1) is the old implementation
 	// FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and function_(ver-1) is the old implementation
+	FDB_API_REMOVED( fdb_create_cluster, 610 );
+	FDB_API_REMOVED( fdb_cluster_create_database, 610 );
+	FDB_API_REMOVED( fdb_cluster_set_option, 610 );
+	FDB_API_REMOVED( fdb_cluster_destroy, 610 );
+	FDB_API_REMOVED( fdb_future_get_cluster, 610 );
+	FDB_API_REMOVED( fdb_future_get_database, 610 );
 	FDB_API_CHANGED( fdb_future_get_error, 23 );
 	FDB_API_REMOVED( fdb_future_is_error, 23 );
 	FDB_API_CHANGED( fdb_future_get_keyvalue_array, 14 );
