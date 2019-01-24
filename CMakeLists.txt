@@ -202,6 +202,7 @@ add_subdirectory(fdbcli)
 add_subdirectory(fdbmonitor)
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
+add_subdirectory(tests)
 
 include(CPack)
 
