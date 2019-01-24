@@ -170,6 +170,7 @@ add_fdb_test(TEST_FILES slow/VersionStampSwitchover.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
 add_fdb_test(TEST_FILES slow/ddbalance.txt)
+# Note that status tests are not deterministic.
 add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
 add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
 add_fdb_test(TEST_FILES status/separate_1_of_3_coordinators_remain.txt)
