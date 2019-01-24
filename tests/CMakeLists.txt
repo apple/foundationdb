@@ -1,7 +1,7 @@
 include(AddFdbTest)
 
 # We need some variables to configure the test setup
-set(ENABLE_BUGGIFY OFF CACHE BOOL "Enable buggify for tests")
+set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")
 set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which locks to keep (NONE, FAILED, ALL)")
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
