@@ -126,6 +126,7 @@
   </Target>
   <Target Name="MyPostCompileSteps" AfterTargets="Link">
     <Exec Command="copy /y &quot;$(OutDir)fdbbackup.exe&quot; &quot;$(OutDir)fdbrestore.exe&quot;" />
+    <Exec Command="copy /y &quot;$(OutDir)fdbbackup.exe&quot; &quot;$(OutDir)fastRestore_agent.exe&quot;" />
     <Exec Command="copy /y &quot;$(OutDir)fdbbackup.exe&quot; &quot;$(OutDir)backup_agent.exe&quot;" />
     <Exec Command="copy /y &quot;$(OutDir)fdbbackup.exe&quot; &quot;$(OutDir)dr_agent.exe&quot;" />
     <Exec Command="copy /y &quot;$(OutDir)fdbbackup.exe&quot; &quot;$(OutDir)fdbdr.exe&quot;" />

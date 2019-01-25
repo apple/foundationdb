@@ -348,5 +348,6 @@ std::string getRoleStr(RestoreRole role);
 ////--- Interface functions
 Future<Void> _restoreWorker(Database const& cx, LocalityData const& locality);
 Future<Void> restoreWorker(Reference<ClusterConnectionFile> const& ccf, LocalityData const& locality);
+Future<Version> fastRestore(Database const& cx, Key const& tagName, Key const& url, bool const& waitForComplete, Version const& targetVersion, bool const& verbose, KeyRange const& range, Key const& addPrefix, Key const& removePrefix);
 
 #endif
