@@ -629,7 +629,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 const KeyRef exeAgent = LiteralStringRef("backup_agent");
 const KeyRef exeBackup = LiteralStringRef("fdbbackup");
 const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreAgent = LiteralStringRef("fastRestore_agent");
+const KeyRef exeFastRestoreAgent = LiteralStringRef("fastrestore_agent"); // must be lower case
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
@@ -944,6 +944,7 @@ enumProgramExe	getProgramType(std::string programExe)
 
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
+	printf("programExe:%s\n", programExe.c_str());
 
 	// Remove the extension, if Windows
 #ifdef _WIN32

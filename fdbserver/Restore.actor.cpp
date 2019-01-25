@@ -40,7 +40,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = 10; // TODO: This can become a configuration param later
+const int min_num_workers = 5; //10; // TODO: This can become a configuration param later
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
