@@ -26,6 +26,7 @@
 #include "flow/FastRef.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
+#include "flow/ObjectSerializerTraits.h"
 #include <algorithm>
 #include <stdint.h>
 #include <string>
@@ -106,6 +107,18 @@ public:
 	friend void* operator new[] ( size_t size, Arena& p );
 //private:
 	Reference<struct ArenaBlock> impl;
+};
+
+template<>
+struct scalar_traits<Arena> : std::true_type {
+	constexpr static size_t size = 0;
+	static void save(uint8_t*, const Arena&) {}
+	// Context is an arbitrary type that is plumbed by reference throughout
+	// the load call tree.
+	template <class Context>
+	static void load(const uint8_t*, Arena& arena, Context& context) {
+		context.addArena(arena);
+	}
 };
 
 struct ArenaBlockRef {
@@ -723,6 +736,17 @@ inline void save( Archive& ar, const StringRef& value ) {
 	ar << (uint32_t)value.size();
 	ar.serializeBytes( value.begin(), value.size() );
 }
+
+template<>
+struct dynamic_size_traits<StringRef> : std::true_type {
+	static WriteRawMemory save(const StringRef& str) { return { { unownedPtr(str.begin()), str.size() } }; }
+
+	template <class Context>
+	static void load(const uint8_t* ptr, size_t sz, StringRef& str, Context& context) {
+		str = StringRef(context.tryReadZeroCopy(ptr, sz), sz);
+	}
+};
+
 inline bool operator == (const StringRef& lhs, const StringRef& rhs ) {
 	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
 }
@@ -753,6 +777,8 @@ struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 template <class T>
 class VectorRef {
 public:
+	using value_type = T;
+
 	// T must be trivially destructible (and copyable)!
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
@@ -927,6 +953,23 @@ inline void save( Archive& ar, const VectorRef<T>& value ) {
 	for(uint32_t i=0; i<length; i++)
 		ar << value[i];
 }
+
+template <class T>
+struct vector_like_traits<VectorRef<T>> : std::true_type {
+	using Vec = VectorRef<T>;
+	using value_type = typename Vec::value_type;
+	using iterator = const T*;
+	using insert_iterator = T*;
+
+	static size_t num_entries(const VectorRef<T>& v) { return v.size(); }
+	template <class Context>
+	static void reserve(VectorRef<T>& v, size_t s, Context& context) {
+		v.resize(context.arena(), s);
+	}
+
+	static insert_iterator insert(Vec& v) { return v.begin(); }
+	static iterator begin(const Vec& v) { return v.begin(); }
+};
 
  void ArenaBlock::destroy() {
 	// If the stack never contains more than one item, nothing will be allocated from stackArena.

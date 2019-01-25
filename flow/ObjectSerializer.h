@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#pragma once
 #include "flow/Error.h"
 #include "flow/Arena.h"
 #include "flow/flat_buffers.h"
@@ -52,21 +53,21 @@ template <class ReaderImpl>
 class _ObjectReader {
 public:
 	template <class... Items>
-	void deserialize(flat_buffers::FileIdentifier file_identifier, Items&... items) {
+	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
 		LoadContext<ReaderImpl> context(*static_cast<ReaderImpl*>(this));
-		ASSERT(flat_buffers::read_file_identifier(data) == file_identifier);
-		flat_buffers::load_members(data, context, items...);
+		ASSERT(read_file_identifier(data) == file_identifier);
+		load_members(data, context, items...);
 		context.done();
 	}
 
 	template <class Item>
 	void deserialize(Item& item) {
-		deserialize(flat_buffers::FileIdentifierFor<Item>::value, item);
+		deserialize(FileIdentifierFor<Item>::value, item);
 	}
 };
 
-class ObjectReader : _ObjectReader<ObjectReader> {
+class ObjectReader : public _ObjectReader<ObjectReader> {
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
@@ -81,7 +82,7 @@ private:
 	Arena _arena;
 };
 
-class ArenaObjectReader : _ObjectReader<ArenaObjectReader> {
+class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
 public:
 	static constexpr bool ownsUnderlyingMemory = true;
 
@@ -99,7 +100,7 @@ private:
 class ObjectWriter {
 public:
 	template <class... Items>
-	void serialize(flat_buffers::FileIdentifier file_identifier, Items const&... items) {
+	void serialize(FileIdentifier file_identifier, Items const&... items) {
 		ASSERT(data = nullptr); // object serializer can only serialize one object
 		int allocations = 0;
 		auto allocator = [this, &allocations](size_t size_) {
@@ -108,21 +109,20 @@ public:
 			data = new uint8_t[size];
 			return data;
 		};
-		auto res = flat_buffers::save_members(allocator, file_identifier, items...);
+		auto res = save_members(allocator, file_identifier, items...);
 		ASSERT(allocations == 1);
 	}
 
 	template <class Item>
 	void serialize(Item const& item) {
-		serialize(flat_buffers::FileIdentifierFor<Item>::value, item);
+		serialize(FileIdentifierFor<Item>::value, item);
+	}
+
+	StringRef toStringRef() const {
+		return StringRef(data, size);
 	}
 
 private:
 	uint8_t* data = nullptr;
 	int size = 0;
 };
-
-template <class Visitor, class... Items>
-std::enable_if<Visitor::is_object_serializer> serializer(Visitor& visitor, Items&... items) {
-	visitor(items...);
-}

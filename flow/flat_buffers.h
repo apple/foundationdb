@@ -35,11 +35,8 @@
 #include <array>
 #include <typeinfo>
 #include <typeindex>
-
-namespace flat_buffers {
-
-template <class... Ts>
-struct pack {};
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializerTraits.h"
 
 template <class T = pack<>, class...>
 struct concat {
@@ -55,117 +52,23 @@ constexpr auto pack_size(pack<Ts...>) {
 	return sizeof...(Ts);
 }
 
-template <int i, class... Ts>
-struct index;
-
-template <int i, class T, class... Ts>
-struct index<i, pack<T, Ts...>> {
-	using type = typename index<i - 1, pack<Ts...>>::type;
-};
-
-template <class T, class... Ts>
-struct index<0, pack<T, Ts...>> {
-	using type = T;
-};
-
-template <int i, class Pack>
-using index_t = typename index<i, Pack>::type;
-
 constexpr int RightAlign(int offset, int alignment) {
 	return offset % alignment == 0 ? offset : ((offset / alignment) + 1) * alignment;
 }
 
-using FileIdentifier = uint32_t;
+template <class T, typename = void>
+struct is_fb_function_t : std::false_type {};
+
+template<class T>
+struct is_fb_function_t<T, typename std::enable_if<T::is_fb_visitor>::type> : std::true_type {};
 
 template <class T>
-struct FileIdentifierFor {
-	constexpr static FileIdentifier value = T::file_identifier;
-};
+constexpr bool is_fb_function = is_fb_function_t<T>::value;
 
-template <>
-struct FileIdentifierFor<int> {
-	constexpr static FileIdentifier value = 1;
-};
-
-template <>
-struct FileIdentifierFor<unsigned> {
-	constexpr static FileIdentifier value = 2;
-};
-
-template <>
-struct FileIdentifierFor<long> {
-	constexpr static FileIdentifier value = 3;
-};
-
-template <>
-struct FileIdentifierFor<unsigned long> {
-	constexpr static FileIdentifier value = 4;
-};
-
-template <>
-struct FileIdentifierFor<long long> {
-	constexpr static FileIdentifier value = 5;
-};
-
-template <>
-struct FileIdentifierFor<unsigned long long> {
-	constexpr static FileIdentifier value = 6;
-};
-
-template <>
-struct FileIdentifierFor<short> {
-	constexpr static FileIdentifier value = 7;
-};
-
-template <>
-struct FileIdentifierFor<unsigned short> {
-	constexpr static FileIdentifier value = 8;
-};
-
-template <>
-struct FileIdentifierFor<signed char> {
-	constexpr static FileIdentifier value = 9;
-};
-
-template <>
-struct FileIdentifierFor<unsigned char> {
-	constexpr static FileIdentifier value = 10;
-};
-
-template <>
-struct FileIdentifierFor<bool> {
-	constexpr static FileIdentifier value = 11;
-};
-
-template <>
-struct FileIdentifierFor<float> {
-	constexpr static flat_buffers::FileIdentifier value = 7266212;
-};
-
-template <>
-struct FileIdentifierFor<double> {
-	constexpr static flat_buffers::FileIdentifier value = 9348150;
-};
-
-template <class K, class V, class Compare, class Allocator>
-struct FileIdentifierFor<std::map<K, V, Compare, Allocator>> {
-	constexpr static FileIdentifier value = FileIdentifierFor<std::pair<K, V>>::value;
-};
-
-template <class F, class S>
-struct FileIdentifierFor<std::pair<F, S>> {
-	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
-};
-
-template <class T, class Allocator>
-struct FileIdentifierFor<std::vector<T, Allocator>> {
-	constexpr static FileIdentifier value = (0x10 << 24) | FileIdentifierFor<T>::value;
-};
-
-template <class CharT, class Traits, class Allocator>
-struct FileIdentifierFor<std::basic_string<CharT, Traits, Allocator>> {
-	constexpr static FileIdentifier value = 15694229;
-};
+template <class Visitor, class... Items>
+typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
+	visitor(items...);
+}
 
 template <class T>
 struct object_construction {
@@ -178,119 +81,6 @@ struct object_construction {
 	T& get() { return obj; }
 	const T& get() const { return obj; }
 	T move() { return std::move(obj); }
-};
-
-// A smart pointer that knows whether or not to delete itself.
-template <class T>
-using OwnershipErasedPtr = std::unique_ptr<T, std::function<void(T*)>>;
-
-// Creates an OwnershipErasedPtr<T> that will delete itself.
-template <class T, class Deleter = std::default_delete<T>>
-OwnershipErasedPtr<T> ownedPtr(T* t, Deleter&& d = Deleter{}) {
-	return OwnershipErasedPtr<T>{ t, std::forward<Deleter>(d) };
-}
-
-// Creates an OwnershipErasedPtr<T> that will not delete itself.
-template <class T>
-OwnershipErasedPtr<T> unownedPtr(T* t) {
-	return OwnershipErasedPtr<T>{ t, [](T*) {} };
-}
-
-template <class T, typename = void>
-struct scalar_traits : std::false_type {
-	constexpr static size_t size = 0;
-	static void save(uint8_t*, const T&);
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t*, T&, Context&);
-};
-
-struct WriteRawMemory {
-	using Block = std::pair<OwnershipErasedPtr<const uint8_t>, size_t>;
-	std::vector<Block> blocks;
-
-	WriteRawMemory() {}
-	WriteRawMemory(Block&& b) { blocks.emplace_back(std::move(b.first), b.second); }
-	WriteRawMemory(std::vector<Block>&& v) : blocks(std::move(v)) {}
-
-	WriteRawMemory(WriteRawMemory&&) = default;
-	WriteRawMemory& operator=(WriteRawMemory&&) = default;
-
-	size_t size() const {
-		size_t result = 0;
-		for (const auto& b : blocks) {
-			result += b.second;
-		}
-		return result;
-	}
-};
-
-template <class T>
-struct dynamic_size_traits : std::false_type {
-	static WriteRawMemory save(const T&);
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t*, size_t, T&, Context&);
-};
-
-template <class T>
-struct serializable_traits : std::false_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, T& v);
-};
-
-template <class VectorLike>
-struct vector_like_traits : std::false_type {
-	// Write this at the beginning of the buffer
-	using value_type = uint8_t;
-	using iterator = void;
-	using insert_iterator = void;
-
-	static size_t num_entries(VectorLike&);
-	template <class Context>
-	static void reserve(VectorLike&, size_t, Context&);
-
-	static insert_iterator insert(VectorLike&);
-	static iterator begin(const VectorLike&);
-	static void deserialization_done(VectorLike&); // Optional
-};
-
-template <class UnionLike>
-struct union_like_traits : std::false_type {
-	using Member = UnionLike;
-	using alternatives = pack<>;
-	static uint8_t index(const Member&);
-	static bool empty(const Member& variant);
-
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member&);
-
-	template <int i, class Alternative>
-	static const void assign(Member&, const Alternative&);
-
-	template <class Context>
-	static void done(Member&, Context&);
-};
-
-// TODO(anoyes): Implement things that are currently using scalar traits with
-// struct-like traits.
-template <class StructLike>
-struct struct_like_traits : std::false_type {
-	using Member = StructLike;
-	using types = pack<>;
-
-	template <int i>
-	static const index_t<i, types>& get(const Member&);
-
-	template <int i>
-	static const void assign(Member&, const index_t<i, types>&);
-
-	template <class Context>
-	static void done(Member&, Context&);
 };
 
 template <class... Ts>
@@ -320,14 +110,11 @@ struct scalar_traits<T, std::enable_if_t<std::is_integral<T>::value || std::is_f
 	}
 };
 
-template <class F, class... Items>
-void serializer(F& fun, Items&... items);
-
 template <class F, class S>
 struct serializable_traits<std::pair<F, S>> : std::true_type {
 	template <class Archiver>
 	static void serialize(Archiver& ar, std::pair<F, S>& p) {
-		flat_buffers::serializer(ar, p.first, p.second);
+		serializer(ar, p.first, p.second);
 	}
 };
 
@@ -734,6 +521,7 @@ private:
 
 struct InsertVTableLambda {
 	static constexpr bool isDeserializing = true;
+	static constexpr bool is_fb_visitor = true;
 	std::set<const VTable*>& vtables;
 	std::set<std::type_index>& known_types;
 
@@ -856,6 +644,7 @@ private:
 template <class Writer>
 struct SaveVisitorLambda {
 	static constexpr bool isDeserializing = false;
+	static constexpr bool is_fb_visitor = true;
 	const VTableSet* vtableset;
 	Writer& writer;
 
@@ -982,6 +771,7 @@ struct LoadSaveHelper {
 	template <class Context>
 	struct SerializeFun {
 		static constexpr bool isDeserializing = true;
+		static constexpr bool is_fb_visitor = true;
 
 		const uint16_t* vtable;
 		const uint8_t* current;
@@ -1143,11 +933,6 @@ auto save_helper(const Member& member, Writer& writer, const VTableSet* vtables)
 
 } // namespace detail
 
-template <class F, class... Items>
-void serializer(F& fun, Items&... items) {
-	fun(items...);
-}
-
 namespace detail {
 
 template <class... Members>
@@ -1164,7 +949,7 @@ struct FakeRoot {
 private:
 	template <class Archive, size_t... is>
 	void serialize_impl(Archive& archive, std::index_sequence<is...>) {
-		flat_buffers::serializer(archive, std::get<is>(members)...);
+		serializer(archive, std::get<is>(members)...);
 	}
 };
 
@@ -1189,20 +974,20 @@ uint8_t* save(Allocator& allocator, const Root& root, FileIdentifier file_identi
 
 template <class Root, class Context>
 void load(Root& root, const uint8_t* in, Context& context) {
-	flat_buffers::detail::load_helper(root, in, context);
+	detail::load_helper(root, in, context);
 }
 
 } // namespace detail
 
 template <class Allocator, class... Members>
 uint8_t* save_members(Allocator& allocator, FileIdentifier file_identifier, Members&... members) {
-	const auto& root = flat_buffers::detail::fake_root(members...);
+	const auto& root = detail::fake_root(members...);
 	return detail::save(allocator, root, file_identifier);
 }
 
 template <class Context, class... Members>
 void load_members(const uint8_t* in, Context& context, Members&... members) {
-	auto root = flat_buffers::detail::fake_root(members...);
+	auto root = detail::fake_root(members...);
 	detail::load(root, in, context);
 }
 
@@ -1216,7 +1001,7 @@ inline FileIdentifier read_file_identifier(const uint8_t* in) {
 // introduce the indirection only when necessary.
 template <class T>
 struct EnsureTable {
-	constexpr static flat_buffers::FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 	EnsureTable() = default;
 	EnsureTable(const object_construction<T>& t) : t(t) {}
 	EnsureTable(const T& t) : t(t) {}
@@ -1229,7 +1014,7 @@ struct EnsureTable {
 				t.get().serialize(ar);
 			}
 		} else {
-			flat_buffers::serializer(ar, t.get());
+			serializer(ar, t.get());
 		}
 	}
 	T& asUnderlyingType() { return t.get(); }
@@ -1238,4 +1023,3 @@ private:
 	object_construction<T> t;
 };
 
-} // namespace flat_buffers

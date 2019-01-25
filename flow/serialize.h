@@ -27,6 +27,8 @@
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -99,6 +101,11 @@ inline void load( Ar& ar, T& value ) {
 	Serializer<Ar,T>::serialize(ar, value);
 }
 
+template <class CharT, class Traits, class Allocator>
+struct FileIdentifierFor<std::basic_string<CharT, Traits, Allocator>> {
+	constexpr static FileIdentifier value = 15694229;
+};
+
 template <class Archive>
 inline void load( Archive& ar, std::string& value ) {
 	int32_t length;
@@ -123,12 +130,23 @@ public:
 	}
 };
 
+template <class F, class S>
+struct FileIdentifierFor<std::pair<F, S>> {
+	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
+};
+
+
 template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
 	static void serialize( Archive& ar, std::pair<T1, T2>& p ) {
 		serializer(ar, p.first, p.second);
 	}
+};
+
+template <class T, class Allocator>
+struct FileIdentifierFor<std::vector<T, Allocator>> {
+	constexpr static FileIdentifier value = (0x10 << 24) | FileIdentifierFor<T>::value;
 };
 
 template <class Archive, class T>
@@ -229,6 +247,11 @@ static inline bool valgrindCheck( const void* data, int bytes, const char* conte
 extern const uint64_t currentProtocolVersion;
 extern const uint64_t minValidProtocolVersion;
 extern const uint64_t compatibleProtocolVersionMask;
+extern const uint64_t objectSerializerFlag;
+
+extern uint64_t removeFlags(uint64_t version);
+extern uint64_t addObjectSerializerFlag(uint64_t version);
+extern bool hasObjectSerializerFlag(uint64_t version);
 
 struct _IncludeVersion {
 	uint64_t v;
@@ -504,6 +527,10 @@ public:
 		return (const uint8_t*)readBytes(bytes);
 	}
 
+	StringRef arenaReadAll() const {
+		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
+	}
+
 	template <class T>
 	void serializeBinaryItem( T& t ) {
 		t = *(T*)readBytes(sizeof(T));
@@ -686,14 +713,22 @@ private:
 };
 
 struct ISerializeSource {
-	virtual void serializePacketWriter( PacketWriter& ) const = 0;
-	virtual void serializeBinaryWriter( BinaryWriter& ) const = 0;
+	virtual void serializePacketWriter(PacketWriter&, bool useObjectSerializer) const = 0;
+	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
 };
 
 template <class T>
 struct MakeSerializeSource : ISerializeSource {
-	virtual void serializePacketWriter( PacketWriter& w ) const { ((T const*)this)->serialize(w); }
-	virtual void serializeBinaryWriter( BinaryWriter& w ) const { ((T const*)this)->serialize(w); }
+	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
+		if (useObjectSerializer) {
+			ObjectWriter writer;
+			writer.serialize(get());
+		} else {
+			((T const*)this)->serialize(w);
+		}
+	}
+	virtual void serializeBinaryWriter(BinaryWriter& w) const { ((T const*)this)->serialize(w); }
+	virtual T const& get() const = 0;
 };
 
 template <class T>
@@ -701,6 +736,7 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>> {
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
 	template <class Ar> void serialize(Ar& ar) const { ar << value; }
+	virtual T const& get() const { return value; }
 };
 
 template <class T>
@@ -709,12 +745,11 @@ struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>> {
 	T const& value;
 	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
 	template <class Ar> void serialize(Ar& ar) const { ar << b << value; }
-};
-
-struct SerializeSourceRaw : MakeSerializeSource<SerializeSourceRaw> {
-	StringRef data;
-	SerializeSourceRaw(StringRef data) : data(data) {}
-	template <class Ar> void serialize(Ar& ar) const { ar.serializeBytes(data); }
+	virtual T const& get() const {
+		// This is only used for the streaming serializer
+		ASSERT(false);
+		return value;
+	}
 };
 
 #endif

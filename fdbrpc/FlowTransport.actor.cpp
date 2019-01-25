@@ -25,6 +25,7 @@
 #include "flow/Net2Packet.h"
 #include "flow/ActorCollection.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/ObjectSerializer.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/crc32c.h"
 #include "fdbrpc/simulator.h"
@@ -371,7 +372,6 @@ struct Peer : NonCopyable {
 
 			// Send an (ignored) packet to make sure that, if our outgoing connection died before the peer made this connection attempt,
 			// we eventually find out that our connection is dead, close it, and then respond to the next connection reattempt from peer.
-			//sendPacket( self, SerializeSourceRaw(StringRef()), Endpoint(peer->address(), TOKEN_IGNORE_PACKET), false );
 		}
 	}
 
@@ -529,7 +529,8 @@ TransportData::~TransportData() {
 	}
 }
 
-ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
+ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket,
+                          bool useFlatbuffers) {
 	int priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskReadSocket || !inReadSocket) {
 		wait( delay(0, priority) );
@@ -540,8 +541,13 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		try {
-			g_currentDeliveryPeerAddress = destination.addresses;
-			receiver->receive( reader );
+			g_currentDeliveryPeerAddress = destination.address;
+			if (useFlatbuffers) {
+				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
+				receiver->receive(objReader);
+			} else {
+                receiver->receive( reader );
+            }
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
@@ -561,7 +567,8 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 		g_network->setCurrentTask( TaskReadSocket );
 }
 
-static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena, NetworkAddress const& peerAddress, uint64_t peerProtocolVersion ) {
+static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, uint8_t* e, Arena& arena,
+                        NetworkAddress const& peerAddress, uint64_t peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -633,8 +640,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		ArenaReader reader( arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion) );
-		UID token; reader >> token;
+		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(removeFlags(peerProtocolVersion)));
+		UID token;
+		reader >> token;
 
 		++transport->countPacketsReceived;
 
@@ -649,7 +657,7 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 				transport->warnAlwaysForLargePacket = false;
 		}
 
-		deliver( transport, Endpoint( {peerAddress}, token ), std::move(reader), true );
+		deliver(transport, Endpoint({ peerAddress }, token), std::move(reader), true, hasObjectSerializerFlag(peerProtocolVersion));
 
 		unprocessed_begin = p = p + packetLen;
 	}
@@ -748,7 +756,8 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId);
+								.detail("ConnectionId", connectionId)
+								.detail("UseObjectSerializer", false);
 						}
 
 						if(connectionId > 1) {
@@ -994,13 +1003,18 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
+		// we don't need to send using an object writer here. This is a loopback delivery
+		// and therefore it is guaranteed that both versions will have exactly the
+		// same structures - so the backwards compatability capabilities are never needed
+		// here.
 		what.serializeBinaryWriter(wr);
 		Standalone<StringRef> copy = wr.toValue();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
 
-		deliver( self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false );
+		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false,
+		        false);
 
 		return (PacketID)NULL;
 	} else {
@@ -1039,7 +1053,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 		wr << destination.token;
-		what.serializePacketWriter(wr);
+		what.serializePacketWriter(wr, g_network->useObjectSerializer());
 		pb = wr.finish();
 		len = wr.size() - packetInfoSize;
 

@@ -58,6 +58,18 @@ using namespace boost::asio::ip;
 const uint64_t currentProtocolVersion        = 0x0FDB00B061070001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+const uint64_t objectSerializerFlag          = 0x1000000000000000LL;
+const uint64_t versionFlagMask               = 0x0FFFFFFFFFFFFFFFLL;
+
+uint64_t removeFlags(uint64_t version) {
+	return version & versionFlagMask;
+}
+uint64_t addObjectSerializerFlag(uint64_t version) {
+	return version | versionFlagMask;
+}
+bool hasObjectSerializerFlag(uint64_t version) {
+	return (version & objectSerializerFlag) > 0;
+}
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
 static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");

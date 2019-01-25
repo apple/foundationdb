@@ -399,6 +399,9 @@ public:
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
 
+	virtual bool useObjectSerializer() { return false; }
+	// Whether or not the object serializer should be used when sending packets
+
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()
 	{

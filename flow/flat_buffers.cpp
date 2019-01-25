@@ -18,16 +18,15 @@
  * limitations under the License.
  */
 
-#include "flat_buffers.h"
-#include "UnitTest.h"
-#include "Arena.h"
-#include "serialize.h"
+#include "flow/flat_buffers.h"
+#include "flow/UnitTest.h"
+#include "flow/Arena.h"
+#include "flow/serialize.h"
+#include "flow/ObjectSerializer.h"
 
 #include <algorithm>
 #include <iomanip>
 #include <boost/variant.hpp>
-
-namespace flat_buffers {
 
 namespace detail {
 
@@ -106,7 +105,7 @@ struct Table2 {
 	int16_t m_ed = {};
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, m_p, m_ujrnpumbfvc, m_iwgxxt, m_tjkuqo, m_ed);
+		serializer(ar, m_p, m_ujrnpumbfvc, m_iwgxxt, m_tjkuqo, m_ed);
 	}
 };
 
@@ -117,7 +116,7 @@ struct Table3 {
 	int64_t m_n = {};
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, m_asbehdlquj, m_k, m_jib, m_n);
+		serializer(ar, m_asbehdlquj, m_k, m_jib, m_n);
 	}
 };
 
@@ -134,7 +133,7 @@ struct Nested2 {
 	int c;
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a, b, c);
+		serializer(ar, a, b, c);
 	}
 
 	friend bool operator==(const Nested2& lhs, const Nested2& rhs) {
@@ -149,7 +148,7 @@ struct Nested {
 	std::vector<uint64_t> c;
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a, b, nested, c);
+		serializer(ar, a, b, nested, c);
 	}
 };
 
@@ -159,7 +158,7 @@ struct Root {
 	Nested c;
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a, b, c);
+		serializer(ar, a, b, c);
 	}
 };
 
@@ -224,7 +223,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 		       { 3, "hello", { 6, { "abc", "def" }, 8 }, { 10, 11, 12 } } };
 	Root root2 = root;
 	Arena arena;
-	auto out = flat_buffers::detail::save(arena, root, flat_buffers::FileIdentifier{});
+	auto out = detail::save(arena, root, FileIdentifier{});
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -237,7 +236,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeRoot") {
 
 	root2 = {};
 	DummyContext context;
-	flat_buffers::detail::load(root2, out, context);
+	detail::load(root2, out, context);
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -399,7 +398,7 @@ struct Y1 {
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a);
+		serializer(ar, a);
 	}
 };
 
@@ -409,7 +408,7 @@ struct Y2 {
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a, b);
+		serializer(ar, a, b);
 	}
 };
 
@@ -421,7 +420,7 @@ struct X {
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
-		return flat_buffers::serializer(ar, a, b, c);
+		serializer(ar, a, b, c);
 	}
 };
 
@@ -493,12 +492,12 @@ TEST_CASE("flow/FlatBuffers/VectorRef") {
 			for (const auto& str : src) {
 				vec.push_back(arena, str);
 			}
-			BinaryWriter writer(IncludeVersion());
-			::serialize_fake_root(writer, FileIdentifierFor<decltype(vec)>::value, arena, vec);
+			ObjectWriter writer;
+			writer.serialize(FileIdentifierFor<decltype(vec)>::value, arena, vec);
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
-		ArenaReader reader(readerArena, serializedVector, IncludeVersion());
-		::serialize_fake_root(reader, FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
+		ArenaObjectReader reader(readerArena, serializedVector);
+		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, vecArena, outVec);
 	}
 	ASSERT(src.size() == outVec.size());
 	for (int i = 0; i < src.size(); ++i) {
@@ -509,5 +508,3 @@ TEST_CASE("flow/FlatBuffers/VectorRef") {
 }
 
 } // namespace unit_tests
-
-} // namespace flat_buffers
