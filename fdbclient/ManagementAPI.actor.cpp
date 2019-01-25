@@ -1045,6 +1045,8 @@ struct AutoQuorumChange : IQuorumChange {
 		vector<ProcessData> remainingWorkers(workers);
 		g_random->randomShuffle(remainingWorkers);
 
+		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
 		std::map<StringRef, int> hardLimits;
@@ -1696,6 +1698,9 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		workers.push_back(data);
 	}
 
+	auto noAssignIndex = g_random->randomInt(0, workers.size());
+	workers[noAssignIndex].processClass._class = ProcessClass::CoordinatorClass;
+
 	change.addDesiredWorkers(chosen, workers, 5, excluded);
 	std::map<StringRef, std::set<StringRef>> chosenValues;
 
@@ -1718,6 +1723,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	ASSERT(chosenValues[LiteralStringRef("data_hall")].size() == 4);
 	ASSERT(chosenValues[LiteralStringRef("zoneid")].size() == 5);
 	ASSERT(chosenValues[LiteralStringRef("machineid")].size() == 5);
+	ASSERT(std::find(chosen.begin(), chosen.end(), workers[noAssignIndex].address) != chosen.end());
 
 	return Void();
 }
