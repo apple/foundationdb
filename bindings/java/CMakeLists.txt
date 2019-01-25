@@ -11,6 +11,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/CloseableAsyncIterator.java
   src/main/com/apple/foundationdb/async/package-info.java
   src/main/com/apple/foundationdb/Cluster.java
+  src/main/com/apple/foundationdb/ClusterOptions.java
   src/main/com/apple/foundationdb/Database.java
   src/main/com/apple/foundationdb/directory/Directory.java
   src/main/com/apple/foundationdb/directory/DirectoryAlreadyExistsException.java
@@ -28,8 +29,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
-  src/main/com/apple/foundationdb/FutureCluster.java
-  src/main/com/apple/foundationdb/FutureDatabase.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
@@ -98,11 +97,10 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/foundationdb)
+set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
 set(GENERATED_JAVA_FILES
-  ${GENERATED_JAVA_DIR}/ClusterOptions.java
   ${GENERATED_JAVA_DIR}/ConflictRangeType.java
   ${GENERATED_JAVA_DIR}/DatabaseOptions.java
   ${GENERATED_JAVA_DIR}/MutationType.java
