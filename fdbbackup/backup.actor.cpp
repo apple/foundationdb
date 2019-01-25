@@ -34,6 +34,8 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
+#include "fdbserver/RestoreInterface.h"
+
 #include "fdbrpc/Platform.h"
 
 #include <stdarg.h>
@@ -67,8 +69,8 @@ using std::endl;
 #include "versions.h"
 #endif
 
+
 #include "flow/SimpleOpt.h"
-#include "fdbserver/RestoreInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 

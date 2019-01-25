@@ -64,6 +64,9 @@
     <Lib>
       <AdditionalDependencies>$(TargetDir)fdbclient.lib</AdditionalDependencies>
     </Lib>
+    <Lib>
+      <AdditionalDependencies>$(TargetDir)fdbserver.lib</AdditionalDependencies>
+    </Lib>
     <ClCompile>
       <PreprocessorDefinitions>FDB_VT_VERSION="$(Version)$(PreReleaseDecoration)";FDB_VT_PACKAGE_NAME="$(PackageName)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
