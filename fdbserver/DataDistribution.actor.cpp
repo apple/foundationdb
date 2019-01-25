@@ -3437,7 +3437,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			TraceEvent("DataDistributorError", di.id()).error(err);
 			throw err;
 		}
-		TraceEvent("DataDistributorTerminated", di.id()).error(err);
+		TraceEvent("DataDistributorDied", di.id()).error(err);
 	}
 
 	return Void();

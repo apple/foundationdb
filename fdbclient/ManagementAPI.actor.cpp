@@ -702,6 +702,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 
 ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
 	state Transaction tr(cx);
+	state std::string versionKey = g_random->randomUniqueID().toString();
 
 	if(!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; //FIXME: correct return type
@@ -750,6 +751,9 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 				for(auto& kv : m)
 					tr.set(kv.first, kv.second);
 			}
+
+			tr.addReadConflictRange( singleKeyRange(configVersionKey) );
+			tr.set( configVersionKey, versionKey );
 
 			wait( tr.commit() );
 			return ConfigurationResult::SUCCESS;

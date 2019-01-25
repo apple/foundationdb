@@ -1154,7 +1154,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 					self->registrationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(excludedServersVersionKey);
+				state Future<Void> watchFuture = tr.watch(configVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;

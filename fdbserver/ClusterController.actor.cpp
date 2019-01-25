@@ -2274,9 +2274,9 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 	// Wait on failures and restart it.
 	loop choose {
 		when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
-			TraceEvent ev("ClusterController", self->id);
-			const UID myDdId = self->db.serverInfo->get().distributor.id();
-			ev.detail("NewDataDistributorID", distributorInterf.id()).detail("Valid", distributorInterf.isValid());
+			TraceEvent("ClusterController", self->id)
+			.detail("DataDistributorID", distributorInterf.id())
+			.detail("Valid", distributorInterf.isValid());
 			self->db.setDistributor( distributorInterf );
 			distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 			newDistributor = Never();
@@ -2284,13 +2284,12 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 		when ( wait( distributorFailed ) ) {
 			distributorFailed = Never();
 			TraceEvent("ClusterController", self->id)
-			.detail("DataDistributorFailed", self->db.serverInfo->get().distributor.id())
-			.detail("Endpoint", self->db.serverInfo->get().distributor.getRateInfo.getEndpoint().token);
+			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.id());
 			self->db.setDistributor( DataDistributorInterface() );
 			newDistributor = startDataDistributor( self );
 		}
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
+			// TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
 			req.reply.send( Void() );
 		}
 	}
