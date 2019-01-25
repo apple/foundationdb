@@ -759,4 +759,10 @@ public:
 		return updateErrorInfo(cx, e, details);
 	}
 };
+
+
+// Fast Restore functions
+//Future<Version> _fastRestore(Database const& cx, Key const& tagName, Key const& url, bool const& waitForComplete, Version const& targetVersion, bool const& verbose, KeyRange const& range, Key const& addPrefix, Key const& removePrefix);
+Future<Version> fastRestore(Database const& cx, Standalone<StringRef> const& tagName, Standalone<StringRef> const& url, bool const& waitForComplete, long const& targetVersion, bool const& verbose, Standalone<KeyRangeRef> const& range, Standalone<StringRef> const& addPrefix, Standalone<StringRef> const& removePrefix);
+
 #endif
