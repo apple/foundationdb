@@ -31,6 +31,7 @@ ifeq ($(NIGHTLY),true)
 	CFLAGS += -DFDB_CLEAN_BUILD
 endif
 
+BOOST_BASENAME ?= boost_1_52_0
 ifeq ($(PLATFORM),Linux)
   PLATFORM := linux
 
@@ -39,7 +40,7 @@ ifeq ($(PLATFORM),Linux)
 
   CXXFLAGS += -std=c++0x
 
-  BOOSTDIR ?= /opt/boost_1_52_0
+  BOOST_BASEDIR ?= /opt
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
@@ -55,13 +56,14 @@ else ifeq ($(PLATFORM),Darwin)
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
-  BOOSTDIR ?= $(HOME)/boost_1_52_0
+  BOOST_BASEDIR ?= ${HOME}
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
   $(error Not prepared to compile on platform $(PLATFORM))
 endif
+BOOSTDIR ?= ${BOOST_BASEDIR}/${BOOST_BASENAME}
 
 CCACHE := $(shell which ccache)
 ifneq ($(CCACHE),)
