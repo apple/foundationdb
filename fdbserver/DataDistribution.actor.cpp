@@ -3289,8 +3289,8 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 	PromiseStream<Future<Void>> addActor;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id, PromiseStream<Future<Void>> const& addActor)
-		: dbInfo(db), configuration(dbConfig), ddId(id), addActor(addActor) {}
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id)
+		: dbInfo(db), configuration(dbConfig), ddId(id) {}
 
 	void refreshDcIds() {
 		primaryDcId.clear();
@@ -3316,6 +3316,7 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 
 		loop {
 			try {
+				TraceEvent("DataDistributor", self->ddId).detail("MonitorConfiguration", "Starting");
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
@@ -3329,7 +3330,7 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 					self->configurationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(excludedServersVersionKey);
+				state Future<Void> watchFuture = tr.watch(configVersionKey);
 				wait( tr.commit() );
 				wait( watchFuture );
 				break;
@@ -3365,9 +3366,8 @@ static std::set<int> const& normalRateKeeperErrors() {
 
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state UID lastClusterControllerID(0,0);
-	state PromiseStream<Future<Void>> addActor;
 	state Reference<AsyncVar<DatabaseConfiguration>> configuration( new AsyncVar<DatabaseConfiguration>(DatabaseConfiguration()) );
-	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id(), addActor) );
+	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 	state Future<Void> trigger = self->configurationTrigger.onTrigger();
 
@@ -3378,12 +3378,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	loop choose {
 		when ( wait( trigger ) ) {
 			self->refreshDcIds();
+			trigger = self->configurationTrigger.onTrigger();
 			break;
 		}
 		when ( wait(self->dbInfo->onChange()) ) {}
 	}
 
 	try {
+		TraceEvent("DataDistributorRunning", di.id());
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
@@ -3404,7 +3406,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				reply = Never();
 			}
 
-			trigger = self->configurationTrigger.onTrigger();
 			choose {
 				when ( wait( brokenPromiseToNever(reply) ) ) {}
 				when ( wait( self->dbInfo->onChange() ) ) {
@@ -3422,6 +3423,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					TraceEvent("DataDistributor", di.id()).detail("RestartDistribution", self->configuration->get().toString());
 					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 					self->addActor.send( distributor );
+					trigger = self->configurationTrigger.onTrigger();
 				}
 				when ( wait( collection ) ) {
 					ASSERT(false);
