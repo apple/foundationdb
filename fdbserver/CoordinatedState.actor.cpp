@@ -208,7 +208,7 @@ struct MovableValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A2000D0001LL );
-		ar & value & mode & other;
+		serializer(ar, value, mode, other);
 	}
 };
 

@@ -40,7 +40,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & reboot & profiler;
+		serializer(ar, reboot, profiler);
 	}
 };
 
@@ -52,7 +52,7 @@ struct RebootRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & deleteData & checkData;
+		serializer(ar, deleteData, checkData);
 	}
 };
 
@@ -77,7 +77,7 @@ struct ProfilerRequest {
 
 	template<class Ar>
 	void serialize( Ar& ar ) {
-		ar & reply & type & action & duration & outputFile;
+		serializer(ar, reply, type, action, duration, outputFile);
 	}
 };
 BINARY_SERIALIZABLE( ProfilerRequest::Type );

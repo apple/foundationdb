@@ -25,6 +25,7 @@
 #include "fdbserver/MoveKeys.h"
 #include "fdbserver/Knobs.h"
 #include <set>
+#include <sstream>
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -74,15 +75,14 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	}
 
 	std::string getServersIDStr() {
-		std::string str;
+		std::stringstream ss;
 		if (serversOnMachine.empty()) return "[unset]";
 
 		for (auto& server : serversOnMachine) {
-			str += server->id.toString() + " ";
+			ss << server->id.toString() << " ";
 		}
-		str.pop_back();
 
-		return str;
+		return ss.str();
 	}
 };
 
@@ -152,16 +152,15 @@ public:
 	}
 
 	std::string getMachineIDsStr() {
-		std::string str;
+		std::stringstream ss;
 
-		if (this == NULL || machineIDs.empty()) return "[unset]";
+		if (machineIDs.empty()) return "[unset]";
 
 		for (auto& id : machineIDs) {
-			str += id.contents().toString() + " ";
+			ss << id.contents().toString() << " ";
 		}
-		str.pop_back();
 
-		return str;
+		return ss.str();
 	}
 
 	int getTotalMachineTeamNumber() {
@@ -210,15 +209,15 @@ public:
 	virtual vector<UID> const& getServerIDs() { return serverIDs; }
 
 	virtual std::string getServerIDsStr() {
-		std::string str;
-		if (this == NULL || serverIDs.empty()) return "[unset]";
+		std::stringstream ss;
+
+		if (serverIDs.empty()) return "[unset]";
 
 		for (auto& id : serverIDs) {
-			str += id.toString() + " ";
+			ss << id.toString() << " ";
 		}
-		str.pop_back();
 
-		return str;
+		return ss.str();
 	}
 
 	virtual void addDataInFlightToTeam( int64_t delta ) {
@@ -2724,7 +2723,7 @@ ACTOR Future<Void> storageServerTracker(
 			}
 		}
 	} catch( Error &e ) {
-		if (e.code() != error_code_actor_cancelled)
+		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
 			errorOut.sendError(e);
 		throw;
 	}

@@ -4,7 +4,8 @@ Section: database
 Priority: optional
 Architecture: amd64
 Conflicts: foundationdb (<< 0.1.4)
-Depends: foundationdb-clients (= VERSION-RELEASE), adduser, libc6 (>= 2.11), python (>= 2.6)
+Depends: foundationdb-clients (= VERSION-RELEASE), adduser, libc6 (>= 2.11)
+Recommends: python (>= 2.6)
 Maintainer: FoundationDB <fdb-dist@apple.com>
 Homepage: https://www.foundationdb.org
 Description: FoundationDB server

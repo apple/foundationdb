@@ -65,8 +65,8 @@ struct TLogInterface {
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		ASSERT(ar.isDeserializing || uniqueID != UID());
-		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
-		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
+		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
+		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
 	}
 };
 
@@ -77,7 +77,7 @@ struct TLogRecoveryFinishedRequest {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -87,7 +87,7 @@ struct TLogLockResult {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & end & knownCommittedVersion;
+		serializer(ar, end, knownCommittedVersion);
 	}
 };
 
@@ -100,7 +100,7 @@ struct TLogConfirmRunningRequest {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & debugID & reply;
+		serializer(ar, debugID, reply);
 	}
 };
 
@@ -116,7 +116,7 @@ struct VersionUpdateRef {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & version & mutations & isPrivateData;
+		serializer(ar, version, mutations, isPrivateData);
 	}
 };
 
@@ -131,7 +131,7 @@ struct VerUpdateRef {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & version & mutations & isPrivateData;
+		serializer(ar, version, mutations, isPrivateData);
 	}
 };
 
@@ -146,7 +146,7 @@ struct TLogPeekReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & messages & end & popped & maxKnownVersion & minKnownCommittedVersion & begin;
+		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin);
 	}
 };
 
@@ -163,7 +163,7 @@ struct TLogPeekRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & begin & tag & returnIfBlocked & sequence & reply;
+		serializer(ar, arena, begin, tag, returnIfBlocked, sequence, reply);
 	}
 };
 
@@ -179,7 +179,7 @@ struct TLogPopRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & to & durableKnownCommittedVersion & tag & reply;
+		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
 	}
 };
 
@@ -196,7 +196,7 @@ struct TagMessagesRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & tag & messageOffsets;
+		serializer(ar, tag, messageOffsets);
 	}
 };
 
@@ -214,7 +214,7 @@ struct TLogCommitRequest {
 		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & prevVersion & version & knownCommittedVersion & minKnownCommittedVersion & messages & reply & arena & debugID;
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
 	}
 };
 
@@ -223,7 +223,7 @@ struct TLogQueuingMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -236,7 +236,7 @@ struct TLogQueuingMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & localTime & instanceID & bytesDurable & bytesInput & storageBytes & v;
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
 	}
 };
 

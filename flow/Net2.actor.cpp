@@ -1023,7 +1023,7 @@ struct TestGVR {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 
@@ -1103,7 +1103,7 @@ void net2_test() {
 
 	Endpoint destination;
 
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 
 	char junk[100];
 
@@ -1153,6 +1153,6 @@ void net2_test() {
 
 	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
 	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };

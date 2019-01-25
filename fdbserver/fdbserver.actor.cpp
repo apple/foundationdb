@@ -78,7 +78,7 @@
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE };
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
@@ -152,6 +152,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_METRICSPREFIX,        "--metrics_prefix",            SO_REQ_SEP },
 	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
+	{ OPT_TRACE_FORMAT      ,   "--trace_format",              SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -552,6 +553,8 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Delete the oldest log file when the total size of all log\n"
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
 		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
 		   "                 to a random value shared by all fdbserver processes on this\n"
@@ -1120,7 +1123,7 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_RANDOMSEED: {
 					char* end;
-					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 10 );
+					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
 					if( *end ) {
 						fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 						printHelpTeaser(argv[0]);
@@ -1203,6 +1206,11 @@ int main(int argc, char* argv[]) {
 				}
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
+					break;
+				case OPT_TRACE_FORMAT:
+					if (!selectTraceFormatter(args.OptionArg())) {
+						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+					}
 					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:

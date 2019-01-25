@@ -98,6 +98,8 @@
 #include <sys/resource.h>
 /* Needed for crash handler */
 #include <signal.h>
+/* Needed for gnu_dev_{major,minor} */
+#include <sys/sysmacros.h>
 #endif
 
 #ifdef __APPLE__
@@ -643,7 +645,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		unsigned int minorId;
 		disk_stream >> majorId;
 		disk_stream >> minorId;
-		if(majorId == (unsigned int) major(buf.st_dev) && minorId == (unsigned int) minor(buf.st_dev)) {
+		if(majorId == (unsigned int) gnu_dev_major(buf.st_dev) && minorId == (unsigned int) gnu_dev_minor(buf.st_dev)) {
 			std::string ignore;
 			uint64_t rd_ios;	/* # of reads completed */
 			//	    This is the total number of reads completed successfully.
@@ -2062,6 +2064,19 @@ bool fileExists(std::string const& filename) {
 	return true;
 }
 
+bool directoryExists(std::string const& path) {
+#ifdef _WIN32
+	DWORD bits = ::GetFileAttributes(path.c_str());
+	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
+#else
+	DIR *d = opendir(path.c_str());
+	if(d == nullptr)
+		return false;
+	closedir(d);
+	return true;
+#endif
+}
+
 int64_t fileSize(std::string const& filename) {
 #ifdef _WIN32
 	struct _stati64 file_status;
@@ -2219,7 +2234,7 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 }; // namespace platform
 
 #ifdef ALLOC_INSTRUMENTATION
-#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
+#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
 #ifdef __linux__
 #include <cxxabi.h>
 #endif

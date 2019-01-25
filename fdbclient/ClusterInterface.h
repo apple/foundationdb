@@ -52,7 +52,7 @@ struct ClusterInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & openDatabase & failureMonitoring & databaseStatus & ping & getClientWorkers & forceRecovery;
+		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
 	}
 };
 
@@ -93,7 +93,7 @@ struct ClientVersionRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientVersion & sourceVersion & protocolVersion;
+		serializer(ar, clientVersion, sourceVersion, protocolVersion);
 	}
 
 	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
@@ -125,7 +125,7 @@ struct OpenDatabaseRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		ar & issues & supportedVersions & traceLogGroup & knownClientInfoID & reply & arena;
+		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, reply, arena);
 	}
 };
 
@@ -138,7 +138,7 @@ struct SystemFailureStatus {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & address & status;
+		serializer(ar, address, status);
 	}
 };
 
@@ -159,7 +159,7 @@ struct FailureMonitoringRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & senderStatus & failureInformationVersion & reply;
+		serializer(ar, senderStatus, failureInformationVersion, reply);
 	}
 };
 
@@ -173,7 +173,7 @@ struct FailureMonitoringReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & changes & failureInformationVersion & allOthersFailed & clientRequestIntervalMS & considerServerFailedTimeoutMS & arena;
+		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
 	}
 };
 
@@ -182,7 +182,7 @@ struct StatusRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -196,7 +196,7 @@ struct StatusReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & statusStr;
+		serializer(ar, statusStr);
 		if( ar.isDeserializing ) {
 			json_spirit::mValue mv;
 			if(g_network->isSimulated()) {
@@ -218,7 +218,7 @@ struct GetClientWorkersRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -229,7 +229,7 @@ struct ForceRecoveryRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 

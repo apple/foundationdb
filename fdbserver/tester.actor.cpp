@@ -105,10 +105,11 @@ Key KVWorkload::keyForIndex( uint64_t index, bool absent ) {
 
 	int idx = 0;
 	if( nodePrefix > 0 ) {
+		ASSERT(keyBytes >= 32);
 		emplaceIndex( data, 0, nodePrefix );
 		idx += 16;
 	}
-
+	ASSERT(keyBytes >= 16);
 	double d = double(index) / nodeCount;
 	emplaceIndex( data, idx, *(int64_t*)&d );
 

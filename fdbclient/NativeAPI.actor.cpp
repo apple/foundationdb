@@ -137,18 +137,6 @@ std::string printable( const std::string& str ) {
 	return StringRef(str).printable();
 }
 
-std::string printable( const Optional<StringRef>& val ) {
-	if( val.present() )
-		return printable( val.get() );
-	return "[not set]";
-}
-
-std::string printable( const Optional<Standalone<StringRef>>& val ) {
-	if( val.present() )
-		return printable( val.get() );
-	return "[not set]";
-}
-
 std::string printable( const KeyRangeRef& range ) {
 	return printable(range.begin) + " - " + printable(range.end);
 }

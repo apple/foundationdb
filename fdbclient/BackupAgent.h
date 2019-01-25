@@ -276,7 +276,7 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
+	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr);
 
 	static const Key keyLastRestorable;
 
@@ -415,7 +415,7 @@ struct RCGroup {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & items & version & groupKey;
+		serializer(ar, items, version, groupKey);
 	}
 };
 

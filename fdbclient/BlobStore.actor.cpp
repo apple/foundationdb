@@ -258,8 +258,17 @@ ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
+	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered successful
 	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
-	// 200 means object deleted, 404 means it doesn't exist already, so either success code passed above is fine.
+
+	// But if the object already did not exist then the 'delete' is assumed to be successful but a warning is logged.
+	if(r->code == 404) {
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointDeleteObjectMissing")
+			.detail("Host", b->host)
+			.detail("Bucket", bucket)
+			.detail("Object", object);
+	}
+
 	return Void();
 }
 
@@ -502,8 +511,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
 			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
+			contentCopy.discardAll();
 			if(pContent != nullptr) {
-				contentCopy.discardAll();
 				PacketBuffer *pFirst = pContent->getUnsent();
 				PacketBuffer *pLast = nullptr;
 				for(PacketBuffer *p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {

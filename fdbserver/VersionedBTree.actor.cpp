@@ -93,7 +93,7 @@ struct BTreePage {
 					r += format("['%s']", c.getKeyRef().toHexString(20).c_str());
 
 					r += " -> ";
-					if(flags && IS_LEAF)
+					if(flags & IS_LEAF)
 						r += format("'%s'", c.getValueRef().toHexString(20).c_str());
 					else
 						r += format("Page id=%u", *(const uint32_t *)c.getValueRef().begin());

@@ -74,7 +74,7 @@ namespace oldTLog {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			ar & tag & messageOffsets;
+			serializer(ar, tag, messageOffsets);
 		}
 	};
 
@@ -93,9 +93,9 @@ namespace oldTLog {
 		template <class Ar>
 		void serialize(Ar& ar) {
 			if( ar.protocolVersion() >= 0x0FDB00A460010001) {
-				ar & version & messages & tags & knownCommittedVersion & id;
+				serializer(ar, version, messages, tags, knownCommittedVersion, id);
 			} else if(ar.isDeserializing) {
-				ar & version & messages & tags;
+				serializer(ar, version, messages, tags);
 				knownCommittedVersion = 0;
 				id = UID();
 			}

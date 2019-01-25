@@ -945,7 +945,7 @@ public:
 					swapAndPop(&itCopy->value, i--);
 				} else {
 					itCopy->value[i]->setPresent = true;
-					itCopy->value[i]->setValue = val.cast_to<Value>();
+					itCopy->value[i]->setValue = val.castTo<Value>();
 				}
 			}
 
