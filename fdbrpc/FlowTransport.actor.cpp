@@ -65,8 +65,8 @@ private:
 	uint32_t firstFree;
 };
 
-EndpointMap::EndpointMap() 
- : firstFree(-1) 
+EndpointMap::EndpointMap()
+ : firstFree(-1)
 {
 }
 
@@ -141,7 +141,7 @@ struct PingReceiver : NetworkMessageReceiver {
 
 class TransportData {
 public:
-	TransportData(uint64_t transportId) 
+	TransportData(uint64_t transportId)
 	  : endpointNotFoundReceiver(endpoints),
 		pingReceiver(endpoints),
 		warnAlwaysForLargePacket(true),
@@ -172,7 +172,7 @@ public:
 			// TraceEvent("VISHESHGetFirstLocalAddress").detail("Size", localAddresses.size());
 			return localAddresses[0];
 		}
-		return localAddresses[1];
+		return localAddresses[0];
 	}
 
 	// Returns a vector of NetworkAddresses we are listening to.
@@ -381,8 +381,8 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionKeeper( Peer* self, 
-			Reference<IConnection> conn = Reference<IConnection>(), 
+	ACTOR static Future<Void> connectionKeeper( Peer* self,
+			Reference<IConnection> conn = Reference<IConnection>(),
 			Future<Void> reader = Void()) {
 		TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 			.detail("PeerAddr", self->destination)
@@ -601,9 +601,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 
 ACTOR static Future<Void> connectionReader(
 		TransportData* transport,
-		Reference<IConnection> conn, 
+		Reference<IConnection> conn,
 		Peer *peer,
-		Promise<Peer*> onConnected) 
+		Promise<Peer*> onConnected)
 {
 	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
 	// For incoming connections conn is set and peer is initially NULL; for outgoing connections it is the reverse
@@ -1035,7 +1035,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		if (len > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
 			// throw platform_error();  // FIXME: How to recover from this situation?
-		} 
+		}
 		else if (len > FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
 				.suppressFor(1.0)
@@ -1078,8 +1078,8 @@ void FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint
 	sendPacket( self, what, destination, false, openConnection );
 }
 
-int FlowTransport::getEndpointCount() { 
-	return -1; 
+int FlowTransport::getEndpointCount() {
+	return -1;
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

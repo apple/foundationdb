@@ -31,8 +31,8 @@ struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	}
 };
 
-ACTOR Future<Void> failureMonitorClientLoop( 
-	SimpleFailureMonitor* monitor, 
+ACTOR Future<Void> failureMonitorClientLoop(
+	SimpleFailureMonitor* monitor,
 	ClusterInterface controller,
 	Reference<FailureMonitorClientState> fmState,
 	bool trackMyStatus)
@@ -133,7 +133,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
-	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState()); 
+	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
 
 	loop {
 		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();
