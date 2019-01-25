@@ -31,7 +31,7 @@ ifeq ($(NIGHTLY),true)
 	CFLAGS += -DFDB_CLEAN_BUILD
 endif
 
-BOOST_BASENAME ?= boost_1_52_0
+BOOST_BASENAME ?= boost_1_67_0
 ifeq ($(PLATFORM),Linux)
   PLATFORM := linux
 
