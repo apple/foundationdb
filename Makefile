@@ -69,6 +69,7 @@ else
   $(error Not prepared to compile on platform $(PLATFORM))
 endif
 BOOSTDIR ?= ${BOOST_BASEDIR}/${BOOST_BASENAME}
+$(info BOOSTDIR is ${BOOSTDIR})
 
 CCACHE := $(shell which ccache)
 ifneq ($(CCACHE),)
