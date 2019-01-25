@@ -232,6 +232,9 @@
 .. |option-trace-roll-size-blurb| replace::
     Sets the maximum size in bytes of a single trace output file for this FoundationDB client.
 
+.. |option-trace-format-blurb| replace::
+    Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.
+
 .. |network-options-warning| replace::
 
     It is an error to set these options after the first call to |open-func| anywhere in your application.
