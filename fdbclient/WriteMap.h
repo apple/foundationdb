@@ -128,8 +128,8 @@ public:
 		PTreeImpl::insert( writes, ver, WriteMapEntry( afterAllKeys, OperationStack(), false, false, false, false, false ) );
 	}
 
-	WriteMap(WriteMap&& r) noexcept(true) : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver), scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
-	WriteMap& operator=(WriteMap&& r) noexcept(true) { writeMapEmpty = r.writeMapEmpty; writes = std::move(r.writes); ver = r.ver; scratch_iterator = std::move(r.scratch_iterator); arena = r.arena; return *this; }
+	WriteMap(WriteMap&& r) BOOST_NOEXCEPT : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver), scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
+	WriteMap& operator=(WriteMap&& r) BOOST_NOEXCEPT { writeMapEmpty = r.writeMapEmpty; writes = std::move(r.writes); ver = r.ver; scratch_iterator = std::move(r.scratch_iterator); arena = r.arena; return *this; }
 
 	//a write with addConflict false on top of an existing write with a conflict range will not remove the conflict
 	void mutate( KeyRef key, MutationRef::Type operation, ValueRef param, bool addConflict ) {

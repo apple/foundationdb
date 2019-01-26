@@ -158,11 +158,11 @@ namespace FDB {
 		void reset() override;
 
 		TransactionImpl() : tr(NULL) {}
-		TransactionImpl(TransactionImpl&& r) noexcept(true) {
+		TransactionImpl(TransactionImpl&& r) BOOST_NOEXCEPT {
 			tr = r.tr;
 			r.tr = NULL;
 		}
-		TransactionImpl& operator=(TransactionImpl&& r) noexcept(true) {
+		TransactionImpl& operator=(TransactionImpl&& r) BOOST_NOEXCEPT {
 			tr = r.tr;
 			r.tr = NULL;
 			return *this;
