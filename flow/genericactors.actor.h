@@ -1187,7 +1187,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
 		Releaser( FlowLock& lock, int amount = 1 ) : lock(&lock), remaining(amount) {}
-		Releaser(Releaser&& r) noexcept(true) : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) { if (remaining) lock->release(remaining); lock = r.lock; remaining = r.remaining; r.remaining = 0; }
 
 		void release( int amount = -1 ) {
@@ -1425,7 +1425,7 @@ public:
 		futures = f.futures;
 	}
 
-	AndFuture(AndFuture&& f) noexcept(true) {
+	AndFuture(AndFuture&& f) BOOST_NOEXCEPT {
 		futures = std::move(f.futures);
 	}
 
@@ -1445,7 +1445,7 @@ public:
 		futures = f.futures;
 	}
 
-	void operator=(AndFuture&& f) noexcept(true) {
+	void operator=(AndFuture&& f) BOOST_NOEXCEPT {
 		futures = std::move(f.futures);
 	}
 

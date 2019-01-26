@@ -170,11 +170,11 @@ namespace FDB {
 		// void debugTransaction(UID dID) { tr.debugTransaction(dID); }
 
 		Transaction() : tr(NULL) {}
-		Transaction( Transaction&& r ) noexcept(true) {
+		Transaction( Transaction&& r ) BOOST_NOEXCEPT {
 			tr = r.tr;
 			r.tr = NULL;
 		}
-		Transaction& operator=( Transaction&& r ) noexcept(true) {
+		Transaction& operator=( Transaction&& r ) BOOST_NOEXCEPT {
 			tr = r.tr;
 			r.tr = NULL;
 			return *this;

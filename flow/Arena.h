@@ -92,9 +92,9 @@ public:
 	inline explicit Arena( size_t reservedSize );
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) noexcept(true);
+	Arena(Arena && r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) noexcept(true);
+	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
 	inline void dependsOn( const Arena& p );
 	inline size_t getSize() const;
@@ -288,12 +288,12 @@ inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
 		ArenaBlock::create((int)reservedSize,impl);
 }
 inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) noexcept(true) : impl(std::move(r.impl)) {}
+inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
 inline Arena& Arena::operator=(const Arena& r) {
 	impl = r.impl;
 	return *this;
 }
-inline Arena& Arena::operator=(Arena&& r) noexcept(true) {
+inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
 	impl = std::move(r.impl);
 	return *this;
 }

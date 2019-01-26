@@ -287,12 +287,12 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 	return onMainThread( [tr, e](){ return tr->onError(e); } );
 }
 
-void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept(true) {
+void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept(true) {
+ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }

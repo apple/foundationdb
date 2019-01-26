@@ -494,12 +494,12 @@ public:
 	~SkipList() {
 		destroy();
 	}
-	SkipList(SkipList&& other) noexcept(true)
+	SkipList(SkipList&& other) BOOST_NOEXCEPT
 		: header(other.header)
 	{
 		other.header = NULL;
 	}
-	void operator=(SkipList&& other) noexcept(true) {
+	void operator=(SkipList&& other) BOOST_NOEXCEPT {
 		destroy();
 		header = other.header;
 		other.header = NULL;
