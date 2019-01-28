@@ -22,14 +22,16 @@
 #define FOUNDATIONDB_DATADISTRIBUTORINTERFACE_H
 
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
+	struct LocalityData locality;
 	bool valid;
 
 	DataDistributorInterface() : valid(false) {}
-	explicit DataDistributorInterface(bool v) : valid(v) {}
+	explicit DataDistributorInterface(struct LocalityData l) : locality(l), valid(true) {}
 
 	bool isValid() const { return valid; }
 	UID id() const { return getRateInfo.getEndpoint().token; }
@@ -43,7 +45,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, valid);
+		serializer(ar, waitFailure, getRateInfo, locality, valid);
 	}
 };
 

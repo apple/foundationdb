@@ -715,9 +715,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
-				DataDistributorInterface recruited(true);
-				TraceEvent("DataDistributorReceived", req.reqId).detail("Addr", interf.address())
-				.detail("DataDistributorId", recruited.id());
+				DataDistributorInterface recruited(locality);
+				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());
 				startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 
 				Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
