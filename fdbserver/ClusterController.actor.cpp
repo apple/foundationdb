@@ -1829,8 +1829,19 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 
 			// Get all requests that are ready right *now*, before GetStatus() begins.
 			// All of these requests will be responded to with the next GetStatus() result.
-			while (requests.isReady())
-				requests_batch.push_back(requests.pop());
+			// If requests are batched, do not respond to more than MAX_STATUS_REQUESTS_PER_SECOND
+			// requests per second
+			while (requests.isReady()) {
+				auto req = requests.pop();
+				if (SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS > 0.0 &&
+					requests_batch.size() + 1 >
+						SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS * SERVER_KNOBS->MAX_STATUS_REQUESTS_PER_SECOND) {
+					TraceEvent("TooManyStatusRequests").detail("BatchSize", requests_batch.size());
+					req.reply.sendError(server_overloaded());
+				} else {
+					requests_batch.push_back(req);
+				}
+			}
 
 			// Get status but trap errors to send back to client.
 			vector<std::pair<WorkerInterface, ProcessClass>> workers;
