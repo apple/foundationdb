@@ -1280,6 +1280,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
 }
 
+// TODO: The operation may be applied more than once due to network duplicate delivery!
  ACTOR Future<Void> applyKVOpsToDB(Reference<RestoreData> rd, Database cx) {
  	state bool isPrint = false; //Debug message
  	state std::string typeStr = "";
@@ -1315,6 +1316,10 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
 
  			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
+ 			// Mutation types SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or,
+			//		Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue,
+			//		ByteMin, ByteMax, MinV2, AndV2, MAX_ATOMIC_OP
+
  			loop {
  				try {
  					tr->reset();
@@ -1326,6 +1331,12 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> restoreDa
  					} else if ( m.type == MutationRef::ClearRange ) {
  						KeyRangeRef mutationRange(m.param1, m.param2);
  						tr->clear(mutationRange);
+ 					} else if ( isAtomicOp((MutationRef::Type) m.type) ) {
+ 						//// Now handle atomic operation from this if statement
+ 						// TODO: Have not de-duplicated the mutations for multiple network delivery
+ 						// ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << MinV2) | (1 << AndV2),
+ 						//atomicOp( const KeyRef& key, const ValueRef& operand, uint32_t operationType )
+ 						tr->atomicOp(m.param1, m.param2, m.type);
  					} else {
  						printf("[WARNING] mtype:%d (%s) unhandled\n", m.type, typeStr.c_str());
  					}
@@ -1948,6 +1959,8 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
 	}
 
+	printf("[WARNING!!!] The receiveMutations() May receive the same mutation more than once! BAD for atomic operations!\n");
+
 	state int numMutations = 0;
 
 	loop {
@@ -1998,6 +2011,8 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 		printf("[INFO][Applier] nodeID:%s (interface id:%s) waits for Loader_Notify_Appler_To_Apply_Mutation cmd\n",
 				rd->localNodeStatus.nodeID.toString().c_str(), interf.id().toString().c_str());
 	}
+
+	printf("[WARNING!!!] The applyKVOpsToDB() May be applied multiple times! BAD for atomic operations!\n");
 
 	state int numMutations = 0;
 
@@ -3827,7 +3842,8 @@ bool allOpsAreKnown(Reference<RestoreData> rd) {
 	bool ret = true;
 	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
-			if ( m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange  )
+			if ( m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange
+			    || isAtomicOp((MutationRef::Type) m->type) )
 				continue;
 			else {
 				printf("[ERROR] Unknown mutation type:%d\n", m->type);
@@ -3995,9 +4011,8 @@ bool isRangeMutation(MutationRef m) {
 		}
 		return true;
 	} else {
-		if ( !(m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::AddValue ||
-				m.type == MutationRef::Type::DebugKey || m.type == MutationRef::Type::NoOp ||
-				m.type == MutationRef::Type::And || m.type == MutationRef::Type::Or) ) {
+		if ( !(m.type == MutationRef::Type::SetValue ||
+				isAtomicOp((MutationRef::Type) m.type)) ) {
 			printf("[ERROR] %s mutation is in backup data unexpectedly. We still handle it as a key mutation; the suspicious mutation:%s\n", typeString[m.type], m.toString().c_str());
 
 		}
