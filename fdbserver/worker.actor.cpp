@@ -135,7 +135,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	}
 }
 
-ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
+ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors, Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf) {
 	loop choose {
 		when( ErrorInfo _err = waitNext(errors) ) {
 			ErrorInfo err = _err;
@@ -151,6 +151,9 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			}
 
 			endRole(err.role, err.id, "Error", ok, err.error);
+			if (err.role == Role::DATA_DISTRIBUTOR && ddInterf->get().present()) {
+				ddInterf->set(Optional<DataDistributorInterface>());
+			}
 
 			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
 		}
@@ -267,13 +270,20 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
-ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass) {
+ACTOR Future<Void> registrationClient(
+		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+		WorkerInterface interf,
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+		ProcessClass initialClass,
+		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
+	// The registration request piggybacks optional distributor interface if it exists.
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
 	loop {
-		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++) ) ) : Never();
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get());
+		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;	
@@ -522,7 +532,8 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData locality,
 	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
 	state PromiseStream< ErrorInfo > errors;
-	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
+	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
+	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture(), ddInterf );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
@@ -650,7 +661,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -716,11 +727,16 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
 				DataDistributorInterface recruited(locality);
-				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());
-				startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
+				if ( ddInterf->get().present() ) {
+					recruited = ddInterf->get().get();
+				} else {
+					startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 
-				Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
-				errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), dataDistributorProcess ) );
+					Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
+					errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), dataDistributorProcess ) );
+					ddInterf->set(Optional<DataDistributorInterface>(recruited));
+				}
+				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {

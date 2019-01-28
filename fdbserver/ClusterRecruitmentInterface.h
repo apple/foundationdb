@@ -169,15 +169,16 @@ struct RegisterWorkerRequest {
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	Generation generation;
+	Optional<DataDistributorInterface> distributorInterf;
 	ReplyPromise<RegisterWorkerReply> reply;
 
 	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation) : 
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, reply);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, reply);
 	}
 };
 
