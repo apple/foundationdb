@@ -166,6 +166,12 @@ namespace actorcompiler
         }
         public Token[] GetAllTokens() { return tokens; }
 
+        public int Length {
+            get {
+                return endPos - beginPos;
+            }
+        }
+
         Token[] tokens;
         int beginPos;
         int endPos;
@@ -852,26 +858,38 @@ namespace actorcompiler
 
             var toks = range(pos+1, tokens.Length);
             var heading = toks.TakeWhile(t => t.Value != "{");
-            var body = range(heading.End+1, tokens.Length)
-                .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
+            var toSemicolon = toks.TakeWhile(t => t.Value != ";");
+            actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
+            if (actor.isForwardDeclaration) {
+                heading = toSemicolon;
+                if (head_token.Value == "ACTOR") {
+                    ParseActorHeading(actor, heading);
+                } else {
+                    head_token.Assert("ACTOR expected!", t => false);
+                }
+                end = heading.End + 1;
+            } else {
+                var body = range(heading.End+1, tokens.Length)
+                    .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-            bool warnOnNoWait = false;
-            if (head_token.Value == "ACTOR")
-            {
-                ParseActorHeading(actor, heading);
-                warnOnNoWait = true;
+                bool warnOnNoWait = false;
+                if (head_token.Value == "ACTOR")
+                {
+                    ParseActorHeading(actor, heading);
+                    warnOnNoWait = true;
+                }
+                else if (head_token.Value == "TEST_CASE")
+                    ParseTestCaseHeading(actor, heading);
+                else
+                    head_token.Assert("ACTOR or TEST_CASE expected!", t => false);
+
+                actor.body = ParseCodeBlock(body);
+
+                if (!actor.body.containsWait() && warnOnNoWait)
+                    Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+
+                end = body.End + 1;
             }
-            else if (head_token.Value == "TEST_CASE")
-                ParseTestCaseHeading(actor, heading);
-            else
-                head_token.Assert("ACTOR or TEST_CASE expected!", t => false);
-
-            actor.body = ParseCodeBlock(body);
-
-            if (!actor.body.containsWait() && warnOnNoWait)
-                Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
-
-            end = body.End + 1;
             return actor;
         }
 

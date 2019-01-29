@@ -300,6 +300,13 @@ namespace actorcompiler
         }
         public void Write(TextWriter writer)
         {
+            string fullReturnType =
+                actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
+                : "void";
+            if (actor.isForwardDeclaration) {
+                writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
+                return;
+            }
             for (int i = 0; ; i++)
             {
                 className = string.Format("{0}{1}Actor{2}",
@@ -391,9 +398,6 @@ namespace actorcompiler
             if (isTopLevel) writer.WriteLine("}");  // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
-            string fullReturnType =
-                actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
-                : "void";
             if (actor.isStatic) writer.Write("static ");
             writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
             LineNumber(writer, actor.SourceLine);
