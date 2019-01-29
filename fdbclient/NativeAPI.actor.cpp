@@ -869,6 +869,9 @@ Future<Void> Cluster::onConnected() {
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
 	switch(option) {
 		// SOMEDAY: If the network is already started, should these three throw an error?
+		case FDBNetworkOptions::USE_OBJECT_SERIALIZER:
+			networkOptions.useObjectSerializer = extractIntOption(value) != 0;
+			break;
 		case FDBNetworkOptions::TRACE_ENABLE:
 			networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 			break;
@@ -1008,7 +1011,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.useObjectSerializer);
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 

@@ -53,6 +53,7 @@ public:
 		NetworkAddress address;
 		LocalityData	locality;
 		ProcessClass startingClass;
+		bool useObjectSerializer;
 		TDMetricCollection tdmetrics;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
 		bool failed;
@@ -69,10 +70,11 @@ public:
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), cleared(false) {}
+            : name(name), locality(locality), startingClass(startingClass), useObjectSerializer(useObjectSerializer),
+              addresses(addresses), address(addresses.address), dataFolder(dataFolder),
+              network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
+              rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+              fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -141,7 +143,7 @@ public:
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) = 0;
+	                                const char* coordinationFolder, bool useObjectSerializer) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
@@ -154,6 +156,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
+	virtual bool useObjectSerializer() const { return currentProcess->useObjectSerializer; }
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
