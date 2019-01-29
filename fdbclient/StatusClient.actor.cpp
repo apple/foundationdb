@@ -375,7 +375,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 							("Unable to communicate with the cluster controller at " + cI.address().toString() + " to get status.").c_str()));
 					else if (result.getError().code() == error_code_server_overloaded)
 						messages->push_back(makeMessage("server_overloaded",
-							"The cluster controller is currently processing too many status requests, and is unable to respond"));
+							"The cluster controller is currently processing too many status requests and is unable to respond"));
 					else
 						messages->push_back(makeMessage("status_incomplete_error", "Cluster encountered an error fetching status."));
 				}
