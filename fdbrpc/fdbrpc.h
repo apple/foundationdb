@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
@@ -174,6 +175,30 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	networkSender(value.getFuture(), endpoint);
 }
 
+template <class T>
+struct scalar_traits<ReplyPromise<T>> : std::true_type {
+	using endpoint = scalar_traits<Endpoint>;
+
+	constexpr static size_t size = endpoint::size;
+
+	static void save(uint8_t* out, const ReplyPromise<T>& reply) {
+		auto const& ep = reply.getEndpoint();
+		endpoint::save(out, ep);
+		ASSERT(!ep.address.isValid() || ep.address.isPublic()); // No re-serializing non-public addresses
+		                                                        // (the reply connection won't be
+		                                                        // available to any other process)
+	}
+
+	template <class C>
+	static void load(const uint8_t* in, ReplyPromise<T>& reply, C& context) {
+		Endpoint ep;
+		endpoint::load(in, ep, context);
+		FlowTransport::transport().loadedEndpoint(ep);
+		reply = ReplyPromise<T>(ep);
+		networkSender(reply.getFuture(), ep);
+	}
+};
+
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) { return p; }
@@ -218,6 +243,13 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 		this->addPromiseRef();
 		T message;
 		reader >> message;
+		this->send(std::move(message));
+		this->delPromiseRef();
+	}
+	virtual void receive(ArenaObjectReader& reader) {
+		this->addPromiseRef();
+		T message;
+		reader.deserialize(message);
 		this->send(std::move(message));
 		this->delPromiseRef();
 	}
@@ -389,6 +421,29 @@ void load(Ar& ar, RequestStream<T>& value) {
 	ar >> endpoint;
 	value = RequestStream<T>(endpoint);
 }
+
+template <class T>
+struct scalar_traits<RequestStream<T>> : std::true_type {
+	using endpointTraits = scalar_traits<Endpoint>;
+
+	static constexpr size_t size = endpointTraits::size;
+
+	static void save(uint8_t* out, const RequestStream<T>& stream) {
+		auto const& ep = stream.getEndpoint();
+		endpointTraits::save(out, ep);
+		UNSTOPPABLE_ASSERT(ep.address.isValid());
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* in, RequestStream<T>& stream, Context& context) {
+		Endpoint endpoint;
+		endpointTraits::load(in, endpoint, context);
+		FlowTransport::transport().loadedEndpoint(endpoint);
+		stream = RequestStream<T>(endpoint);
+	}
+};
 
 #endif
 #include "fdbrpc/genericactors.actor.h"

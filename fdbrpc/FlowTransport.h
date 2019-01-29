@@ -86,6 +86,26 @@ public:
 #pragma pack(pop)
 
 
+template <>
+struct scalar_traits<Endpoint> : std::true_type {
+	using networkAddress = scalar_traits<NetworkAddress>;
+	using token = scalar_traits<UID>;
+
+	static constexpr size_t size = networkAddress::size + token::size;
+
+	static void save(uint8_t* out, const Endpoint& endpoint) {
+		networkAddress::save(out, endpoint.address);
+		out += networkAddress::size;
+		token::save(out, endpoint.token);
+	}
+
+	template <class C>
+	static void load(const uint8_t* in, Endpoint& endpoint, C& c) {
+		networkAddress::load(in, endpoint.address, c);
+		in += networkAddress::size;
+		token::load(in, endpoint.token, c);
+	}
+};
 
 class ArenaObjectReader;
 class NetworkMessageReceiver {
@@ -162,6 +182,8 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+
+	void loadedEndpoint(Endpoint&);
 
 private:
 	class TransportData* self;

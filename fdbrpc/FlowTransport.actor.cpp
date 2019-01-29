@@ -127,6 +127,12 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 		Endpoint e; reader >> e;
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
+
+	virtual void receive(ArenaObjectReader& reader) {
+		Endpoint e;
+		reader.deserialize(e);
+		IFailureMonitor::failureMonitor().endpointNotFound(e);
+	}
 };
 
 struct PingReceiver : NetworkMessageReceiver {
@@ -137,6 +143,11 @@ struct PingReceiver : NetworkMessageReceiver {
 	}
 	virtual void receive( ArenaReader& reader ) {
 		ReplyPromise<Void> reply; reader >> reply;
+		reply.send(Void());
+	}
+	virtual void receive(ArenaObjectReader& reader) {
+		ReplyPromise<Void> reply;
+		reader.deserialize(reply);
 		reply.send(Void());
 	}
 };

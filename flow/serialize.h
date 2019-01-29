@@ -717,22 +717,24 @@ struct ISerializeSource {
 	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
 };
 
-template <class T>
+template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
+	using value_type = V;
 	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
 		if (useObjectSerializer) {
 			ObjectWriter writer;
 			writer.serialize(get());
 		} else {
-			((T const*)this)->serialize(w);
+			static_cast<T const*>(this)->serialize(w);
 		}
 	}
-	virtual void serializeBinaryWriter(BinaryWriter& w) const { ((T const*)this)->serialize(w); }
-	virtual T const& get() const = 0;
+	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
+	virtual value_type const& get() const = 0;
 };
 
 template <class T>
-struct SerializeSource : MakeSerializeSource<SerializeSource<T>> {
+struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
+	using value_type = T;
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
 	template <class Ar> void serialize(Ar& ar) const { ar << value; }
@@ -740,7 +742,8 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>> {
 };
 
 template <class T>
-struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>> {
+struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
+	using value_type = T;
 	bool b;
 	T const& value;
 	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}

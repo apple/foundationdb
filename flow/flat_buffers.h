@@ -56,20 +56,6 @@ constexpr int RightAlign(int offset, int alignment) {
 	return offset % alignment == 0 ? offset : ((offset / alignment) + 1) * alignment;
 }
 
-template <class T, typename = void>
-struct is_fb_function_t : std::false_type {};
-
-template<class T>
-struct is_fb_function_t<T, typename std::enable_if<T::is_fb_visitor>::type> : std::true_type {};
-
-template <class T>
-constexpr bool is_fb_function = is_fb_function_t<T>::value;
-
-template <class Visitor, class... Items>
-typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
-	visitor(items...);
-}
-
 template <class T>
 struct object_construction {
 	T obj;
@@ -100,7 +86,8 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 };
 
 template <class T>
-struct scalar_traits<T, std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value>>
+struct scalar_traits<
+    T, std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value || std::is_enum<T>::value>>
   : std::true_type {
 	constexpr static size_t size = sizeof(T);
 	static void save(uint8_t* out, const T& t) { memcpy(out, &t, size); }

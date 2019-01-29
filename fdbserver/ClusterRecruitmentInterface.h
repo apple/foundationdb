@@ -60,9 +60,12 @@ struct ClusterControllerFullInterface {
 	}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
+		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
+		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 
@@ -216,9 +219,12 @@ struct RegisterMasterRequest {
 	RegisterMasterRequest() {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
+		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
+		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 

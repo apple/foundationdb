@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/Platform.h"
+#include "flow/ObjectSerializerTraits.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
 #include <ext/hash_map>
@@ -58,6 +59,22 @@ public:
 
 template <class Ar> void load( Ar& ar, UID& uid ) { uid.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, UID const& uid ) { const_cast<UID&>(uid).serialize_unversioned(ar); }
+
+template <>
+struct scalar_traits<UID> : std::true_type {
+	constexpr static size_t size = sizeof(uint64_t[2]);
+	static void save(uint8_t* out, const UID& uid) {
+		uint64_t* outI = reinterpret_cast<uint64_t*>(out);
+		outI[0] = uid.first();
+		outI[1] = uid.second();
+	}
+
+	template <class Context>
+	static void load(const uint8_t* i, UID& out, Context& context) {
+		const uint64_t* in = reinterpret_cast<const uint64_t*>(i);
+		out = UID(in[0], in[1]);
+	}
+};
 
 namespace std {
 	template <>

@@ -156,6 +156,7 @@ public:
 
 	bool isValid() const { return ptr != NULL; }
 	explicit operator bool() const { return ptr != NULL; }
+	P*& changePtrUnsafe() { return ptr; }
 
 private:
 	P *ptr;

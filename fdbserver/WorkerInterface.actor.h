@@ -139,7 +139,9 @@ struct RecruitMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+		}
 		serializer(ar, lifetime, forceRecovery, reply, arena);
 	}
 };

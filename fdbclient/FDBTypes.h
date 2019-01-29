@@ -73,6 +73,23 @@ struct Tag {
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
 
+template<>
+struct scalar_traits<Tag> : std::true_type {
+	using locality_trait = scalar_traits<decltype(std::declval<Tag>().locality)>;
+	using id_trait = scalar_traits<decltype(std::declval<Tag>().id)>;
+	constexpr static size_t size = locality_trait::size + id_trait::size;
+	static void save(uint8_t* out, const Tag& tag) {
+		locality_trait::save(out, tag.locality);
+		id_trait::save(out + id_trait::size, tag.id);
+	}
+
+	template <class Context>
+	static void load(const uint8_t* in, Tag& tag, Context& context) {
+		locality_trait::load(in, tag.locality, context);
+		id_trait::load(in + locality_trait::size, tag.id, context);
+	}
+};
+
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
 
@@ -724,6 +741,25 @@ struct AddressExclusion {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ip, port);
+	}
+};
+
+template <>
+struct scalar_traits<AddressExclusion> : std::true_type {
+	using ip_traits = scalar_traits<uint32_t>;
+	using port_traits = scalar_traits<int>;
+	constexpr static size_t size = ip_traits::size + port_traits::size;
+	static void save(uint8_t* buf, const AddressExclusion& value) {
+		ip_traits::save(buf, value.ip);
+		port_traits::save(buf + ip_traits::size, value.port);
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* buf, AddressExclusion& value, Context& context) {
+		ip_traits::load<Context>(buf, value.ip, context);
+		port_traits::load<Context>(buf + ip_traits::size, value.port, context);
 	}
 };
 

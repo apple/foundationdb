@@ -27,6 +27,21 @@
 #include <functional>
 #include <vector>
 
+template <class T, typename = void>
+struct is_fb_function_t : std::false_type {};
+
+template<class T>
+struct is_fb_function_t<T, typename std::enable_if<T::is_fb_visitor>::type> : std::true_type {};
+
+template <class T>
+constexpr bool is_fb_function = is_fb_function_t<T>::value;
+
+template <class Visitor, class... Items>
+typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
+	visitor(items...);
+}
+
+
 template <class... Ts>
 struct pack {};
 
