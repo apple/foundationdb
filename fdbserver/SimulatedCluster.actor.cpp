@@ -131,8 +131,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupToFile) {
-		Reference<Cluster> cluster = Cluster::createCluster(connFile, -1);
-		Database cx = cluster->createDatabase().get();
+		Database cx = Database::createDatabase(connFile, -1);
 
 		state FileBackupAgent fileAgent;
 		state double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
@@ -159,12 +158,10 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 	}
 
 	if (g_simulator.drAgents == ISimulator::BackupToDB) {
-		Reference<Cluster> cluster = Cluster::createCluster(connFile, -1);
-		Database cx = cluster->createDatabase().get();
+		Database cx = Database::createDatabase(connFile, -1);
 
 		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-		state Database extraDB = extraCluster->createDatabase().get();
+		state Database extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
 
@@ -597,7 +594,7 @@ ACTOR Future<Void> simulatedMachine(
 
 ACTOR Future<Void> restartSimulatedSystem(
 		vector<Future<Void>> *systemActors, std::string baseFolder, int* pTesterCount,
-		Optional<ClusterConnectionString> *pConnString, Reference<TLSOptions> tlsOptions, int extraDB) {
+		Optional<ClusterConnectionString> *pConnString, Standalone<StringRef> *pStartingConfiguration, Reference<TLSOptions> tlsOptions, int extraDB) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -619,13 +616,20 @@ ACTOR Future<Void> restartSimulatedSystem(
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
 		int useSeedForMachine = g_random->randomInt(0, machineCount);
+		std::vector<std::string> dcIds;
 		for( int i = 0; i < machineCount; i++) {
 			Optional<Standalone<StringRef>> dcUID;
 			std::string zoneIdString = ini.GetValue("META", format("%d", i).c_str());
 			Standalone<StringRef> zoneId = StringRef(zoneIdString);
 			std::string	dcUIDini = ini.GetValue(zoneIdString.c_str(), "dcUID");
-			if (!dcUIDini.empty()) dcUID = StringRef(dcUIDini);
+			
+			if (!dcUIDini.empty()) {
+				dcUID = StringRef(dcUIDini);
+			}
 			ProcessClass processClass = ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(zoneIdString.c_str(), "mClass")), ProcessClass::CommandLineSource);
+			if(processClass != ProcessClass::TesterClass) {
+				dcIds.push_back(dcUIDini);
+			}
 
 			std::vector<uint32_t> ipAddrs;
 			int processes = atoi(ini.GetValue(zoneIdString.c_str(), "processes"));
@@ -656,6 +660,32 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 		g_simulator.desiredCoordinators = desiredCoordinators;
 		g_simulator.processesPerMachine = processesPerMachine;
+
+		uniquify(dcIds);
+		if(!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
+			StatusObject primaryObj;
+			StatusObject primaryDcObj;
+			primaryDcObj["id"] = dcIds[0];
+			primaryDcObj["priority"] = 2;
+			StatusArray primaryDcArr;
+			primaryDcArr.push_back(primaryDcObj);
+
+			StatusObject remoteObj;
+			StatusObject remoteDcObj;
+			remoteDcObj["id"] = dcIds[1];
+			remoteDcObj["priority"] = 1;
+			StatusArray remoteDcArr;
+			remoteDcArr.push_back(remoteDcObj);
+
+			primaryObj["datacenters"] = primaryDcArr;
+			remoteObj["datacenters"] = remoteDcArr;
+
+			StatusArray regionArr;
+			regionArr.push_back(primaryObj);
+			regionArr.push_back(remoteObj);
+
+			*pStartingConfiguration = "single usable_regions=2 regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+		}
 	}
 	catch (Error& e) {
 		TraceEvent(SevError, "RestartSimulationError").error(e);
@@ -705,8 +735,9 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
-	bool generateFearless = minimumRegions > 1 || g_random->random01() < 0.5;
-	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
+	const bool simple = false;  // Set true to simplify simulation configs for easier debugging
+	bool generateFearless = simple ? false : (minimumRegions > 1 || g_random->random01() < 0.5);
+	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 ) );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -715,8 +746,13 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else {
 		set_config("memory");
 	}
+	if(simple) {
+		db.desiredTLogCount = 1;
+		db.masterProxyCount = 1;
+		db.resolverCount = 1;
+	}
 
-	int replication_type = std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3));
+	int replication_type = simple ? 1 : ( std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3)) );
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
@@ -1259,7 +1295,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, tlsOptions, extraDB), 100.0 ) );
+			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, tlsOptions, extraDB), 100.0 ) );
 		}
 		else {
 			g_expect_full_pointermap = 1;

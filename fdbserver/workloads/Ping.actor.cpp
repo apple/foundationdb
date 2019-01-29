@@ -34,7 +34,7 @@ struct PingWorkloadInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & payloadPing;
+		serializer(ar, payloadPing);
 	}
 };
 

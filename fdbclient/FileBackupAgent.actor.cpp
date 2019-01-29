@@ -1004,6 +1004,7 @@ namespace fileBackup {
 
 					// Update the range bytes written in the backup config
 					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
+					backup.snapshotRangeFileCount().atomicOp(tr, 1, MutationRef::AddValue);
 
 					// See if there is already a file for this key which has an earlier begin, update the map if not.
 					Optional<BackupConfig::RangeSlice> s = wait(backup.snapshotRangeFileMap().get(tr, range.end));
@@ -1129,11 +1130,31 @@ namespace fileBackup {
 					if(done)
 						return Void();
 
-					// Start writing a new file 
+					// Start writing a new file after verifying this task should keep running as of a new read version (which must be >= outVersion)
 					outVersion = values.second;
 					// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
 					state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
-					Reference<IBackupFile> f = wait(bc->writeRangeFile(outVersion, blockSize));
+					state Version snapshotBeginVersion;
+					state int64_t snapshotRangeFileCount;
+
+					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+					loop {
+						try {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+							wait(taskBucket->keepRunning(tr, task)
+								&& storeOrThrow(backup.snapshotBeginVersion().get(tr), snapshotBeginVersion)
+								&& store(backup.snapshotRangeFileCount().getD(tr), snapshotRangeFileCount)
+							);
+
+							break;
+						} catch(Error &e) {
+							wait(tr->onError(e));
+						}
+					}
+
+					Reference<IBackupFile> f = wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 					outFile = f;
 
 					// Initialize range file writer and write begin key
@@ -3360,8 +3381,9 @@ class FileBackupAgentImpl {
 public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
-	// This method will return the final status of the backup
-	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone) {
+	// This method will return the final status of the backup at tag, and return the URL that was used on the tag
+	// when that status value was read.
+	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr) {
 		state std::string backTrace;
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
@@ -3379,13 +3401,20 @@ public:
 				state BackupConfig config(oldUidAndAborted.get().first);
 				state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
-				// Break, if no longer runnable
-				if (!FileBackupAgent::isRunnable(status)) {
-					return status;
-				}
+				// Break, if one of the following is true
+				//  - no longer runnable
+				//  - in differential mode (restorable) and stopWhenDone is not enabled
+				if( !FileBackupAgent::isRunnable(status) || (!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) ) {
 
-				// Break, if in differential mode (restorable) and stopWhenDone is not enabled
-				if ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status)) {
+					if(pContainer != nullptr) {
+						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
+						*pContainer = c;
+					}
+
+					if(pUID != nullptr) {
+						*pUID = oldUidAndAborted.get().first;
+					}
+
 					return status;
 				}
 
@@ -4061,7 +4090,7 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	tr->set(lastRestorable.pack(tagName), BinaryWriter::toValue<Version>(version, Unversioned()));
 }
 
-Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone) {
-	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
+Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer, UID *pUID) {
+	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone, pContainer, pUID);
 }
 

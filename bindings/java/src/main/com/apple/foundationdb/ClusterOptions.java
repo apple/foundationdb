@@ -1,9 +1,9 @@
 /*
- * FutureCluster.java
+ * ClusterOptions.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,21 +20,14 @@
 
 package com.apple.foundationdb;
 
-import java.util.concurrent.Executor;
-
-class FutureCluster extends NativeFuture<Cluster> {
-	private final Executor executor;
-
-	protected FutureCluster(long cPtr, Executor executor) {
-		super(cPtr);
-		this.executor = executor;
-		registerMarshalCallback(executor);
+/**
+ * A set of options that can be set on a {@link Cluster}.
+ * 
+ * @deprecated There are no cluster options.
+ */
+@Deprecated
+public class ClusterOptions extends OptionsSet {	
+	public ClusterOptions( OptionConsumer consumer ) { 
+		super(consumer); 
 	}
-
-	@Override
-	protected Cluster getIfDone_internal(long cPtr) throws FDBException {
-		return new Cluster(FutureCluster_get(cPtr), executor);
-	}
-
-	private native long FutureCluster_get(long cPtr) throws FDBException;
 }

@@ -28,6 +28,7 @@
 
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
 
 	LocalityData locality;
 	RequestStream< struct CommitTransactionRequest > commit;
@@ -49,7 +50,7 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & locality & commit & getConsistentReadVersion & getKeyServersLocations & waitFailure & getStorageServerRejoinInfo & getRawCommittedVersion & txnState;
+		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion, txnState);
 	}
 
 	void initEndpoints() {
@@ -66,7 +67,7 @@ struct CommitID {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & txnBatchId;
+		serializer(ar, version, txnBatchId);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
@@ -92,16 +93,16 @@ struct CommitTransactionRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & transaction & reply & arena & flags & debugID;
+		serializer(ar, transaction, reply, arena, flags, debugID);
 	}
 };
 
-static inline int getBytes( CommitTransactionRequest const& r ) { 
+static inline int getBytes( CommitTransactionRequest const& r ) {
 	// SOMEDAY: Optimize
 	//return r.arena.getSize(); // NOT correct because arena can be shared!
 	int total = sizeof(r);
 	for(auto m = r.transaction.mutations.begin(); m != r.transaction.mutations.end(); ++m)
-		total += m->expectedSize();
+		total += m->expectedSize() + CLIENT_KNOBS->PROXY_COMMIT_OVERHEAD_BYTES;
 	for(auto i = r.transaction.read_conflict_ranges.begin(); i != r.transaction.read_conflict_ranges.end(); ++i)
 		total += i->expectedSize();
 	for(auto i = r.transaction.write_conflict_ranges.begin(); i != r.transaction.write_conflict_ranges.end(); ++i)
@@ -115,7 +116,7 @@ struct GetReadVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & locked;
+		serializer(ar, version, locked);
 	}
 };
 
@@ -143,7 +144,7 @@ struct GetReadVersionRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & transactionCount & flags & debugID & reply;
+		serializer(ar, transactionCount, flags, debugID, reply);
 	}
 };
 
@@ -153,7 +154,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & results & arena;
+		serializer(ar, results, arena);
 	}
 };
 
@@ -170,7 +171,7 @@ struct GetKeyServerLocationsRequest {
 	
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & begin & end & limit & reverse & reply & arena;
+		serializer(ar, begin, end, limit, reverse, reply, arena);
 	}
 };
 
@@ -182,7 +183,7 @@ struct GetRawCommittedVersionRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & debugID & reply;
+		serializer(ar, debugID, reply);
 	}
 };
 
@@ -195,7 +196,7 @@ struct GetStorageServerRejoinInfoReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & tag & newTag & newLocality & history;
+		serializer(ar, version, tag, newTag, newLocality, history);
 	}
 };
 
@@ -209,7 +210,7 @@ struct GetStorageServerRejoinInfoRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & dcId & reply;
+		serializer(ar, id, dcId, reply);
 	}
 };
 
@@ -222,7 +223,7 @@ struct TxnStateRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & data & sequence & last & reply & arena;
+		serializer(ar, data, sequence, last, reply, arena);
 	}
 };
 

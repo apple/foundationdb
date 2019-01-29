@@ -45,8 +45,8 @@ struct OptionalInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & iface;
-		if( !iface.present() ) ar & ident;
+		serializer(ar, iface);
+		if( !iface.present() ) serializer(ar, ident);
 		else ident = iface.get().id();
 	}
 
@@ -111,7 +111,7 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & locality & startVersion & satelliteTagLocations;
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 	}
 };
 
@@ -144,7 +144,7 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & epochEnd & logRouterTags;
+		serializer(ar, tLogs, epochEnd, logRouterTags);
 	}
 };
 
@@ -304,7 +304,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & recoveredAt;
+		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt);
 	}
 };
 

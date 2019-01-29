@@ -175,11 +175,9 @@ public:
 	Future<Void> vacuuming;
 	Version oldestVersion;
 
+	// TODO: This structure maybe isn't needed
 	struct BusyPage {
-		BusyPage() : readerCount(0) {}
-		int readerCount;
-		Promise<Void> onUnused;
-		Future<Reference<IPage>> read;
+		Future<Reference<const IPage>> read;
 	};
 
 	typedef std::map<PhysicalPageID, BusyPage> BusyPageMapT;

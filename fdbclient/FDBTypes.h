@@ -53,7 +53,7 @@ struct Tag {
 
 	template <class Ar>
 	force_inline void serialize_unversioned(Ar& ar) { 
-		ar & locality & id;
+		serializer(ar, locality, id);
 	}
 };
 #pragma pack(pop)
@@ -89,6 +89,11 @@ static std::string describe( const Tag item ) {
 
 static std::string describe( const int item ) {
 	return format("%d", item);
+}
+
+template <class T>
+static std::string describe( Reference<T> const& item ) {
+	return item->toString();
 }
 
 template <class T>
@@ -140,12 +145,17 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
-std::string printable( const Optional<StringRef>& val );
-std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
+
+template <class T>
+std::string printable( const Optional<T>& val ) {
+	if( val.present() )
+		return printable( val.get() );
+	return "[not set]";
+}
 
 inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
 	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )
@@ -188,7 +198,7 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		ar & const_cast<KeyRef&>(begin) & const_cast<KeyRef&>(end);
+		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		if( begin > end ) {
 			throw inverted_range();
 		};
@@ -222,7 +232,7 @@ struct KeyValueRef {
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
 	template <class Ar>
-	force_inline void serialize(Ar& ar) { ar & key & value; }
+	force_inline void serialize(Ar& ar) { serializer(ar, key, value); }
 
 	struct OrderByKey {
 		bool operator()(KeyValueRef const& a, KeyValueRef const& b) const {
@@ -380,7 +390,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & orEqual & offset;
+		serializer(ar, key, orEqual, offset);
 	}
 };
 
@@ -413,7 +423,7 @@ struct KeyRangeWith : KeyRange {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((KeyRange&)*this) & value;
+		serializer(ar, ((KeyRange&)*this), value);
 	}
 };
 template <class Val>
@@ -465,7 +475,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 };
 
@@ -487,7 +497,7 @@ struct KeyValueStoreType {
 	operator StoreType() const { return StoreType(type); }
 
 	template <class Ar>
-	void serialize(Ar& ar) { ar & type; }
+	void serialize(Ar& ar) { serializer(ar, type); }
 
 	std::string toString() const {
 		switch( type ) {
@@ -515,7 +525,7 @@ struct StorageBytes {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & free & total & used & available;
+		serializer(ar, free, total, used, available);
 	}
 };
 
@@ -634,7 +644,7 @@ struct ClusterControllerPriorityInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & processClassFitness & isExcluded & dcFitness;
+		serializer(ar, processClassFitness, isExcluded, dcFitness);
 	}
 };
 

@@ -59,8 +59,9 @@ std::string ClusterConnectionFile::getErrorString( std::pair<std::string, bool> 
 }
 
 ClusterConnectionFile::ClusterConnectionFile( std::string const& filename ) {
-	if( !fileExists( filename ) )
+	if( !fileExists( filename ) ) {
 		throw no_cluster_file_found();
+	}
 
 	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
 	this->filename = filename;

@@ -234,7 +234,7 @@
 
 .. |network-options-warning| replace::
 
-    It is an error to set these options after the first call to |open-func| or |init-func| anywhere in your application.
+    It is an error to set these options after the first call to |open-func| anywhere in your application.
 
 .. |tls-options-burb| replace::
 
@@ -242,7 +242,7 @@
 
 .. |option-tls-plugin-blurb| replace::
 
-    Sets the :ref:`TLS plugin <configuring-tls-plugin>` to load. This option, if used, must be set before any other TLS options.
+    Sets the :ref:`TLS plugin <configuring-tls>` to load. This option, if used, must be set before any other TLS options.
 
 .. |option-tls-cert-path-blurb| replace::
 
@@ -398,7 +398,7 @@
     Cancels |future-type-string| and its associated asynchronous operation. If called before the future is ready, attempts to access its value will |error-raise-type| an :ref:`operation_cancelled <developer-guide-error-codes>` |error-type|. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.
 
 .. |fdb-open-blurb| replace::
-    Initializes the FoundationDB API, connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`, and opens the database with the specified name. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
+    Initializes the FoundationDB API and connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
 
 .. |fdb-transactional-unknown-result-note| replace::
     In some failure scenarios, it is possible that your transaction will be executed twice. See :ref:`developer-guide-unknown-results` for more information.

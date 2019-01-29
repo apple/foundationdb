@@ -57,12 +57,11 @@ struct ChangeConfigWorkload : TestWorkload {
 	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload *self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = cluster->createDatabase().get();
+			state Database extraDB = Database::createDatabase(extraFile, -1);
 
 			wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
-				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
+				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode, true));
 				TraceEvent("WaitForReplicasExtra");
 				wait( waitForFullReplication( extraDB ) );
 				TraceEvent("WaitForReplicasExtraEnd");
@@ -87,7 +86,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if( self->configMode.size() ) {
-			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode, true ) );
 			TraceEvent("WaitForReplicas");
 			wait( waitForFullReplication( cx ) );
 			TraceEvent("WaitForReplicasEnd");

@@ -31,7 +31,7 @@
     ``coordinators auto`` selects processes based on IP address. If your cluster has processes on the same machine with different IP addresses, ``coordinators auto`` may select a set of coordinators that are not fault tolerant. To ensure maximal fault tolerance, we recommend selecting coordinators according to the criteria in :ref:`configuration-choosing-coordination-servers` and setting them manually.
 
 .. |conf-file-change-detection| replace::
-    Whenever the ``foundationdb.conf`` file changes, the ``fdbmonitor`` daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.
+    Whenever the ``foundationdb.conf`` file changes, the ``fdbmonitor`` daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.  Note that changes to the configuration file contents must be made *atomically*.  It is recommended to save the modified file to a temporary filename and then move/rename it into place, replacing the original.  Some text editors do this automatically when saving.
 
 .. |package-deb-clients| replace::
     foundationdb-clients\_\ |release|\ -1\_amd64.deb

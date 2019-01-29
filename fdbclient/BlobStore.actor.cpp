@@ -18,15 +18,18 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/BlobStore.h"
+#include "fdbclient/BlobStore.h"
 
-#include "fdbrpc/md5/md5.h"
-#include "fdbrpc/libb64/encode.h"
-#include "fdbrpc/sha1/SHA1.h"
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
+#include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
+#include "rapidxml/rapidxml.hpp"
+
+using namespace rapidxml;
 
 json_spirit::mObject BlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;
@@ -135,7 +138,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &url, std::string *resourceFromURL, std::string *error) {
+Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &url, std::string *resourceFromURL, std::string *error, ParametersT *ignored_parameters) {
 	if(resourceFromURL)
 		resourceFromURL->clear();
 
@@ -162,12 +165,28 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			if(name.size() == 0)
 				break;
 			StringRef value = t.eat("&");
+
+			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is known to BlobStoreEndpoint.
+			// If it is, then we will set it to a good value or throw below, so the dummy set has no bad side effects.
+			bool known = knobs.set(name, 0);
+
+			// If the parameter is not known to BlobStoreEndpoint then throw unless there is an ignored_parameters set to add it to
+			if(!known) {
+				if(ignored_parameters == nullptr) {
+					throw format("%s is not a valid parameter name", name.toString().c_str());
+				}
+				(*ignored_parameters)[name.toString()] = value.toString();
+				continue;
+			}
+
+			// The parameter is known to BlobStoreEndpoint so it must be numeric and valid.
 			char *valueEnd;
 			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
 			if(*valueEnd || (ivalue == 0 && value.toString() != "0"))
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
-			if(!knobs.set(name, ivalue))
-				throw format("%s is not a valid parameter name", name.toString().c_str());
+
+			// It should not be possible for this set to fail now since the dummy set above had to have worked.
+			ASSERT(knobs.set(name, ivalue));
 		}
 
 		if(resourceFromURL != nullptr)
@@ -206,6 +225,20 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 	return r;
 }
 
+ACTOR Future<bool> bucketExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
+	wait(b->requestRateRead->getAllowance(1));
+
+	std::string resource = std::string("/") + bucket;
+	HTTP::Headers headers;
+
+	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
+	return r->code == 200;
+}
+
+Future<bool> BlobStoreEndpoint::bucketExists(std::string const &bucket) {
+	return bucketExists_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
+}
+
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
@@ -225,8 +258,17 @@ ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string
 
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
+	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered successful
 	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
-	// 200 means object deleted, 404 means it doesn't exist already, so either success code passed above is fine.
+
+	// But if the object already did not exist then the 'delete' is assumed to be successful but a warning is logged.
+	if(r->code == 404) {
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointDeleteObjectMissing")
+			.detail("Host", b->host)
+			.detail("Bucket", bucket)
+			.detail("Object", object);
+	}
+
 	return Void();
 }
 
@@ -291,9 +333,12 @@ Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateWrite->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket;
-	HTTP::Headers headers;
-	Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
+	bool exists = wait(b->bucketExists(bucket));
+	if(!exists) {
+		std::string resource = std::string("/") + bucket;
+		HTTP::Headers headers;
+		Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
+	}
 	return Void();
 }
 
@@ -448,6 +493,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
+	headers["Accept"] = "application/xml";
 	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
@@ -465,8 +511,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
 			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
+			contentCopy.discardAll();
 			if(pContent != nullptr) {
-				contentCopy.discardAll();
 				PacketBuffer *pFirst = pContent->getUnsent();
 				PacketBuffer *pLast = nullptr;
 				for(PacketBuffer *p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {
@@ -489,7 +535,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
-			r->convertToJSONifXML();
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
 			if(r->headers["Connection"] != "close")
@@ -628,82 +673,92 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 		listReleaser.release();
 
 		try {
-			BlobStoreEndpoint::ListResult result;
-			// Parse the json assuming it is valid and contains the right stuff.  If any exceptions are thrown, throw http_bad_response
-			json_spirit::mValue json;
-			json_spirit::read_string(r->content, json);
-			JSONDoc doc(json);
+			BlobStoreEndpoint::ListResult listResult;
+			xml_document<> doc;
 
-			std::string isTruncated;
-			if (!doc.tryGet("truncated", more)) {
-				doc.get("ListBucketResult.IsTruncated", isTruncated);
-				more = isTruncated == "false" ? false : true;
+			// Copy content because rapidxml will modify it during parse
+			std::string content = r->content;
+			doc.parse<0>((char *)content.c_str());
+
+			// There should be exactly one node
+			xml_node<> *result = doc.first_node();
+			if(result == nullptr || strcmp(result->name(), "ListBucketResult") != 0) {
+				throw http_bad_response();
 			}
 
-			if (doc.has("results")) {
-				for (auto &jsonObject : doc.at("results").get_array()) {
-					JSONDoc objectDoc(jsonObject);
-					BlobStoreEndpoint::ObjectInfo object;
-					objectDoc.get("size", object.size);
-					objectDoc.get("key", object.name);
-					result.objects.push_back(std::move(object));
-				}
-			}
-
-			if(doc.has("ListBucketResult.Contents")) {
-				if (doc.at("ListBucketResult.Contents").type() == json_spirit::array_type) {
-					for (auto &jsonObject : doc.at("ListBucketResult.Contents").get_array()) {
-						JSONDoc objectDoc(jsonObject);
-						BlobStoreEndpoint::ObjectInfo object;
-						std::string sizeVal;
-						objectDoc.get("Size", sizeVal);
-						object.size = strtoll(sizeVal.c_str(), NULL, 10);
-						objectDoc.get("Key", object.name);
-						result.objects.push_back(std::move(object));
+			xml_node<> *n = result->first_node();
+			while(n != nullptr) {
+				const char *name = n->name();
+				if(strcmp(name, "IsTruncated") == 0) {
+					const char *val = n->value();
+					if(strcmp(val, "true") == 0) {
+						more = true;
+					}
+					else if(strcmp(val, "false") == 0) {
+						more = false;
+					}
+					else {
+						throw http_bad_response();
 					}
 				}
-				else {
-					auto jsonObject = doc.at("ListBucketResult.Contents");
-					JSONDoc objectDoc(jsonObject);
+				else if(strcmp(name, "Contents") == 0) {
 					BlobStoreEndpoint::ObjectInfo object;
-					std::string sizeVal;
-					objectDoc.get("Size", sizeVal);
-					object.size = strtoll(sizeVal.c_str(), NULL, 10);
-					objectDoc.get("Key", object.name);
-					result.objects.push_back(std::move(object));
-				}
-			}
 
-			if(doc.has("CommonPrefixes")) {
-				for(auto &jsonObject : doc.at("CommonPrefixes").get_array()) {
-					JSONDoc objectDoc(jsonObject);
-					std::string p;
-					objectDoc.get("Prefix", p);
-					// If recursing, queue a sub-request, otherwise add the common prefix to the result.
-					if(maxDepth > 0) {
-						// If there is no recurse filter or the filter returns true then start listing the subfolder
-						if(!recurseFilter || recurseFilter(p))
-							subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1, recurseFilter));
-						if(more)
-							lastFile = std::move(p);
+					xml_node<> *key = n->first_node("Key");
+					if(key == nullptr) {
+						throw http_bad_response();
 					}
-					else
-						result.commonPrefixes.push_back(std::move(p));
+					object.name = key->value();
+
+					xml_node<> *size = n->first_node("Size");
+					if(size == nullptr) {
+						throw http_bad_response();
+					}
+					object.size = strtoull(size->value(), NULL, 10);
+
+					listResult.objects.push_back(object);
 				}
+				else if(strcmp(name, "CommonPrefixes") == 0) {
+					xml_node<> *prefixNode = n->first_node("Prefix");
+					while(prefixNode != nullptr) {
+						const char *prefix = prefixNode->value();
+						// If recursing, queue a sub-request, otherwise add the common prefix to the result.
+						if(maxDepth > 0) {
+							// If there is no recurse filter or the filter returns true then start listing the subfolder
+							if(!recurseFilter || recurseFilter(prefix)) {
+								subLists.push_back(bstore->listBucketStream(bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
+							}
+							// Since prefix will not be in the final listResult below we have to set lastFile here in case it's greater than the last object
+							lastFile = prefix;
+						}
+						else {
+							listResult.commonPrefixes.push_back(prefix);
+						}
+
+						prefixNode = prefixNode->next_sibling("Prefix");
+					}
+				}
+
+				n = n->next_sibling();
 			}
 
-			results.send(result);
+			results.send(listResult);
 
 			if(more) {
-				// lastFile will be the last commonprefix for which a sublist was started, if any
-				if(!result.objects.empty() && lastFile < result.objects.back().name)
-					lastFile = result.objects.back().name;
-				if(!result.commonPrefixes.empty() && lastFile < result.commonPrefixes.back())
-					lastFile = result.commonPrefixes.back();
+				// lastFile will be the last commonprefix for which a sublist was started, if any.
+				// If there are any objects and the last one is greater than lastFile then make it the new lastFile.
+				if(!listResult.objects.empty() && lastFile < listResult.objects.back().name) {
+					lastFile = listResult.objects.back().name;
+				}
+				// If there are any common prefixes and the last one is greater than lastFile then make it the new lastFile.
+				if(!listResult.commonPrefixes.empty() && lastFile < listResult.commonPrefixes.back()) {
+					lastFile = listResult.commonPrefixes.back();
+				}
 
+				// If lastFile is empty at this point, something has gone wrong.
 				if(lastFile.empty()) {
 					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").suppressFor(60).detail("Resource", fullResource);
-					throw backup_error();
+					throw http_bad_response();
 				}
 			}
 		} catch(Error &e) {
@@ -779,10 +834,15 @@ std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
 }
 
 void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string const &resource, HTTP::Headers& headers) {
+	std::string &date = headers["Date"];
+
+	char dateBuf[20];
 	time_t ts;
 	time(&ts);
-	std::string &date = headers["Date"];
-	date = std::string(asctime(gmtime(&ts)), 24) + " GMT";  // asctime() returns a 24 character string plus a \n and null terminator.
+	// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
+	strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+	date = dateBuf;
+
 	std::string msg;
 	StringRef x;
 	msg.append(verb);
@@ -921,14 +981,25 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEn
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, NULL, 0, {200}));
-	int start = r->content.find("<UploadId>");
-	if(start == std::string::npos)
-		 throw http_bad_response();
-	start += 10;
-	int end = r->content.find("</UploadId>", start);
-	if(end == std::string::npos)
-		throw http_bad_response();
-	return r->content.substr(start, end - start);
+
+	try {
+		xml_document<> doc;
+		// Copy content because rapidxml will modify it during parse
+		std::string content = r->content;
+
+		doc.parse<0>((char *)content.c_str());
+
+		// There should be exactly one node
+		xml_node<> *result = doc.first_node();
+		if(result != nullptr && strcmp(result->name(), "InitiateMultipartUploadResult") == 0) {
+			xml_node<> *id = result->first_node("UploadId");
+			if(id != nullptr) {
+				return id->value();
+			}
+		}
+	} catch(...) {
+	}
+	throw http_bad_response();
 }
 
 Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &bucket, std::string const &object) {

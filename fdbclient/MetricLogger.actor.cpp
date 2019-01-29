@@ -408,9 +408,9 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Reference<Cluster> metricsCluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
+	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
-	state Future<Void> metrics = runMetrics(metricsCluster->createDatabase(), KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;

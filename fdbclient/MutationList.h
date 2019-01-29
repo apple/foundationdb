@@ -132,7 +132,7 @@ public:
 
 	template <class Ar>
 	void serialize_load( Ar& ar ) {
-		ar & totalBytes;
+		serializer(ar, totalBytes);
 
 		if(totalBytes > 0) {
 			blob_begin = blob_end = new (ar.arena()) Blob;
@@ -142,7 +142,7 @@ public:
 	}
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
-		ar & totalBytes;
+		serializer(ar, totalBytes);
 		for(auto b = blob_begin; b; b=b->next)
 			ar.serializeBytes(b->data);
 	}

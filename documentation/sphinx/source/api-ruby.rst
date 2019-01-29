@@ -12,7 +12,6 @@
 .. |reset-func-name| replace:: :meth:`reset <Transaction.reset>`
 .. |reset-func| replace:: :meth:`Transaction.reset`
 .. |cancel-func| replace:: :meth:`Transaction.cancel`
-.. |init-func| replace:: :func:`FDB.init`
 .. |open-func| replace:: :func:`FDB.open`
 .. |on-error-func| replace:: :meth:`Transaction.on_error`
 .. |null-type| replace:: ``nil``
@@ -75,27 +74,15 @@ For API changes between version 14 and |api-version| (for the purpose of porting
 Opening a database
 ==================
 
-After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
+After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
     FDB.api_version 610
     db = FDB.open
 
-.. function:: open( cluster_file=nil, db_name="DB" ) -> Database
+.. function:: open( cluster_file=nil ) -> Database
 
     |fdb-open-blurb|
-
-    .. note:: In this release, db_name must be "DB".
-
-    .. note:: ``fdb.open`` combines the effect of :func:`init`, :func:`create_cluster`, and :meth:`Cluster.open_database`.
-
-.. function:: init() -> nil
-
-    Initializes the FoundationDB API, creating a thread for the FoundationDB client and initializing the client's networking engine. :func:`init` can only be called once. If called subsequently or after :func:`open`, it will raise a ``client_invalid_operation`` error.
-
-.. function:: create_cluster(cluster_file=nil) -> Cluster
-
-    Connects to the cluster specified by :ref:`cluster_file <foundationdb-cluster-file>`, or by a :ref:`default cluster file <default-cluster-file>` if ``cluster_file`` is ``nil``.
 
 .. global:: FDB.options
 
@@ -159,17 +146,6 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
     .. method :: FDB.options.set_disable_multi_version_client_api() -> nil
 
-
-Cluster objects
-===============
-
-.. class:: Cluster
-
-.. method:: Cluster.open_database(name="DB") -> Database
-
-    Opens a database with the given name.
-
-    .. note:: In this release, name **must** be "DB".
 
 .. _api-ruby-keys:
 
@@ -870,7 +846,7 @@ All future objects are a subclass of the :class:`Future` type.
 
             |future-cancel-blurb|
 
-        .. classmethod:: Future.wait_for_any(*futures) -> Fixnum
+        .. classmethod:: Future.wait_for_any(\*futures) -> Fixnum
 
             Does not return until at least one of the given future objects is ready. Returns the index in the parameter list of a ready future object.
 
@@ -983,8 +959,8 @@ In the FoundationDB Ruby API, a tuple is an :class:`Enumerable` of elements of t
 | Unicode string       | Any value ``v`` where ``v.kind_of? String == true`` and ``v.encoding`` is   | ``String`` with encoding ``Encoding::UTF_8``                                 |
 |                      | ``Encoding::UTF_8``                                                         |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
-| 64-bit signed integer| Any value ``v`` where ``v.kind_of? Integer == true`` and ``-2**64+1 <= v <= | ``Fixnum`` or ``Bignum`` (depending on the magnitude of the value)           |
-|                      | 2**64-1``                                                                   |                                                                              |
+| Integer              | Any value ``v`` where ``v.kind_of? Integer == true`` and                    | ``Integer``                                                                  |
+|                      | ``-2**2040+1 <= v <= 2**2040-1``                                            |                                                                              |
 +----------------------+-----------------------------------------------------------------------------+------------------------------------------------------------------------------+
 | Floating point number| Any value ``v`` where ``v.kind_of? FDB::Tuple::SingleFloat`` where          | :class:`FDB::Tuple::SingleFloat`                                             |
 | (single-precision)   | ``v.value.kind_of? Float`` and ``v.value`` fits inside an IEEE 754 32-bit   |                                                                              |

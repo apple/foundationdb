@@ -30,11 +30,11 @@ struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 
 private:
 	static int getApiVersion(const Database &cx) {
-		return cx->cluster->apiVersion;
+		return cx->apiVersion;
 	}
 
 	static void setApiVersion(Database *cx, int version) {
-		(*cx)->cluster->apiVersion = version;
+		(*cx)->apiVersion = version;
 	}
 
 	Key getTestKey(std::string prefix) {

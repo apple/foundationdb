@@ -57,7 +57,7 @@ extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION };
+enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -74,6 +74,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -135,7 +136,7 @@ public:
 	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
 		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
-			tr->setOption(itr->first, itr->second.cast_to<StringRef>());
+			tr->setOption(itr->first, itr->second.castTo<StringRef>());
 	}
 
 	//Returns true if any options have been set
@@ -173,7 +174,7 @@ private:
 		if(intrans)
 			tr->setOption(option, arg);
 
-		transactionOptions.setOption(option, enabled, arg.cast_to<StringRef>());
+		transactionOptions.setOption(option, enabled, arg.castTo<StringRef>());
 	}
 
 	//A group of enabled options (of type T::Option) as well as a legal options map from string to T::Option
@@ -188,8 +189,8 @@ private:
 		//Enable or disable an option. Returns true if option value changed
 		bool setOption(typename T::Option option, bool enabled, Optional<StringRef> arg) {
 			auto optionItr = options.find(option);
-			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).cast_to< StringRef >() != arg)) {
-				options[option] = arg.cast_to<Standalone<StringRef>>();
+			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).castTo< StringRef >() != arg)) {
+				options[option] = arg.castTo<Standalone<StringRef>>();
 				return true;
 			}
 			else if(!enabled && optionItr != options.end()) {
@@ -401,6 +402,9 @@ static void printProgramUsage(const char* name) {
 		   "  --log-dir PATH Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n"
+		   "  --trace_format FORMAT\n"
+		   "                 Select the format of the log files. xml (the default) and json\n"
+		   "                 are supported. Has no effect unless --log is specified.\n"
 		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 		   "                 and then exits.\n"
 		   "  --no-status    Disables the initial status check done when starting\n"
@@ -1483,14 +1487,6 @@ ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 	}
 }
 
-ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, bool doCheckStatus ) {
-	state Database db = wait( cluster->createDatabase() );
-	if (doCheckStatus) {
-		wait( makeInterruptable( checkStatus( Void(), ccf )) );
-	}
-	return db;
-}
-
 ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) {
 	wait( makeInterruptable( tr->commit() ) );
 	auto ver = tr->getCommittedVersion();
@@ -1503,11 +1499,18 @@ ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) 
 
 ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
 	state ConfigurationResult::Type result;
+	state int startToken = 1;
+	state bool force = false;
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
+		if(tokens[startToken] == LiteralStringRef("FORCE")) {
+			force = true;
+			startToken = 2;
+		}
+
 		state Optional<ConfigureAutoResult> conf;
-		if( tokens[1] == LiteralStringRef("auto") ) {
+		if( tokens[startToken] == LiteralStringRef("auto") ) {
 			StatusObject s = wait( makeInterruptable(StatusClient::statusFetcher( ccf )) );
 			if(warn.isValid())
 				warn.cancel();
@@ -1567,7 +1570,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 		}
 
-		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+1,tokens.end()), conf) ) );
+		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+startToken,tokens.end()), conf, force) ) );
 		result = r;
 	}
 
@@ -1579,7 +1582,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(tokens[0]);
+		printUsage(LiteralStringRef("configure"));
 		ret=true;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
@@ -1594,6 +1597,36 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		printf("Database created\n");
 		ret=false;
 		break;
+	case ConfigurationResult::DATABASE_UNAVAILABLE:
+		printf("ERROR: The database is unavailable\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
+		printf("ERROR: All storage servers must be in one of the known regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
+		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
 		ret=false;
@@ -1605,7 +1638,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	return ret;
 }
 
-ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase) {
+ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase, bool force) {
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if(!json_spirit::read_string( contents, config )) {
@@ -1645,7 +1678,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 			return true;
 		}
 	}
-	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString) ) );
+	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString, force) ) );
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
@@ -1676,6 +1709,36 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
+		ret=false;
+		break;
+	case ConfigurationResult::DATABASE_UNAVAILABLE:
+		printf("ERROR: The database is unavailable\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
+		printf("ERROR: All storage servers must be in one of the known regions\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
+		printf("ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before changing the configuration\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
+		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::REGIONS_CHANGED:
+		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -2272,6 +2335,11 @@ struct CLIOptions {
 				return 0;
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
+			case OPT_TRACE_FORMAT:
+				if (!selectTraceFormatter(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				break;
 			case OPT_VERSION:
 				printVersion();
 				return FDB_EXIT_SUCCESS;
@@ -2294,12 +2362,9 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
-	state bool connected = false;
-	state bool opened = false;
 	state bool intrans = false;
 
 	state Database db;
-	state Reference<Cluster> cluster;
 	state Reference<ReadYourWritesTransaction> tr;
 
 	state bool writeMode = false;
@@ -2326,10 +2391,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		cluster = Cluster::createCluster(ccf->getFilename().c_str(), -1);
-		connected = true;
-		if (!opt.exec.present())
+		db = Database::createDatabase(ccf, -1);
+		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
+		}
 	}
 	catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
@@ -2349,28 +2414,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.trackLatest("ProgramStart");
 	}
 
-	if (connected) {
-		try {
-			Database _db = wait( openDatabase( ccf, cluster, !opt.exec.present() && opt.initialStatusCheck ) );
-			db = _db;
-			tr = Reference<ReadYourWritesTransaction>();
-			opened = true;
-			if (!opt.exec.present() && !opt.initialStatusCheck)
-				printf("\n");
-		} catch (Error& e) {
-			if(e.code() != error_code_actor_cancelled) {
-				printf("ERROR: %s (%d)\n", e.what(), e.code());
-				printf("Unable to open database\n");
-			}
-			return 1;
-		}
-	}
-
 	if (!opt.exec.present()) {
+		if(opt.initialStatusCheck) {
+			wait( makeInterruptable( checkStatus( Void(), ccf )) );
+		}
+		else {
+			printf("\n");
+		}
+
 		printf("Welcome to the fdbcli. For help, type `help'.\n");
-
 		validOptions = options->getValidOptions();
-
 	}
 
 	state bool is_error = false;
@@ -2499,14 +2552,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (!connected) {
-					printf("ERROR: Not connected\n");
-					is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "waitconnected")) {
-					wait( makeInterruptable( cluster->onConnected() ) );
+					wait( makeInterruptable( db->onConnected() ) );
 					continue;
 				}
 
@@ -2549,8 +2596,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && tokens[1] == LiteralStringRef("new"))) {
-						bool err = wait( fileConfigure( db, tokens.back().toString(), tokens.size() == 3 ) );
+					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") || tokens[1] == LiteralStringRef("FORCE")) )) {
+						bool err = wait( fileConfigure( db, tokens.back().toString(), tokens[1] == LiteralStringRef("new"), tokens[1] == LiteralStringRef("FORCE") ) );
 						if (err) is_error = true;
 					} else {
 						printUsage(tokens[0]);
@@ -2597,12 +2644,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						bool err = wait( setClass(db, tokens) );
 						if (err) is_error = true;
 					}
-					continue;
-				}
-
-				if (!opened) {
-					printf("ERROR: No database open\n");
-					is_error = true;
 					continue;
 				}
 
@@ -3207,13 +3248,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			if(e.code() != error_code_actor_cancelled)
 				printf("ERROR: %s (%d)\n", e.what(), e.code());
 			is_error = true;
-			if (connected && opened) {
-				if (intrans) {
-					printf("Rolling back current transaction\n");
-					intrans = false;
-					options = &globalOptions;
-					options->apply(tr);
-				}
+			if (intrans) {
+				printf("Rolling back current transaction\n");
+				intrans = false;
+				options = &globalOptions;
+				options->apply(tr);
 			}
 		}
 

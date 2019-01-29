@@ -40,7 +40,7 @@ struct NetworkTestRequest {
 	NetworkTestRequest( Key key, uint32_t replySize ) : key(key), replySize(replySize) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & replySize & reply;
+		serializer(ar, key, replySize, reply);
 	}
 };
 
@@ -50,7 +50,7 @@ struct NetworkTestReply {
 	NetworkTestReply( Value value ) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & value;
+		serializer(ar, value);
 	}
 };
 

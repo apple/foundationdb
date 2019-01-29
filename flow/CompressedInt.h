@@ -51,7 +51,7 @@ struct CompressedInt {
 	template <class Ar> void serialize(Ar &ar) {
 		if(ar.isDeserializing) {
 			uint8_t b;
-			ar & b;
+			serializer(ar, b);
 			int bytesToRead = 0;              // Additional bytes to read after the required first byte
 			bool positive = (b & 0x80) != 0;  // Sign bit
 			if(!positive)
@@ -62,7 +62,7 @@ struct CompressedInt {
 			// Scan the unary len bits across multiple bytes if needed
 			while(1) {
 				if(hb == 0) {       // Go to next byte if needed
-					ar & b;         // Read byte
+					serializer(ar, b);         // Read byte
 					if(!positive)
 						b = ~b;     // Negative, so invert bytes read
 
@@ -78,7 +78,7 @@ struct CompressedInt {
 
 			value = b;                    // b contains the highest byte of value
 			while(bytesToRead-- != 0) {
-				ar & b;                   // Read byte
+				serializer(ar, b);                   // Read byte
 				if(!positive)
 					b = ~b;               // Negative, so invert bytes read
 				value <<= 8;              // Shift value up to make room for new byte

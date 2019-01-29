@@ -35,6 +35,7 @@
 #include "flow/CompressedInt.h"
 #include <algorithm>
 #include <functional>
+#include <cmath>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricNameRef {
@@ -338,9 +339,9 @@ struct FieldHeader {
 		sum += v;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & sum;
+		serializer(ar, count, sum);
 	}
 };
 
@@ -1126,9 +1127,9 @@ struct FieldHeader<TimeAndValue<T>> {
 		previous_time = v.time;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & area;
+		serializer(ar, count, area);
 	}
 };
 

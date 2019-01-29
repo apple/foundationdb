@@ -212,6 +212,21 @@ void DLTransaction::reset() {
 }
 
 // DLDatabase
+DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
+	ready = mapThreadFuture<FdbCApi::FDBDatabase*, Void>(dbFuture, [this](ErrorOr<FdbCApi::FDBDatabase*> db){ 
+		if(db.isError()) {
+			return ErrorOr<Void>(db.getError());
+		}
+
+		this->db = db.get();
+		return ErrorOr<Void>(Void());
+	});
+}
+
+ThreadFuture<Void> DLDatabase::onReady() {
+	return ready;
+}
+
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction *tr;
 	api->databaseCreateTransaction(db, &tr);
@@ -222,21 +237,6 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
 	
-// DLCluster
-ThreadFuture<Reference<IDatabase>> DLCluster::createDatabase() {
-		FdbCApi::FDBFuture *f = api->clusterCreateDatabase(cluster, (uint8_t*)"DB", 2);
-
-	return toThreadFuture<Reference<IDatabase>>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		FdbCApi::FDBDatabase *db;
-		api->futureGetDatabase(f, &db);
-		return Reference<IDatabase>(new DLDatabase(Reference<FdbCApi>::addRef(api), db));
-	});
-}
-
-void DLCluster::setOption(FDBClusterOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->clusterSetOption(cluster, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
-}
-
 // DLApi
 template<class T>
 void loadClientFunction(T *fp, void *lib, std::string libPath, const char *functionName, bool requireFunction = true) {
@@ -266,11 +266,7 @@ void DLApi::init() {
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network");
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network");
-	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster");
-
-	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database");
-	loadClientFunction(&api->clusterSetOption, lib, fdbCPath, "fdb_cluster_set_option");
-	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy");
+	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
 	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
@@ -297,7 +293,6 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
 
-	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster");
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database");
 	loadClientFunction(&api->futureGetVersion, lib, fdbCPath, "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
@@ -308,6 +303,11 @@ void DLApi::init() {
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy");
+
+	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
+	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
+	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
+	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
@@ -361,14 +361,45 @@ void DLApi::stopNetwork() {
 	}
 }
 
-ThreadFuture<Reference<ICluster>> DLApi::createCluster(const char *clusterFilePath) {
+Reference<IDatabase> DLApi::createDatabase609(const char *clusterFilePath) {
 	FdbCApi::FDBFuture *f = api->createCluster(clusterFilePath);
 
-	return toThreadFuture<Reference<ICluster>>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		FdbCApi::FDBCluster *cluster;
 		api->futureGetCluster(f, &cluster);
-		return Reference<ICluster>(new DLCluster(Reference<FdbCApi>::addRef(api), cluster));
+		return cluster;
 	});
+
+	Reference<FdbCApi> innerApi = api;
+	auto dbFuture = flatMapThreadFuture<FdbCApi::FDBCluster*, FdbCApi::FDBDatabase*>(clusterFuture, [innerApi](ErrorOr<FdbCApi::FDBCluster*> cluster) {
+		if(cluster.isError()) {
+			return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(cluster.getError());
+		}
+
+		auto innerDbFuture = toThreadFuture<FdbCApi::FDBDatabase*>(innerApi, innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2), [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+			FdbCApi::FDBDatabase *db;
+			api->futureGetDatabase(f, &db);
+			return db;
+		});
+
+		return ErrorOr<ThreadFuture<FdbCApi::FDBDatabase*>>(mapThreadFuture<FdbCApi::FDBDatabase*, FdbCApi::FDBDatabase*>(innerDbFuture, [cluster, innerApi](ErrorOr<FdbCApi::FDBDatabase*> db) {
+			innerApi->clusterDestroy(cluster.get());
+			return db;
+		}));
+	});
+
+	return Reference<DLDatabase>(new DLDatabase(api, dbFuture));
+}
+
+Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
+	if(headerVersion >= 610) {
+		FdbCApi::FDBDatabase *db;
+		api->createDatabase(clusterFilePath, &db);
+		return Reference<IDatabase>(new DLDatabase(api, db));
+	}
+	else {
+		return DLApi::createDatabase609(clusterFilePath);
+	}
 }
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
@@ -566,16 +597,36 @@ void MultiVersionTransaction::reset() {
 }
 
 // MultiVersionDatabase
-MultiVersionDatabase::MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed) 
-	: dbState(new DatabaseState(cluster, db, changed)) {}
+MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors) : dbState(new DatabaseState()) {
+	dbState->db = db;
+	dbState->dbVar->set(db);
+
+	if(!openConnectors) {
+		dbState->currentClientIndex = 0;
+	}
+	else {
+		if(!api->localClientDisabled) {
+			dbState->currentClientIndex = 0;
+			dbState->addConnection(api->getLocalClient(), clusterFilePath);
+		}
+		else {
+			dbState->currentClientIndex = -1;
+		}
+
+		api->runOnExternalClients([this, clusterFilePath](Reference<ClientInfo> client) {
+			dbState->addConnection(client, clusterFilePath);
+		});
+
+		dbState->startConnections();
+	}
+}
 
 MultiVersionDatabase::~MultiVersionDatabase() {
-	dbState->cancelCallbacks();
+	dbState->cancelConnections();
 }
 
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
-	auto cluster = Reference<ThreadSafeAsyncVar<Reference<ICluster>>>(new ThreadSafeAsyncVar<Reference<ICluster>>(Reference<ICluster>(NULL)));
-	return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(new MultiVersionCluster()), db, ThreadFuture<Void>(Never())));
+	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, "", db, false));
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
@@ -599,167 +650,10 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		dbState->db->setOption(option, value);
 	}
 
-	dbState->options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
+	dbState->options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
 }
 
-MultiVersionDatabase::DatabaseState::DatabaseState(Reference<MultiVersionCluster> cluster, Reference<IDatabase> db, ThreadFuture<Void> changed)
-	: cluster(cluster), db(db), dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(db)), cancelled(false), changed(changed)
-{
-	addref();
-	int userParam;
-	changed.callOrSetAsCallback(this, userParam, false);
-}
-
-void MultiVersionDatabase::DatabaseState::fire(const Void &unused, int& userParam) {
-	onMainThreadVoid([this]() {
-		if(!cancelled) {
-			if(changed.isReady()) {
-				updateDatabase();
-			}
-			else if(dbFuture.isValid() && dbFuture.isReady()) {
-				auto newDb = dbFuture.get();
-
-				optionLock.enter();
-				bool optionFailed = false;
-				for(auto option : options) {
-					try {
-						newDb->setOption(option.first, option.second.cast_to<StringRef>()); // In practice, this will set a deferred error instead of throwing. If that happens, the database will be unusable (all transaction operations will throw errors).
-					}
-					catch(Error &e) {
-						optionFailed = true;
-						TraceEvent(SevError, "DatabaseVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second));
-					}
-				}
-
-				if(!optionFailed) {
-					db = newDb;
-				}
-				else {
-					// TODO: does this constitute a client failure?
-					db = Reference<IDatabase>(NULL); // If we can't set all options on the database, just leave us disconnected until we switch clients again
-				}
-				optionLock.leave();
-
-				dbVar->set(db);
-				dbFuture.cancel();
-			}
-		}
-
-		delref();
-	}, NULL);
-}
-
-void MultiVersionDatabase::DatabaseState::error(const Error& e, int& userParam) {
-	if(e.code() == error_code_operation_cancelled) {
-		delref();
-		return;
-	}
-
-	// TODO: retry?
-	TraceEvent(SevWarnAlways, "DatabaseCreationFailed").error(e);
-	onMainThreadVoid([this]() {
-		updateDatabase();
-		delref();
-	}, NULL);
-}
-
-void MultiVersionDatabase::DatabaseState::updateDatabase() {
-	auto currentCluster = cluster->clusterState->clusterVar->get();
-	changed = currentCluster.onChange;
-
-	addref();
-	int userParam;
-	changed.callOrSetAsCallback(this, userParam, false);
-
-	if(dbFuture.isValid()) {
-		dbFuture.cancel();
-	}
-
-	if(currentCluster.value) {
-		addref();
-		dbFuture = currentCluster.value->createDatabase();
-		dbFuture.callOrSetAsCallback(this, userParam, false);
-	}
-}
-
-void MultiVersionDatabase::DatabaseState::cancelCallbacks() {
-	addref();
-	onMainThreadVoid([this]() {
-		cancelled = true;
-		if(dbFuture.isValid()) {
-			dbFuture.cancel();
-		}
-		if(changed.isValid() && changed.clearCallback(this)) {
-			delref();
-		}
-		delref();
-	}, NULL);
-}
-
-// MultiVersionCluster
-MultiVersionCluster::MultiVersionCluster(MultiVersionApi *api, std::string clusterFilePath, Reference<ICluster> cluster) : clusterState(new ClusterState()) {
-	clusterState->cluster = cluster;
-	clusterState->clusterVar->set(cluster);
-
-	if(!api->localClientDisabled) {
-		clusterState->currentClientIndex = 0;
-		clusterState->addConnection(api->getLocalClient(), clusterFilePath);
-	}
-	else {
-		clusterState->currentClientIndex = -1;
-	}
-
-	api->runOnExternalClients([this, clusterFilePath](Reference<ClientInfo> client) {
-		clusterState->addConnection(client, clusterFilePath);
-	});
-
-	clusterState->startConnections();
-}
-
-MultiVersionCluster::~MultiVersionCluster() {
-	clusterState->cancelConnections();
-}
-
-ThreadFuture<Reference<IDatabase>> MultiVersionCluster::createDatabase() {
-	auto cluster = clusterState->clusterVar->get();
-
-	if(cluster.value) {
-		ThreadFuture<Reference<IDatabase>> dbFuture = abortableFuture(cluster.value->createDatabase(), cluster.onChange);
-
-		return mapThreadFuture<Reference<IDatabase>, Reference<IDatabase>>(dbFuture, [this, cluster](ErrorOr<Reference<IDatabase>> db) {
-			if(db.isError() && db.getError().code() != error_code_cluster_version_changed) {
-				return db;
-			}
-
-			Reference<IDatabase> newDb = db.isError() ? Reference<IDatabase>(NULL) : db.get();
-			return ErrorOr<Reference<IDatabase>>(Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), newDb, cluster.onChange)));
-		});
-	}
-	else {
-		return Reference<IDatabase>(new MultiVersionDatabase(Reference<MultiVersionCluster>::addRef(this), Reference<IDatabase>(), cluster.onChange));
-	}
-}
-
-void MultiVersionCluster::setOption(FDBClusterOptions::Option option, Optional<StringRef> value) {
-	MutexHolder holder(clusterState->optionLock);
-
-	auto itr = FDBClusterOptions::optionInfo.find(option);
-	if(itr != FDBClusterOptions::optionInfo.end()) {
-		TraceEvent("SetClusterOption").detail("Option", itr->second.name);
-	}
-	else {
-		TraceEvent("UnknownClusterOption").detail("Option", option);
-		throw invalid_option();
-	}
-
-	if(clusterState->cluster) {
-		clusterState->cluster->setOption(option, value);
-	}
-
-	clusterState->options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
-}
-
-void MultiVersionCluster::Connector::connect() {
+void MultiVersionDatabase::Connector::connect() {
 	addref();
 	onMainThreadVoid([this]() {
 		if(!cancelled) {
@@ -767,37 +661,32 @@ void MultiVersionCluster::Connector::connect() {
 			if(connectionFuture.isValid()) {
 				connectionFuture.cancel();
 			}
+			
+			candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
+			if(client->external) {
+				connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
+			}
+			else { 
+				connectionFuture = ThreadFuture<Void>(Void());
+			}
 
-			auto clusterFuture = client->api->createCluster(clusterFilePath.c_str());
-			auto dbFuture = flatMapThreadFuture<Reference<ICluster>, Reference<IDatabase>>(clusterFuture, [this](ErrorOr<Reference<ICluster>> cluster) {
-				if(cluster.isError()) {
-					return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.getError());
+			connectionFuture = flatMapThreadFuture<Void, Void>(connectionFuture, [this](ErrorOr<Void> ready) {
+				if(ready.isError()) {
+					return ErrorOr<ThreadFuture<Void>>(ready.getError());
 				}
-				else {
-					candidateCluster = cluster.get();
-					return ErrorOr<ThreadFuture<Reference<IDatabase>>>(cluster.get()->createDatabase());
-				}
+
+				tr = candidateDatabase->createTransaction();
+				return ErrorOr<ThreadFuture<Void>>(mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
+					// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
+					if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
+						return ErrorOr<Void>(v.getError());
+					}
+					else {
+						return ErrorOr<Void>(Void());
+					}
+				}));
 			});
 
-			connectionFuture = flatMapThreadFuture<Reference<IDatabase>, Void>(dbFuture, [this](ErrorOr<Reference<IDatabase>> db) {
-				if(db.isError()) {
-					return ErrorOr<ThreadFuture<Void>>(db.getError());
-				}
-				else {
-					tr = db.get()->createTransaction();
-					auto versionFuture = mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
-						// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-						if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
-							return ErrorOr<Void>(v.getError());
-						}
-						else {
-							return ErrorOr<Void>(Void());
-						}
-					});
-
-					return ErrorOr<ThreadFuture<Void>>(versionFuture);
-				}
-			});
 
 			int userParam;
 			connectionFuture.callOrSetAsCallback(this, userParam, 0);
@@ -809,7 +698,7 @@ void MultiVersionCluster::Connector::connect() {
 }
 
 // Only called from main thread
-void MultiVersionCluster::Connector::cancel() {
+void MultiVersionDatabase::Connector::cancel() {
 	connected = false;
 	cancelled = true;
 	if(connectionFuture.isValid()) {
@@ -817,29 +706,32 @@ void MultiVersionCluster::Connector::cancel() {
 	}
 }
 
-void MultiVersionCluster::Connector::fire(const Void &unused, int& userParam) {
+void MultiVersionDatabase::Connector::fire(const Void &unused, int& userParam) {
 	onMainThreadVoid([this]() {
 		if(!cancelled) {
 			connected = true;
-			clusterState->stateChanged();
+			dbState->stateChanged();
 		}
 		delref();
 	}, NULL);
 }
 
-void MultiVersionCluster::Connector::error(const Error& e, int& userParam) {
+void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 	if(e.code() != error_code_operation_cancelled) {
 		// TODO: is it right to abandon this connection attempt?
 		client->failed = true;
 		MultiVersionApi::api->updateSupportedVersions();
-		TraceEvent(SevError, "ClusterConnectionError").error(e).detail("ClientLibrary", this->client->libPath);
+		TraceEvent(SevError, "DatabaseConnectionError").error(e).detail("ClientLibrary", this->client->libPath);
 	}
 
 	delref();
 }
 
+MultiVersionDatabase::DatabaseState::DatabaseState()
+	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))), currentClientIndex(-1) {}
+
 // Only called from main thread
-void MultiVersionCluster::ClusterState::stateChanged() {
+void MultiVersionDatabase::DatabaseState::stateChanged() {
 	int newIndex = -1;
 	for(int i = 0; i < clients.size(); ++i) {
 		if(i != currentClientIndex && connectionAttempts[i]->connected) {
@@ -862,12 +754,12 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 	}
 
 	// Restart connection for replaced client
-	auto newCluster = connectionAttempts[newIndex]->candidateCluster;
+	auto newDb = connectionAttempts[newIndex]->candidateDatabase;
 
 	optionLock.enter();
 	for(auto option : options) {
 		try {
-			newCluster->setOption(option.first, option.second.cast_to<StringRef>()); // In practice, this will set a deferred error instead of throwing. If that happens, the cluster will be unusable (attempts to use it will throw errors).
+			newDb->setOption(option.first, option.second.castTo<StringRef>()); // In practice, this will set a deferred error instead of throwing. If that happens, the database will be unusable (attempts to use it will throw errors).
 		}
 		catch(Error &e) {
 			optionLock.leave();
@@ -879,10 +771,10 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 		}
 	}
 
-	cluster = newCluster;
+	db = newDb;
 	optionLock.leave();
 
-	clusterVar->set(cluster);
+	dbVar->set(db);
 
 	if(currentClientIndex >= 0 && connectionAttempts[currentClientIndex]->connected) {
 		connectionAttempts[currentClientIndex]->connected = false;
@@ -893,18 +785,18 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 	currentClientIndex = newIndex;
 }
 
-void MultiVersionCluster::ClusterState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
+void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
 	clients.push_back(client);
-	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<ClusterState>::addRef(this), client, clusterFilePath)));
+	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<DatabaseState>::addRef(this), client, clusterFilePath)));
 }
 
-void MultiVersionCluster::ClusterState::startConnections() {
+void MultiVersionDatabase::DatabaseState::startConnections() {
 	for(auto c : connectionAttempts) {
 		c->connect();
 	}
 }
 
-void MultiVersionCluster::ClusterState::cancelConnections() {
+void MultiVersionDatabase::DatabaseState::cancelConnections() {
 	addref();
 	onMainThreadVoid([this](){
 		for(auto c : connectionAttempts) {
@@ -1122,7 +1014,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 				});
 			}
 			else {
-				options.push_back(std::make_pair(option, value.cast_to<Standalone<StringRef>>()));
+				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
 			}
 		}
 	}
@@ -1166,7 +1058,7 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		runOnExternalClients([this, transportId](Reference<ClientInfo> client) {
 			for(auto option : options) {
-				client->api->setNetworkOption(option.first, option.second.cast_to<StringRef>());
+				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
 
@@ -1253,34 +1145,28 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 	}
 }
 
-ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clusterFilePath) {
+Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
-		return network_not_setup();
+		throw network_not_setup();
 	}
 	lock.leave();
 
 	std::string clusterFile(clusterFilePath);
 	if(localClientDisabled) {
-		return Reference<ICluster>(new MultiVersionCluster(this, clusterFile, Reference<ICluster>()));
+		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, Reference<IDatabase>()));
 	}
 
-	auto clusterFuture = localClient->api->createCluster(clusterFilePath);
+	auto db = localClient->api->createDatabase(clusterFilePath);
 	if(bypassMultiClientApi) {
-		return clusterFuture;
+		return db;
 	}
 	else {
-		for( auto it : externalClients ) {
-			TraceEvent("CreatingClusterOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
+		for(auto it : externalClients) {
+			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
 		}
-		return mapThreadFuture<Reference<ICluster>, Reference<ICluster>>(clusterFuture, [this, clusterFile](ErrorOr<Reference<ICluster>> cluster) {
-			if(cluster.isError()) {
-				return cluster;
-			}
-
-			return ErrorOr<Reference<ICluster>>(Reference<ICluster>(new MultiVersionCluster(this, clusterFile, cluster.get())));
-		});
+		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, db));
 	}
 }
 

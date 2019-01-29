@@ -31,7 +31,6 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbrpc/batcher.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/ConflictSet.h"
@@ -110,12 +109,13 @@ ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransact
 	}
 }
 
-ACTOR Future<Void> queueTransactionStartRequests(std::priority_queue< std::pair<GetReadVersionRequest, int64_t>,
-	std::vector< std::pair<GetReadVersionRequest, int64_t> > > *transactionQueue,
+ACTOR Future<Void> queueTransactionStartRequests(
+	std::priority_queue< std::pair<GetReadVersionRequest, int64_t>, std::vector< std::pair<GetReadVersionRequest, int64_t> > > *transactionQueue,
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
-	ProxyStats* stats) {
+	ProxyStats* stats) 
+{
 	state int64_t counter = 0;
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
@@ -189,6 +189,7 @@ struct ProxyCommitData {
 	bool firstProxy;
 	double lastCoalesceTime;
 	bool locked;
+	double commitBatchInterval;
 
 	int64_t localCommitBatchesStarted;
 	NotifiedVersion latestLocalCommitBatchResolving;
@@ -205,6 +206,7 @@ struct ProxyCommitData {
 	std::map<Tag, Version> tag_popped;
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
+	bool popRemoteTxs;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -227,13 +229,13 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-			logAdapter(NULL), txnStateStore(NULL),
+			logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false),
 			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
-			localCommitBatchesStarted(0), locked(false), firstProxy(firstProxy),
-			cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)), singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")),
-			commitBatchesMemBytesCount(0), lastTxsPop(0)
+			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+			firstProxy(firstProxy), cx(openDBOnServer(db, TaskDefaultEndpoint, true, true)),
+			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0)
 	{}
 };
 
@@ -318,10 +320,75 @@ struct ResolutionRequestBuilder {
 	}
 };
 
+ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
+	wait(delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher));  
+
+	state double lastBatch = 0;
+
+	loop{
+		state Future<Void> timeout;
+		state std::vector<CommitTransactionRequest> batch;
+		state int batchBytes = 0;
+
+		if(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL <= 0) {
+			timeout = Never();
+		}
+		else {
+			timeout = delayJittered(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskProxyCommitBatcher);
+		}
+
+		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
+			choose{
+				when(CommitTransactionRequest req = waitNext(in)) {
+					int bytes = getBytes(req);
+
+					// Drop requests if memory is under severe pressure
+					if(commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
+						req.reply.sendError(proxy_memory_limit_exceeded());
+						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded").suppressFor(60).detail("MemBytesCount", commitData->commitBatchesMemBytesCount).detail("MemLimit", memBytesLimit);
+						continue;
+					}
+
+					++commitData->stats.txnCommitIn;
+
+					if(req.debugID.present()) {
+						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "MasterProxyServer.batcher");
+					}
+
+					if(!batch.size()) {
+						commitData->commitBatchStartNotifications.send(Void());
+						if(now() - lastBatch > commitData->commitBatchInterval) {
+							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskProxyCommitBatcher);
+						}
+						else {
+							timeout = delayJittered(commitData->commitBatchInterval - (now() - lastBatch), TaskProxyCommitBatcher);
+						}
+					}
+
+					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
+						out.send({ batch, batchBytes });
+						lastBatch = now();
+						commitData->commitBatchStartNotifications.send(Void());
+						timeout = delayJittered(commitData->commitBatchInterval, TaskProxyCommitBatcher);
+						batch = std::vector<CommitTransactionRequest>();
+						batchBytes = 0;
+					}
+
+					batch.push_back(req);
+					batchBytes += bytes;
+					commitData->commitBatchesMemBytesCount += bytes;
+				}
+				when(wait(timeout)) {}
+			}
+		}
+		out.send({ std::move(batch), batchBytes });
+		lastBatch = now();
+	}
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
-	double *commitBatchTime,
 	int currentBatchMemBytesCount)
 {
 	state int64_t localBatchNumber = ++self->localCommitBatchesStarted;
@@ -849,7 +916,7 @@ ACTOR Future<Void> commitBatch(
 	}
 	wait(yield());
 
-	if(!self->txsPopVersions.size() || msg.popTo > self->txsPopVersions.back().second) {
+	if( self->popRemoteTxs && msg.popTo > ( self->txsPopVersions.size() ? self->txsPopVersions.back().second : self->lastTxsPop ) ) {
 		if(self->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
 			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
 			self->txsPopVersions.pop_front();
@@ -920,10 +987,10 @@ ACTOR Future<Void> commitBatch(
 
 	// Dynamic batching for commits
 	double target_latency = (now() - t1) * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
-	*commitBatchTime = 
+	self->commitBatchInterval = 
 		std::max(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN, 
 			std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX, 
-				target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA + *commitBatchTime * (1-SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
+				target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA + self->commitBatchInterval * (1-SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
@@ -1191,7 +1258,7 @@ ACTOR static Future<Void> readRequestServer(
 						}
 					} else {
 						rep.newLocality = true;
-						int8_t maxTagLocality = 0;
+						int8_t maxTagLocality = -1;
 						auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
 						for( auto& kv : localityKeys ) {
 							maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));
@@ -1231,6 +1298,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<Async
 			wait(db->onChange());
 			continue;
 		}
+		self->popRemoteTxs = true;
 
 		state Future<Void> onChange = db->onChange();
 		loop {
@@ -1276,7 +1344,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream< std::pair<vector<CommitTransactionRequest>, int> > batchedCommits;
-	state Future<Void> commitBatcher;
+	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
 
 	state PromiseStream<Future<Void>> addActor;
@@ -1284,7 +1352,6 @@ ACTOR Future<Void> masterProxyServerCore(
 	state double lastCommit = 0;
 	state std::set<Sequence> txnSequences;
 	state Sequence maxSequence = std::numeric_limits<Sequence>::max();
-	state double commitBatchInterval = SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
 
 	addActor.send( fetchVersions(&commitData) );
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
@@ -1326,7 +1393,8 @@ ACTOR Future<Void> masterProxyServerCore(
 		(int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX, 
 			std::max<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MIN, 
 				SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE * pow(db->get().client.proxies.size(), SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER)));
-	commitBatcher = batcher(batchedCommits, proxy.commit.getFuture(), SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, &commitBatchInterval, SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX, commitBatchByteLimit, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT, commitData.commitBatchStartNotifications, &commitData.commitBatchesMemBytesCount, commitBatchesMemoryLimit, TaskProxyCommitBatcher, &commitData.stats.txnCommitIn);
+
+	commitBatcherActor = commitBatcher(&commitData, batchedCommits, proxy.commit.getFuture(), commitBatchByteLimit, commitBatchesMemoryLimit);
 	loop choose{
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
@@ -1347,7 +1415,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
-					lastCommitComplete = commitBatch(&commitData, trs, &commitBatchInterval, batchBytes);
+					lastCommitComplete = commitBatch(&commitData, trs, batchBytes);
 					addActor.send(lastCommitComplete);
 				}
 			}

@@ -60,12 +60,8 @@ struct StatusWorkload : TestWorkload {
 	virtual Future<Void> start(Database const& cx) {
 		if (clientId != 0)
 			return Void();
-		Reference<Cluster> cluster = cx->cluster;
-		if (!cluster) {
-			TraceEvent(SevError, "StatusWorkloadStartError").detail("Reason", "NULL cluster");
-			return Void();
-		}
-		return success(timeout(fetcher(cluster->getConnectionFile(), this), testDuration));
+
+		return success(timeout(fetcher(cx->getConnectionFile(), this), testDuration));
 	}
 	virtual Future<bool> check(Database const& cx) {
 		return errors.getValue() == 0;

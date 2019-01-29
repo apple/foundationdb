@@ -46,10 +46,10 @@ static int send_func(void* ctx, const uint8_t* buf, int len) {
 		int w = conn->conn->write( &sb );
 		return w;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error(e).suppressFor(1.0);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error( unknown_error() ).suppressFor(1.0);
 		return -1;
 	}
 }
@@ -62,10 +62,10 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 		int r = conn->conn->read( buf, buf + len );
 		return r;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error(e).suppressFor(1.0);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error( unknown_error() ).suppressFor(1.0);
 		return -1;
 	}
 }
@@ -75,7 +75,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		int r = self->session->handshake();
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
-			TraceEvent("TLSConnectionHandshakeError", self->getDebugID());
+			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0);
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );

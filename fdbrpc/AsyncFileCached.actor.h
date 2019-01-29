@@ -257,9 +257,9 @@ private:
 		try {
 			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
 			if(flags & IAsyncFile::OPEN_CACHED_READ_ONLY)
-				flags = flags & ~IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_READONLY;
+				flags = (flags & ~IAsyncFile::OPEN_READWRITE) | IAsyncFile::OPEN_READONLY;
 			else
-				flags = flags & ~IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_READWRITE;
+				flags = (flags & ~IAsyncFile::OPEN_READONLY) | IAsyncFile::OPEN_READWRITE;
 			state Reference<IAsyncFile> f = wait( IAsyncFileSystem::filesystem()->open(filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode) );
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait( f->size() );
@@ -308,6 +308,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	void orphan() {
 		owner->orphanedPages[data] = zeroCopyRefCount;
 		zeroCopyRefCount = 0;
+		notReading = Void();
 		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
 	}
 
@@ -315,18 +316,23 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		// If zero-copy reads are in progress, allow whole page writes to a new page buffer so the effects
 		// are not seen by the prior readers who still hold zeroCopyRead pointers
 		bool fullPage = offset == 0 && length == pageCache->pageSize;
+		ASSERT(zeroCopyRefCount == 0 || fullPage);
+
 		if(zeroCopyRefCount != 0) {
 			ASSERT(fullPage);
 			orphan();
 		}
+
 		setDirty();
 
+		// If there are no active readers then if data is valid or we're replacing all of it we can write directly
 		if (valid || fullPage) {
 			valid = true;
 			memcpy( static_cast<uint8_t*>(this->data) + offset, data, length );
 			return yield();
 		}
 
+		// If data is not valid but no read is in progress, start reading
 		if (notReading.isReady()) {
 			notReading = readThrough( this );
 		}
@@ -388,9 +394,10 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	ACTOR static Future<Void> readThrough( AFCPage* self ) {
 		ASSERT(!self->valid);
+		state void *dst = self->data;
 		if ( self->pageOffset < self->owner->prevLength ) {
 			try {
-				int _ = wait( self->owner->uncached->read( self->data, self->pageCache->pageSize, self->pageOffset ) );
+				int _ = wait( self->owner->uncached->read( dst, self->pageCache->pageSize, self->pageOffset ) );
 				if (_ != self->pageCache->pageSize)
 					TraceEvent("ReadThroughShortRead").detail("ReadAmount", _).detail("PageSize", self->pageCache->pageSize).detail("PageOffset", self->pageOffset);
 			} catch (Error& e) {
@@ -399,7 +406,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 				throw;
 			}
 		}
-		self->valid = true;
+		// If the memory we read into wasn't orphaned while we were waiting on the read then set valid to true
+		if(dst == self->data)
+			self->valid = true;
 		return Void();
 	}
 

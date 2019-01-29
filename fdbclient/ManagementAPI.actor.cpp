@@ -268,39 +268,158 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 	}
 }
 
-ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m ) {
+ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
 
-	if (!m.size())
+	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
+	}
 
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
 	if (creating) {
 		m[initIdKey.toString()] = g_random->randomUniqueID().toString();
-		if (!isCompleteConfiguration(m))
+		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
-	} else {
-		state Future<DatabaseConfiguration> fConfig = getDatabaseConfiguration(cx);
-		wait( success(fConfig) || delay(1.0) );
-
-		if(fConfig.isReady()) {
-			DatabaseConfiguration config = fConfig.get();
-			for(auto kv : m) {
-				config.set(kv.first, kv.second);
-			}
-			if(!config.isValid()) {
-				return ConfigurationResult::INVALID_CONFIGURATION;
-			}
 		}
 	}
 
+	state Future<Void> tooLong = delay(4.5);
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+			if(!creating && !force) {
+				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
+				wait( success(fConfig) || tooLong );
+
+				if(!fConfig.isReady()) {
+					return ConfigurationResult::DATABASE_UNAVAILABLE;
+				}
+
+				if(fConfig.isReady()) {
+					ASSERT( fConfig.get().size() < CLIENT_KNOBS->TOO_MANY );
+					state DatabaseConfiguration oldConfig;
+					oldConfig.fromKeyValues((VectorRef<KeyValueRef>) fConfig.get());
+					state DatabaseConfiguration newConfig = oldConfig;
+					for(auto kv : m) {
+						newConfig.set(kv.first, kv.second);
+					}
+					if(!newConfig.isValid()) {
+						return ConfigurationResult::INVALID_CONFIGURATION;
+					}
+
+					if(oldConfig.usableRegions != newConfig.usableRegions) {
+						//cannot change region configuration
+						std::map<Key,int32_t> dcId_priority;
+						for(auto& it : newConfig.regions) {
+							dcId_priority[it.dcId] = it.priority;
+						}
+						for(auto& it : oldConfig.regions) {
+							if(!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
+								return ConfigurationResult::REGIONS_CHANGED;
+							}
+						}
+
+						//must only have one region with priority >= 0
+						int activeRegionCount = 0;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								activeRegionCount++;
+							}
+						}
+						if(activeRegionCount > 1) {
+							return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
+						}
+					}
+
+					state Future<Standalone<RangeResultRef>> fServerList = (newConfig.regions.size()) ? tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) : Future<Standalone<RangeResultRef>>();
+
+					if(newConfig.usableRegions==2) {
+						//all regions with priority >= 0 must be fully replicated
+						state std::vector<Future<Optional<Value>>> replicasFutures;
+						for(auto& it : newConfig.regions) {
+							if(it.priority >= 0) {
+								replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
+							}
+						}
+						wait( waitForAll(replicasFutures) || tooLong );
+
+						for(auto& it : replicasFutures) {
+							if(!it.isReady()) {
+								return ConfigurationResult::DATABASE_UNAVAILABLE;
+							}
+							if(!it.get().present()) {
+								return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+							}
+						}
+					}
+
+					if(newConfig.regions.size()) {
+						//all storage servers must be in one of the regions
+						wait( success(fServerList) || tooLong );
+						if(!fServerList.isReady()) {
+							return ConfigurationResult::DATABASE_UNAVAILABLE;
+						}
+						Standalone<RangeResultRef> serverList = fServerList.get();
+						ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+						std::set<Key> newDcIds;
+						for(auto& it : newConfig.regions) {
+							newDcIds.insert(it.dcId);
+						}
+						for(auto& s : serverList) {
+							auto ssi = decodeServerListValue( s.value );
+							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
+								return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
+							}
+						}
+					}
+
+					wait( success(fWorkers) || tooLong );
+					if(!fWorkers.isReady()) {
+						return ConfigurationResult::DATABASE_UNAVAILABLE;
+					}
+
+					if(newConfig.regions.size()) {
+						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
+							}
+						}
+						for(auto& region : newConfig.regions) {
+							if(dcId_zoneIds[region.dcId].size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+								return ConfigurationResult::NOT_ENOUGH_WORKERS;
+							}
+							if(region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
+								int totalSatelliteProcesses = 0;
+								for(auto& sat : region.satellites) {
+									totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
+								}
+								if(totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
+									return ConfigurationResult::NOT_ENOUGH_WORKERS;
+								}
+							}
+						}
+					} else {
+						std::set<Optional<Key>> zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								zoneIds.insert(it.locality.zoneId());
+							}
+						}
+						if(zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+							return ConfigurationResult::NOT_ENOUGH_WORKERS;
+						}
+					}
+				}
+			}
+
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
@@ -636,7 +755,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force ) {
 	if( modes.size() && modes[0] == LiteralStringRef("auto") && conf.present() ) {
 		return autoConfig(cx, conf.get());
 	}
@@ -645,16 +764,16 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes ) {
+Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes, bool force ) {
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string,std::string> m;
 	auto r = buildConfiguration( modes, m );
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfig(cx, m);
+	return changeConfig(cx, m, force);
 }
 
 ACTOR Future<vector<ProcessData>> getWorkers( Transaction* tr ) {
@@ -730,7 +849,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone deleted this key entirely?
 
 			state ClusterConnectionString old( currentKey.get().toString() );
-			if ( cx->cluster && old.clusterKeyName().toString() != cx->cluster->getConnectionFile()->getConnectionString().clusterKeyName() )
+			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
 			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;

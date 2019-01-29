@@ -30,83 +30,55 @@
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
 
-Reference<ICluster> constructThreadSafeCluster( Cluster* cluster ) {
-	return Reference<ICluster>( new ThreadSafeCluster(cluster) );
-}
-Future<Reference<ICluster>> createThreadSafeCluster( std::string connFilename, int apiVersion ) {
-	Reference<Cluster> cluster = Cluster::createCluster( connFilename, apiVersion );
-	return constructThreadSafeCluster( cluster.extractPtr() );
-}
-ThreadFuture<Reference<ICluster>> ThreadSafeCluster::create( std::string connFilename, int apiVersion ) {
-	if (!g_network) return ThreadFuture<Reference<ICluster>>(network_not_setup());
-	return onMainThread( [connFilename, apiVersion](){ return createThreadSafeCluster( connFilename, apiVersion ); } );
-}
-ThreadFuture<Void> ThreadSafeCluster::onConnected() {
-	Cluster* cluster = this->cluster;
-	return onMainThread( [cluster]() -> Future<Void> {
-		cluster->checkDeferredError();
-		return cluster->onConnected();
-	} );
-}
-
-void ThreadSafeCluster::setOption( FDBClusterOptions::Option option, Optional<StringRef> value ) {
-	Cluster* cluster = this->cluster;
-	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [cluster, option, passValue](){ cluster->setOption(option, passValue.contents()); }, &cluster->deferred_error );
-}
-
-ThreadSafeCluster::~ThreadSafeCluster() {
-	Cluster* cluster = this->cluster;
-	onMainThreadVoid( [cluster](){ cluster->delref(); }, NULL );
-}
-
-Future<Reference<IDatabase>> threadSafeCreateDatabase( Database db ) {
-	db.getPtr()->addref();
-	return Reference<IDatabase>(new ThreadSafeDatabase(db.getPtr()));
-}
-
-ACTOR Future<Reference<IDatabase>> threadSafeCreateDatabase( Cluster* cluster ) {
-	Database db = wait( cluster->createDatabase() );
-	Reference<IDatabase> threadSafeDb = wait(threadSafeCreateDatabase(db));
-	return threadSafeDb;
-}
-
-ThreadFuture<Reference<IDatabase>> ThreadSafeCluster::createDatabase() {
-	Cluster* cluster = this->cluster;
-	return onMainThread( [cluster](){
-		cluster->checkDeferredError();
-		return threadSafeCreateDatabase(cluster);
+ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
+	return onMainThread( [this]() -> Future<Void> {
+		db->checkDeferredError();
+		return db->onConnected();
 	} );
 }
 
 ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabase(Database db) {
 	return onMainThread( [db](){
 		db->checkDeferredError();
-		return threadSafeCreateDatabase(db);
+		DatabaseContext *cx = db.getPtr();
+		cx->addref();
+		return Future<Reference<IDatabase>>(Reference<IDatabase>(new ThreadSafeDatabase(cx)));
 	});
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(this));
-}
-
-Database ThreadSafeDatabase::unsafeGetDatabase() const {
-	db->addref();
-	return Database(db);
+	return Reference<ITransaction>(new ThreadSafeTransaction(Reference<ThreadSafeDatabase>::addRef(this)));
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [db, option, passValue](){ db->setOption(option, passValue.contents()); }, &db->deferred_error );
+	onMainThreadVoid( [this, option, passValue](){ db->setOption(option, passValue.contents()); }, &db->deferredError );
+}
+
+ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
+	db = NULL; // All accesses to db happen on the main thread, so this pointer will be set by the time anybody uses it
+
+	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
+	onMainThreadVoid([this, connFile, apiVersion](){ 
+		try {
+			Database db = Database::createDatabase(connFile, apiVersion);
+			this->db = db.extractPtr();
+		}
+		catch(Error &e) {
+			this->db = new DatabaseContext(e);
+		}
+		catch(...) {
+			this->db = new DatabaseContext(unknown_error());
+		}
+	}, NULL);
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
-	DatabaseContext* db = this->db;
+	DatabaseContext *db = this->db;
 	onMainThreadVoid( [db](){ db->delref(); }, NULL );
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
+ThreadSafeTransaction::ThreadSafeTransaction( Reference<ThreadSafeDatabase> db ) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -114,10 +86,12 @@ ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
 	// because the reference count of the DatabaseContext is solely managed from the main thread.  If cx is destructed
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
-	DatabaseContext* db = cx->db;
 	ReadYourWritesTransaction *tr = this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid( [tr,db](){ db->addref(); new (tr) ReadYourWritesTransaction( Database(db) ); }, NULL );
+	onMainThreadVoid( [tr, db](){ 
+		db->db->addref(); 
+		new (tr) ReadYourWritesTransaction( Database(db->db) ); 
+	}, NULL );
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
@@ -133,7 +107,7 @@ void ThreadSafeTransaction::cancel() {
 
 void ThreadSafeTransaction::setVersion( Version v ) {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, v](){ tr->setVersion(v); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, v](){ tr->setVersion(v); }, &tr->deferredError );
 }
 
 ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
@@ -200,12 +174,12 @@ void ThreadSafeTransaction::addReadConflictRange( const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, r](){ tr->addReadConflictRange(r); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, r](){ tr->addReadConflictRange(r); }, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::makeSelfConflicting() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->makeSelfConflicting(); }, &tr->deferred_error );
+	onMainThreadVoid( [tr](){ tr->makeSelfConflicting(); }, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::atomicOp( const KeyRef& key, const ValueRef& value, uint32_t operationType ) {
@@ -213,7 +187,7 @@ void ThreadSafeTransaction::atomicOp( const KeyRef& key, const ValueRef& value, 
 	Value v = value;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, k, v, operationType](){ tr->atomicOp(k, v, operationType); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, k, v, operationType](){ tr->atomicOp(k, v, operationType); }, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::set( const KeyRef& key, const ValueRef& value ) {
@@ -221,14 +195,14 @@ void ThreadSafeTransaction::set( const KeyRef& key, const ValueRef& value ) {
 	Value v = value;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, k, v](){ tr->set(k, v); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, k, v](){ tr->set(k, v); }, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::clear( const KeyRangeRef& range ) {
 	KeyRange r = range;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, r](){ tr->clear(r); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, r](){ tr->clear(r); }, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::clear( const KeyRef& begin, const KeyRef& end ) {
@@ -241,14 +215,14 @@ void ThreadSafeTransaction::clear( const KeyRef& begin, const KeyRef& end ) {
 			throw inverted_range();
 
 		tr->clear(KeyRangeRef(b, e));
-	}, &tr->deferred_error );
+	}, &tr->deferredError );
 }
 
 void ThreadSafeTransaction::clear( const KeyRef& key ) {
 	Key k = key;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, k](){ tr->clear(k); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, k](){ tr->clear(k); }, &tr->deferredError );
 }
 
 ThreadFuture< Void > ThreadSafeTransaction::watch( const KeyRef& key ) {
@@ -265,7 +239,7 @@ void ThreadSafeTransaction::addWriteConflictRange( const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr, r](){ tr->addWriteConflictRange(r); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, r](){ tr->addWriteConflictRange(r); }, &tr->deferredError );
 }
 
 ThreadFuture< Void > ThreadSafeTransaction::commit() {
@@ -292,7 +266,7 @@ ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [tr, option, passValue](){ tr->setOption(option, passValue.contents()); }, &tr->deferred_error );
+	onMainThreadVoid( [tr, option, passValue](){ tr->setOption(option, passValue.contents()); }, &tr->deferredError );
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
@@ -301,7 +275,7 @@ ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
 		try {
 			tr->checkDeferredError();
 		} catch (Error &e) {
-			tr->deferred_error = Error();
+			tr->deferredError = Error();
 			return Future<Void>(e);
 		}
 		return Future<Void>(Void());
@@ -387,8 +361,8 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-ThreadFuture<Reference<ICluster>> ThreadSafeApi::createCluster(const char *clusterFilePath) {
-	return ThreadSafeCluster::create(clusterFilePath, apiVersion);
+Reference<IDatabase> ThreadSafeApi::createDatabase(const char *clusterFilePath) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {

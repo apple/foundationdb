@@ -51,7 +51,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & clusterInterface & client & master & resolvers & recoveryCount & masterLifetime & logSystemConfig & priorCommittedLogServers & recoveryState;
+		serializer(ar, id, clusterInterface, client, master, resolvers, recoveryCount, masterLifetime, logSystemConfig, priorCommittedLogServers, recoveryState);
 	}
 };
 

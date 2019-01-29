@@ -284,6 +284,7 @@ ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<Transaction
 	else if(transactionType == MULTI_VERSION)
 	{
 		printf("client %d: Running Multi-Version Transactions\n", self->clientPrefixInt);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 		Reference<IDatabase> threadSafeHandle = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		Reference<IDatabase> dbHandle = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));

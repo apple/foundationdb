@@ -78,13 +78,19 @@ const Value tagLocalityListValue( int8_t const& );
 Optional<Value> decodeTagLocalityListKey( KeyRef const& );
 int8_t decodeTagLocalityListValue( ValueRef const& );
 
-//    "\xff\x02/DatacenterReplicas/[[datacenterID]]" := "[[replicas]]"
+//    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
 extern const KeyRangeRef datacenterReplicasKeys;
 extern const KeyRef datacenterReplicasPrefix;
 const Key datacenterReplicasKeyFor( Optional<Value> dcID );
 const Value datacenterReplicasValue( int const& );
 Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
 int decodeDatacenterReplicasValue( ValueRef const& );
+
+//    "\xff\x02/tLogDatacenters/[[datacenterID]]"
+extern const KeyRangeRef tLogDatacentersKeys;
+extern const KeyRef tLogDatacentersPrefix;
+const Key tLogDatacentersKeyFor( Optional<Value> dcID );
+Optional<Value> decodeTLogDatacentersKey( KeyRef const& );
 
 extern const KeyRef primaryDatacenterKey;
 
@@ -148,6 +154,8 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
+extern const KeyRef rebootWhenDurableKey;
+extern const KeyRef rebootWhenDurablePrivateKey;
 extern const KeyRef fastLoggingEnabled;
 extern const KeyRef fastLoggingEnabledPrivateKey;
 

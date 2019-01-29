@@ -293,6 +293,9 @@ void threadYield();  // Attempt to yield to other processes or threads
 // Returns true iff the file exists
 bool fileExists(std::string const& filename);
 
+// Returns true iff the directory exists
+bool directoryExists(std::string const& path);
+
 // Returns size of file in bytes
 int64_t fileSize(std::string const& filename);
 
@@ -487,6 +490,9 @@ inline static void flushOutputStreams() { fflush(NULL); }
 
 #define crashAndDie() (*(volatile int*)0 = 0)
 
+#ifdef _WIN32
+#define strcasecmp stricmp
+#endif
 
 #if defined(__GNUG__)
 #define DEFAULT_CONSTRUCTORS(X) \
