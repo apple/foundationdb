@@ -799,6 +799,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TRACE_FORMAT:
 			validateOptionValue(value, true);
 			networkOptions.traceFormat = value.get().toString();
+			if (!validateTraceFormat(networkOptions.traceFormat)) {
+				fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
+				throw invalid_option_value();
+			}
 			break;
 		case FDBNetworkOptions::KNOB: {
 			validateOptionValue(value, true);
