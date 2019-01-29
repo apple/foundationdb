@@ -35,6 +35,8 @@
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
 struct ClusterControllerFullInterface {
+    constexpr static FileIdentifier file_identifier =
+        ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
 	RequestStream< struct RecruitFromConfigurationRequest > recruitFromConfiguration;
 	RequestStream< struct RecruitRemoteFromConfigurationRequest > recruitRemoteFromConfiguration;

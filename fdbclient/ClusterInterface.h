@@ -29,6 +29,7 @@
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
+    constexpr static FileIdentifier file_identifier = 15888863;
 	RequestStream< struct OpenDatabaseRequest > openDatabase;
 	RequestStream< struct FailureMonitoringRequest > failureMonitoring;
 	RequestStream< struct StatusRequest > databaseStatus;
@@ -53,6 +54,23 @@ struct ClusterInterface {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+	}
+};
+
+struct ClusterControllerClientInterface {
+	constexpr static FileIdentifier file_identifier = 14997695;
+	ClusterInterface clientInterface;
+
+	bool operator==(ClusterControllerClientInterface const& r) const {
+		return clientInterface.id() == r.clientInterface.id();
+	}
+	bool operator!=(ClusterControllerClientInterface const& r) const {
+		return clientInterface.id() != r.clientInterface.id();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, clientInterface);
 	}
 };
 

@@ -463,3 +463,22 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 
 	}
 }
+
+ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
+                                                    Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
+	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
+	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
+	loop {
+		choose {
+			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(knownLeader->onChange())) {
+				if (knownLeader->get().present()) {
+					outKnownLeader->set(knownLeader->get().get().clientInterface);
+				} else {
+					outKnownLeader->set(Optional<ClusterInterface>{});
+				}
+			}
+		}
+	}
+}
