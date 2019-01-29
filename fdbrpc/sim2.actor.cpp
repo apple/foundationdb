@@ -63,7 +63,7 @@ void ISimulator::displayWorkers() const
 {
 	std::map<std::string, std::vector<ISimulator::ProcessInfo*>> machineMap;
 
-	// Create a map of zone Id
+	// Create a map of machine Id
 	for (auto processInfo : getAllProcesses()) {
 		std::string dataHall = processInfo->locality.dataHallId().present() ? processInfo->locality.dataHallId().get().printable() : "[unset]";
 		std::string machineId = processInfo->locality.machineId().present() ? processInfo->locality.machineId().get().printable() : "[unset]";
