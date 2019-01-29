@@ -109,7 +109,6 @@ public:
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
 	//GenericActors
-	double MAX_DELIVER_DUPLICATE_DELAY;
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
 
 	//IAsyncFile
