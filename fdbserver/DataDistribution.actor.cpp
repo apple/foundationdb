@@ -3413,7 +3413,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					TraceEvent("DataDistributor", di.id()).detail("IncomingID", distributor.id()).detail("Valid", distributor.isValid());
 					if ( distributor.isValid() && distributor.id() != di.id() ) {
 						TraceEvent("DataDistributorExit", di.id()).detail("CurrentLiveID", distributor.id());
-						break;
+						// break;
 					}
 				}
 				when ( wait( trigger ) ) {
@@ -3434,10 +3434,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
-			TraceEvent("DataDistributorError", di.id()).error(err);
+			TraceEvent("DataDistributorError", di.id()).error(err, true);
 			throw err;
 		}
-		TraceEvent("DataDistributorDied", di.id()).error(err);
+		TraceEvent("DataDistributorDied", di.id()).error(err, true);
 	}
 
 	return Void();

@@ -116,12 +116,12 @@ public:
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
 			newInfo.distributor = distributorInterf;
-			serverInfo->set( newInfo );
 			if ( distributorInterf.isValid() ) {
 				distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 			} else {
 				distributorFailed = Never();
 			}
+			serverInfo->set( newInfo );
 		}
 	};
 
@@ -2296,14 +2296,14 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 		state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
 		state InitializeDataDistributorRequest req;
 		req.reqId = g_random->randomUniqueID();
-		TraceEvent("DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
+		TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
 
 		ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, 1, 0) );
 		if (distributor.present()) {
-			TraceEvent("DataDistributorReqID", req.reqId).detail("Recruited", data_distributor.worker.first.address());
+			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruited", data_distributor.worker.first.address());
 			return distributor.get();
 		}
-		TraceEvent("DataDistributorReqID", req.reqId)
+		TraceEvent("ClusterController_DataDistributorReqID", req.reqId)
 		.detail("RecruitFailed", data_distributor.worker.first.address())
 		.error(distributor.getError());
 	}
@@ -2315,14 +2315,17 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 	// wait for a while to see if existing data distributor will join.
 	loop choose {
 		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-			TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinID", req.dataDistributor.id());
+			TraceEvent("ClusterController_Rejoin", self->id).detail("DataDistributorID", req.dataDistributor.id());
 			self->db.setDistributor( req.dataDistributor );
 			req.reply.send( Void() );
 			break;
 		}
 		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) ) ) { break; }
 		when ( wait( self->db.serverInfo->onChange() ) ) {  // Rejoins via worker registration
-			if ( self->db.serverInfo->get().distributor.isValid() ) break;
+			if ( self->db.serverInfo->get().distributor.isValid() ) {
+				TraceEvent("ClusterController_InfoChange", self->id).detail("DataDistributorID", self->db.serverInfo->get().distributor.id());
+				break;
+			}
 		}
 	}
 

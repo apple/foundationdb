@@ -290,6 +290,7 @@ ACTOR Future<Void> registrationClient(
 				asyncPriorityInfo->set( reply.priorityInfo );
 			}
 			when ( wait( ccInterface->onChange() )) { }
+			when ( wait( ddInterf->onChange() ) ) {}
 		}
 	}
 }
