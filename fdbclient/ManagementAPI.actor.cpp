@@ -861,7 +861,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			}
 
 			if(result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
-				//we could get not_enough_machines if we happen to see the database while the coordinator is updating the worker list, so make sure it happens twice before returning a failure
+				//we could get not_enough_machines if we happen to see the database while the cluster controller is updating the worker list, so make sure it happens twice before returning a failure
 				notEnoughMachineResults++;
 				wait( delay(1.0) );
 				tr.reset();
