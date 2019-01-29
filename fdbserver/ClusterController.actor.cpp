@@ -1836,7 +1836,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				if (SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS > 0.0 &&
 					requests_batch.size() + 1 >
 						SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS * SERVER_KNOBS->MAX_STATUS_REQUESTS_PER_SECOND) {
-					TraceEvent("TooManyStatusRequests").detail("BatchSize", requests_batch.size());
+					TraceEvent(SevWarnAlways, "TooManyStatusRequests").suppressFor(1.0).detail("BatchSize", requests_batch.size());
 					req.reply.sendError(server_overloaded());
 				} else {
 					requests_batch.push_back(req);
