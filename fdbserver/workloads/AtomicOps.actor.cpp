@@ -163,6 +163,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check( Database cx, AtomicOpsWorkload* self ) {
 		state int g = 0;
+		state bool ret = true;
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
@@ -189,6 +190,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
 						TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+						ret = false;
 					}
 
 					if( self->opType == MutationRef::AddValue ) {
@@ -203,6 +205,7 @@ struct AtomicOpsWorkload : TestWorkload {
 						}
 						if(logResult != opsResult) {
 							TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
+							ret = false;
 						}
 					}
 					break;
@@ -211,7 +214,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				}
 			}
 		}
-		return true;
+		return ret;
 	}
 };
 

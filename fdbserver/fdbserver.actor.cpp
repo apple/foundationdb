@@ -76,7 +76,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BLOB_CREDENTIAL_FILE,  OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
 	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -128,6 +128,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_DCID,                 "--datacenter_id",             SO_REQ_SEP },
 	{ OPT_MACHINE_CLASS,        "-c",                          SO_REQ_SEP },
 	{ OPT_MACHINE_CLASS,        "--class",                     SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE, "--blob_credential_file",      SO_REQ_SEP },
 	{ OPT_BUGGIFY,              "-b",                          SO_REQ_SEP },
 	{ OPT_BUGGIFY,              "--buggify",                   SO_REQ_SEP },
 	{ OPT_VERSION,              "-v",                          SO_NONE },
@@ -809,6 +810,8 @@ int main(int argc, char* argv[]) {
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
+		std::vector<std::string> blobCredentials; // used for fast restore workers
+		const char *blobCredsFromENV = nullptr;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -865,9 +868,9 @@ int main(int argc, char* argv[]) {
 						flushAndExit(FDB_EXIT_ERROR);
 					}
 					syn = syn.substr(7);
-					knobs.push_back( std::make_pair( syn, args.OptionArg() ) );
+					knobs.push_back(std::make_pair(syn, args.OptionArg()));
 					break;
-					}
+				}
 				case OPT_LOCALITY: {
 					std::string syn = args.OptionSyntax();
 					if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
@@ -878,7 +881,7 @@ int main(int argc, char* argv[]) {
 					std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
 					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
 					break;
-					}
+				}
 				case OPT_VERSION:
 					printVersion();
 					flushAndExit(FDB_EXIT_SUCCESS);
@@ -932,12 +935,12 @@ int main(int argc, char* argv[]) {
 				case OPT_SEEDCONNSTRING:
 					seedConnString = args.OptionArg();
 					break;
-	#ifdef __linux__
+#ifdef __linux__
 				case OPT_FILESYSTEM: {
 					fileSystemPath = args.OptionArg();
 					break;
 				}
-	#endif
+#endif
 				case OPT_DATAFOLDER:
 					dataFolder = args.OptionArg();
 					break;
@@ -945,9 +948,12 @@ int main(int argc, char* argv[]) {
 					logFolder = args.OptionArg();
 					break;
 				case OPT_NETWORKIMPL: {
-					const char* a = args.OptionArg();
+					const char *a = args.OptionArg();
 					if (!strcmp(a, "net2")) useNet2 = true;
-					else if (!strcmp(a, "net2-threadpool")) { useNet2 = true; useThreadPool = true; }
+					else if (!strcmp(a, "net2-threadpool")) {
+						useNet2 = true;
+						useThreadPool = true;
+					}
 					else {
 						fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
 						printHelpTeaser(argv[0]);
@@ -956,7 +962,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case OPT_TRACECLOCK: {
-					const char* a = args.OptionArg();
+					const char *a = args.OptionArg();
 					if (!strcmp(a, "realtime")) g_trace_clock = TRACE_CLOCK_REALTIME;
 					else if (!strcmp(a, "now")) g_trace_clock = TRACE_CLOCK_NOW;
 					else {
@@ -967,8 +973,8 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case OPT_NUMTESTERS: {
-					const char* a = args.OptionArg();
-					if( !sscanf(a, "%d", &minTesterCount) ) {
+					const char *a = args.OptionArg();
+					if (!sscanf(a, "%d", &minTesterCount)) {
 						fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
@@ -976,7 +982,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case OPT_ROLLSIZE: {
-					const char* a = args.OptionArg();
+					const char *a = args.OptionArg();
 					ti = parse_with_suffix(a);
 					if (!ti.present()) {
 						fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
@@ -1002,7 +1008,7 @@ int main(int argc, char* argv[]) {
 					const char *a = args.OptionArg();
 					char *end;
 					maxLogs = strtoull(a, &end, 10);
-					if(*end) {
+					if (*end) {
 						fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
@@ -1010,7 +1016,7 @@ int main(int argc, char* argv[]) {
 					maxLogsSet = true;
 					break;
 				}
-	#ifdef _WIN32
+#ifdef _WIN32
 				case OPT_PARENTPID: {
 					auto pid_str = args.OptionArg();
 					int parent_pid = atoi(pid_str);
@@ -1033,7 +1039,7 @@ int main(int argc, char* argv[]) {
 				case OPT_NOBOX:
 					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 					break;
-	#endif
+#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
 					break;
@@ -1044,9 +1050,9 @@ int main(int argc, char* argv[]) {
 					restarting = true;
 					break;
 				case OPT_RANDOMSEED: {
-					char* end;
-					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 10 );
-					if( *end ) {
+					char *end;
+					randomSeed = (uint32_t) strtoul(args.OptionArg(), &end, 10);
+					if (*end) {
 						fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
@@ -1063,13 +1069,31 @@ int main(int argc, char* argv[]) {
 				}
 				case OPT_MACHINE_CLASS:
 					sRole = args.OptionArg();
-					processClass = ProcessClass( sRole, ProcessClass::CommandLineSource );
+					processClass = ProcessClass(sRole, ProcessClass::CommandLineSource);
 					if (processClass == ProcessClass::InvalidClass) {
 						fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
 					}
 					break;
+				case OPT_BLOB_CREDENTIAL_FILE: {
+					//Add blob credential following backup agent example
+					blobCredentials.push_back(args.OptionArg());
+					printf("blob credential file:%s\n", blobCredentials.back().c_str());
+
+//
+//					blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+//					if (blobCredsFromENV != nullptr) {
+//						printf("[WARNING] set blob credetial via env variable is not tested\n");
+//						StringRef t((uint8_t *) blobCredsFromENV, strlen(blobCredsFromENV));
+//						do {
+//							StringRef file = t.eat(":");
+//							if (file.size() != 0)
+//								blobCredentials.push_back(file.toString());
+//						} while (t.size() != 0);
+//					}
+					break;
+				}
 				case OPT_KEY:
 					targetKey = args.OptionArg();
 					break;
@@ -1539,21 +1563,37 @@ int main(int argc, char* argv[]) {
 			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
-			ASSERT( connectionFile );
+			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
+			if ( processClass == ProcessClass::FastRestoreClass) {
+				printf("Run as fast restore worker\n");
 
-			setupSlowTaskProfiler();
+				// Update the global blob credential files list
+				std::vector<std::string> *pFiles = (std::vector<std::string> *) g_network->global(INetwork::enBlobCredentialFiles);
+				if (pFiles != nullptr) {
+					for (auto &f : blobCredentials) {
+						pFiles->push_back(f);
+					}
+				}
 
-			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddress.port);  // SOMEDAY: Better default
+				f = stopAfter( restoreWorker(connectionFile, localities) );
+				g_network->run();
+			} else {
+				ASSERT( connectionFile );
 
-			vector<Future<Void>> actors;
-			actors.push_back( listenError );
+				setupSlowTaskProfiler();
 
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
-			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", publicAddress.port);  // SOMEDAY: Better default
 
-			f = stopAfter( waitForAll(actors) );
-			g_network->run();
+				vector<Future<Void>> actors;
+				actors.push_back( listenError );
+
+				actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
+				//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+
+				f = stopAfter( waitForAll(actors) );
+				g_network->run();
+			}
 		} else if (role == MultiTester) {
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();

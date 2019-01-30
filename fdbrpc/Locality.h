@@ -26,7 +26,7 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, FastRestoreClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
 	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
@@ -48,6 +48,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
+		else if (s=="fast_restore") _class = FastRestoreClass;
 		else _class = InvalidClass;
 	}
 
@@ -63,6 +64,7 @@ public:
 		else if (classStr=="log") _class = LogClass;
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
+		else if (classStr=="fast_restore") _class = FastRestoreClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -93,6 +95,7 @@ public:
 			case LogClass: return "log";
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
+			case FastRestoreClass: return "fast_restore";
 			default: return "invalid";
 		}
 	}
