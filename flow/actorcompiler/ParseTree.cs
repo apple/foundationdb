@@ -233,6 +233,7 @@ namespace actorcompiler
         public bool isUncancellable = false;
         public string testCaseParameters = null;
         public string nameSpace = null;
+        public bool isForwardDeclaration = false;
     };
 
     class Descr
