@@ -3498,6 +3498,44 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
  	return Void();
  }
 
+ struct FastRestoreStatus {
+	double curWorkloadSize;
+	double curRunningTime;
+	double curSpeed;
+
+	double totalWorkloadSize;
+	double totalRunningTime;
+	double totalSpeed;
+};
+
+ ACTOR static Future<Void> registerStatus(Reference<ReadYourWritesTransaction> tr, struct FastRestoreStatus status) {
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			tr->set(restoreStatusKeyFor("/curWorkload"), restoreStatusValue(status.curWorkloadSize));
+			tr->set(restoreStatusKeyFor("/curRunningTime"), restoreStatusValue(status.curRunningTime));
+			tr->set(restoreStatusKeyFor("/curSpeed"), restoreStatusValue(status.curSpeed));
+
+			tr->set(restoreStatusKeyFor("/totalWorkload"), restoreStatusValue(status.totalWorkloadSize));
+			tr->set(restoreStatusKeyFor("/totalRunningTime"), restoreStatusValue(status.totalRunningTime));
+			tr->set(restoreStatusKeyFor("/totalSpeed"), restoreStatusValue(status.totalSpeed));
+
+			wait( tr->commit() );
+
+			break;
+		} catch( Error &e ) {
+			printf("Error when we registerStatus. Error:%s\n", e.what());
+			wait(tr->onError(e));
+		}
+	 };
+
+	return Void();
+}
+
+
 
 ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference<RestoreData> restoreData, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
@@ -3521,7 +3559,12 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 
 	state long curBackupFilesBeginIndex = 0;
 	state long curBackupFilesEndIndex = 0;
-	state double curWorkloadSize = 0;
+	state double totalWorkloadSize = 0;
+	state double totalRunningTime = 0; // seconds
+	state double curRunningTime = 0; // seconds
+	state double curStartTime = 0;
+	state double curEndTime = 0;
+	state double curWorkloadSize = 0; //Bytes
 	state double loadBatchSizeMB = 1000.0;
 	state double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 	state int restoreBatchIndex = 0;
@@ -3583,9 +3626,26 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 					}
 					printBackupFilesInfo(restoreData);
 
+					curStartTime = now();
+
 					printf("------[Progress] restoreBatchIndex:%d, curWorkloadSize:%.2f------\n", restoreBatchIndex++, curWorkloadSize);
 					restoreData->resetPerVersionBatch();
 					wait( distributeWorkload(interf, restoreData, cx, request, restoreConfig) );
+
+					curEndTime = now();
+					curRunningTime = curEndTime - curStartTime;
+					ASSERT(curRunningTime > 0);
+					totalRunningTime += curRunningTime;
+					totalWorkloadSize += curWorkloadSize;
+
+					struct FastRestoreStatus status;
+					status.curRunningTime = curRunningTime;
+					status.curWorkloadSize = curWorkloadSize;
+					status.curSpeed = curWorkloadSize /  curRunningTime;
+					status.totalRunningTime = totalRunningTime;
+					status.totalWorkloadSize = totalWorkloadSize;
+					status.totalSpeed = totalWorkloadSize / totalRunningTime;
+					wait( registerStatus(tr, status) );
 
 					curBackupFilesBeginIndex = curBackupFilesEndIndex + 1;
 					curBackupFilesEndIndex++;

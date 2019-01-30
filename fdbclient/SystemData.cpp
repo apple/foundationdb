@@ -596,6 +596,7 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
+const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus");
 
 
 const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
@@ -686,4 +687,18 @@ RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
 	return s;
+}
+
+// restoreStatus key
+const Value restoreStatusKeyFor (std::string const statusType) {
+	BinaryWriter wr(IncludeVersion());
+	wr.serializeBytes(restoreStatusKey);
+	wr << statusType;
+	return wr.toStringRef();
+}
+
+const Value restoreStatusValue( double const& val ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << val;
+	return wr.toStringRef();
 }

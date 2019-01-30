@@ -1870,7 +1870,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
-		printf("[INFO] runFastRestoreAgent: num_ranges:%d\n", ranges.size());
+		printf("[INFO] runFastRestoreAgent: num_ranges:%d restore_range:%s\n", ranges.size(), range.toString().c_str());
 
 		if (performRestore) {
 			if(dbVersion == invalidVersion) {
@@ -3288,6 +3288,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 		targetVersion = desc.maxRestorableVersion.get();
 
 	Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+	printf("targetVersion:%ldd restoreSet present:%d\n", (long long)  targetVersion,  restoreSet.present());
 
 	if(!restoreSet.present()) {
 		TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
