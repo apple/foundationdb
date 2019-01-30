@@ -3316,7 +3316,7 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 
 		loop {
 			try {
-				TraceEvent("DataDistributor", self->ddId).detail("MonitorConfiguration", "Starting");
+				TraceEvent("DataDistributor_MonitorConfigurationStart", self->ddId);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
@@ -3325,7 +3325,7 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 				DatabaseConfiguration conf;
 				conf.fromKeyValues( (VectorRef<KeyValueRef>) results );
 				if ( conf != self->configuration->get() ) {
-					TraceEvent("DataDistributor", self->ddId).detail("UpdateConfiguration", conf.toString());
+					TraceEvent("DataDistributor_UpdateConfiguration", self->ddId).detail("Config", conf.toString());
 					self->configuration->set( conf );
 					self->configurationTrigger.trigger();
 				}
@@ -3371,7 +3371,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 	state Future<Void> trigger = self->configurationTrigger.onTrigger();
 
-	TraceEvent("NewDataDistributorID", di.id());
+	TraceEvent("DataDistributor_Starting", di.id());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 	self->addActor.send( configurationMonitor( self ) );
 
@@ -3385,7 +3385,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 
 	try {
-		TraceEvent("DataDistributorRunning", di.id());
+		TraceEvent("DataDistributor_Running", di.id());
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
@@ -3397,7 +3397,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			if ( self->dbInfo->get().clusterInterface.id() != lastClusterControllerID ) {
 				// Rejoin the new cluster controller
 				DataDistributorRejoinRequest req(di);
-				TraceEvent("DataDistributorRejoining", di.id())
+				TraceEvent("DataDistributor_Rejoining", di.id())
 				.detail("OldClusterControllerID", lastClusterControllerID)
 				.detail("ClusterControllerID", self->dbInfo->get().clusterInterface.id());
 				reply = self->dbInfo->get().clusterInterface.dataDistributorRejoin.getReply(req);
@@ -3407,20 +3407,13 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 
 			choose {
-				when ( wait( brokenPromiseToNever(reply) ) ) {}
-				when ( wait( self->dbInfo->onChange() ) ) {
-					const DataDistributorInterface& distributor = self->dbInfo->get().distributor;
-					TraceEvent("DataDistributor", di.id()).detail("IncomingID", distributor.id()).detail("Valid", distributor.isValid());
-					if ( distributor.isValid() && distributor.id() != di.id() ) {
-						TraceEvent("DataDistributorExit", di.id()).detail("CurrentLiveID", distributor.id());
-						// break;
-					}
-				}
+				when ( wait( brokenPromiseToNever(reply) ) ) { reply = Never(); }
+				when ( wait( self->dbInfo->onChange() ) ) {}
 				when ( wait( trigger ) ) {
-					TraceEvent("DataDistributorRestart", di.id())
-					.detail("ClusterControllerID", lastClusterControllerID);
+					TraceEvent("DataDistributor_Restart", di.id())
+					.detail("ClusterControllerID", lastClusterControllerID)
+					.detail("Configuration", self->configuration->get().toString());
 					self->refreshDcIds();
-					TraceEvent("DataDistributor", di.id()).detail("RestartDistribution", self->configuration->get().toString());
 					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 					self->addActor.send( distributor );
 					trigger = self->configurationTrigger.onTrigger();
@@ -3434,10 +3427,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
-			TraceEvent("DataDistributorError", di.id()).error(err, true);
+			TraceEvent("DataDistributor_Error", di.id()).error(err, true);
 			throw err;
 		}
-		TraceEvent("DataDistributorDied", di.id()).error(err, true);
+		TraceEvent("DataDistributor_Died", di.id()).error(err, true);
 	}
 
 	return Void();

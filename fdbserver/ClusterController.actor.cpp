@@ -1033,22 +1033,23 @@ public:
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
-		usedIds.set( idUsed );
+		usedIds.swap( idUsed );
+		usedIdsTrigger.trigger();
 	}
 
 	void traceUsedIds() {
-		auto idUsed = usedIds.get();
-		for (const auto& it : idUsed) {
+		for (const auto& it : usedIds) {
 			TraceEvent ev("UsedID");
 			if (it.first.present()) ev.detail("Key", it.first.get().contents().toString());
-			ev.detail("Value", idUsed[it.first]);
+			ev.detail("Value", usedIds[it.first]);
 			ev.detail("Address", id_worker[it.first].interf.address().toString());
 		}
 	}
 
 	std::map< Optional<Standalone<StringRef>>, WorkerInfo > id_worker;
 	std::map< Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
-	AsyncVar<std::map< Optional<Standalone<StringRef>>, int>> usedIds;  // current used process IDs reported by master
+	std::map< Optional<Standalone<StringRef>>, int> usedIds;  // current used process IDs reported by master
+	AsyncTrigger usedIdsTrigger;
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
@@ -1089,6 +1090,7 @@ public:
 	~ClusterControllerData() {
 		ac.clear(false);
 		id_worker.clear();
+		usedIds.clear();
 	}
 };
 
@@ -1395,6 +1397,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.priorityInfo) );
 				}
 				cluster->id_worker.erase( worker.locality.processId() );
+				cluster->usedIds.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
 			}
@@ -2283,29 +2286,35 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
+	state InitializeDataDistributorRequest req;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
 	while (true) {
-		if ( self->usedIds.get().size() == 0 ) {
-			wait( self->usedIds.onChange() );
-		}
-		self->traceUsedIds();
-		std::map<Optional<Standalone<StringRef>>, int> id_used = self->usedIds.get();
-		state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
-		state InitializeDataDistributorRequest req;
-		req.reqId = g_random->randomUniqueID();
-		TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
+		try {
+			if ( self->usedIds.size() == 0 ) {
+				wait( self->usedIdsTrigger.onTrigger() );
+			}
+			self->traceUsedIds();
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->usedIds;
+			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			req.reqId = g_random->randomUniqueID();
+			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
 
-		ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, 1, 0) );
-		if (distributor.present()) {
-			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruited", data_distributor.worker.first.address());
-			return distributor.get();
+			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, 1, 0) );
+			if (distributor.present()) {
+				TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruited", data_distributor.worker.first.address());
+				return distributor.get();
+			}
 		}
-		TraceEvent("ClusterController_DataDistributorReqID", req.reqId)
-		.detail("RecruitFailed", data_distributor.worker.first.address())
-		.error(distributor.getError());
+		catch (Error& e) {
+			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).error(e);
+			if ( e.code() != error_code_no_more_servers ) {
+				throw;
+			}
+			wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+		}
 	}
 }
 
