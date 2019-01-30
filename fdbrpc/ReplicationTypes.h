@@ -22,6 +22,7 @@
 #define FLOW_REPLICATION_TYPES_H
 #pragma once
 
+#include <sstream>
 #include "flow/flow.h"
 #include "fdbrpc/Locality.h"
 
@@ -139,6 +140,18 @@ struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
 
 	int	getMemoryUsed() const {
 		return sizeof(_entryIndex) + sizeof(_dataMap) + _dataMap->getMemoryUsed();
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "KeyValueArraySize:" << _dataMap->_keyvaluearray.size();
+		for (int i = 0; i < _dataMap->size(); ++i) {
+			AttribRecord attribRecord = _dataMap->_keyvaluearray[i]; // first is key, second is value
+			ss << " KeyValueArrayIndex:" << i << " Key:" << attribRecord.first._id <<
+			       " Value:" << attribRecord.second._id;
+		}
+
+		return ss.str();
 	}
 };
 

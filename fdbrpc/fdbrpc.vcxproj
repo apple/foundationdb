@@ -74,7 +74,6 @@
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="crc32c.h" />
-    <ClInclude Include="EndpointGroup.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>

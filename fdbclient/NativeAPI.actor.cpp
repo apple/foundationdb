@@ -137,18 +137,6 @@ std::string printable( const std::string& str ) {
 	return StringRef(str).printable();
 }
 
-std::string printable( const Optional<StringRef>& val ) {
-	if( val.present() )
-		return printable( val.get() );
-	return "[not set]";
-}
-
-std::string printable( const Optional<Standalone<StringRef>>& val ) {
-	if( val.present() )
-		return printable( val.get() );
-	return "[not set]";
-}
-
 std::string printable( const KeyRangeRef& range ) {
 	return printable(range.begin) + " - " + printable(range.end);
 }
@@ -497,6 +485,8 @@ DatabaseContext::DatabaseContext(
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
+
+DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
 	try {
@@ -1867,8 +1857,9 @@ Transaction::Transaction( Database const& cx )
 	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-	if(cx->lockAware)
+	if(cx->lockAware) {
 		options.lockAware = true;
+	}
 }
 
 Transaction::~Transaction() {
@@ -3061,11 +3052,14 @@ Future< Standalone<VectorRef<KeyRef>> > Transaction::splitStorageMetrics( KeyRan
 void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
-	double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-	if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation))
-		return Reference<TransactionLogInfo>(new TransactionLogInfo());
-	else
-		return Reference<TransactionLogInfo>();
+	if(!cx->isError()) {
+		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+			return Reference<TransactionLogInfo>(new TransactionLogInfo());
+		}
+	}
+
+	return Reference<TransactionLogInfo>();
 }
 
 void enableClientInfoLogging() {

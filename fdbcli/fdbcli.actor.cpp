@@ -57,7 +57,7 @@ extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;
 
-enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION };
+enum { OPT_CONNFILE, OPT_DATABASE, OPT_HELP, OPT_TRACE, OPT_TRACE_DIR, OPT_TIMEOUT, OPT_EXEC, OPT_NO_STATUS, OPT_STATUS_FROM_JSON, OPT_VERSION, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -74,6 +74,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -135,7 +136,7 @@ public:
 	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
 		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
-			tr->setOption(itr->first, itr->second.cast_to<StringRef>());
+			tr->setOption(itr->first, itr->second.castTo<StringRef>());
 	}
 
 	//Returns true if any options have been set
@@ -173,7 +174,7 @@ private:
 		if(intrans)
 			tr->setOption(option, arg);
 
-		transactionOptions.setOption(option, enabled, arg.cast_to<StringRef>());
+		transactionOptions.setOption(option, enabled, arg.castTo<StringRef>());
 	}
 
 	//A group of enabled options (of type T::Option) as well as a legal options map from string to T::Option
@@ -188,8 +189,8 @@ private:
 		//Enable or disable an option. Returns true if option value changed
 		bool setOption(typename T::Option option, bool enabled, Optional<StringRef> arg) {
 			auto optionItr = options.find(option);
-			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).cast_to< StringRef >() != arg)) {
-				options[option] = arg.cast_to<Standalone<StringRef>>();
+			if(enabled && (optionItr == options.end() || Optional<Standalone<StringRef>>(optionItr->second).castTo< StringRef >() != arg)) {
+				options[option] = arg.castTo<Standalone<StringRef>>();
 				return true;
 			}
 			else if(!enabled && optionItr != options.end()) {
@@ -401,6 +402,9 @@ static void printProgramUsage(const char* name) {
 		   "  --log-dir PATH Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n"
+		   "  --trace_format FORMAT\n"
+		   "                 Select the format of the log files. xml (the default) and json\n"
+		   "                 are supported. Has no effect unless --log is specified.\n"
 		   "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 		   "                 and then exits.\n"
 		   "  --no-status    Disables the initial status check done when starting\n"
@@ -1618,6 +1622,11 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
 		ret=false;
 		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		ret=false;
+		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
 		ret=false;
@@ -1724,7 +1733,12 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		ret=false;
+		break;
+	case ConfigurationResult::NOT_ENOUGH_WORKERS:
+		printf("ERROR: Not enough processes exist to support the specified configuration\n");
+		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
 		ret=false;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -2321,6 +2335,11 @@ struct CLIOptions {
 				return 0;
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
+			case OPT_TRACE_FORMAT:
+				if (!selectTraceFormatter(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				break;
 			case OPT_VERSION:
 				printVersion();
 				return FDB_EXIT_SUCCESS;

@@ -294,6 +294,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 
 			if(!creating && !force) {
 				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
 				wait( success(fConfig) || tooLong );
 
 				if(!fConfig.isReady()) {
@@ -376,6 +377,44 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
 								return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
 							}
+						}
+					}
+
+					wait( success(fWorkers) || tooLong );
+					if(!fWorkers.isReady()) {
+						return ConfigurationResult::DATABASE_UNAVAILABLE;
+					}
+
+					if(newConfig.regions.size()) {
+						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
+							}
+						}
+						for(auto& region : newConfig.regions) {
+							if(dcId_zoneIds[region.dcId].size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+								return ConfigurationResult::NOT_ENOUGH_WORKERS;
+							}
+							if(region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
+								int totalSatelliteProcesses = 0;
+								for(auto& sat : region.satellites) {
+									totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
+								}
+								if(totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
+									return ConfigurationResult::NOT_ENOUGH_WORKERS;
+								}
+							}
+						}
+					} else {
+						std::set<Optional<Key>> zoneIds;
+						for(auto& it : fWorkers.get()) {
+							if( it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit ) {
+								zoneIds.insert(it.locality.zoneId());
+							}
+						}
+						if(zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+							return ConfigurationResult::NOT_ENOUGH_WORKERS;
 						}
 					}
 				}

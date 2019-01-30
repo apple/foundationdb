@@ -14,7 +14,6 @@
 .. |reset-func-name| replace:: :func:`reset <Transaction.reset>`
 .. |reset-func| replace:: :func:`Transaction.reset`
 .. |cancel-func| replace:: :func:`Transaction.cancel`
-.. |init-func| replace:: :func:`fdb.init`
 .. |open-func| replace:: :func:`fdb.open`
 .. |on-error-func| replace:: :meth:`Transaction.on_error`
 .. |null-type| replace:: ``None``
@@ -86,32 +85,17 @@ For API changes between version 13 and |api-version| (for the purpose of porting
 Opening a database
 ==================
 
-After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database`. The simplest way of doing this is using :func:`open`::
+After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
     fdb.api_version(610)
     db = fdb.open()
 
-.. function:: open( cluster_file=None, db_name="DB", event_model=None )
+.. function:: open( cluster_file=None, event_model=None )
 
     |fdb-open-blurb|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
-
-    .. note:: In this release, db_name must be "DB".
-
-    .. note:: ``fdb.open()`` combines the effect of :func:`init`, :func:`create_cluster`, and :meth:`Cluster.open_database`.
-
-.. function:: init()
-
-    Initializes the FoundationDB API, creating a thread for the FoundationDB client and initializing the client's networking engine. :func:`init()` can only be called once. If called subsequently or after :func:`open`, it will raise an ``client_invalid_operation`` error.
-
-.. function:: create_cluster( cluster_file=None )
-
-    Connects to the cluster specified by :ref:`cluster_file <foundationdb-cluster-file>`, or by a :ref:`default cluster file <default-cluster-file>` if
-    ``cluster_file`` is None. :func:`init` must be called first.
-
-    Returns a |future-type| :class:`Cluster` object.
 
 .. data:: options
 
@@ -174,19 +158,6 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_key_bytes(bytes)
 
        |option-tls-key-bytes|
-
-Cluster objects
-===============
-
-.. class:: Cluster
-
-.. method:: Cluster.open_database(name="DB")
-
-    Opens a database with the given name.
-
-    Returns a |future-type| :class:`Database` object.
-
-    .. note:: In this release, name **must** be "DB".
 
 .. _api-python-keys:
 
@@ -966,7 +937,7 @@ The following streaming modes are available:
 Event models
 ============
 
-By default, the FoundationDB Python API assumes that the calling program uses threads (as provided by the ``threading`` module) for concurrency.  This means that blocking operations will block the current Python thread.  This behavior can be changed by specifying the optional ``event_model`` parameter to the :func:`open` or :func:`init` functions.
+By default, the FoundationDB Python API assumes that the calling program uses threads (as provided by the ``threading`` module) for concurrency.  This means that blocking operations will block the current Python thread.  This behavior can be changed by specifying the optional ``event_model`` parameter to the :func:`open` function.
 
 The following event models are available:
 

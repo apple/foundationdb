@@ -262,6 +262,10 @@ void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
 
+// Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
+// to openTraceFile.
+bool selectTraceFormatter(std::string format);
+
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 

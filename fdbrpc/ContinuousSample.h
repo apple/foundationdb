@@ -26,6 +26,7 @@
 #include "flow/IRandom.h"
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 template <class T>
 class ContinuousSample {

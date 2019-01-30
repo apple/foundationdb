@@ -51,7 +51,7 @@ public:
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		ar & part[0] & part[1];
+		serializer(ar, part[0], part[1]);
 	}
 };
 

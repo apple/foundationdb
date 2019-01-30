@@ -105,10 +105,11 @@ Key KVWorkload::keyForIndex( uint64_t index, bool absent ) {
 
 	int idx = 0;
 	if( nodePrefix > 0 ) {
+		ASSERT(keyBytes >= 32);
 		emplaceIndex( data, 0, nodePrefix );
 		idx += 16;
 	}
-
+	ASSERT(keyBytes >= 16);
 	double d = double(index) / nodeCount;
 	emplaceIndex( data, idx, *(int64_t*)&d );
 
@@ -393,7 +394,7 @@ void sendResult( ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result ) {
 }
 
 ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, TestWorkload *workload, double databasePingDelay ) {
-	state auto_ptr<TestWorkload> delw(workload);
+	state unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<bool>> checkResult;
@@ -622,6 +623,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	TraceEvent("TestRunning").detail( "WorkloadTitle", printable(spec.title) )
 		.detail("TesterCount", testers.size()).detail("Phases", spec.phases)
 		.detail("TestTimeout", spec.timeout);
+
 	state vector< Future< WorkloadInterface > > workRequests;
 	state vector<vector<PerfMetric>> metricsResults;
 
@@ -659,8 +661,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 	if( spec.phases & TestWorkload::EXECUTION ) {
 		TraceEvent("TestStarting").detail("WorkloadTitle", printable(spec.title));
-		printf("running test...\n");
-		printf("test WorkloadTitle:%s\n", printable(spec.title).c_str());
+		printf("running test (%s)...\n", printable(spec.title).c_str());
 		std::vector< Future<Void> > starts;
 		for(int i= 0; i < workloads.size(); i++)
 			starts.push_back( workloads[i].start.template getReply<Void>() );
@@ -676,7 +677,9 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		state std::vector< Future<bool> > checks;
 		TraceEvent("CheckingResults");
-		printf("checking tests... num_workloads:%d\n", workloads.size());
+
+		printf("checking test (%s)...\n", printable(spec.title).c_str());
+
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back( workloads[i].check.template getReply<bool>() );
 		wait( waitForAll( checks ) );
@@ -693,7 +696,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 	if( spec.phases & TestWorkload::METRICS ) {
 		state std::vector< Future<vector<PerfMetric>> > metricTasks;
-		printf("fetching metrics...\n");
+		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", printable(spec.title));
 		for(int i= 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReply<vector<PerfMetric>>() );
@@ -728,6 +731,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
+
 	return Void();
 }
 
@@ -767,6 +771,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
+
 		wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
 	}
 }
@@ -1037,6 +1042,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
 
 	//Change the configuration (and/or create the database) if necessary
+	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
@@ -1072,8 +1078,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
 			try {
-				wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
-					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
+				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
+				     (databasePingDelay == 0.0 ? Never()
+				                               : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd")));
 			} catch( Error& e ) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);
 				throw;

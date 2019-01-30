@@ -298,6 +298,16 @@ Future<Void> store(Future<T> what, T &out) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });
 }
 
+template<class T>
+Future<Void> storeOrThrow(Future<Optional<T>> what, T &out, Error e = key_not_found()) {
+	return map(what, [&out,e](Optional<T> const &o) {
+		if(!o.present())
+			throw e;
+		out = o.get();
+		return Void();
+	});
+}
+
 //Waits for a future to be ready, and then applies an asynchronous function to it.
 ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
 Future<U> mapAsync(Future<T> what, F actorFunc)

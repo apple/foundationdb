@@ -81,6 +81,7 @@ ERROR( please_reboot, 1207, "Reboot of server process requested" )
 ERROR( please_reboot_delete, 1208, "Reboot of server process requested, with deletion of state" )
 ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
+ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -102,7 +103,7 @@ ERROR( io_timeout, 1521, "A disk IO operation failed to complete in a timely man
 ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
-
+ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -178,6 +179,7 @@ ERROR( backup_invalid_info, 2315, "Backup Container URL invalid")
 ERROR( backup_cannot_expire, 2316, "Cannot expire requested data from backup without violating minimum restorability")
 ERROR( backup_auth_missing, 2317, "Cannot find authentication details (such as a password or secret key) for the specified Backup Container URL")
 ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources of authentication information for Backup Container URLs")
+ERROR( backup_does_not_exist, 2319, "Backup does not exist")
 ERROR( restore_invalid_version, 2361, "Invalid restore version")
 ERROR( restore_corrupted_data, 2362, "Corrupted backup data")
 ERROR( restore_missing_data, 2363, "Missing backup data")

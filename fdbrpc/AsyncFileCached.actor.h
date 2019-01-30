@@ -257,9 +257,9 @@ private:
 		try {
 			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
 			if(flags & IAsyncFile::OPEN_CACHED_READ_ONLY)
-				flags = flags & ~IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_READONLY;
+				flags = (flags & ~IAsyncFile::OPEN_READWRITE) | IAsyncFile::OPEN_READONLY;
 			else
-				flags = flags & ~IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_READWRITE;
+				flags = (flags & ~IAsyncFile::OPEN_READONLY) | IAsyncFile::OPEN_READWRITE;
 			state Reference<IAsyncFile> f = wait( IAsyncFileSystem::filesystem()->open(filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode) );
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait( f->size() );

@@ -57,7 +57,7 @@ struct TLogQueueEntryRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & messages & knownCommittedVersion & id;
+		serializer(ar, version, messages, knownCommittedVersion, id);
 	}
 	size_t expectedSize() const {
 		return messages.expectedSize();
@@ -76,11 +76,11 @@ struct AlternativeTLogQueueEntryRef {
 	void serialize(Ar& ar) {
 		ASSERT(!ar.isDeserializing && alternativeMessages);
 		uint32_t msgSize = expectedSize();
-		ar & version & msgSize;
+		serializer(ar, version, msgSize);
 		for(auto& msg : *alternativeMessages) {
 			ar.serializeBytes( msg.message );
 		}
-		ar & knownCommittedVersion & id;
+		serializer(ar, knownCommittedVersion, id);
 	}
 
 	uint32_t expectedSize() const {

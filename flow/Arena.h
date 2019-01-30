@@ -375,7 +375,7 @@ public:
 		//T tmp;
 		//ar >> tmp;
 		//*this = tmp;
-		ar & (*(T*)this) & arena();
+		serializer(ar, (*(T*)this), arena());
 	}
 
 	/*static Standalone<T> fakeStandalone( const T& t ) {

@@ -100,14 +100,14 @@ resulting value to a _newly declared variable._
 From 6.1, `wait()` on `Void` actors shouldn't assign the resulting value. So, the following code
 
 ```c++
-Futue<Void> asyncTask(); //defined elsewhere
+Future<Void> asyncTask(); //defined elsewhere
 Void _ = wait(asyncTask());
 ```
 
 becomes
 
 ```c++
-Futue<Void> asyncTask(); //defined elsewhere
+Future<Void> asyncTask(); //defined elsewhere
 wait(asyncTask());
 ```
 
@@ -240,7 +240,7 @@ struct CountingServerInterface {
     // serialization code required for use on a network
     template <class Ar>
     void serialize( Ar& ar ) {
-        ar & addCount & subtractCount & getCount;
+        serializer(ar, addCount, subtractCount, getCount);
     }
 };
 ```

@@ -102,6 +102,11 @@ public:
 		return _localitygroup->getRecord(getEntry(localIndex)._id);
 	}
 
+	// Return record array to help debug the locality information for servers
+	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const {
+		return _localitygroup->getRecordArray();
+	}
+
 	Reference<LocalityRecord> const& getRecordViaEntry(LocalityEntry localEntry) const {
 		return _localitygroup->getRecord(localEntry._id);
 	}
@@ -167,6 +172,8 @@ public:
 
 	// This function is used to create an subset containing all of the entries within
 	// the specified value for the given key
+	// The returned LocalitySet contains the LocalityRecords that have the same value as
+	// the indexValue under the same indexKey (e.g., zoneid)
 	LocalitySetRef restrict(AttribKey indexKey, AttribValue indexValue ) {
 		LocalitySetRef	localitySet;
 		LocalityCacheRecord			searchRecord(AttribRecord(indexKey, indexValue), localitySet);
@@ -497,6 +504,7 @@ struct LocalityGroup : public LocalitySet {
 	virtual ~LocalityGroup() { }
 
 	LocalityEntry const& add(LocalityData const& data) {
+		// _recordArray.size() is the new entry index for the new data
 		Reference<LocalityRecord>	record(new LocalityRecord(convertToAttribMap(data), _recordArray.size()));
 		_recordArray.push_back(record);
 		return LocalitySet::add(record, *this);
@@ -526,6 +534,9 @@ struct LocalityGroup : public LocalitySet {
 		ASSERT((recordIndex >= 0) && (recordIndex < _recordArray.size()));
 		return _recordArray[recordIndex];
 	}
+
+	// Get the locality info for debug purpose
+	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const { return _recordArray; }
 
 	virtual int	getMemoryUsed() const {
 		int memorySize = sizeof(_recordArray) + _keymap->getMemoryUsed();

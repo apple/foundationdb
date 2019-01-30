@@ -123,7 +123,7 @@ public:
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
 	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
-	Use .cast_to<>() instead.
+	Use .castTo<>() instead.
 	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
 	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
@@ -131,11 +131,17 @@ public:
 	}
 	int expectedSize() const { return valid ? get().expectedSize() : 0; }
 
-	template <class R> Optional<R> cast_to() const {
-		if (present())
-			return Optional<R>(get());
-		else
+	template <class R> Optional<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> Optional<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return Optional<R>(f(get()));
+		}
+		else {
 			return Optional<R>();
+		}
 	}
 
 	~Optional() {
@@ -170,10 +176,10 @@ public:
 		// SOMEDAY: specialize for space efficiency?
 		if (valid && Ar::isDeserializing)
 			(*(T *)&value).~T();
-		ar & valid;
+		serializer(ar, valid);
 		if (valid) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
 	}
 
@@ -211,11 +217,17 @@ public:
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
-	template <class R> ErrorOr<R> cast_to() const {
-		if (present())
-			return ErrorOr<R>(get());
-		else
-			return ErrorOr<R>();
+	template <class R> ErrorOr<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> ErrorOr<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return ErrorOr<R>(f(get()));
+		}
+		else {
+			return ErrorOr<R>(error);
+		}
 	}
 
 	~ErrorOr() {
@@ -247,24 +259,11 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
-		ar & error;
+		serializer(ar, error);
 		if (present()) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
-	}
-
-	bool operator == (ErrorOr const& o) const {
-		return error == o.error && (!present() || get() == o.get());
-	}
-	bool operator != (ErrorOr const& o) const {
-		return !(*this == o);
-	}
-
-	bool operator < (ErrorOr const& o) const {
-		if (error != o.error) return error < o.error;
-		if (!present()) return false;
-		return get() < o.get();
 	}
 
 	bool isError() const { return error.code() != invalid_error_code; }

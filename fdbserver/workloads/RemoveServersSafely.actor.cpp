@@ -247,6 +247,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		int	randomIndex;
 		bool bCanKillProcess;
 		ISimulator::ProcessInfo*	randomProcess;
+
 		for (int killsLeft = killProcArray.size(); killsLeft > 0; killsLeft --)
 		{
 			// Select a random kill process
@@ -267,9 +268,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			if (bCanKillProcess) {
 				killableProcesses.push_back(randomProcess);
 				killableAddrs.push_back(AddressExclusion(randomProcess->address.ip, randomProcess->address.port));
-				TraceEvent("RemoveAndKill").detail("Step", "identifyVictim")
-					.detail("VictimCount", killableAddrs.size()).detail("Victim",randomProcess->toString())
-					.detail("Victims", describe(killableAddrs));
+				TraceEvent("RemoveAndKill")
+				    .detail("Step", "identifyVictim")
+				    .detail("VictimCount", killableAddrs.size())
+				    .detail("Victim", randomProcess->toString())
+				    .detail("Victims", describe(killableAddrs));
 			}
 			// Move the process to the keep array
 			else {

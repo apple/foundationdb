@@ -51,7 +51,8 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & test & request;
+		//ar & test & request;
+		serializer(ar, test, request);
 	}
 };
 
@@ -72,7 +73,7 @@ struct RestoreCommandInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & cmd;
+		serializer(ar, cmd);
 //		ar & cmd & request;
 	}
 };
@@ -116,7 +117,8 @@ struct RestoreCommand {
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			ar & url & version & filename & offset & length & blockSize & restoreRange & addPrefix & removePrefix & mutationLogPrefix;
+			serializer(ar, url, version, filename, offset, length, blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+			//ar & url & version & filename & offset & length & blockSize & restoreRange & addPrefix & removePrefix & mutationLogPrefix;
 		}
 
 		std::string toString() {
@@ -147,7 +149,8 @@ struct RestoreCommand {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
+		serializer(ar , cmd  , cmdIndex , id , masterApplier , role , keyRange ,  commitVersion , mutation , applierKeyRangeLB ,  applierID , keyRangeIndex , loadingParam , reply);
+		//ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
 	}
 };
 typedef RestoreCommand::LoadingParam LoadingParam;
@@ -166,7 +169,8 @@ struct RestoreCommandReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & id & cmdIndex & num & lowerBound;
+		serializer(ar, id , cmdIndex , num , lowerBound);
+		//ar & id & cmdIndex & num & lowerBound;
 	}
 };
 
@@ -180,7 +184,7 @@ struct TestRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & testData & reply;
+		serializer(ar, testData, reply);
 	}
 };
 
@@ -192,7 +196,7 @@ struct TestReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & replyData;
+		serializer(ar, replyData);
 	}
 };
 
@@ -236,8 +240,10 @@ struct RestoreRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & index & tagName & url &  waitForComplete & targetVersion & verbose & range & addPrefix & removePrefix & lockDB & randomUid &
-		testData & restoreRequests & reply;
+		serializer(ar, index , tagName , url ,  waitForComplete , targetVersion , verbose , range , addPrefix , removePrefix , lockDB , randomUid ,
+		testData , restoreRequests , reply);
+//		ar & index & tagName & url &  waitForComplete & targetVersion & verbose & range & addPrefix & removePrefix & lockDB & randomUid &
+//		testData & restoreRequests & reply;
 	}
 
 	std::string toString() const {
@@ -280,7 +286,8 @@ struct RestoreReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & replyData;
+		serializer(ar, replyData);
+		//ar & replyData;
 	}
 };
 

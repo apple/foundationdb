@@ -63,7 +63,7 @@ function printUsage() {
     echo
     echo "cmd: One of the commands to run. The options are:"
     echo "     install         Download the FDB go bindings and install them"
-    echo "     localinstall    Install a into the go path a local copy of the repo"
+    echo "     localinstall    Install into the go path a local copy of the repo"
     echo "     download        Download but do not prepare the FoundationDB bindings"
     echo "     help            Print this help message and then quit"
     echo

@@ -61,13 +61,16 @@
 template<int Size>
 INIT_SEG thread_local typename FastAllocator<Size>::ThreadData FastAllocator<Size>::threadData;
 
+template<int Size>
+thread_local bool FastAllocator<Size>::threadInitialized = false;
+
 #ifdef VALGRIND
 template<int Size>
 unsigned long FastAllocator<Size>::vLock = 1;
 #endif
 
 template<int Size>
-void* FastAllocator<Size>::freelist = 0;
+void* FastAllocator<Size>::freelist = nullptr;
 
 typedef void (*ThreadInitFunction)();
 
@@ -118,32 +121,30 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
+		uint32_t a = 0, b = 0;
 		if( nptrs > 0 ) {
-			uint32_t a = 0, b = 0;
 			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
-
-			{
-				double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
-				size_t sizeDelta = std::max(SAMPLE_BYTES, size);
-				ThreadSpinLockHolder holder( memLock );
-				auto it = backTraceLookup.find( a );
-				if( it == backTraceLookup.end() ) {
-					auto& bt = backTraceLookup[ a ];
-					bt.backTrace = new std::vector<void*>();
-					for (int j = 0; j < nptrs; j++) {
-						bt.backTrace->push_back( buffer[j] );
-					}
-					bt.totalSize = sizeDelta;
-					bt.count = countDelta;
-					bt.sampleCount = 1;
-				} else {
-					it->second.totalSize += sizeDelta;
-					it->second.count += countDelta;
-					it->second.sampleCount++;
-				}
-				memSample[(int64_t)ptr] = std::make_pair(a, size);
-			}
 		}
+
+		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
+		size_t sizeDelta = std::max(SAMPLE_BYTES, size);
+		ThreadSpinLockHolder holder( memLock );
+		auto it = backTraceLookup.find( a );
+		if( it == backTraceLookup.end() ) {
+			auto& bt = backTraceLookup[ a ];
+			bt.backTrace = new std::vector<void*>();
+			for (int j = 0; j < nptrs; j++) {
+				bt.backTrace->push_back( buffer[j] );
+			}
+			bt.totalSize = sizeDelta;
+			bt.count = countDelta;
+			bt.sampleCount = 1;
+		} else {
+			it->second.totalSize += sizeDelta;
+			it->second.count += countDelta;
+			it->second.sampleCount++;
+		}
+		memSample[(int64_t)ptr] = std::make_pair(a, size);
 	}
 	memSample_entered = false;
 #endif
@@ -188,20 +189,28 @@ struct FastAllocator<Size>::GlobalData {
 	CRITICAL_SECTION mutex;
 	std::vector<void*> magazines;   // These magazines are always exactly magazine_size ("full")
 	std::vector<std::pair<int, void*>> partial_magazines;  // Magazines that are not "full" and their counts.  Only created by releaseThreadMagazines().
-	long long memoryUsed;
-	GlobalData() : memoryUsed(0) { 
+	long long totalMemory;
+	long long partialMagazineUnallocatedMemory;
+	long long activeThreads;
+	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) { 
 		InitializeCriticalSection(&mutex);
 	}
 };
 
 template <int Size>
-long long FastAllocator<Size>::getMemoryUsed() {
-	return globalData()->memoryUsed;
+long long FastAllocator<Size>::getTotalMemory() {
+	return globalData()->totalMemory;
+}
+
+// This does not include memory held by various threads that's available for allocation
+template <int Size>
+long long FastAllocator<Size>::getApproximateMemoryUnused() {
+	return globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
 }
 
 template <int Size>
-long long FastAllocator<Size>::getMemoryUnused() {
-	return globalData()->magazines.size() * magazine_size * Size;
+long long FastAllocator<Size>::getActiveThreads() {
+	return globalData()->activeThreads;
 }
 
 static int64_t getSizeCode(int i) {
@@ -221,15 +230,21 @@ static int64_t getSizeCode(int i) {
 
 template<int Size>
 void *FastAllocator<Size>::allocate() {
+	if(!threadInitialized) {
+		initThread();
+	}
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
+		ASSERT(thr.count == 0);
 		if (thr.alternate) {
 			thr.freelist = thr.alternate;
-			thr.alternate = 0;
+			thr.alternate = nullptr;
 			thr.count = magazine_size;
-		} else
+		} else {
 			getMagazine();
+		}
 	}
 	--thr.count;
 	void* p = thr.freelist;
@@ -237,6 +252,7 @@ void *FastAllocator<Size>::allocate() {
 	VALGRIND_MAKE_MEM_DEFINED(p, sizeof(void*));
 #endif
 	thr.freelist = *(void**)p;
+	ASSERT(!thr.freelist == (thr.count == 0)); // freelist is empty if and only if count is 0
 	//check( p, true );
 #else
 	void* p = freelist;
@@ -257,15 +273,22 @@ void *FastAllocator<Size>::allocate() {
 
 template<int Size>
 void FastAllocator<Size>::release(void *ptr) {
+	if(!threadInitialized) {
+		initThread();
+	}
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (thr.count == magazine_size) {
 		if (thr.alternate)		// Two full magazines, return one
 			releaseMagazine( thr.alternate );
 		thr.alternate = thr.freelist;
-		thr.freelist = 0;
+		thr.freelist = nullptr;
 		thr.count = 0;
 	}
+
+	ASSERT(!thr.freelist == (thr.count == 0)); // freelist is empty if and only if count is 0
+
 	++thr.count;
 	*(void**)ptr = thr.freelist;
 	//check(ptr, false);
@@ -335,8 +358,26 @@ void FastAllocator<Size>::check(void* ptr, bool alloc) {
 }
 
 template <int Size>
+void FastAllocator<Size>::initThread() {
+	threadInitialized = true;
+	if (threadInitFunction) {
+		threadInitFunction();
+	}
+
+	EnterCriticalSection(&globalData()->mutex);
+	++globalData()->activeThreads;
+	LeaveCriticalSection(&globalData()->mutex);
+
+	threadData.freelist = nullptr;
+	threadData.alternate = nullptr;
+	threadData.count = 0;
+}
+
+template <int Size>
 void FastAllocator<Size>::getMagazine() {
-	if (threadInitFunction) threadInitFunction();
+	ASSERT(threadInitialized);
+	ASSERT(!threadData.freelist && !threadData.alternate && threadData.count == 0);
+
 	EnterCriticalSection(&globalData()->mutex);
 	if (globalData()->magazines.size()) {
 		void* m = globalData()->magazines.back();
@@ -348,12 +389,13 @@ void FastAllocator<Size>::getMagazine() {
 	} else if (globalData()->partial_magazines.size()) {
 		std::pair<int, void*> p = globalData()->partial_magazines.back();
 		globalData()->partial_magazines.pop_back();
+		globalData()->partialMagazineUnallocatedMemory -= p.first * Size;
 		LeaveCriticalSection(&globalData()->mutex);
 		threadData.freelist = p.second;
 		threadData.count = p.first;
 		return;
 	}
-	globalData()->memoryUsed += magazine_size*Size;
+	globalData()->totalMemory += magazine_size*Size;
 	LeaveCriticalSection(&globalData()->mutex);
 
 	// Allocate a new page of data from the system allocator
@@ -361,7 +403,7 @@ void FastAllocator<Size>::getMagazine() {
 	interlockedIncrement(&pageCount);
 	#endif
 
-	void** block = 0;
+	void** block = nullptr;
 #if FAST_ALLOCATOR_DEBUG
 #ifdef WIN32
 	static int alt = 0; alt++;
@@ -386,30 +428,42 @@ void FastAllocator<Size>::getMagazine() {
 		check( &block[i*PSize], false );
 	}
 		
-	block[(magazine_size-1)*PSize+1] = block[(magazine_size-1)*PSize] = 0;
+	block[(magazine_size-1)*PSize+1] = block[(magazine_size-1)*PSize] = nullptr;
 	check( &block[(magazine_size-1)*PSize], false );
 	threadData.freelist = block;
 	threadData.count = magazine_size;
 }
 template <int Size>
 void FastAllocator<Size>::releaseMagazine(void* mag) {
+	ASSERT(threadInitialized);
 	EnterCriticalSection(&globalData()->mutex);
 	globalData()->magazines.push_back(mag);
 	LeaveCriticalSection(&globalData()->mutex);
 }
 template <int Size>
 void FastAllocator<Size>::releaseThreadMagazines() {
-	ThreadData& thr = threadData;
+	if(threadInitialized) {
+		threadInitialized = false;
+		ThreadData& thr = threadData;
 
-	if (thr.freelist || thr.alternate) {
 		EnterCriticalSection(&globalData()->mutex);
-		if (thr.freelist) globalData()->partial_magazines.push_back( std::make_pair(thr.count, thr.freelist) );
-		if (thr.alternate) globalData()->magazines.push_back(thr.alternate);
+		if (thr.freelist || thr.alternate) {
+			if (thr.freelist) {
+				ASSERT(thr.count > 0 && thr.count <= magazine_size);
+				globalData()->partial_magazines.push_back( std::make_pair(thr.count, thr.freelist) );
+				globalData()->partialMagazineUnallocatedMemory += thr.count * Size;
+			}
+			if (thr.alternate) {
+				globalData()->magazines.push_back(thr.alternate);
+			}
+		}
+		--globalData()->activeThreads;
 		LeaveCriticalSection(&globalData()->mutex);
+
+		thr.count = 0;
+		thr.alternate = nullptr;
+		thr.freelist = nullptr;
 	}
-	thr.count = 0;
-	thr.alternate = 0;
-	thr.freelist = 0;
 }
 
 void releaseAllThreadMagazines() {
@@ -427,15 +481,15 @@ void releaseAllThreadMagazines() {
 int64_t getTotalUnusedAllocatedMemory() {
 	int64_t unusedMemory = 0;
 
-	unusedMemory += FastAllocator<16>::getMemoryUnused();
-	unusedMemory += FastAllocator<32>::getMemoryUnused();
-	unusedMemory += FastAllocator<64>::getMemoryUnused();
-	unusedMemory += FastAllocator<128>::getMemoryUnused();
-	unusedMemory += FastAllocator<256>::getMemoryUnused();
-	unusedMemory += FastAllocator<512>::getMemoryUnused();
-	unusedMemory += FastAllocator<1024>::getMemoryUnused();
-	unusedMemory += FastAllocator<2048>::getMemoryUnused();
-	unusedMemory += FastAllocator<4096>::getMemoryUnused();
+	unusedMemory += FastAllocator<16>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<32>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<64>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<128>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<256>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<512>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
 
 	return unusedMemory;
 }

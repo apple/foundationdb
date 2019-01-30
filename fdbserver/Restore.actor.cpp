@@ -2279,7 +2279,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> restoreData,
 	return Void();
 }
 
-ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
+ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreRequest request, Reference<RestoreConfig> restoreConfig, int64_t sampleMB_input) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -2296,8 +2296,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state std::vector<UID> loaderIDs = getLoaderIDs(rd);
 	state std::vector<UID> applierIDs = getApplierIDs(rd);
 	state std::vector<UID> finishedLoaderIDs;
-	state int64_t sampleMB = 10;
-	state int64_t sampleB = 10 * 1024 * 1024; // Sample a block for every sampleB bytes.
+	state int64_t sampleMB = sampleMB_input; //100;
+	state int64_t sampleB = sampleMB * 1024 * 1024; // Sample a block for every sampleB bytes. // Should adjust this value differently for simulation mode and real mode
 	state int64_t curFileIndex = 0;
 	state int64_t curFileOffset = 0;
 	state int64_t loadSizeB = 0;
@@ -2567,8 +2567,11 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	ASSERT( numLoaders > 0 );
 	ASSERT( numAppliers > 0 );
 
+	state int loadingSizeMB = numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
+	int64_t sampleSizeMB = loadingSizeMB / 100;
+
 	// TODO: WiP Sample backup files to determine the key range for appliers
-	wait( sampleWorkload(restoreData, request, restoreConfig) );
+	wait( sampleWorkload(restoreData, request, restoreConfig, sampleSizeMB) );
 //
 //	KeyRef maxKey = normalKeys.end;
 //	KeyRef minKey = normalKeys.begin;
@@ -2618,7 +2621,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	// We need to concatenate the related KVs to a big KV before we can parse the value into a vector of mutations at that version
 	// (2) The backuped KV are arranged in blocks in range file.
 	// For simplicity, we distribute at the granularity of files for now.
-	int loadingSizeMB = 10000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
+
 	state int loadSizeB = loadingSizeMB * 1024 * 1024;
 	state int loadingCmdIndex = 0;
 	state int curFileIndex = 0; // The smallest index of the files that has not been FULLY loaded

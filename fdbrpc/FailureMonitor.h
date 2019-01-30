@@ -74,7 +74,7 @@ struct FailureStatus {
 	bool operator != (FailureStatus const& r) const { return failed != r.failed; }
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & failed;
+		serializer(ar, failed);
 	}
 };
 
