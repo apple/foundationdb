@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/Platform.h"
+#include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
@@ -35,6 +36,7 @@
 class UID {
 	uint64_t part[2];
 public:
+	constexpr static FileIdentifier file_identifier = 15597147;
 	UID() { part[0] = part[1] = 0; }
 	UID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
 	std::string toString() const;

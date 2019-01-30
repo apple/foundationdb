@@ -29,6 +29,7 @@
 #include <boost/preprocessor/control/if.hpp>
 #include "flow/Platform.h"
 #include "flow/Knobs.h"
+#include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
 
 enum { invalid_error_code = 0xffff };
@@ -41,6 +42,7 @@ public:
 
 class Error {
 public:
+	constexpr static FileIdentifier file_identifier = 14065384;
 	int code() const { return error_code; }
 	const char* name() const;
 	const char* what() const;

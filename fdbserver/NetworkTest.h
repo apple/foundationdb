@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "flow/FileIdentifier.h"
 
 struct NetworkTestInterface {
 	RequestStream< struct NetworkTestRequest > test;
@@ -33,6 +34,7 @@ struct NetworkTestInterface {
 };
 
 struct NetworkTestRequest {
+	constexpr static FileIdentifier file_identifier = 4146513;
 	Key key;
 	uint32_t replySize;
 	ReplyPromise<struct NetworkTestReply> reply;
@@ -45,6 +47,7 @@ struct NetworkTestRequest {
 };
 
 struct NetworkTestReply {
+	constexpr static FileIdentifier file_identifier = 14465374;
 	Value value;
 	NetworkTestReply() {}
 	NetworkTestReply( Value value ) : value(value) {}

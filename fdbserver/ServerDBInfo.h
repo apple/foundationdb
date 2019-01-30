@@ -31,6 +31,7 @@
 #include "fdbserver/LatencyBandConfig.h"
 
 struct ServerDBInfo {
+	constexpr static FileIdentifier file_identifier = 13838807;
 	// This structure contains transient information which is broadcast to all workers for a database,
 	// permitting them to communicate with each other.  It is not available to the client.  This mechanism
 	// (see GetServerDBInfoRequest) is closely parallel to OpenDatabaseRequest for the client.

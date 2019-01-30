@@ -392,7 +392,7 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 			policy = Reference<IReplicationPolicy>(pointer);
 		}
 		else if(name == LiteralStringRef("And")) {
-			PolicyAnd* pointer = new PolicyAnd({});
+			PolicyAnd* pointer = new PolicyAnd{};
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		}

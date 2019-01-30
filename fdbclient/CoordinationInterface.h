@@ -91,6 +91,7 @@ private:
 };
 
 struct LeaderInfo {
+	constexpr static FileIdentifier file_identifier = 8338794;
 	UID changeID;
 	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
@@ -126,6 +127,7 @@ struct LeaderInfo {
 };
 
 struct GetLeaderRequest {
+	constexpr static FileIdentifier file_identifier = 214727;
 	Key key;
 	UID knownLeader;
 	ReplyPromise< Optional<LeaderInfo> > reply;

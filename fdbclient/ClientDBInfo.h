@@ -27,6 +27,7 @@
 // ClientDBInfo is all the information needed by a database client to access the database
 // It is returned (and kept up to date) by the OpenDatabaseRequest interface of ClusterInterface
 struct ClientDBInfo {
+	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
 	vector< MasterProxyInterface > proxies;
 	double clientTxnInfoSampleRate;

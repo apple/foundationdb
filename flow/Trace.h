@@ -57,6 +57,7 @@ enum Severity {
 
 class TraceEventFields {
 public:
+	constexpr static FileIdentifier file_identifier = 11262274;
 	typedef std::pair<std::string, std::string> Field;
 	typedef std::vector<Field> FieldContainer;
 	typedef FieldContainer::const_iterator FieldIterator;

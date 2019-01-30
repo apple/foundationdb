@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 
 struct ResolverInterface {
+	constexpr static FileIdentifier file_identifier = 1755944;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -54,6 +55,7 @@ struct ResolverInterface {
 };
 
 struct StateTransactionRef {
+	constexpr static FileIdentifier file_identifier = 6150271;
 	StateTransactionRef() {}
 	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations) : committed(committed), mutations(mutations) {}
 	StateTransactionRef(Arena &p, const StateTransactionRef &toCopy) : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
@@ -70,6 +72,7 @@ struct StateTransactionRef {
 };
 
 struct ResolveTransactionBatchReply {
+	constexpr static FileIdentifier file_identifier = 15472264;
 	Arena arena;
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
@@ -83,6 +86,7 @@ struct ResolveTransactionBatchReply {
 };
 
 struct ResolveTransactionBatchRequest {
+	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
 	Version prevVersion;
@@ -100,6 +104,7 @@ struct ResolveTransactionBatchRequest {
 };
 
 struct ResolutionMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 11663527;
 	ReplyPromise<int64_t> reply;
 
 	template <class Archive>
@@ -109,6 +114,7 @@ struct ResolutionMetricsRequest {
 };
 
 struct ResolutionSplitReply {
+	constexpr static FileIdentifier file_identifier = 12137765;
 	Key key;
 	int64_t used;
 	template <class Archive>
@@ -119,6 +125,7 @@ struct ResolutionSplitReply {
 };
 
 struct ResolutionSplitRequest {
+	constexpr static FileIdentifier file_identifier = 167535;
 	KeyRange range;
 	int64_t offset;
 	bool front;

@@ -44,6 +44,7 @@
 #include "flow/Deque.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
+#include "flow/FileIdentifier.h"
 
 #include <boost/version.hpp>
 
@@ -114,6 +115,7 @@ Standalone<StringRef> concatenate( Iter b, Iter const& e ) {
 
 class Void {
 public:
+	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
 	void serialize(Ar&) {}
 };
@@ -123,6 +125,7 @@ class Never {};
 template <class T>
 class ErrorOr {
 public:
+	constexpr static FileIdentifier file_identifier = (0x1 << 24) | FileIdentifierFor<T>::value;
 	ErrorOr() : error(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) {}
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {

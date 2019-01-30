@@ -72,6 +72,7 @@ struct ClusterControllerFullInterface {
 };
 
 struct RecruitFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 2023046;
 	DatabaseConfiguration configuration;
 	bool recruitSeedServers;
 	int maxOldLogRouters;
@@ -88,6 +89,7 @@ struct RecruitFromConfigurationRequest {
 };
 
 struct RecruitFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 2224085;
 	vector<WorkerInterface> tLogs;
 	vector<WorkerInterface> satelliteTLogs;
 	vector<WorkerInterface> proxies;
@@ -106,6 +108,7 @@ struct RecruitFromConfigurationReply {
 };
 
 struct RecruitRemoteFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 3235995;
 	DatabaseConfiguration configuration;
 	Optional<Key> dcId;
 	int logRouterCount;
@@ -122,6 +125,7 @@ struct RecruitRemoteFromConfigurationRequest {
 };
 
 struct RecruitRemoteFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 9091392;
 	vector<WorkerInterface> remoteTLogs;
 	vector<WorkerInterface> logRouters;
 
@@ -132,6 +136,7 @@ struct RecruitRemoteFromConfigurationReply {
 };
 
 struct RecruitStorageReply {
+	constexpr static FileIdentifier file_identifier = 15877089;
 	WorkerInterface worker;
 	ProcessClass processClass;
 
@@ -142,6 +147,7 @@ struct RecruitStorageReply {
 };
 
 struct RecruitStorageRequest {
+	constexpr static FileIdentifier file_identifier = 905920;
 	std::vector<Optional<Standalone<StringRef>>> excludeMachines;	//< Don't recruit any of these machines
 	std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
 	std::vector<Optional<Standalone<StringRef>>> includeDCs;
@@ -155,6 +161,7 @@ struct RecruitStorageRequest {
 };
 
 struct RegisterWorkerReply {
+	constexpr static FileIdentifier file_identifier = 16475696;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
@@ -168,6 +175,7 @@ struct RegisterWorkerReply {
 };
 
 struct RegisterWorkerRequest {
+	constexpr static FileIdentifier file_identifier = 14332605;
 	WorkerInterface wi;
 	ProcessClass initialClass;
 	ProcessClass processClass;
@@ -189,6 +197,7 @@ struct RegisterWorkerRequest {
 };
 
 struct GetWorkersRequest {
+	constexpr static FileIdentifier file_identifier = 1254174;
 	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
@@ -204,6 +213,7 @@ struct GetWorkersRequest {
 };
 
 struct RegisterMasterRequest {
+	constexpr static FileIdentifier file_identifier = 10773445;
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
@@ -231,6 +241,7 @@ struct RegisterMasterRequest {
 };
 
 struct GetServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
 	UID knownServerInfoID;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;

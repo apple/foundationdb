@@ -101,7 +101,7 @@ class ObjectWriter {
 public:
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
-		ASSERT(data = nullptr); // object serializer can only serialize one object
+		ASSERT(data == nullptr); // object serializer can only serialize one object
 		int allocations = 0;
 		auto allocator = [this, &allocations](size_t size_) {
 			++allocations;

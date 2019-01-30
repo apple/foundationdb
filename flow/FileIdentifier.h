@@ -25,9 +25,7 @@ using FileIdentifier = uint32_t;
 
 template <class T>
 struct FileIdentifierFor {
-	//constexpr static FileIdentifier value = T::file_identifier;
-	// TODO: use file identifiers for different types
-	constexpr static FileIdentifier value = 0xffffff;
+	constexpr static FileIdentifier value = T::file_identifier;
 };
 
 template <>

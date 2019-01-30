@@ -28,6 +28,7 @@
 #include "fdbrpc/Locality.h"
 
 struct RestoreInterface {
+	constexpr static FileIdentifier file_identifier = 13398189;
 	RequestStream< struct TestRequest > test;
 
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
@@ -46,6 +47,7 @@ struct RestoreInterface {
 };
 
 struct TestRequest {
+	constexpr static FileIdentifier file_identifier = 14404487;
 	int testData;
 	ReplyPromise< struct TestReply > reply;
 
@@ -59,6 +61,7 @@ struct TestRequest {
 };
 
 struct TestReply {
+	constexpr static FileIdentifier file_identifier = 12075719;
 	int replyData;
 
 	TestReply() : replyData(0) {}

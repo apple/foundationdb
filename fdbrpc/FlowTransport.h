@@ -24,12 +24,14 @@
 
 #include <algorithm>
 #include "flow/network.h"
+#include "flow/FileIdentifier.h"
 
 #pragma pack(push, 4)
 class Endpoint {
 public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
+	constexpr static FileIdentifier file_identifier = 10618805;
 	typedef UID Token;
 	NetworkAddressList addresses;
 	Token token;

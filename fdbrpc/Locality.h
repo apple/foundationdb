@@ -25,6 +25,7 @@
 #include "flow/flow.h"
 
 struct ProcessClass {
+	constexpr static FileIdentifier file_identifier = 6697257;
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
 	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RatekeeperClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask

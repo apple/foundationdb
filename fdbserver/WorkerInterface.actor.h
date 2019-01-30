@@ -41,6 +41,7 @@
 #define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 struct WorkerInterface {
+	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
@@ -89,6 +90,7 @@ struct WorkerDetails {
 };
 
 struct InitializeTLogRequest {
+	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
@@ -116,6 +118,7 @@ struct InitializeTLogRequest {
 };
 
 struct InitializeLogRouterRequest {
+	constexpr static FileIdentifier file_identifier = 2976228;
 	uint64_t recoveryCount;
 	Tag routerTag;
 	Version startVersion;
@@ -132,6 +135,7 @@ struct InitializeLogRouterRequest {
 
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
+	constexpr static FileIdentifier file_identifier = 12684574;
 	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
@@ -147,6 +151,7 @@ struct RecruitMasterRequest {
 };
 
 struct InitializeMasterProxyRequest {
+	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
@@ -184,6 +189,7 @@ struct InitializeRatekeeperRequest {
 };
 
 struct InitializeResolverRequest {
+	constexpr static FileIdentifier file_identifier = 7413317;
 	uint64_t recoveryCount;
 	int proxyCount;
 	int resolverCount;
@@ -196,6 +202,7 @@ struct InitializeResolverRequest {
 };
 
 struct InitializeStorageReply {
+	constexpr static FileIdentifier file_identifier = 10390645;
 	StorageServerInterface interf;
 	Version addedVersion;
 
@@ -206,6 +213,7 @@ struct InitializeStorageReply {
 };
 
 struct InitializeStorageRequest {
+	constexpr static FileIdentifier file_identifier = 16665642;
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
@@ -219,6 +227,7 @@ struct InitializeStorageRequest {
 };
 
 struct TraceBatchDumpRequest {
+	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
@@ -228,6 +237,7 @@ struct TraceBatchDumpRequest {
 };
 
 struct LoadedReply {
+	constexpr static FileIdentifier file_identifier = 9956350;
 	Standalone<StringRef> payload;
 	UID id;
 
@@ -238,6 +248,7 @@ struct LoadedReply {
 };
 
 struct LoadedPingRequest {
+	constexpr static FileIdentifier file_identifier = 4590979;
 	UID id;
 	bool loadReply;
 	Standalone<StringRef> payload;
@@ -250,6 +261,7 @@ struct LoadedPingRequest {
 };
 
 struct CoordinationPingMessage {
+	constexpr static FileIdentifier file_identifier = 9982747;
 	UID clusterControllerId;
 	int64_t timeStep;
 
@@ -263,6 +275,7 @@ struct CoordinationPingMessage {
 };
 
 struct SetMetricsLogRateRequest {
+	constexpr static FileIdentifier file_identifier = 4245995;
 	uint32_t metricsLogsPerSecond;
 
 	SetMetricsLogRateRequest() : metricsLogsPerSecond( 1 ) {}
@@ -275,6 +288,7 @@ struct SetMetricsLogRateRequest {
 };
 
 struct EventLogRequest {
+	constexpr static FileIdentifier file_identifier = 122319;
 	bool getLastError;
 	Standalone<StringRef> eventName;
 	ReplyPromise< TraceEventFields > reply;
@@ -309,6 +323,7 @@ struct DebugEntryRef {
 };
 
 struct DiskStoreRequest {
+	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
 	ReplyPromise<Standalone<VectorRef<UID>>> reply;
 

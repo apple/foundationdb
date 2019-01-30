@@ -329,7 +329,8 @@ struct Peer : NonCopyable {
 		}
 
 		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-		pkt.protocolVersion = currentProtocolVersion;
+		pkt.protocolVersion =
+		    g_network->useObjectSerializer() ? addObjectSerializerFlag(currentProtocolVersion) : currentProtocolVersion;
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
@@ -1013,19 +1014,26 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		TEST(true); // "Loopback" delivery
 		// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
+		Standalone<StringRef> copy;
+		if (g_network->useObjectSerializer()) {
+			ObjectWriter wr;
+			what.serializeBinaryWriter(wr);
+			copy = wr.toStringRef();
+		} else {
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		// we don't need to send using an object writer here. This is a loopback delivery
 		// and therefore it is guaranteed that both versions will have exactly the
 		// same structures - so the backwards compatability capabilities are never needed
 		// here.
 		what.serializeBinaryWriter(wr);
-		Standalone<StringRef> copy = wr.toValue();
+			copy = wr.toStringRef();
+		}
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
 
 		deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false,
-		        false);
+		        g_network->useObjectSerializer());
 
 		return (PacketID)NULL;
 	} else {
