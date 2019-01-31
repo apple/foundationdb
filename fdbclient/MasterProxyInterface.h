@@ -227,4 +227,70 @@ struct TxnStateRequest {
 	}
 };
 
+struct GetHealthMetricsRequest
+{
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply);
+	}
+};
+
+struct GetHealthMetricsReply
+{
+	HealthMetrics healthMetrics;
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, healthMetrics);
+	}
+};
+
+
+struct GetDetailedHealthMetricsRequest
+{
+	ReplyPromise<struct GetDetailedHealthMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply);
+	}
+};
+
+struct GetDetailedHealthMetricsReply
+{
+	Standalone<StringRef> serialized;
+
+	GetDetailedHealthMetricsReply() {}
+
+	void setHealthMetrics(const HealthMetrics& healthMetrics)
+	{
+		BinaryWriter bw(Unversioned());
+		bw << healthMetrics;
+		serialized = Standalone<StringRef>(bw.toStringRef());
+	}
+
+	HealthMetrics getHealthMetrics()
+	{
+		if (serialized.size() > 0) {
+			BinaryReader br(serialized, Unversioned());
+			HealthMetrics result;
+			br >> result;
+			return result;
+		}
+		else
+			return HealthMetrics();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, serialized);
+	}
+};
+
 #endif
