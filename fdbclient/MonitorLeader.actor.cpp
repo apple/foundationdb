@@ -265,8 +265,8 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 		}
 		leaderInfo.serializedInfo = rndString;
 	}
-	ErrorOr<Optional<LeaderInfo>> objIn{ Optional<LeaderInfo>{leaderInfo} };
-	ErrorOr<Optional<LeaderInfo>> objOut;
+	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objIn(leaderInfo);
+	ErrorOr<EnsureTable<Optional<LeaderInfo>>> objOut;
 	Standalone<StringRef> copy;
 	ObjectWriter writer;
 	writer.serialize(objIn);
@@ -275,8 +275,8 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	reader.deserialize(objOut);
 
 	ASSERT(!objOut.isError());
-	ASSERT(objOut.get().present());
-	LeaderInfo outLeader = objOut.get().get();
+	ASSERT(objOut.get().asUnderlyingType().present());
+	LeaderInfo outLeader = objOut.get().asUnderlyingType().get();
 	ASSERT(outLeader.changeID == leaderInfo.changeID);
 	ASSERT(outLeader.forward == leaderInfo.forward);
 	ASSERT(outLeader.serializedInfo == leaderInfo.serializedInfo);
