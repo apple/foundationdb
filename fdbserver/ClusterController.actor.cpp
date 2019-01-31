@@ -89,7 +89,6 @@ public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
 		Reference<AsyncVar<ServerDBInfo>> serverInfo;
-		Future<Void> distributorFailed;
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
@@ -107,7 +106,6 @@ public:
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
-			distributorFailed( Never() ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
 		}
@@ -116,11 +114,6 @@ public:
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
 			newInfo.distributor = distributorInterf;
-			if ( distributorInterf.isValid() ) {
-				distributorFailed = waitFailureClient( distributorInterf.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
-			} else {
-				distributorFailed = Never();
-			}
 			serverInfo->set( newInfo );
 		}
 	};
@@ -2289,10 +2282,10 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 
 	while (true) {
 		try {
-			if ( self->usedIds.size() == 0 ) {
-				wait( self->usedIdsTrigger.onTrigger() );
+			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
+				wait( self->db.serverInfo->onChange() );
 			}
-			self->traceUsedIds();
+
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->usedIds;
 			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
 			state InitializeDataDistributorRequest req;
@@ -2310,7 +2303,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
-			wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+			wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 		}
 	}
 }
@@ -2326,7 +2319,7 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 			req.reply.send( Void() );
 			break;
 		}
-		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) ) ) { break; }
+		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY) ) ) { break; }
 		when ( wait( self->db.serverInfo->onChange() ) ) {  // Rejoins via worker registration
 			if ( self->db.serverInfo->get().distributor.isValid() ) {
 				TraceEvent("ClusterController_InfoChange", self->id).detail("DataDistributorID", self->db.serverInfo->get().distributor.id());
@@ -2340,23 +2333,30 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 	}
 
 	// Wait on failures and restart it.
-	loop choose {
-		when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
-			TraceEvent("ClusterController", self->id)
-			.detail("DataDistributorID", distributorInterf.id())
-			.detail("Valid", distributorInterf.isValid());
-			self->db.setDistributor( distributorInterf );
-			newDistributor = Never();
+	loop {
+		state Future<Void> distributorFailed = Never();
+		if ( self->db.serverInfo->get().distributor.isValid() ) {
+			distributorFailed = waitFailureClient( self->db.serverInfo->get().distributor.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
 		}
-		when ( wait( self->db.distributorFailed ) ) {
-			TraceEvent("ClusterController", self->id)
-			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.id());
-			self->db.setDistributor( DataDistributorInterface() );
-			newDistributor = startDataDistributor( self );
-		}
-		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-			// TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
-			req.reply.send( Void() );
+
+		choose {
+			when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
+				TraceEvent("ClusterController", self->id)
+				.detail("DataDistributorID", distributorInterf.id())
+				.detail("Valid", distributorInterf.isValid());
+				self->db.setDistributor( distributorInterf );
+				newDistributor = Never();
+			}
+			when ( wait( distributorFailed ) ) {
+				TraceEvent("ClusterController", self->id)
+				.detail("DataDistributorDied", self->db.serverInfo->get().distributor.id());
+				self->db.setDistributor( DataDistributorInterface() );
+				newDistributor = startDataDistributor( self );
+			}
+			when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
+				// TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
+				req.reply.send( Void() );
+			}
 		}
 	}
 }
