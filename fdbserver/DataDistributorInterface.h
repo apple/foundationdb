@@ -31,7 +31,7 @@ struct DataDistributorInterface {
 	bool valid;
 
 	DataDistributorInterface() : valid(false) {}
-	explicit DataDistributorInterface(struct LocalityData l) : locality(l), valid(true) {}
+	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l), valid(true) {}
 
 	bool isValid() const { return valid; }
 	UID id() const { return getRateInfo.getEndpoint().token; }
