@@ -1042,7 +1042,7 @@ public:
 			TraceEvent ev("UsedID");
 			if (it.first.present()) ev.detail("Key", it.first.get().contents().toString());
 			ev.detail("Value", usedIds[it.first]);
-			ev.detail("Address", id_worker[it.first].interf.address().toString());
+			ev.detail("Locality", id_worker[it.first].interf.locality.toString());
 		}
 	}
 
@@ -2285,7 +2285,6 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
-	state InitializeDataDistributorRequest req;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
@@ -2298,6 +2297,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			self->traceUsedIds();
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->usedIds;
 			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			state InitializeDataDistributorRequest req;
 			req.reqId = g_random->randomUniqueID();
 			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
 

@@ -30,8 +30,6 @@
 #include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-using DistributorPair = std::pair<WorkerInterface, UID>;
-
 ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {
 		choose {
@@ -67,7 +65,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 }
 
 // Gets the WorkerInterface representing the data distributor.
-ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<WorkerInterface> getDataDistributorWorker( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
@@ -76,7 +74,7 @@ ACTOR Future<DistributorPair> getDataDistributorWorker( Database cx, Reference<A
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().distributor.address() ) {
 				TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", dbInfo->get().distributor.id()).detail("WorkerId", workers[i].first.id());
-				return std::make_pair(workers[i].first, dbInfo->get().distributor.id());
+				return workers[i].first;
 			}
 		}
 
@@ -106,8 +104,8 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 
 // Gets the number of bytes in flight from the data distributor.
 ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	DistributorPair distributorPair = wait( getDataDistributorWorker(cx, dbInfo) );
-	int64_t dataInFlight = wait(getDataInFlight(cx, distributorPair.first));
+	WorkerInterface distributorInterf = wait( getDataDistributorWorker(cx, dbInfo) );
+	int64_t dataInFlight = wait(getDataInFlight(cx, distributorInterf));
 	return dataInFlight;
 }
 
@@ -256,8 +254,8 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 //Gets the size of the data distribution queue.  If reportInFlight is true, then data in flight is considered part of the queue
 //Convenience method that first finds the master worker from a zookeeper interface
 ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, bool reportInFlight ) {
-	DistributorPair distributorPair = wait( getDataDistributorWorker(cx, dbInfo) );
-	int64_t inQueue = wait( getDataDistributionQueueSize( cx, distributorPair.first, reportInFlight) );
+	WorkerInterface distributorInterf = wait( getDataDistributorWorker(cx, dbInfo) );
+	int64_t inQueue = wait( getDataDistributionQueueSize( cx, distributorInterf, reportInFlight) );
 	return inQueue;
 }
 
@@ -335,10 +333,9 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
-			DistributorPair distributorPair = wait( getDataDistributorWorker( cx, dbInfo ) );
-			const WorkerInterface& distributorWorker = distributorPair.first;
-			const UID& distributorUID = distributorPair.second;
-			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID);
+			WorkerInterface distributorWorker = wait( getDataDistributorWorker( cx, dbInfo ) );
+			UID distributorUID = dbInfo->get().distributor.id();
+			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID).detail("Locality", distributorWorker.locality.toString());
 
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, distributorWorker);
 			state Future<int64_t> tLogQueueSize = getMaxTLogQueueSize( cx, dbInfo );

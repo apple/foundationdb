@@ -3170,7 +3170,7 @@ ACTOR Future<Void> dataDistribution(
 					TraceEvent("DDInitGotInitialDD", myId).detail("B","").detail("E", "").detail("Src", "[no items]").detail("Dest", "[no items]").trackLatest("InitialDD");
 				}
 
-				if (initData->mode) break;
+				if (initData->mode) break; // mode may be set true by system operator using fdbcli
 				TraceEvent("DataDistributionDisabled", myId);
 
 				TraceEvent("MovingData", myId)

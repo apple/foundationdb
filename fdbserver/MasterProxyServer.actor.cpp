@@ -93,6 +93,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
+	if (db->get().distributor.isValid()) nextRequestTimer = Void();
 	loop choose {
 		when ( wait( db->onChange() ) ) {
 			if ( db->get().distributor.isValid() ) {
@@ -112,14 +113,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
-			TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			// TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
 		}
 		when ( wait(leaseTimeout ) ) {
 			*outTransactionRate = 0;
-			TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
+			// TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
