@@ -2568,7 +2568,7 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	ASSERT( numAppliers > 0 );
 
 	state int loadingSizeMB = 0; //numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
-	int64_t sampleSizeMB = 0; loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
+	int64_t sampleSizeMB = 0; //loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
 
 	// TODO: WiP Sample backup files to determine the key range for appliers
 	wait( sampleWorkload(restoreData, request, restoreConfig, sampleSizeMB) );
@@ -3512,9 +3512,13 @@ ACTOR static Future<Void> _finishMX(Reference<ReadYourWritesTransaction> tr,  Re
 };
 
 int restoreStatusIndex = 0;
- ACTOR static Future<Void> registerStatus(Reference<ReadYourWritesTransaction> tr, struct FastRestoreStatus status) {
+ ACTOR static Future<Void> registerStatus(Database cx, struct FastRestoreStatus status) {
+ 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
+			printf("[Restore_Status][%d] curWorkload:%.2f curRunningtime:%.2f curSpeed:%.2f totalWorkload:%.2f totalRunningTime:%.2f totalSpeed:%.2f\n",
+					restoreStatusIndex, status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
+
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3529,8 +3533,6 @@ int restoreStatusIndex = 0;
 
 			wait( tr->commit() );
 			restoreStatusIndex++;
-			printf("[Restore Status][%d] curWorkload:%.2f curRunningtime:%.2f curSpeed:%.2f totalWorkload:%.2f totalRunningTime:%.2f totalSpeed:%.2f\n",
-					restoreStatusIndex, status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
 
 			break;
 		} catch( Error &e ) {
@@ -3652,7 +3654,12 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 					status.totalRunningTime = totalRunningTime;
 					status.totalWorkloadSize = totalWorkloadSize;
 					status.totalSpeed = totalWorkloadSize / totalRunningTime;
-					wait( registerStatus(tr, status) );
+
+					printf("------[Progress] restoreBatchIndex:%d, curWorkloadSize:%.2f, curWorkload:%.2f curRunningtime:%.2f curSpeed:%.2f totalWorkload:%.2f totalRunningTime:%.2f totalSpeed:%.2f\n",
+							restoreBatchIndex-1, curWorkloadSize,
+							status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
+
+					wait( registerStatus(cx, status) );
 
 					curBackupFilesBeginIndex = curBackupFilesEndIndex + 1;
 					curBackupFilesEndIndex++;
@@ -4284,7 +4291,8 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 		cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, applierID)));
 	}
 
-	std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+	//std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies ));
+	wait( waitForAny(cmdReplies) ); //TODO: I wait for any insteal of wait for all! This is NOT TESTED IN SIMULATION!
 
 	printf("[INFO][Role:%s] Node:%s finish Loader_Notify_Appler_To_Apply_Mutation cmd\n", rd->getRole().c_str(), rd->getNodeID().c_str());
 
