@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FOUNDATIONDB_DATADISTRIBUTORINTERFACE_H
-#define FOUNDATIONDB_DATADISTRIBUTORINTERFACE_H
+#ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
+#define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -33,6 +33,7 @@ struct DataDistributorInterface {
 	DataDistributorInterface() : valid(false) {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l), valid(true) {}
 
+	void initEndpoints() {}
 	bool isValid() const { return valid; }
 	UID id() const { return getRateInfo.getEndpoint().token; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
@@ -73,4 +74,4 @@ struct GetRateInfoReply {
 	}
 };
 
-#endif //FOUNDATIONDB_DATADISTRIBUTORINTERFACE_H
+#endif //FDBSERVER_DATADISTRIBUTORINTERFACE_H

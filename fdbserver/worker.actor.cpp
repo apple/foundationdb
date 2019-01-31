@@ -135,7 +135,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	}
 }
 
-ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors, Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf) {
+ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when( ErrorInfo _err = waitNext(errors) ) {
 			ErrorInfo err = _err;
@@ -151,9 +151,6 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors, Reference<
 			}
 
 			endRole(err.role, err.id, "Error", ok, err.error);
-			if (err.role == Role::DATA_DISTRIBUTOR && ddInterf->get().present()) {
-				ddInterf->set(Optional<DataDistributorInterface>());
-			}
 
 			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
 		}
@@ -534,7 +531,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
-	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture(), ddInterf );  // Needs to be stopped last
+	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
@@ -728,13 +725,15 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
 				DataDistributorInterface recruited(locality);
+				recruited.initEndpoints();
+
 				if ( ddInterf->get().present() ) {
 					recruited = ddInterf->get().get();
 				} else {
 					startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 
 					Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
-					errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), dataDistributorProcess ) );
+					errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), setWhenDoneOrError( dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>() ) ) );
 					ddInterf->set(Optional<DataDistributorInterface>(recruited));
 				}
 				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());

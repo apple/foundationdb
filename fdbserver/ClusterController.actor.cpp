@@ -1016,12 +1016,10 @@ public:
 		if (distributorInterf.isValid()) {
 			idUsed[distributorInterf.locality.processId()]++;
 		}
-		for (const auto& tlog : req.logSystemConfig.tLogs) {
-			for (const auto& locality: tlog.tLogLocalities) {
-				if (locality.processId().present()) {
-					idUsed[locality.processId()]++;
-				} else {
-					TraceEvent("UsedID").detail("Tlog", locality.toString());
+		for (const auto& tlogset : req.logSystemConfig.tLogs) {
+			for (const auto& tlog: tlogset.tLogs) {
+				if (tlog.present()) {
+					idUsed[tlog.interf().locality.processId()]++;
 				}
 			}
 		}
@@ -1703,13 +1701,13 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		dbInfo.recoveryCount = req.recoveryCount;
 	}
 
+	self->updateUsedIds(req);
+	self->traceUsedIds();
+
 	if( isChanged ) {
 		dbInfo.id = g_random->randomUniqueID();
 		self->db.serverInfo->set( dbInfo );
 	}
-
-	self->updateUsedIds(req);
-	self->traceUsedIds();
 
 	checkOutstandingRequests(self);
 }
