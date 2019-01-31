@@ -56,13 +56,13 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_67_0
-  $(info Boost dir: ${BOOSTDIR})
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
   $(error Not prepared to compile on platform $(PLATFORM))
 endif
+$(info Boost dir: ${BOOSTDIR})
 
 CCACHE := $(shell which ccache)
 ifneq ($(CCACHE),)
