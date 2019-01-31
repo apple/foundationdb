@@ -234,6 +234,27 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 }
 
 TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
+	{
+		LeaderInfo in;
+		LeaderInfo out;
+		in.forward = g_random->coinflip();
+		in.changeID = g_random->randomUniqueID();
+		{
+			std::string rndString(g_random->randomInt(10, 400), 'x');
+			for (auto& c : rndString) {
+				c = g_random->randomAlphaNumeric();
+			}
+			in.serializedInfo = rndString;
+		}
+		ObjectWriter writer;
+		writer.serialize(in);
+		Standalone<StringRef> copy = writer.toStringRef();
+		ArenaObjectReader reader(copy.arena(), copy);
+		reader.deserialize(out);
+		ASSERT(in.forward == out.forward);
+		ASSERT(in.changeID == out.changeID);
+		ASSERT(in.serializedInfo == out.serializedInfo);
+	}
 	LeaderInfo leaderInfo;
 	leaderInfo.forward = g_random->coinflip();
 	leaderInfo.changeID = g_random->randomUniqueID();
@@ -247,11 +268,9 @@ TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	ErrorOr<Optional<LeaderInfo>> objIn{ Optional<LeaderInfo>{leaderInfo} };
 	ErrorOr<Optional<LeaderInfo>> objOut;
 	Standalone<StringRef> copy;
-	{
-		ObjectWriter writer;
-		writer.serialize(objIn);
-		copy = writer.toStringRef();
-	}
+	ObjectWriter writer;
+	writer.serialize(objIn);
+	copy = writer.toStringRef();
 	ArenaObjectReader reader(copy.arena(), copy);
 	reader.deserialize(objOut);
 

@@ -126,3 +126,26 @@ private:
 	uint8_t* data = nullptr;
 	int size = 0;
 };
+
+// this special case is needed - the code expects
+// Standalone<T> and T to be equivalent for serialization
+namespace detail {
+
+template <class T>
+struct LoadSaveHelper<Standalone<T>> {
+	template <class Context>
+	void load(Standalone<T>& member, const uint8_t* current, Context& context) {
+		helper.load(member.contents(), current, context);
+		context.addArena(member.arena());
+	}
+
+	template <class Writer>
+	RelativeOffset save(const Standalone<T>& member, Writer& writer, const VTableSet* vtables) {
+		return helper.save(member.contents(), writer, vtables);
+	}
+
+private:
+	LoadSaveHelper<T> helper;
+};
+
+} // namespace detail
