@@ -2313,12 +2313,6 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 
 	// wait for a while to see if existing data distributor will join.
 	loop choose {
-		when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-			TraceEvent("ClusterController_Rejoin", self->id).detail("DataDistributorID", req.dataDistributor.id());
-			self->db.setDistributor( req.dataDistributor );
-			req.reply.send( Void() );
-			break;
-		}
 		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY) ) ) { break; }
 		when ( wait( self->db.serverInfo->onChange() ) ) {  // Rejoins via worker registration
 			if ( self->db.serverInfo->get().distributor.isValid() ) {
@@ -2352,10 +2346,6 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 				.detail("DataDistributorDied", self->db.serverInfo->get().distributor.id());
 				self->db.setDistributor( DataDistributorInterface() );
 				newDistributor = startDataDistributor( self );
-			}
-			when ( DataDistributorRejoinRequest req = waitNext( clusterInterface->dataDistributorRejoin.getFuture() ) ) {
-				// TraceEvent("ClusterController", self->id).detail("DataDistributorRejoinIgnored", req.dataDistributor.id());
-				req.reply.send( Void() );
 			}
 		}
 	}

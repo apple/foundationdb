@@ -3369,16 +3369,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<AsyncVar<DatabaseConfiguration>> configuration( new AsyncVar<DatabaseConfiguration>(DatabaseConfiguration()) );
 	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
-	state Future<Void> trigger = self->configurationTrigger.onTrigger();
 
 	TraceEvent("DataDistributor_Starting", di.id());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
-		when ( wait( trigger ) ) {
+		when ( wait( self->configurationTrigger.onTrigger() ) ) {
 			self->refreshDcIds();
-			trigger = self->configurationTrigger.onTrigger();
 			break;
 		}
 		when ( wait(self->dbInfo->onChange()) ) {}
@@ -3392,36 +3390,18 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		self->addActor.send( distributor );
 		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
-		state Future<Void> reply;
-		loop {
-			if ( self->dbInfo->get().clusterInterface.id() != lastClusterControllerID ) {
-				// Rejoin the new cluster controller
-				DataDistributorRejoinRequest req(di);
-				TraceEvent("DataDistributor_Rejoining", di.id())
-				.detail("OldClusterControllerID", lastClusterControllerID)
-				.detail("ClusterControllerID", self->dbInfo->get().clusterInterface.id());
-				reply = self->dbInfo->get().clusterInterface.dataDistributorRejoin.getReply(req);
-				lastClusterControllerID = self->dbInfo->get().clusterInterface.id();
-			} else {
-				reply = Never();
+		loop choose {
+			when ( wait( self->configurationTrigger.onTrigger() ) ) {
+				TraceEvent("DataDistributor_Restart", di.id())
+				.detail("ClusterControllerID", lastClusterControllerID)
+				.detail("Configuration", self->configuration->get().toString());
+				self->refreshDcIds();
+				distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+				self->addActor.send( distributor );
 			}
-
-			choose {
-				when ( wait( brokenPromiseToNever(reply) ) ) { reply = Never(); }
-				when ( wait( self->dbInfo->onChange() ) ) {}
-				when ( wait( trigger ) ) {
-					TraceEvent("DataDistributor_Restart", di.id())
-					.detail("ClusterControllerID", lastClusterControllerID)
-					.detail("Configuration", self->configuration->get().toString());
-					self->refreshDcIds();
-					distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-					self->addActor.send( distributor );
-					trigger = self->configurationTrigger.onTrigger();
-				}
-				when ( wait( collection ) ) {
-					ASSERT(false);
-					throw internal_error();
-				}
+			when ( wait( collection ) ) {
+				ASSERT(false);
+				throw internal_error();
 			}
 		}
 	}

@@ -43,7 +43,6 @@ struct ClusterControllerFullInterface {
 	RequestStream< struct GetWorkersRequest > getWorkers;
 	RequestStream< struct RegisterMasterRequest > registerMaster;
 	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo;
-	RequestStream< struct DataDistributorRejoinRequest > dataDistributorRejoin; // sent by dataDistributor (may or may not rebooted) to communicate with a new CC
 
 	UID id() const { return clientInterface.id(); }
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -58,13 +57,12 @@ struct ClusterControllerFullInterface {
 		getWorkers.getEndpoint( TaskClusterController );
 		registerMaster.getEndpoint( TaskClusterController );
 		getServerDBInfo.getEndpoint( TaskClusterController );
-		dataDistributorRejoin.getEndpoint( TaskClusterController );
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo, dataDistributorRejoin);
+		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 
@@ -230,19 +228,6 @@ struct GetServerDBInfoRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
-	}
-};
-
-struct DataDistributorRejoinRequest {
-	DataDistributorInterface dataDistributor;
-	ReplyPromise<Void> reply;
-
-	DataDistributorRejoinRequest() { }
-	explicit DataDistributorRejoinRequest(DataDistributorInterface di) : dataDistributor(di) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, dataDistributor, reply);
 	}
 };
 
