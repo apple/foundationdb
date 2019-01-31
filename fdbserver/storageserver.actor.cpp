@@ -283,6 +283,8 @@ public:
 	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
+	double cpuUsage;
+	double diskUsage;
 
 	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
 	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
@@ -492,7 +494,7 @@ public:
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
 			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
-			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max())
+			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -664,6 +666,34 @@ void validate(StorageServer* data, bool force = false) {
 	}
 }
 #pragma endregion
+
+void
+updateProcessStats(StorageServer* self)
+{
+	if (g_network->isSimulated()) {
+		// diskUsage and cpuUsage are not relevant in the simulator,
+		// and relying on the actual values could break seed determinism
+		self->cpuUsage = 100.0;
+		self->diskUsage = 100.0;
+		return;
+	}
+
+	auto processMetrics = latestEventCache.get("ProcessMetrics");
+	std::string elapsedStr;
+	if (processMetrics.tryGetValue("Elapsed", elapsedStr)) {
+		double elapsed = std::stod(elapsedStr);
+
+		std::string cpuSecondsStr;
+		if (processMetrics.tryGetValue("CPUSeconds", cpuSecondsStr)) {
+			self->cpuUsage = 100 * std::stod(cpuSecondsStr) / elapsed;
+		}
+
+		std::string diskIdleSecondsStr;
+		if (processMetrics.tryGetValue("DiskIdleSeconds", diskIdleSecondsStr)) {
+			self->diskUsage = 100 * std::max(0.0, (elapsed - std::stod(diskIdleSecondsStr) / elapsed));
+		}
+	}
+}
 
 ///////////////////////////////////// Queries /////////////////////////////////
 #pragma region Queries
@@ -1388,7 +1418,11 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 
 	reply.storageBytes = self->storage.getStorageBytes();
 
-	reply.v = self->version.get();
+	reply.version = self->version.get();
+	reply.cpuUsage = self->cpuUsage;
+	reply.diskUsage = self->diskUsage;
+	reply.durableVersion = self->durableVersion.get();
+	reply.desiredOldestVersion = self->desiredOldestVersion.get();
 	req.reply.send( reply );
 }
 
@@ -3250,6 +3284,8 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
+	state double updateProcessStatsDelay = SERVER_KNOBS->UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
+	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
 
 	actors.add(updateStorage(self));
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -3346,6 +3382,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					doUpdate = Never();
 				else
 					doUpdate = update( self, &updateReceived );
+			}
+			when(wait(updateProcessStatsTimer)) {
+				updateProcessStats(self);
+				updateProcessStatsTimer = delay(updateProcessStatsDelay);
 			}
 			when(wait(actors.getResult())) {}
 		}

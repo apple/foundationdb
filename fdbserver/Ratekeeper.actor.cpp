@@ -370,11 +370,11 @@ void updateRate( Ratekeeper* self ) {
 			auto& ss = i->value;
 			if (!ss.valid) continue;
 
-			minSSVer = std::min(minSSVer, ss.lastReply.v);
+			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
 			// Machines that ratekeeper isn't controlling can fall arbitrarily far behind
 			if(ignoredMachines.count(i->value.locality.zoneId()) == 0) {
-				minLimitingSSVer = std::min(minLimitingSSVer, ss.lastReply.v);
+				minLimitingSSVer = std::min(minLimitingSSVer, ss.lastReply.version);
 			}
 		}
 

@@ -380,6 +380,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( LONG_BYTE_SAMPLE_RECOVERY_DELAY,                      60.0 );
 	init( BYTE_SAMPLE_LOAD_PARALLELISM,                           32 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_PARALLELISM = 1;
 	init( BYTE_SAMPLE_LOAD_DELAY,                                0.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_DELAY = 0.1;
+	init( UPDATE_STORAGE_PROCESS_STATS_INTERVAL,                 5.0 );
 
 	//Wait Failure
 	init( BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS,               2 );
