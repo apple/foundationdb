@@ -55,23 +55,28 @@ struct GetRateInfoRequest {
 	UID requesterID;
 	int64_t totalReleasedTransactions;
 	ReplyPromise<struct GetRateInfoReply> reply;
+	bool detailed;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
+	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions, bool detailed )
+		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply);
+		serializer(ar, requesterID, totalReleasedTransactions, reply, detailed);
 	}
 };
 
 struct GetRateInfoReply {
 	double transactionRate;
 	double leaseDuration;
+	double detailedLeaseDuration;
+	HealthMetrics healthMetrics;
+	bool detailed;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration);
+		serializer(ar, transactionRate, leaseDuration, detailedLeaseDuration, healthMetrics, detailed);
 	}
 };
 

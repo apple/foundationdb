@@ -91,7 +91,7 @@ ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransact
 	loop choose{
 		when(wait(nextRequestTimer)) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(master.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+			reply = brokenPromiseToNever(master.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, false)));
 		}
 		when(GetRateInfoReply rep = wait(reply)) {
 			reply = Never();
