@@ -57,7 +57,7 @@ public:
 
 	virtual Future<Void> start(Database const& cx) {
 		if (opType == -1)
-			opType = sharedRandomNumber % 8;
+			opType = sharedRandomNumber % 9;
 
 		switch (opType) {
 		case 0:
@@ -84,6 +84,9 @@ public:
 		case 7:
 			TEST(true); //Testing atomic Add
 			return testAdd(cx->clone(), this);
+		case 8:
+			TEST(true); // Testing atomic CompareAndClear
+			return testCompareAndClear(cx->clone(), this);
 		default:
 			ASSERT(false);
 		}
@@ -268,6 +271,102 @@ public:
 		return Void();
 	}
 
+	ACTOR Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, Key key,
+	                                                  bool keySet) {
+		state uint64_t opType = MutationRef::CompareAndClear;
+		state uint64_t intValue1 = g_random->randomInt(0, 10000000);
+		state uint64_t intValue2 = g_random->coinflip() ? intValue1 : g_random->randomInt(0, 10000000);
+
+		state Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
+		state Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));
+		state std::function<Optional<uint64_t>(uint64_t, uint64_t)> opFunc = [keySet](uint64_t val1, uint64_t val2) {
+			if (!keySet || val1 == val2) {
+				return Optional<uint64_t>();
+			} else {
+				return Optional<uint64_t>(val1);
+			}
+		};
+
+		// Do operation on Storage Server
+		loop {
+			try {
+				// Set the key to a random value
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					if (keySet) {
+						tr->set(key, val1);
+					} else {
+						tr->clear(key);
+					}
+					return Void();
+				}));
+
+				// Do atomic op
+				wait(runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->atomicOp(key, val2, opType);
+					return Void();
+				}));
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
+				wait(delay(1));
+			}
+		}
+
+		// Compare result
+		Optional<Value> outputVal = wait(runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+		state Optional<uint64_t> expectedOutput = opFunc(intValue1, intValue2);
+
+		ASSERT(outputVal.present() == expectedOutput.present());
+		if (outputVal.present()) {
+			uint64_t output = 0;
+			ASSERT(outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != expectedOutput.get()) {
+				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+				    .detail("OpOn", "StorageServer")
+				    .detail("InValue1", intValue1)
+				    .detail("InValue2", intValue2)
+				    .detail("AtomicOp", opType)
+				    .detail("ExpectedOutput", expectedOutput.get())
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+
+		// Do operation at RYW layer
+		Optional<Value> outputVal =
+		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    if (keySet) {
+				    tr->set(key, val1);
+			    } else {
+				    tr->clear(key);
+			    }
+			    tr->atomicOp(key, val2, opType);
+			    return tr->get(key);
+		    }));
+
+		// Compare result
+		ASSERT(outputVal.present() == expectedOutput.present());
+		if (outputVal.present()) {
+			uint64_t output = 0;
+			ASSERT(outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != expectedOutput.get()) {
+				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+				    .detail("OpOn", "RYWLayer")
+				    .detail("InValue1", intValue1)
+				    .detail("InValue2", intValue2)
+				    .detail("AtomicOp", opType)
+				    .detail("ExpectedOutput", expectedOutput.get())
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+
+		return Void();
+	}
+
 	ACTOR Future<Void> testMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		state int currentApiVersion = getApiVersion(cx);
 		state Key key = self->getTestKey("test_key_min_");
@@ -352,6 +451,14 @@ public:
 		wait(self->testAtomicOpApi(cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2;  }));
 		wait(self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); }));
 
+		return Void();
+	}
+
+	ACTOR Future<Void> testCompareAndClear(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
+		state Key key = self->getTestKey("test_key_compare_and_clear_");
+		TraceEvent(SevInfo, "Running Atomic Op COMPARE_AND_CLEAR Correctness Current Api Version");
+		wait(self->testCompareAndClearAtomicOpApi(cx, self, key, true));
+		wait(self->testCompareAndClearAtomicOpApi(cx, self, key, false));
 		return Void();
 	}
 

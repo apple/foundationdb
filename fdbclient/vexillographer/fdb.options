@@ -254,6 +254,9 @@ description is not currently required but encouraged.
     <Option name="byte_max" code="17"
             paramType="Bytes" paramDescription="value to check against database value"
             description="Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database."/>
+    <Option name="compare_and_clear" code="20"
+            paramType="Bytes" paramDescription="Value to compare with"
+            description="Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared."/>
   </Scope>
 
   <Scope name="ConflictRangeType">

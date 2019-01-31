@@ -220,6 +220,15 @@ static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const
 	return otherOperand;
 }
 
+static Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingValueOptional,
+                                            const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present() || existingValueOptional.get() == otherOperand) {
+		// Clear the value.
+		return Optional<ValueRef>();
+	}
+	return existingValueOptional; // No change required.
+}
+
 /*
 * Returns the range corresponding to the specified versionstamp key.
 */
