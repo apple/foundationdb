@@ -233,6 +233,37 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
+	LeaderInfo leaderInfo;
+	leaderInfo.forward = g_random->coinflip();
+	leaderInfo.changeID = g_random->randomUniqueID();
+	{
+		std::string rndString(g_random->randomInt(10, 400), 'x');
+		for (auto& c : rndString) {
+			c = g_random->randomAlphaNumeric();
+		}
+		leaderInfo.serializedInfo = rndString;
+	}
+	ErrorOr<Optional<LeaderInfo>> objIn{ Optional<LeaderInfo>{leaderInfo} };
+	ErrorOr<Optional<LeaderInfo>> objOut;
+	Standalone<StringRef> copy;
+	{
+		ObjectWriter writer;
+		writer.serialize(objIn);
+		copy = writer.toStringRef();
+	}
+	ArenaObjectReader reader(copy.arena(), copy);
+	reader.deserialize(objOut);
+
+	ASSERT(!objOut.isError());
+	ASSERT(objOut.get().present());
+	LeaderInfo outLeader = objOut.get().get();
+	ASSERT(outLeader.changeID == leaderInfo.changeID);
+	ASSERT(outLeader.forward == leaderInfo.forward);
+	ASSERT(outLeader.serializedInfo == leaderInfo.serializedInfo);
+	return Void();
+}
+
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	// For a static connection string, add in fuzzed comments and whitespace
 	// SOMEDAY: create a series of random connection strings, rather than the one we started with
