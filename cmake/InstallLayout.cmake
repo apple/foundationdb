@@ -194,12 +194,12 @@ if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
       COMPONENT server)
   else()
     if(INSTALL_LAYOUT MATCHES "RPM")
-      install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
         DESTINATION "etc/rc.d/init.d"
         RENAME "foundationdb"
         COMPONENT server)
     else()
-      install(FILES ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
         DESTINATION "etc/init.d"
         RENAME "foundationdb"
         COMPONENT server)
