@@ -1090,7 +1090,6 @@ public:
 	~ClusterControllerData() {
 		ac.clear(false);
 		id_worker.clear();
-		usedIds.clear();
 	}
 };
 
