@@ -424,7 +424,7 @@ struct X {
 	}
 };
 
-TEST_CASE("flow/FlatBuffers/nestedCompat") {
+TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y1> x1 = { 1, { 2 }, 3 };
 	X<Y2> x2;
 	Arena arena;
@@ -448,7 +448,7 @@ TEST_CASE("flow/FlatBuffers/nestedCompat") {
 	return Void();
 }
 
-TEST_CASE("flow/FlatBuffers/struct") {
+TEST_CASE("/flow/FlatBuffers/struct") {
 	std::vector<std::tuple<int16_t, bool, int64_t>> x1 = { { 1, true, 2 }, { 3, false, 4 } };
 	decltype(x1) x2;
 	Arena arena;
@@ -462,7 +462,7 @@ TEST_CASE("flow/FlatBuffers/struct") {
 	return Void();
 }
 
-TEST_CASE("flow/FlatBuffers/file_identifier") {
+TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
@@ -472,7 +472,7 @@ TEST_CASE("flow/FlatBuffers/file_identifier") {
 	return Void();
 }
 
-TEST_CASE("flow/FlatBuffers/VectorRef") {
+TEST_CASE("/flow/FlatBuffers/VectorRef") {
 	// this test tests a few weird memory properties of
 	// serialized arenas. This is why it uses weird scoping
 
