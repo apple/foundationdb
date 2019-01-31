@@ -596,7 +596,7 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
-const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus");
+const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
 
 const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
