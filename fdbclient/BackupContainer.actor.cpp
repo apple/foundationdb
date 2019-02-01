@@ -1000,7 +1000,7 @@ public:
 				Version end = i->endVersion;
 				restorable.logs.push_back(*i);
 
-				printf("\t[INFO] Log File:%s\n", i->toString().c_str());
+				//printf("\t[INFO] Log File:%s\n", i->toString().c_str());
 
 				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
 				while(++i != logs.end()) {
@@ -1010,7 +1010,7 @@ public:
 					if(i->beginVersion == end) {
 						restorable.logs.push_back(*i);
 						end = i->endVersion;
-						printf("\t[INFO] Log File:%s\n", i->toString().c_str());
+						//printf("\t[INFO] Log File:%s\n", i->toString().c_str());
 					}
 				}
 

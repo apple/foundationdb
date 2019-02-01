@@ -40,7 +40,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = 50; //10; // TODO: This can become a configuration param later
+const int min_num_workers = 10; //10; // TODO: This can become a configuration param later
 
 class RestoreConfig;
 struct RestoreData; // Only declare the struct exist but we cannot use its field
@@ -2570,8 +2570,11 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 	state int loadingSizeMB = 0; //numLoaders * 1000; //NOTE: We want to load the entire file in the first version, so we want to make this as large as possible
 	int64_t sampleSizeMB = 0; //loadingSizeMB / 100; // Will be overwritten. The sampleSizeMB will be calculated based on the batch size
 
+	state double startTimeSampling = now();
 	// TODO: WiP Sample backup files to determine the key range for appliers
 	wait( sampleWorkload(restoreData, request, restoreConfig, sampleSizeMB) );
+
+	printf("------[Progress] distributeWorkload sampling time:%.2f seconds------\n", now() - startTimeSampling);
 //
 //	KeyRef maxKey = normalKeys.end;
 //	KeyRef minKey = normalKeys.begin;
@@ -2597,6 +2600,8 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 //		uint8_t val = curLowerBound[0] + step;
 //		curLowerBound = KeyRef(&val, 1);
 //	}
+
+	state double startTime = now();
 
 	// Notify each applier about the key range it is responsible for, and notify appliers to be ready to receive data
 	wait( assignKeyRangeToAppliers(restoreData, cx) );
@@ -2762,6 +2767,11 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 	// Notify the applier to applly mutation to DB
 	wait( notifyApplierToApplyMutations(restoreData) );
+
+	state double endTime = now();
+
+	double runningTime = endTime - startTime;
+	printf("------[Progress] distributeWorkload runningTime without sampling time:%.2f seconds, with sampling time:%.2f seconds------\n", runningTime, endTime - startTimeSampling);
 
 
 	// Notify to apply mutation to DB: ask loader to notify applier to do so
@@ -3574,7 +3584,7 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 	state double curStartTime = 0;
 	state double curEndTime = 0;
 	state double curWorkloadSize = 0; //Bytes
-	state double loadBatchSizeMB = 1000.0;
+	state double loadBatchSizeMB = 50000.0;
 	state double loadBatchSizeThresholdB = loadBatchSizeMB * 1024 * 1024;
 	state int restoreBatchIndex = 0;
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));

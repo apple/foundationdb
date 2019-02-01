@@ -206,7 +206,7 @@ public:
 	// Get the size of an object in a bucket
 	Future<int64_t> objectSize(std::string const &bucket, std::string const &object);
 
-	// Read an arbitrary segment of an object
+	// Read an arbitrary segment of an objecta
 	Future<int> readObject(std::string const &bucket, std::string const &object, void *data, int length, int64_t offset);
 
 	// Delete an object in a bucket
