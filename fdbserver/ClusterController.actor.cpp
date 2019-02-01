@@ -517,6 +517,9 @@ public:
 
 		id_used[masterProcessId]++;
 		id_used[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.isValid()) {
+			id_used[db.serverInfo->get().distributor.locality.processId()]++;
+		}
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
@@ -556,6 +559,9 @@ public:
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[masterProcessId]++;
 		id_used[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.isValid()) {
+			id_used[db.serverInfo->get().distributor.locality.processId()]++;
+		}
 
 		ASSERT(dcId.present());
 
@@ -685,6 +691,9 @@ public:
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
 			id_used[clusterControllerProcessId]++;
+			if (db.serverInfo->get().distributor.isValid()) {
+				id_used[db.serverInfo->get().distributor.locality.processId()]++;
+			}
 			
 			auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used );
 			for(int i = 0; i < tlogs.size(); i++) {
@@ -907,6 +916,9 @@ public:
 
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.isValid()) {
+			id_used[db.serverInfo->get().distributor.locality.processId()]++;
+		}
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 
 		if ( oldMasterFit < mworker.fitness )
@@ -1005,9 +1017,8 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
 		idUsed[clusterControllerProcessId]++;
 		idUsed[masterProcessId]++;
-		const auto& distributorInterf = dbInfo.distributor;
-		if (distributorInterf.isValid()) {
-			idUsed[distributorInterf.locality.processId()]++;
+		if (dbInfo.distributor.isValid()) {
+			idUsed[dbInfo.distributor.locality.processId()]++;
 		}
 		for (const auto& tlogset : req.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
@@ -1025,7 +1036,6 @@ public:
 			idUsed[interf.locality.processId()]++;
 		}
 		usedIds.swap( idUsed );
-		usedIdsTrigger.trigger();
 	}
 
 	void traceUsedIds() {
@@ -1033,14 +1043,18 @@ public:
 			TraceEvent ev("UsedID");
 			if (it.first.present()) ev.detail("Key", it.first.get().contents().toString());
 			ev.detail("Value", usedIds[it.first]);
-			ev.detail("Locality", id_worker[it.first].interf.locality.toString());
+			if (id_worker.find(it.first) != id_worker.end()) {
+				ev.detail("Locality", id_worker[it.first].interf.locality.toString());
+				ev.detail("Addr", id_worker[it.first].interf.address().toString());
+			} else {
+				ev.detail("Locality", "Not found!");
+			}
 		}
 	}
 
 	std::map< Optional<Standalone<StringRef>>, WorkerInfo > id_worker;
 	std::map< Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
 	std::map< Optional<Standalone<StringRef>>, int> usedIds;  // current used process IDs reported by master
-	AsyncTrigger usedIdsTrigger;
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
@@ -1084,14 +1098,6 @@ public:
 	}
 };
 
-template <class K, class T>
-vector<T> values( std::map<K,T> const& map ) {
-	vector<T> t;
-	for(auto i = map.begin(); i!=map.end(); ++i)
-		t.push_back(i->second);
-	return t;
-}
-
 ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, ClusterControllerData::DBInfo* db )
 {
 	state MasterInterface iMaster;
@@ -1113,6 +1119,9 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[cluster->clusterControllerProcessId]++;
+			if (cluster->db.serverInfo->get().distributor.isValid()) {
+				id_used[cluster->db.serverInfo->get().distributor.locality.processId()]++;
+			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.first.locality.processId() == cluster->clusterControllerProcessId )
 				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
@@ -1694,6 +1703,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		dbInfo.recoveryCount = req.recoveryCount;
 	}
 
+	// The master may tell us processes that we are not aware of. Thus, when
+	// using usedIds, proceed with caution as id_workers may not have the process.
 	self->updateUsedIds(req);
 	self->traceUsedIds();
 

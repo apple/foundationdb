@@ -60,7 +60,7 @@ struct WorkerInterface {
 	NetworkAddress address() const { return tLog.getEndpoint().address; }
 
 	WorkerInterface() {}
-	WorkerInterface( LocalityData locality ) : locality( locality ) {}
+	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
