@@ -50,10 +50,11 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
+	bool sendDetailedHealthMetrics;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions() : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()), traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	                   slowTaskProfilingEnabled(false)
+	                   slowTaskProfilingEnabled(false), sendDetailedHealthMetrics(false)
 	{ }
 };
 

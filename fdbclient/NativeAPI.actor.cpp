@@ -895,6 +895,12 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, false);
 			networkOptions.slowTaskProfilingEnabled = true;
 			break;
+		case FDBNetworkOptions::SEND_DETAILED_HEALTH_METRICS:
+			validateOptionValue(value, true);
+			int sendDetailedHealthMetrics;
+			std::istringstream(value.get().toString()) >> sendDetailedHealthMetrics;
+			networkOptions.sendDetailedHealthMetrics = (sendDetailedHealthMetrics > 0);
+			break;
 		default:
 			break;
 	}
