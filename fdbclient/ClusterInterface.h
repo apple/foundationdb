@@ -130,15 +130,15 @@ struct OpenDatabaseRequest {
 };
 
 struct SystemFailureStatus {
-	NetworkAddress address;
+	NetworkAddressList addresses;
 	FailureStatus status;
 
-	SystemFailureStatus() : address(0,0) {}
-	SystemFailureStatus( NetworkAddress const& a, FailureStatus const& s ) : address(a), status(s) {}
+	SystemFailureStatus() {}
+	SystemFailureStatus( NetworkAddressList const& a, FailureStatus const& s ) : addresses(a), status(s) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, address, status);
+		serializer(ar, addresses, status);
 	}
 };
 
@@ -155,11 +155,12 @@ struct FailureMonitoringRequest {
 
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
+	NetworkAddressList addresses;
 	ReplyPromise< struct FailureMonitoringReply > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, senderStatus, failureInformationVersion, reply);
+		serializer(ar, senderStatus, failureInformationVersion, addresses, reply);
 	}
 };
 

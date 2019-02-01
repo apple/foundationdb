@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -84,10 +84,6 @@ public:
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
 
-		const NetworkAddress& getPrimaryAddress() {
-			return addresses[1];
-		}
-
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
 			switch (startingClass._class) {
@@ -108,10 +104,7 @@ public:
 
 		const Reference<IListener> getListener(const NetworkAddress& addr) {
 			auto listener = listenerMap.find(addr);
-			if (listener == listenerMap.end()) {
-				TraceEvent("VISHESH: GetListenerFailed").detail("Address", addr.toString());
-				return Reference<IListener>();
-			}
+			ASSERT( listener != listenerMap.end());
 			return listener->second;
 		}
 
@@ -274,6 +267,7 @@ public:
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
+	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	class ClusterConnectionString* extraDB;

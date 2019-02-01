@@ -37,6 +37,28 @@ public:
 	Endpoint() : addresses({NetworkAddress()}) {}
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
 		ASSERT(addresses.size() > 0);
+		choosePrimaryAddress();
+	}
+
+	void choosePrimaryAddress() {
+		if(addresses.size() < 2) {
+			return;
+		}
+		for(int i = 0; i < addresses.size(); i++) {
+			bool compatible = false;
+			for(auto& addr : g_network->getLocalAddresses()) {
+				if(addr.isTLS() == addresses[i].isTLS()) {
+					compatible = true;
+					break;
+				}
+			}
+			if(compatible) {
+				if(i > 0) {
+					std::swap(addresses[0], addresses[i]);
+				}
+				break;
+			}
+		}
 	}
 
 	bool isValid() const { return token.isValid(); }
@@ -45,14 +67,6 @@ public:
 	// Return the primary network address, which is the first network address among
 	// all addresses this endpoint listens to.
 	const NetworkAddress& getPrimaryAddress() const {
-		return addresses[0];
-	}
-
-	const NetworkAddress& getCompatibleAddress() const {
-		if (addresses.size() < 2) {
-			// TraceEvent("VISHESHGetCompatibleAddress").detail("Size", addresses.size());
-			return addresses[0];
-		}
 		return addresses[0];
 	}
 
@@ -75,15 +89,15 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-			// ar & addresses[0] & token;
-		// } else {
-		const char* msg = ar.isDeserializing ? "EndpointDeserializing" : "EndpointSerializing";
-			ar & addresses & token;
-			TraceEvent(msg).detail("Size", addresses.size())
-				.detail("Address", getPrimaryAddress())
-				.detail("CompatibleAddress", getCompatibleAddress());
-		// }
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+			addresses.resize(1);
+			serializer(ar, addresses[0], token);
+		} else {
+			serializer(ar, addresses, token);
+			if (ar.isDeserializing) {
+				choosePrimaryAddress();
+			}
+		}
 	}
 };
 #pragma pack(pop)
@@ -118,6 +132,9 @@ public:
 
 	NetworkAddress getLocalAddress() const;
 	// Returns first local NetworkAddress.
+
+	NetworkAddressList getLocalAddresses() const;
+	// Returns all local NetworkAddress.
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
@@ -156,6 +173,7 @@ public:
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
+	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	template <class Ar>
 	void loadEndpoint(Ar& ar, Endpoint& e) {
@@ -163,24 +181,15 @@ public:
 		loadedEndpoint(e);
 	}
 
-	const NetworkAddressList& getEndpointAddresses(const NetworkAddress& addr) {
-		auto& addresses = endpointAddressList[addr];
-		if (addresses.empty()) {
-			addresses.push_back(addr);
-		}
-		TraceEvent("GetEndpointAddresses").detail("Addr", addr).detail("Size", endpointAddressList[addr].size());
-		return endpointAddressList[addr];
-	}
-
 private:
 	class TransportData* self;
 
-	std::map<NetworkAddress, std::vector<NetworkAddress>> endpointAddressList;
 	void loadedEndpoint(Endpoint&);
 };
 
 inline bool Endpoint::isLocal() const {
-	return addresses[0] == FlowTransport::transport().getLocalAddress();
+	auto localAddrs = FlowTransport::transport().getLocalAddresses();
+	return std::find(localAddrs.begin(), localAddrs.end(), addresses[0]) != localAddrs.end();
 }
 
 #endif

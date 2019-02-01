@@ -255,7 +255,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 
 				vector<Future<Void>> futures;
 				for (int listenPort = port; listenPort < port + listenPerProcess; ++listenPort) {
-					NetworkAddress n(ip, listenPort, true, sslEnabled);
+					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind( n, n ));
 				}
 				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
@@ -374,13 +374,14 @@ ACTOR Future<Void> simulatedMachine(
 		std::string baseFolder,
 		bool restarting,
 		bool useSeedFile,
-		bool runBackupAgents)
+		bool runBackupAgents,
+		bool sslOnly)
 {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
 	state UID randomId = g_nondeterministic_random->randomUniqueID();
-	state int listenPerProcess = 2; // g_random->randomInt(1, 3);
+	state int listenPerProcess = (sslEnabled && !sslOnly) ? 2 : 1;
 
 	try {
 		CSimpleIni ini;
@@ -616,6 +617,11 @@ ACTOR Future<Void> restartSimulatedSystem(
 	try {
 		int machineCount = atoi(ini.GetValue("META", "machineCount"));
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
+		int listenersPerProcess = 1;
+		auto listenersPerProcessStr = ini.GetValue("META", "listenersPerProcess");
+		if(listenersPerProcessStr != NULL) {
+			listenersPerProcess = atoi(listenersPerProcessStr);
+		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		bool enableExtraDB = (extraDB == 3);
@@ -625,7 +631,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
-		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
+		bool usingSSL = conn.toString().find(":tls") != std::string::npos || listenersPerProcess > 1;
 		int useSeedForMachine = g_random->randomInt(0, machineCount);
 		std::vector<std::string> dcIds;
 		for( int i = 0; i < machineCount; i++) {
@@ -633,7 +639,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 			std::string zoneIdString = ini.GetValue("META", format("%d", i).c_str());
 			Standalone<StringRef> zoneId = StringRef(zoneIdString);
 			std::string	dcUIDini = ini.GetValue(zoneIdString.c_str(), "dcUID");
-			
+
 			if (!dcUIDini.empty()) {
 				dcUID = StringRef(dcUIDini);
 			}
@@ -649,7 +655,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 			if( ip == NULL ) {
 				for (int i = 0; i < processes; i++){
-					ipAddrs.push_back(strtoul(ini.GetValue(zoneIdString.c_str(), format("ipAddr%d", i).c_str()), NULL, 10));
+					ipAddrs.push_back(strtoul(ini.GetValue(zoneIdString.c_str(), format("ipAddr%d", i*listenersPerProcess).c_str()), NULL, 10));
 				}
 			}
 			else {
@@ -665,7 +671,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB ),
+				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB, usingSSL && listenersPerProcess == 1 ),
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
@@ -1020,11 +1026,11 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	for( auto kv : startingConfigJSON) {
 		startingConfigString += " ";
 		if( kv.second.type() == json_spirit::int_type ) {
-			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int()); 
+			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if( kv.second.type() == json_spirit::str_type ) {
-			startingConfigString += kv.second.get_str(); 
+			startingConfigString += kv.second.get_str();
 		} else if( kv.second.type() == json_spirit::array_type ) {
-			startingConfigString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none); 
+			startingConfigString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
 		} else {
 			ASSERT(false);
 		}
@@ -1083,7 +1089,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL 5% of the time
-	bool sslEnabled = g_random->random01() < 0.05 && tlsOptions->enabled();
+	bool sslEnabled = g_random->random01() < 0.10 && tlsOptions->enabled();
+	bool sslOnly = sslEnabled && g_random->coinflip();
+	g_simulator.listenersPerProcess = sslEnabled && !sslOnly ? 2 : 1;
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled
 
@@ -1095,7 +1103,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			int dcCoordinators = coordinatorCount / nonPrimaryDcs + ((dc-1)/2 < coordinatorCount%nonPrimaryDcs);
 			for(int m = 0; m < dcCoordinators; m++) {
 				uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
-				coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
+				coordinatorAddresses.push_back(NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
 			}
 		}
@@ -1105,7 +1113,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 			for(int m = 0; m < dcCoordinators; m++) {
 				uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
-				coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
+				coordinatorAddresses.push_back(NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
 				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
 			}
 		}
@@ -1115,6 +1123,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	for(int i = 0; i < (coordinatorAddresses.size()/2)+1; i++) {
 		TraceEvent("ProtectCoordinator").detail("Address", coordinatorAddresses[i]).detail("Coordinators", describe(coordinatorAddresses)).backtrace();
 		g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip,coordinatorAddresses[i].port,true,false));
+		if(coordinatorAddresses[i].port==2) {
+			g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip,1,true,false));
+		}
 	}
 	g_random->randomShuffle(coordinatorAddresses);
 
@@ -1175,7 +1186,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled, tlsOptions,
-				localities, processClass, baseFolder, false, machine == useSeedForMachine, true ), "SimulatedMachine"));
+				localities, processClass, baseFolder, false, machine == useSeedForMachine, true, sslOnly ), "SimulatedMachine"));
 
 			if (extraDB && g_simulator.extraDB->toString() != conn.toString()) {
 				std::vector<uint32_t> extraIps;
@@ -1188,7 +1199,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 				localities.set(LiteralStringRef("data_hall"), dcUID);
 				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled, tlsOptions,
 					localities,
-					processClass, baseFolder, false, machine == useSeedForMachine, false ), "SimulatedMachine"));
+					processClass, baseFolder, false, machine == useSeedForMachine, false, sslOnly ), "SimulatedMachine"));
 			}
 
 			assignedMachines++;
@@ -1216,7 +1227,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		systemActors->push_back( reportErrors( simulatedMachine(
 			conn, ips, sslEnabled, tlsOptions,
 			localities, ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-			baseFolder, false, i == useSeedForMachine, false ),
+			baseFolder, false, i == useSeedForMachine, false, sslEnabled ),
 			"SimulatedTesterMachine") );
 	}
 	*pStartingConfiguration = startingConfigString;
@@ -1230,6 +1241,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		.detail("ServerMachineCount", machineCount)
 		.detail("ProcessesPerServer", processesPerMachine)
 		.detail("SSLEnabled", sslEnabled)
+		.detail("SSLOnly", sslOnly)
 		.detail("ClassesAssigned", assignClasses)
 		.detail("StartingConfiguration", pStartingConfiguration->toString());
 }

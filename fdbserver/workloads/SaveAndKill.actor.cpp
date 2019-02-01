@@ -60,6 +60,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.LoadFile(self->restartInfo.c_str());
 
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
+		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
 		ini.SetValue("META", "connectionString",  g_simulator.connectionString.c_str());
 		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());

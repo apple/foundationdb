@@ -132,16 +132,6 @@ public:
 	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint );
 	virtual bool onlyEndpointFailed( Endpoint const& endpoint );
 	virtual bool permanentlyFailed( Endpoint const& endpoint );
-	const NetworkAddressList& getEndpointAddresses(const NetworkAddress& addr);
-	const NetworkAddress& getPrimaryAddress(const NetworkAddress& addr) {
-		const NetworkAddressList& addresses = getEndpointAddresses(addr);
-		return addresses.size() ? getEndpointAddresses(addr)[0] : addr;
-	}
-
-	const NetworkAddress& getPrimaryAddress(const Endpoint& endpoint) {
-		const NetworkAddressList& addresses = getEndpointAddresses(endpoint.getPrimaryAddress());
-		return addresses.size() ? getEndpointAddresses(endpoint.getPrimaryAddress())[0] : endpoint.getPrimaryAddress();
-	}
 
 	void reset();
 private:
