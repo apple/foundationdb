@@ -304,6 +304,7 @@ namespace actorcompiler
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
             if (actor.isForwardDeclaration) {
+                if (actor.isStatic) writer.Write("static ");
                 writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
                 return;
             }
