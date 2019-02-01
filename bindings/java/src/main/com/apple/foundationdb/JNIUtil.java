@@ -39,6 +39,7 @@ class JNIUtil {
 	private enum OS {
 		WIN32("windows", "amd64", false),
 		LINUX("linux", "amd64", true),
+		FREEBSD("freebsd", "amd64", true),
 		OSX("osx", "x86_64", true);
 
 		private final String name;
@@ -175,6 +176,8 @@ class JNIUtil {
 			return OS.WIN32;
 		if(osname.startsWith("linux"))
 			return OS.LINUX;
+		if(osname.startsWith("freebsd"))
+			return OS.FREEBSD;
 		if(osname.startsWith("mac") || osname.startsWith("darwin"))
 			return OS.OSX;
 		throw new IllegalStateException("Unknown or unsupported OS: " + osname);
