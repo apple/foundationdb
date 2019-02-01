@@ -1293,6 +1293,26 @@ ACTOR static Future<Void> readRequestServer(
 	}
 }
 
+ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, HealthMetrics* healthMetrics, GetDetailedHealthMetricsReply* getDetailedHealthMetricsReply)
+{
+	loop {
+		choose {
+			when(GetHealthMetricsRequest req =
+				 waitNext(proxy.getHealthMetrics.getFuture()))
+			{
+				GetHealthMetricsReply rep;
+				rep.healthMetrics.update(*healthMetrics, true, false);
+				req.reply.send(rep);
+			}
+			when(GetDetailedHealthMetricsRequest req =
+				 waitNext(proxy.getDetailedHealthMetrics.getFuture()))
+			{
+				req.reply.send(*getDetailedHealthMetricsReply);
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<AsyncVar<ServerDBInfo>> db) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
@@ -1406,6 +1426,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(monitorRemoteCommitted(&commitData, db));
 	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData, &healthMetrics, &getDetailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, &commitData));
+	addActor.send(healthMetricsRequestServer(proxy, &healthMetrics, &getDetailedHealthMetricsReply));
 
 	// wait for txnStateStore recovery
 	Optional<Value> _ = wait(commitData.txnStateStore->readValue(StringRef()));

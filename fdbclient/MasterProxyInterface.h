@@ -42,6 +42,9 @@ struct MasterProxyInterface {
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 
+	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream< struct GetDetailedHealthMetricsRequest > getDetailedHealthMetrics;
+
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
@@ -50,7 +53,9 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion, txnState);
+		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations,
+				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
+				   txnState, getHealthMetrics, getDetailedHealthMetrics);
 	}
 
 	void initEndpoints() {
