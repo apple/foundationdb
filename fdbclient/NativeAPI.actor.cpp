@@ -462,6 +462,61 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
+	state bool sendDetailedHealthMetrics = networkOptions.sendDetailedHealthMetrics;
+	if (!cx->getMasterProxies().isValid() || !cx->getMasterProxies()->size()) {
+		// Wait until at least one proxy is available
+		loop
+		{
+			wait(cx->onMasterProxiesChanged());
+			if (cx->getMasterProxies().isValid() && cx->getMasterProxies()->size())
+				break;
+		}
+	}
+	state Future<Void> detailedTimer = Void();
+	if (!sendDetailedHealthMetrics)
+		detailedTimer = Never();
+	loop
+	{
+		if (!sendDetailedHealthMetrics &&
+			networkOptions.sendDetailedHealthMetrics) {
+			// Network option has been set
+			TraceEvent("EnablingDetailedHealthMetrics");
+			sendDetailedHealthMetrics = true;
+			detailedTimer = Void();
+		} else if (sendDetailedHealthMetrics &&
+			       !networkOptions.sendDetailedHealthMetrics) {
+			// Network option has been unset
+			TraceEvent("DisablingDetailedHealthMetrics");
+			sendDetailedHealthMetrics = false;
+			detailedTimer = Never();
+		}
+		state Future<Void> timer =
+			delay(CLIENT_KNOBS->UPDATE_HEALTH_METRICS_INTERVAL);
+		choose
+		{
+			when(wait(timer))
+			{
+				state GetHealthMetricsReply rep =
+					wait(loadBalance(cx->getMasterProxies(),
+							 &MasterProxyInterface::getHealthMetrics,
+							 GetHealthMetricsRequest()));
+			}
+			when(wait(detailedTimer))
+			{
+				ASSERT(sendDetailedHealthMetrics);
+				state GetDetailedHealthMetricsReply detailedRep = wait(
+					loadBalance(cx->getMasterProxies(),
+						&MasterProxyInterface::getDetailedHealthMetrics,
+						GetDetailedHealthMetricsRequest()));
+				cx->healthMetrics.update(detailedRep.getHealthMetrics(), true, true);
+				detailedTimer = delay(
+					CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL);
+			}
+		}
+	}
+}
+
 DatabaseContext::DatabaseContext(
 	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, 
 	int taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, int apiVersion ) 
@@ -484,6 +539,8 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
+
+	updateHealthMetrics = updateHealthMetricsActor(this);
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
