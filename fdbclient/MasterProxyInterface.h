@@ -274,7 +274,7 @@ struct GetDetailedHealthMetricsReply
 
 	void setHealthMetrics(const HealthMetrics& healthMetrics)
 	{
-		BinaryWriter bw(Unversioned());
+		BinaryWriter bw(IncludeVersion());
 		bw << healthMetrics;
 		serialized = Standalone<StringRef>(bw.toStringRef());
 	}
@@ -282,7 +282,7 @@ struct GetDetailedHealthMetricsReply
 	HealthMetrics getHealthMetrics()
 	{
 		if (serialized.size() > 0) {
-			BinaryReader br(serialized, Unversioned());
+			BinaryReader br(serialized, IncludeVersion());
 			HealthMetrics result;
 			br >> result;
 			return result;
