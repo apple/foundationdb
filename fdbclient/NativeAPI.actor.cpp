@@ -501,6 +501,7 @@ ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 					wait(loadBalance(cx->getMasterProxies(),
 							 &MasterProxyInterface::getHealthMetrics,
 							 GetHealthMetricsRequest()));
+				cx->healthMetrics.update(rep.healthMetrics, false, true);
 			}
 			when(wait(detailedTimer))
 			{
