@@ -690,7 +690,7 @@ updateProcessStats(StorageServer* self)
 
 		std::string diskIdleSecondsStr;
 		if (processMetrics.tryGetValue("DiskIdleSeconds", diskIdleSecondsStr)) {
-			self->diskUsage = 100 * std::max(0.0, (elapsed - std::stod(diskIdleSecondsStr) / elapsed));
+			self->diskUsage = 100 * std::max(0.0, (elapsed - std::stod(diskIdleSecondsStr)) / elapsed);
 		}
 	}
 }
