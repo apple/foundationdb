@@ -354,6 +354,7 @@ void updateRate( Ratekeeper* self ) {
 	}
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
+	self->healthMetrics.worstStorageNDV = worstStorageNDVStorageServer;
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for(auto ss = storageTPSLimitReverseIndex.begin(); ss != storageTPSLimitReverseIndex.end() && ss->first < self->TPSLimit; ++ss) {
