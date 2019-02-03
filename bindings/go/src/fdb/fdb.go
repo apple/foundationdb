@@ -30,10 +30,10 @@ package fdb
 import "C"
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"runtime"
-	"strings"
 	"sync"
 	"unsafe"
 )
@@ -387,19 +387,19 @@ func (k Key) String() string {
 // ASCII printable characters [32-127) are passed through. Other bytes are
 // replaced with \x followed by a two character zero-padded hex code for byte.
 func Printable(d []byte) string {
-	var sb strings.Builder
+	buf := new(bytes.Buffer)
 	for _, b := range d {
 		if b >= 32 && b < 127 && b != '\\' {
-			sb.WriteByte(b)
+			buf.WriteByte(b)
 			continue
 		}
 		if b == '\\' {
-			sb.WriteString("\\\\")
+			buf.WriteString("\\\\")
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("\\x%02x", b))
+		buf.WriteString(fmt.Sprintf("\\x%02x", b))
 	}
-	return sb.String()
+	return buf.String()
 }
 
 func panicToError(e *error) {
