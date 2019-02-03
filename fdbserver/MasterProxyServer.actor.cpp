@@ -103,6 +103,7 @@ ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransact
 		}
 		when(GetRateInfoReply rep = wait(reply)) {
 			reply = Never();
+			healthMetrics->update(rep.healthMetrics, rep.detailed, true);
 			*outTransactionRate = rep.transactionRate;
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
