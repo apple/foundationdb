@@ -1090,7 +1090,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL 5% of the time
-	bool sslEnabled = g_random->random01() < 0.95 && tlsOptions->enabled();
+	bool sslEnabled = g_random->random01() < 0.10 && tlsOptions->enabled();
 	bool sslOnly = sslEnabled && g_random->coinflip();
 	g_simulator.listenersPerProcess = sslEnabled && !sslOnly ? 2 : 1;
 	TEST( sslEnabled ); // SSL enabled
