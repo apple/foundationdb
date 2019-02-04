@@ -390,15 +390,15 @@ ACTOR Future<Void> simulatedMachine(
 
 		for (int i = 0; i < ips.size(); i++) {
 			if (restarting) {
-				myFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
+				myFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("%d", i*listenPerProcess).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
 
 				if(i == 0) {
 					std::string coordinationFolder = ini.GetValue(printable(localities.zoneId()).c_str(), "coordinationFolder", "");
 					if(!coordinationFolder.size())
-						coordinationFolder = ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str());
+						coordinationFolder = ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i*listenPerProcess).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str());
 					coordFolders.push_back(coordinationFolder);
 				} else {
-					coordFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
+					coordFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i*listenPerProcess).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
 				}
 			}
 			else {
@@ -671,7 +671,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB, usingSSL && listenersPerProcess == 1 ),
+				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB, usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass) ),
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
@@ -703,14 +703,15 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 			*pStartingConfiguration = "single usable_regions=2 regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 		}
+
+		TraceEvent("RestartSimulatorSettings")
+		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
+		.detail("ProcessesPerMachine", g_simulator.processesPerMachine)
+		.detail("ListenersPerProcess", listenersPerProcess);
 	}
 	catch (Error& e) {
 		TraceEvent(SevError, "RestartSimulationError").error(e);
 	}
-
-	TraceEvent("RestartSimulatorSettings")
-		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
 	wait(delay(1.0));
 
@@ -1089,7 +1090,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL 5% of the time
-	bool sslEnabled = g_random->random01() < 0.10 && tlsOptions->enabled();
+	bool sslEnabled = g_random->random01() < 0.95 && tlsOptions->enabled();
 	bool sslOnly = sslEnabled && g_random->coinflip();
 	g_simulator.listenersPerProcess = sslEnabled && !sslOnly ? 2 : 1;
 	TEST( sslEnabled ); // SSL enabled
