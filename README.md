@@ -52,7 +52,7 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
-    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' <image-tag-name> /bin/bash
+    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' <image-tag-name>
     ```
 
 1. Navigate to the container's mounted directory which contains the foundationdb repo.
