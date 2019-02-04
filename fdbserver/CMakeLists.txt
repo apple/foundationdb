@@ -169,7 +169,8 @@ set(FDBSERVER_SRCS
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.h
   workloads/WriteBandwidth.actor.cpp
-  workloads/WriteDuringRead.actor.cpp)
+  workloads/WriteDuringRead.actor.cpp
+  workloads/WritesSkewedRangedReads.actor.cpp)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
