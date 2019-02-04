@@ -115,6 +115,7 @@
     <ActorCompiler Include="workloads\SelectorCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\KVStoreTest.actor.cpp" />
     <ActorCompiler Include="workloads\StreamingRead.actor.cpp" />
+    <ActorCompiler Include="workloads\Throttling.actor.cpp" />
     <ActorCompiler Include="workloads\Throughput.actor.cpp" />
     <ActorCompiler Include="workloads\WriteBandwidth.actor.cpp" />
     <ActorCompiler Include="workloads\QueuePush.actor.cpp" />
