@@ -1,5 +1,5 @@
 FROM centos:6
-LABEL version=0.1
+LABEL version=0.0.4
 
 RUN yum install -y yum-utils
 RUN yum-config-manager --enable rhel-server-rhscl-7-rpms
