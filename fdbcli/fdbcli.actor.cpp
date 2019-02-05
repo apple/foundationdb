@@ -669,6 +669,22 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 	return outputString;
 }
 
+int getNumOfZones(StatusObjectReader statusObjCluster) {
+	StatusObjectReader machinesMap;
+	std::set<std::string> zones;
+	if (statusObjCluster.get("machines", machinesMap)) {
+		int machineExclusions = 0;
+		for (auto mach : machinesMap.obj()) {
+			StatusObjectReader machine(mach.second);
+			std::string zoneId;
+			if (machine.get("locality.zoneid", zoneId)) {
+				zones.insert(zoneId);
+			}
+		}
+	}
+	return zones.size();
+}
+
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
 		printf("WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
@@ -751,9 +767,9 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
-									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+									description += format("\nHave %d processes on %d machines across %d zone(s).", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size(), getNumOfZones(statusObjCluster));
 							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
 								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
