@@ -216,7 +216,13 @@ struct UpdateEagerReadInfo {
 			keyBegin.push_back( m.param2 );
 		else if (m.type == MutationRef::CompareAndClear) {
 			keyBegin.push_back(keyAfter(m.param1, arena));
-			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size() + 1));
+			if (keys.size() > 0 && keys.back().first == m.param1) {
+				// Don't issue a second read, if the last read was equal to the current key.
+				// CompareAndClear is likely to be used after another atomic operation on same key.
+				keys.back().second = std::max(keys.back().second, m.param2.size() + 1);
+			} else {
+				keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size() + 1));
+			}
 		} else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
 		           (m.type == MutationRef::ByteMax))
 			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
