@@ -1,0 +1,42 @@
+testTitle=BackupAndRestore
+
+    testName=WriteDuringRead
+    testDuration=30.0
+
+; Each testName=RunRestoreWorkerWorkload creates a restore worker
+; We need at least 3 restore workers: master, loader, and applier
+    testName=RunRestoreWorkerWorkload
+
+; Test case for parallel restore
+    testName=BackupAndParallelRestoreCorrectness
+    backupAfter=10.0
+    restoreAfter=60.0
+    clearAfterTest=false
+    simBackupAgents=BackupToFile
+    backupRangesCount=-1
+
+    testName=RandomClogging
+    testDuration=90.0
+	
+    testName=Rollback
+    meanDelay=90.0
+    testDuration=90.0
+
+; Do NOT consider machine crash yet
+;    testName=Attrition
+;    machinesToKill=10
+;    machinesToLeave=3
+;    reboot=true
+;    testDuration=90.0
+
+;    testName=Attrition
+;    machinesToKill=10
+;    machinesToLeave=3
+;    reboot=true
+;    testDuration=90.0
+
+; Disable buggify for parallel restore
+buggify=off
+;testDuration=360000 ;not work
+;timeout is in seconds
+timeout=360000
