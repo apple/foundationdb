@@ -2458,7 +2458,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 					wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
 				}
 				status->isFailed = !status->isFailed;
-				if(!status->isFailed && !server->teams.size()) {
+				if( !status->isFailed && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
 					self->doBuildTeams = true;
 				}
 
