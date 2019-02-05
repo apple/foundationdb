@@ -101,7 +101,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-	
+
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
@@ -839,6 +839,8 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
 	state Transaction tr(cx);
 	state int retries = 0;
+	state std::vector<NetworkAddress> desiredCoordinators;
+	state int notEnoughMachineResults = 0;
 
 	loop {
 		try {
@@ -853,8 +855,18 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
 			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
-			std::vector<NetworkAddress> _desiredCoordinators = wait( change->getDesiredCoordinators( &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result ) );
-			std::vector<NetworkAddress> desiredCoordinators = _desiredCoordinators;
+			if(!desiredCoordinators.size()) {
+				std::vector<NetworkAddress> _desiredCoordinators = wait( change->getDesiredCoordinators( &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result ) );
+				desiredCoordinators = _desiredCoordinators;
+			}
+
+			if(result == CoordinatorsResult::NOT_ENOUGH_MACHINES && notEnoughMachineResults < 1) {
+				//we could get not_enough_machines if we happen to see the database while the cluster controller is updating the worker list, so make sure it happens twice before returning a failure
+				notEnoughMachineResults++;
+				wait( delay(1.0) );
+				tr.reset();
+				continue;
+			}
 			if (result != CoordinatorsResult::SUCCESS)
 				return result;
 			if (!desiredCoordinators.size())
@@ -1009,15 +1021,13 @@ struct AutoQuorumChange : IQuorumChange {
 		//     check if multiple old coordinators map to the same locality data (same machine)
 		bool checkAcceptable = true;
 		std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-		if (workers.size()){
-			for (auto addr : oldCoordinators) {
-				auto findResult = addr_locality.find(addr);
-				if (findResult == addr_locality.end() || checkDuplicates.count(findResult->second.zoneId())){
-					checkAcceptable = false;
-					break;
-				}
-				checkDuplicates.insert(findResult->second.zoneId());
+		for (auto addr : oldCoordinators) {
+			auto findResult = addr_locality.find(addr);
+			if (findResult == addr_locality.end() || checkDuplicates.count(findResult->second.zoneId())){
+				checkAcceptable = false;
+				break;
 			}
+			checkDuplicates.insert(findResult->second.zoneId());
 		}
 
 		if (checkAcceptable){
@@ -1057,7 +1067,7 @@ struct AutoQuorumChange : IQuorumChange {
 		});
 
 		for(auto field = fields.begin(); field != fields.end(); field++) {
-			if(field->toString() == "machineid") {
+			if(field->toString() == "zoneid") {
 				hardLimits[*field] = 1;
 			}
 			else {
@@ -1334,7 +1344,7 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 			ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
 			state DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
-			
+
 			state std::vector<Future<Optional<Value>>> replicasFutures;
 			for(auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
