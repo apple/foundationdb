@@ -254,39 +254,53 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 
 //Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
 ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWorker) {
-	try {
-		TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
+	state int attempts = 0;
+	loop {
+		try {
+			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
-		TraceEventFields addTeamsBestOfMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( LiteralStringRef("AddTeamsBestOf") ) ), 1.0 ) );
+			TraceEventFields teamCollectionInfoMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+				EventLogRequest( LiteralStringRef("TeamCollectionInfo") ) ), 1.0 ) );
 
-		TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
+			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
-		int64_t currentTeamNumber;
-		int64_t desiredTeamNumber;
-		int64_t maxTeamNumber;
-		int64_t currentMachineTeamNumber;
-		int64_t desiredMachineTeamNumber;
-		int64_t maxMachineTeamNumber;
-		sscanf(addTeamsBestOfMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
-		sscanf(addTeamsBestOfMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
-		sscanf(addTeamsBestOfMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
-		sscanf(addTeamsBestOfMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld", &currentMachineTeamNumber);
-		sscanf(addTeamsBestOfMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
-		sscanf(addTeamsBestOfMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
+			int64_t currentTeamNumber;
+			int64_t desiredTeamNumber;
+			int64_t maxTeamNumber;
+			int64_t currentMachineTeamNumber;
+			int64_t desiredMachineTeamNumber;
+			int64_t maxMachineTeamNumber;
+			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld", &currentMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
 
-		if (currentTeamNumber > maxTeamNumber || currentMachineTeamNumber > maxMachineTeamNumber) {
-			printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld.",
-					currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
-			return false;
-		} else {
-			return true;
+			if (currentTeamNumber > maxTeamNumber || currentMachineTeamNumber > maxMachineTeamNumber) {
+				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld.",
+						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
+				TraceEvent("GetTeamCollectionValid").detail("CurrentTeamNumber", currentTeamNumber)
+					.detail("DesiredTeamNumber", desiredTeamNumber).detail("MaxTeamNumber", maxTeamNumber)
+					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber).detail("DesiredMachineTeams", desiredMachineTeamNumber)
+					.detail("MaxMachineTeams", maxMachineTeamNumber);
+				return false;
+			} else {
+				return true;
+			}
+
+		} catch( Error &e ) {
+			TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract GetTeamCollectionValid information");
+			attempts++;
+			if ( attempts > 10 ) {
+				TraceEvent("QuietDatabaseNoTeamCollectionInfo", masterWorker.id()).detail("Reason", "Had never called build team to build any team");
+				return true;
+			}
+			//throw;
+			wait( delay(5.0) );
 		}
+	};
 
-	} catch( Error &e ) {
-		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract GetTeamCollectionValid information");
-		throw;
-	}
 }
 
 //Gets if the number of process and machine teams does not exceed the maximum allowed number of teams

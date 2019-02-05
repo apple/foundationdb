@@ -690,6 +690,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		}
 	}
 
+	printf("MX: success:%d failure:%d\n", success, failure);
+
 	if( spec.phases & TestWorkload::METRICS ) {
 		state std::vector< Future<vector<PerfMetric>> > metricTasks;
 		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
