@@ -29,14 +29,8 @@ add_custom_target(python_binding ALL DEPENDS ${out_files})
 
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/bindings/python/fdb)
 set(options_file ${PROJECT_BINARY_DIR}/bindings/python/fdb/fdboptions.py)
-add_custom_command(OUTPUT ${options_file}
-  COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options python ${options_file}
-  DEPENDS ${PROJECT_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
-  COMMENT "Generate Python options")
-add_custom_target(fdb_python_options DEPENDS
-  ${options_file}
-  ${PROJECT_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-  vexillographer)
+vexillographer_compile(TARGET fdb_python_options LANG python OUT ${options_file}
+  OUTPUT ${options_file})
 
 add_dependencies(python_binding fdb_python_options)
 

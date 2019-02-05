@@ -31,10 +31,17 @@ macro(actor_compile target srcs)
       set(actor_compiler_flags "--disable-actor-without-wait-error")
     endif()
     if(tmp)
-      add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${tmp}"
-        COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${tmp}" ${actor_compiler_flags} > /dev/null
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler ${actor_exe}
-        COMMENT "Compile actor: ${src}")
+      if(WIN32)
+        add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${tmp}"
+          COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${tmp}" ${actor_compiler_flags}
+          DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler ${actor_exe}
+          COMMENT "Compile actor: ${src}")
+      else()
+        add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${tmp}"
+          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${tmp}" ${actor_compiler_flags} > /dev/null
+          DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler ${actor_exe}
+          COMMENT "Compile actor: ${src}")
+      endif()
       set(_tmp_out "${_tmp_out};${CMAKE_CURRENT_BINARY_DIR}/${tmp}")
     endif()
   endforeach()

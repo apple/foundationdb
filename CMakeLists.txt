@@ -23,6 +23,12 @@ project(fdb
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM Java)
 
+if(WIN32)
+  # C# is currently only supported on Windows.
+  # On other platforms we find mono manually
+  enable_language(CSharp)
+endif()
+
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")

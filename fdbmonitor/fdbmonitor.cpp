@@ -20,7 +20,9 @@
 
 #include <signal.h>
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <random>
 
 #ifdef __linux__

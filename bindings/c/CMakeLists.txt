@@ -23,11 +23,8 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.S
 add_custom_target(fdb_c_generated DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.S
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
-  COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options c ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
-  DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
-  COMMENT "Generate C options")
-add_custom_target(fdb_c_options DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
+vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
 
 include(GenerateExportHeader)
 

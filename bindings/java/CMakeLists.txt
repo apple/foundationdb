@@ -109,11 +109,8 @@ set(GENERATED_JAVA_FILES
   ${GENERATED_JAVA_DIR}/TransactionOptions.java
   ${GENERATED_JAVA_DIR}/FDBException.java)
 
-add_custom_command(OUTPUT ${GENERATED_JAVA_FILES}
-  COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options java ${GENERATED_JAVA_DIR}
-  DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
-  COMMENT "Generate Java options")
-add_custom_target(fdb_java_options DEPENDS ${GENERATED_JAVA_DIR}/StreamingMode.java)
+vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
+  OUTPUT ${GENERATED_JAVA_FILES})
 
 set(SYSTEM_NAME "linux")
 if (APPLE)
