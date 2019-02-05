@@ -40,7 +40,7 @@ set(CMAKE_REQUIRED_LIBRARIES c)
 
 
 if(WIN32)
-  add_compile_options(/W3 /EHsc)
+  add_compile_options(/W3 /EHsc /std:c++11)
 else()
   if(USE_GOLD_LINKER)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
