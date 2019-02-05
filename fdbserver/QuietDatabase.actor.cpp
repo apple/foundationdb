@@ -252,6 +252,51 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 	return inQueue;
 }
 
+//Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
+ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWorker) {
+	try {
+		TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
+
+		TraceEventFields addTeamsBestOfMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+			EventLogRequest( LiteralStringRef("AddTeamsBestOf") ) ), 1.0 ) );
+
+		TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
+
+		int64_t currentTeamNumber;
+		int64_t desiredTeamNumber;
+		int64_t maxTeamNumber;
+		int64_t currentMachineTeamNumber;
+		int64_t desiredMachineTeamNumber;
+		int64_t maxMachineTeamNumber;
+		sscanf(addTeamsBestOfMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
+		sscanf(addTeamsBestOfMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
+		sscanf(addTeamsBestOfMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
+		sscanf(addTeamsBestOfMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld", &currentMachineTeamNumber);
+		sscanf(addTeamsBestOfMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
+		sscanf(addTeamsBestOfMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
+
+		if (currentTeamNumber > maxTeamNumber || currentMachineTeamNumber > maxMachineTeamNumber) {
+			printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld.",
+					currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
+			return false;
+		} else {
+			return true;
+		}
+
+	} catch( Error &e ) {
+		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract GetTeamCollectionValid information");
+		throw;
+	}
+}
+
+//Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
+//Convenience method that first finds the master worker from a zookeeper interface
+ACTOR Future<bool> getTeamCollectionValid( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	WorkerInterface masterWorker = wait(getMasterWorker(cx, dbInfo));
+	bool valid = wait(getTeamCollectionValid( cx, masterWorker));
+	return valid;
+}
+
 //Checks that data distribution is active
 ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface masterWorker ) {
 	try {
@@ -330,20 +375,27 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, masterWorker);
 			state Future<int64_t> tLogQueueSize = getMaxTLogQueueSize( cx, dbInfo, masterWorker );
 			state Future<int64_t> dataDistributionQueueSize = getDataDistributionQueueSize( cx, masterWorker, dataInFlightGate == 0);
+			state Future<bool> teamCollectionValid = getTeamCollectionValid(cx, masterWorker);
 			state Future<int64_t> storageQueueSize = getMaxStorageServerQueueSize( cx, dbInfo, masterWorker );
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, masterWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, dbInfo, masterWorker );
 
 			wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
-							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
+			                && success( teamCollectionValid ) && success( storageQueueSize )
+			                && success( dataDistributionActive ) && success( storageServersRecruiting ) );
 			TraceEvent(("QuietDatabase" + phase).c_str())
-				.detail("DataInFlight", dataInFlight.get()).detail("MaxTLogQueueSize", tLogQueueSize.get()).detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-				.detail("MaxStorageQueueSize", storageQueueSize.get()).detail("DataDistributionActive", dataDistributionActive.get())
+				.detail("DataInFlight", dataInFlight.get())
+				.detail("MaxTLogQueueSize", tLogQueueSize.get())
+				.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+				.detail("TeamCollectionValid", teamCollectionValid.get())
+				.detail("MaxStorageQueueSize", storageQueueSize.get())
+				.detail("DataDistributionActive", dataDistributionActive.get())
 				.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
 			if( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate
-				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true) {
+				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true
+				|| teamCollectionValid.get() == false) {
 
 				wait( delay( 1.0 ) );
 				numSuccesses = 0;

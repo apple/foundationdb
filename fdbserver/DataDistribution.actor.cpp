@@ -1091,6 +1091,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
 		bool badTeam = !satisfiesPolicy(teamInfo->servers) || teamInfo->servers.size() != configuration.storageTeamSize;
 
+		//TODO: MT upgrade: add a bool to force it to be a badTeam
 		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 		if (badTeam) {
@@ -1563,7 +1564,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
-	int addTeamsBestOf(int teamsToBuild) {
+	int addTeamsBestOf(int teamsToBuild, int desiredTeamNumber, int maxTeamNumber) {
 		ASSERT(teamsToBuild > 0);
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 
@@ -1686,13 +1687,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		TraceEvent("AddTeamsBestOf")
+		TraceEvent("AddTeamsBestOf", masterId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
 		    .detail("AimToBuildTeamNumber", teamsToBuild)
 		    .detail("CurrentTeamNumber", teams.size())
+		    .detail("DesiredTeamNumber", desiredTeamNumber)
+		    .detail("MaxTeamNumber", maxTeamNumber)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
-		    .detail("MachineTeamNum", machineTeams.size());
+		    .detail("CurrentMachineTeamNumber", machineTeams.size())
+		    .detail("DesiredMachineTeams", desiredMachineTeams)
+		    .detail("MaxMachineTeams", maxMachineTeams)
+		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
+		    .trackLatest( "AddTeamsBestOf" );
+
 
 		return addedTeams;
 	}
@@ -1762,7 +1770,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				state vector<std::vector<UID>> builtTeams;
 
-				int addedTeams = self->addTeamsBestOf(teamsToBuild);
+				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams);
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam")
 					    .detail("TeamNum", self->teams.size())
@@ -3364,11 +3372,13 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 
 	int teamSize = 3; // replication size
 	int processSize = 60;
+	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(teamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
-	int result = collection->addTeamsBestOf(30);
+	int result = collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 	ASSERT(collection->sanityCheckTeams() == true);
 
@@ -3382,6 +3392,8 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 
 	int teamSize = 3; // replication size
 	int processSize = 60;
+	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(teamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
@@ -3392,7 +3404,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	}
 
 	collection->addBestMachineTeams(30); // Create machine teams to help debug
-	int result = collection->addTeamsBestOf(30);
+	int result = collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
 	if (collection) delete (collection);
@@ -3402,9 +3414,12 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
+	state int processSize = 10;
+	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
 
-	int result = collection->addTeamsBestOf(200);
+	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
 
 	delete(collection);
 
@@ -3418,9 +3433,13 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
+	state int processSize = 10;
+	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-	int result = collection->addTeamsBestOf(10);
+	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+
+	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 	delete(collection);
 
@@ -3432,12 +3451,15 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	wait(Future<Void>(Void()));
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	state DDTeamCollection* collection = testTeamCollection(3, policy, 10);
+	state int processSize = 10;
+	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
-	int result = collection->addTeamsBestOf(8);
+	int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
 
 	ASSERT(result == 8);
 
@@ -3459,13 +3481,16 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	wait(Future<Void>(Void()));
 
 	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	state DDTeamCollection* collection = testTeamCollection(3, policy, 5);
+	state int processSize = 5;
+	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
 
 	int resultMachineTeams = collection->addBestMachineTeams(10);
-	int result = collection->addTeamsBestOf(10);
+	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 	if (collection->machineTeams.size() != 10 || result != 8) {
 		collection->traceAllInfo(true); // Debug message
