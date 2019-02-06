@@ -104,7 +104,8 @@ not yet supported.
    other location)
 7. Open the `Developer Command Prompt for VS 2017`
 8. Run cmake like this: `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=C:\boost_167_0 Z:\Projects\foundationdb`
-9. This should succeed. In which case you can build using msbuild: `msbuild /p:Configuration=Release`
+9. This should succeed. In which case you can build using msbuild:
+   `msbuild /p:Configuration=Release fdb.sln`
 
 You can also open the generated solution file in Visual Studio and build from
 there. However, working on FDB in Visual Studio is currently not supported (as
