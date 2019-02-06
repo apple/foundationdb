@@ -42,6 +42,7 @@ elseif(DIR_LAYOUT MATCHES "OSX")
   set(FDB_SHARE_DIR "usr/local/share")
 elseif(DIR_LAYOUT MATCHES "WIN")
   set(CPACK_GENERATOR "WIX")
+  set(FDB_CONFIG_DIR "etc")
   set(FDB_LIB_DIR "lib")
   set(FDB_LIB_NOSUFFIX "lib")
   set(FDB_LIBEXEC_DIR "bin")
@@ -186,14 +187,24 @@ string(RANDOM LENGTH 8 description2)
 set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
-install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
-  DESTINATION ${FDB_CONFIG_DIR}
-  COMPONENT server)
-install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-  DESTINATION "usr/lib/foundationdb"
-  COMPONENT server)
-install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
-  DESTINATION "usr/lib/foundationdb")
+if(NOT WIN32)
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
+    DESTINATION ${FDB_CONFIG_DIR}
+    COMPONENT server)
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
+    DESTINATION "usr/lib/foundationdb"
+    COMPONENT server)
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
+    DESTINATION "usr/lib/foundationdb")
+else()
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/msi/skeleton.txt
+    DESTINATION "etc"
+    COMPONENT server
+    RENAME "foundationdb.conf")
+  install(FILES ${CMAKE_BINARY_DIR}/fdb.cluster
+    DESTINATION "etc"
+    COMPONENTS server)
+endif()
 if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
     ${CMAKE_BINARY_DIR}/packaging/rpm)
