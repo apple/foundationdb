@@ -2934,7 +2934,7 @@ int main(int argc, char* argv[]) {
 				fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", tlsCAPath.c_str(), e.what());
 				return 1;
 			}
-	}
+		}
 		if (tlsKeyPath.size()) {
 			try {
 				if (tlsPassword.size())
