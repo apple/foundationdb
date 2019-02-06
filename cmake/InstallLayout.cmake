@@ -1,5 +1,9 @@
 if(NOT INSTALL_LAYOUT)
-  set(DEFAULT_INSTALL_LAYOUT "STANDALONE")
+  if(WIN32)
+    set(DEFAULT_INSTALL_LAYOUT "WIN")
+  else()
+    set(DEFAULT_INSTALL_LAYOUT "STANDALONE")
+  endif()
 endif()
 set(INSTALL_LAYOUT "${DEFAULT_INSTALL_LAYOUT}"
   CACHE STRING "Installation directory layout. Options are: TARGZ (as in tar.gz installer), WIN, STANDALONE, RPM, DEB, OSX")
@@ -37,7 +41,15 @@ elseif(DIR_LAYOUT MATCHES "OSX")
   set(FDB_PYTHON_INSTALL_DIR "Library/Python/2.7/site-packages/fdb")
   set(FDB_SHARE_DIR "usr/local/share")
 elseif(DIR_LAYOUT MATCHES "WIN")
-  # TODO
+  set(CPACK_GENERATOR "WIX")
+  set(FDB_LIB_DIR "lib")
+  set(FDB_LIB_NOSUFFIX "lib")
+  set(FDB_LIBEXEC_DIR "bin")
+  set(FDB_SHARE_DIR "share")
+  set(FDB_BIN_DIR "bin")
+  set(FDB_SBIN_DIR "bin")
+  set(FDB_INCLUDE_INSTALL_DIR "include")
+  set(FDB_PYTHON_INSTALL_DIR "share/python/2.7/site-packages/fdb")
 else()
   # for deb and rpm
   if(INSTALL_LAYOUT MATCHES "RPM")
@@ -149,6 +161,20 @@ if(INSTALL_LAYOUT MATCHES "DEB")
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postinst
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/prerm
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postrm)
+endif()
+
+################################################################################
+# Configuration for DEB
+################################################################################
+
+if(INSTALL_LAYOUT MATCHES "WIN")
+  set(CPACK_WIX_UPGRADE_GUID A95EA002-686E-4164-8356-C715B7F8B1C8)
+  set(CPACK_WIX_PRODUCT_GUID A4228020-2D9B-43FA-B3AE-4EE6297105F5)
+  set(CPACK_WIX_LICENSE_RTF  ${CMAKE_SOURCE_DIR}/packaging/msi/LICENSE.rtf)
+  set(CPACK_WIX_PRODUCT_ICON ${CMAKE_SOURCE_DIR}/packaging/msi/art/favicon-60.png)
+  set(CPACK_WIX_UI_BANNER    ${CMAKE_SOURCE_DIR}/packaging/msi/art/banner.jpg)
+  set(CPACK_WIX_UI_DIALOG    ${CMAKE_SOURCE_DIR}/packaging/msi/art/dialog.jpg)
+  set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY FoundationDB)
 endif()
 
 ################################################################################
