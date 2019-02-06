@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+// There's something in one of the files below that defines a macros
+// a macro that makes boost interprocess break on Windows.
+#define BOOST_DATE_TIME_NO_LIB
+#include <boost/interprocess/managed_shared_memory.hpp>
+
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/PerfMetric.h"
@@ -51,9 +56,6 @@
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
 #include "fdbclient/versions.h"
-
-#define BOOST_DATE_TIME_NO_LIB
-#include <boost/interprocess/managed_shared_memory.hpp>
 
 #ifdef  __linux__
 #include <execinfo.h>
