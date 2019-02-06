@@ -21,7 +21,7 @@ project(fdb
   VERSION 6.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Java)
+  LANGUAGES ASM C CXX Java)
 
 if(WIN32)
   # C# is currently only supported on Windows.
