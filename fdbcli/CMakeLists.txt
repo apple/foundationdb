@@ -5,7 +5,7 @@ set(FDBCLI_SRCS
   linenoise/linenoise.h)
 
 if(NOT WIN32)
-  list(APPEN FDBCLI_SRCS linenoise/linenoise.c)
+  list(APPEND FDBCLI_SRCS linenoise/linenoise.c)
 endif()
 
 actor_set(FDBCLI_BUILD "${FDBCLI_SRCS}")
