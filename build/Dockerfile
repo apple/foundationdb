@@ -27,4 +27,12 @@ RUN yum install -y java-1.8.0-openjdk-devel
 # install python
 RUN yum install -y rh-python36-python-devel
 
+# install LibreSSL
+RUN curl https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.8.2.tar.gz > /tmp/libressl.tar.gz &&\
+    cd /tmp && echo "b8cb31e59f1294557bfc80f2a662969bc064e83006ceef0574e2553a1c254fd5  libressl.tar.gz" > libressl-sha.txt &&\
+    sha256sum -c libressl-sha.txt && tar xf libressl.tar.gz &&\
+    cd libressl-2.8.2
+RUN cd /tmp/libressl-2.8.2 && scl enable devtoolset-7 -- ./configure --prefix=/usr/local/stow/libressl CFLAGS="-fPIC -O3" --prefix=/usr/local
+RUN cd /tmp/libressl-2.8.2 && scl enable devtoolset-7 -- make -j`nproc` install
+
 CMD scl enable devtoolset-7 -- scl enable rh-python36 -- bash
