@@ -171,7 +171,7 @@ public:
 					coalesceOver( e.stack, RYWMutation( param, operation ), *arena );
 				else
 					e.stack.push( RYWMutation( param, operation ) );
-				
+
 				it.tree.clear();
 				PTreeImpl::remove( writes, ver, e.key ); // FIXME: Make PTreeImpl::insert do this automatically (see also VersionedMap.h FIXME)
 				PTreeImpl::insert( writes, ver, std::move(e) );
@@ -394,8 +394,18 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::AppendIfFits) {
+		} else if (newEntry.type == MutationRef::CompareAndClear) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				if (doCompareAndClear(existingEntry.value, newEntry.value.get(), arena).present()) {
+					return existingEntry;
+				} else {
+					return RYWMutation(Optional<ValueRef>(), MutationRef::SetValue);
+				}
+			default:
+				throw operation_failed();
+			}
+		} else if (newEntry.type == MutationRef::AppendIfFits) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -404,8 +414,7 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::And) {
+		} else if (newEntry.type == MutationRef::And) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doAnd(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -414,8 +423,7 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::Or) {
+		} else if (newEntry.type == MutationRef::Or) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doOr(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -424,8 +432,7 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::Xor) {
+		} else if (newEntry.type == MutationRef::Xor) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doXor(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -434,8 +441,7 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::Max) {
+		} else if (newEntry.type == MutationRef::Max) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -444,8 +450,7 @@ public:
 			default:
 				throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::Min) {
+		} else if (newEntry.type == MutationRef::Min) {
 			switch (existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -454,8 +459,7 @@ public:
 				default:
 					throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::ByteMin) {
+		} else if (newEntry.type == MutationRef::ByteMin) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doByteMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -464,8 +468,7 @@ public:
 			default:
 				throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::ByteMax) {
+		} else if (newEntry.type == MutationRef::ByteMax) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doByteMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -474,8 +477,7 @@ public:
 			default:
 				throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::MinV2) {
+		} else if (newEntry.type == MutationRef::MinV2) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doMinV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -484,8 +486,7 @@ public:
 			default:
 				throw operation_failed();
 			}
-		}
-		else if (newEntry.type == MutationRef::AndV2) {
+		} else if (newEntry.type == MutationRef::AndV2) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doAndV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -494,8 +495,8 @@ public:
 			default:
 				throw operation_failed();
 			}
-		}
-		else throw operation_failed();
+		} else
+			throw operation_failed();
 	}
 		
 	static void coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {

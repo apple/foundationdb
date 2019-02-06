@@ -203,6 +203,8 @@ struct UpdateEagerReadInfo {
 	vector<pair<KeyRef, int>> keys;
 	vector<Optional<Value>> value;
 
+	Arena arena;
+
 	void addMutations( VectorRef<MutationRef> const& mutations ) {
 		for(auto& m : mutations)
 			addMutation(m);
@@ -212,7 +214,17 @@ struct UpdateEagerReadInfo {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
 		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
 			keyBegin.push_back( m.param2 );
-		else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) || (m.type == MutationRef::ByteMax))
+		else if (m.type == MutationRef::CompareAndClear) {
+			keyBegin.push_back(keyAfter(m.param1, arena));
+			if (keys.size() > 0 && keys.back().first == m.param1) {
+				// Don't issue a second read, if the last read was equal to the current key.
+				// CompareAndClear is likely to be used after another atomic operation on same key.
+				keys.back().second = std::max(keys.back().second, m.param2.size() + 1);
+			} else {
+				keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size() + 1));
+			}
+		} else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
+		           (m.type == MutationRef::ByteMax))
 			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
 		else if (isAtomicOp((MutationRef::Type) m.type))
 			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size()));
@@ -1420,13 +1432,6 @@ ACTOR Future<Void> doEagerReads( StorageServer* data, UpdateEagerReadInfo* eager
 	return Void();
 }
 
-void singleEagerReadFromVector( UpdateEagerReadInfo& eager, KeyRef const& key, VectorRef<KeyValueRef> data ) {
-	eager.keyBegin.clear(); eager.keyEnd.clear();
-	eager.keyBegin.push_back( key );
-	auto e = std::lower_bound( data.begin(), data.end(), key, KeyValueRef::OrderByKey() );
-	eager.keyEnd.push_back( e != data.end() ? e->key : allKeys.end );
-}
-
 bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) {
 	// Remove entries from the latest version of data->versionedData that haven't changed since they were inserted
 	//   before or at desiredDurableVersion, to maintain the invariants for versionedData.
@@ -1549,39 +1554,46 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 		}
 
 		switch(m.type) {
-			case MutationRef::AddValue:
-				m.param2 = doLittleEndianAdd(oldVal, m.param2, ar);
-				break;
-			case MutationRef::And:
-				m.param2 = doAnd(oldVal, m.param2, ar);
-				break;
-			case MutationRef::Or:
-				m.param2 = doOr(oldVal, m.param2, ar);
-				break;
-			case MutationRef::Xor:
-				m.param2 = doXor(oldVal, m.param2, ar);
-				break;
-			case MutationRef::AppendIfFits:
-				m.param2 = doAppendIfFits(oldVal, m.param2, ar);
-				break;
-			case MutationRef::Max:
-				m.param2 = doMax(oldVal, m.param2, ar);
-				break;
-			case MutationRef::Min:
-				m.param2 = doMin(oldVal, m.param2, ar);
-				break;
-			case MutationRef::ByteMin:
-				m.param2 = doByteMin(oldVal, m.param2, ar);
-				break;
-			case MutationRef::ByteMax:
-				m.param2 = doByteMax(oldVal, m.param2, ar);
-				break;
-			case MutationRef::MinV2:
-				m.param2 = doMinV2(oldVal, m.param2, ar);
-				break;
-			case MutationRef::AndV2:
-				m.param2 = doAndV2(oldVal, m.param2, ar);
-				break;
+		case MutationRef::AddValue:
+			m.param2 = doLittleEndianAdd(oldVal, m.param2, ar);
+			break;
+		case MutationRef::And:
+			m.param2 = doAnd(oldVal, m.param2, ar);
+			break;
+		case MutationRef::Or:
+			m.param2 = doOr(oldVal, m.param2, ar);
+			break;
+		case MutationRef::Xor:
+			m.param2 = doXor(oldVal, m.param2, ar);
+			break;
+		case MutationRef::AppendIfFits:
+			m.param2 = doAppendIfFits(oldVal, m.param2, ar);
+			break;
+		case MutationRef::Max:
+			m.param2 = doMax(oldVal, m.param2, ar);
+			break;
+		case MutationRef::Min:
+			m.param2 = doMin(oldVal, m.param2, ar);
+			break;
+		case MutationRef::ByteMin:
+			m.param2 = doByteMin(oldVal, m.param2, ar);
+			break;
+		case MutationRef::ByteMax:
+			m.param2 = doByteMax(oldVal, m.param2, ar);
+			break;
+		case MutationRef::MinV2:
+			m.param2 = doMinV2(oldVal, m.param2, ar);
+			break;
+		case MutationRef::AndV2:
+			m.param2 = doAndV2(oldVal, m.param2, ar);
+			break;
+		case MutationRef::CompareAndClear:
+			if (oldVal.present() && m.param2 == oldVal.get()) {
+				m.type = MutationRef::ClearRange;
+				m.param2 = keyAfter(m.param1, ar);
+				return expandMutation(m, data, eager, eagerTrustedEnd, ar);
+			}
+			return false;
 		}
 		m.type = MutationRef::SetValue;
 	}
@@ -2565,6 +2577,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 						case MutationRef::MinV2:
 						case MutationRef::Or:
 						case MutationRef::Xor:
+						case MutationRef::CompareAndClear:
 							++data->counters.atomicMutations;
 							break;
 					}

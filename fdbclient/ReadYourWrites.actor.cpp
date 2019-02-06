@@ -32,12 +32,18 @@ public:
 		it.skip(allKeys.begin);
 		Arena arena;
 		while( true ) {
-			TraceEvent("RYWDump").detail("Begin", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("End", printable(it.endKey().toStandaloneStringRef()))
-				.detail("Unknown", it.is_unknown_range())
-				.detail("Empty", it.is_empty_range())
-				.detail("KV", it.is_kv())
-				.detail("Key", printable(it.is_kv() ? it.kv(arena).key : StringRef()));
+			Optional<StringRef> key = StringRef();
+			if (it.is_kv()) {
+				auto kv = it.kv(arena);
+				if (kv) key = kv->key;
+			}
+			TraceEvent("RYWDump")
+			    .detail("Begin", printable(it.beginKey().toStandaloneStringRef()))
+			    .detail("End", printable(it.endKey().toStandaloneStringRef()))
+			    .detail("Unknown", it.is_unknown_range())
+			    .detail("Empty", it.is_empty_range())
+			    .detail("KV", it.is_kv())
+			    .detail("Key", printable(key.get()));
 			if( it.endKey() == allKeys.end )
 				break;
 			++it;
@@ -74,13 +80,18 @@ public:
 		it->skip(read.key);
 		state bool dependent = it->is_dependent();
 		if( it->is_kv() ) {
-			return it->kv(ryw->arena).value;
+			const KeyValueRef* result = it->kv(ryw->arena);
+			if (result != nullptr) {
+				return result->value;
+			} else {
+				return Optional<Value>();
+			}
 		} else if( it->is_empty_range() ) {
 			return Optional<Value>();
 		} else {
 			Optional<Value> res = wait( ryw->tr.get( read.key, true ) );
 			KeyRef k( ryw->arena, read.key );
-			
+
 			if( res.present() ) {
 				if( ryw->cache.insert( k, res.get() ) )
 					ryw->arena.dependsOn(res.get().arena());
@@ -96,7 +107,12 @@ public:
 			it->skip(k);
 
 			ASSERT( it->is_kv() );
-			return it->kv(ryw->arena).value;
+			const KeyValueRef* result = it->kv(ryw->arena);
+			if (result != nullptr) {
+				return result->value;
+			} else {
+				return Optional<Value>();
+			}
 		}
 	}
 
@@ -605,10 +621,14 @@ public:
 				resolveKeySelectorFromCache( begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 				resolveKeySelectorFromCache( end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 			} else if (it.is_kv()) {
-				KeyValueRef const* start = &it.kv(ryw->arena);
+				KeyValueRef const* start = it.kv(ryw->arena);
+				if (start == nullptr) {
+					++it;
+					continue;
+				}
 				it.skipContiguous( end.isFirstGreaterOrEqual() ? end.getKey() : ryw->getMaxReadKey() ); //not technically correct since this would add end.getKey(), but that is protected above
-				
-				int maxCount = &it.kv(ryw->arena) - start + 1;
+
+				int maxCount = it.kv(ryw->arena) - start + 1;
 				int count = 0;
 				for(; count < maxCount && !limits.isReached(); count++ ) {
 					limits.decrement(start[count]);
@@ -884,10 +904,11 @@ public:
 				resolveKeySelectorFromCache( end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 				resolveKeySelectorFromCache( begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 			} else {
-				if (it.is_kv()) {
-					KeyValueRef const* end = &it.kv(ryw->arena);
+				KeyValueRef const* end = it.is_kv() ? it.kv(ryw->arena) : nullptr;
+				if (end != nullptr) {
 					it.skipContiguousBack( begin.isFirstGreaterOrEqual() ? begin.getKey() : allKeys.begin );
-					KeyValueRef const* start = &it.kv(ryw->arena);
+					KeyValueRef const* start = it.kv(ryw->arena);
+					ASSERT(start != nullptr);
 
 					int maxCount = end - start + 1;
 					int count = 0;
@@ -1409,7 +1430,11 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			for( int i = 0; i < op.size(); ++i) {
 				switch(op[i].type) {
 					case MutationRef::SetValue:
-						tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
+						if (op[i].value.present()) {
+							tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
+						} else {
+							tr.clear( it.beginKey().assertRef(), false );
+						}
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1424,7 +1449,8 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::ByteMax:
 					case MutationRef::MinV2:
 					case MutationRef::AndV2:
-						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
+					case MutationRef::CompareAndClear:
+						tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
 						break;
 					default:
 						break;
