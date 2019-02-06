@@ -277,9 +277,9 @@ ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWo
 			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
 
-			if (currentTeamNumber > maxTeamNumber || currentMachineTeamNumber > maxMachineTeamNumber) {
-				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld.",
-						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
+			if (currentTeamNumber > desiredTeamNumber || currentMachineTeamNumber > desiredMachineTeamNumber) {
+//				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld\n",
+//						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
 				TraceEvent("GetTeamCollectionValid").detail("CurrentTeamNumber", currentTeamNumber)
 					.detail("DesiredTeamNumber", desiredTeamNumber).detail("MaxTeamNumber", maxTeamNumber)
 					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber).detail("DesiredMachineTeams", desiredMachineTeamNumber)
@@ -297,7 +297,7 @@ ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWo
 				return true;
 			}
 			//throw;
-			wait( delay(5.0) );
+			wait( delay(10.0) );
 		}
 	};
 

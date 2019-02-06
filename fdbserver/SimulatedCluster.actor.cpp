@@ -736,6 +736,10 @@ StringRef StringRefOf(const char* s) {
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
 	const bool simple = false;  // Set true to simplify simulation configs for easier debugging
+	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
+	// if we do not remove the surplus server and machine teams, the simulation test will report error.
+	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
+	bool generateMachineTeamTestConfig = (BUGGIFY && g_random->random01() < 0.1) ? true : false;
 	bool generateFearless = simple ? false : (minimumRegions > 1 || g_random->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 ) );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
@@ -976,6 +980,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		machine_count = 12;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
+	} else if (generateMachineTeamTestConfig) {
+		// When DESIRED_TEAMS_PER_MACHINE is set to 1, the desired machine team number is 5
+		// while the max possible machine team number is 10
+		machine_count = 5;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
 		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minMachinesRequiredPerDatacenter()));
@@ -993,6 +1001,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 	if(generateFearless) {
 		processes_per_machine = 1;
+	} else if (generateMachineTeamTestConfig) {
+		// The total process number is 5*5 = 25. The max possible server teams is 3 combination out of 25 (2300).
+		// The buildMachine logic aims to build process_number (25) * server_teams_per_machine (5) = 125 server machines
+		// But we should guarantee the machine team number is no larger than 5.
+		processes_per_machine = (extraDB ? 2 : 5);
 	} else {
 		processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	}

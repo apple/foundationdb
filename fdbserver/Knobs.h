@@ -120,6 +120,9 @@ public:
 	double FREE_SPACE_RATIO_DD_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
 	int MAX_TEAMS_PER_SERVER;
+	// In real env, DESIRED_TEAMS_PER_MACHINE is same with DESIRED_TEAMS_PER_SERVER. In simulation, it is set to 1 to test we can remove the surplus machine teams that were created by server teams
+	int DESIRED_TEAMS_PER_MACHINE;
+	int MAX_TEAMS_PER_MACHINE;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
 	int64_t DD_SHARD_SIZE_GRANULARITY_SIM;
 	int DD_MOVE_KEYS_PARALLELISM;

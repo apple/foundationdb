@@ -1620,8 +1620,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		int totalHealthyMachineCount = calculateHealthyMachineCount();
 
-		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
+		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE * totalHealthyMachineCount;
+		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
 		int machineTeamsToBuild =
 		    std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount);
@@ -1746,8 +1746,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int maxServerTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER  * totalHealthyServerCount;
 
 		int totalHealthyMachineCount = calculateHealthyMachineCount();
-		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
+		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE * totalHealthyMachineCount;
+		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 
 		TraceEvent("TeamCollectionInfo", masterId)
 		    .detail("Primary", primary)
@@ -1845,8 +1845,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			} else {
 				int totalHealthyMachineCount = self->calculateHealthyMachineCount();
 
-				int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
+				int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE * totalHealthyMachineCount;
+				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 
 				TraceEvent("TeamCollectionInfo", self->masterId)
 							.detail("Primary", self->primary)
