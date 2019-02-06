@@ -63,3 +63,24 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Run `make`.
 
 This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
+
+#### Windows (Experimental)
+
+The Windows build is currently experimental and the creation of installers is
+not yet supported.
+
+1. Install Visual Studio 2017 (Community Edition is tested)
+2. Install cmake (>= 3.12)
+3. Download OpenJDK (>= 8) and unpack it somewhere
+4. Set JAVA_HOME to the unpacked location and JAVA_COMPILE to
+   $JAVA_HOME/bin/javac
+5. Download boost 1.67 (this exact version is required)
+6. Unpack boost (in our example we use `C:\boost_1_67` - but you can chose any
+   other location)
+7. Open the `Developer Command Prompt for VS 2017`
+8. Run cmake like this: `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=C:\boost_167_0 Z:\Projects\foundationdb`
+9. This should succeed. In which case you can build using msbuild: `msbuild /p:Configuration=Release`
+
+You can also open the generated solution file in Visual Studio and build from
+there. However, working on FDB in Visual Studio is currently not supported (as
+Visual Studio currently only sees the generated files).
