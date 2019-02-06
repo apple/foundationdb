@@ -27,6 +27,31 @@ Developers interested in using the FoundationDB store for an application can get
 
 Developers on a OS for which there is no binary package, or who would like to start hacking on the code can get started by compiling from source.
 
+#### CMake (Experimental)
+
+FoundationDB is currently in the process of migrating the build system to cmake.
+The CMake build system is currently used by several developers. However, most of
+the testing and packaging infrastructure still uses the old VisualStudio+Make
+based build system.
+
+To build with CMake, generally the following is required (works on Linux and OS
+X - for Windows see below):
+1. git clone https://github.com/apple/foundationdb.git
+2. mkdir build
+3. cd build
+4. cmake ../foundationdb
+5. make
+
+CMake will try to find its dependencies. However, for LibreSSL this can be often
+problematic (especially if OpenSSL is installed as well). For that we recommend
+passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
+LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
+this:
+
+```
+cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
+```
+
 #### macOS
 
 1. Check out this repo on your Mac.

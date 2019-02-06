@@ -63,6 +63,20 @@ find_package(PythonLibs 3.4 REQUIRED)
 include(ConfigureCompiler)
 
 ################################################################################
+# LibreSSL
+################################################################################
+
+set(LIBRESSL_USE_STATIC_LIBS TRUE)
+find_package(LibreSSL)
+if(LibreSSL_FOUND)
+  set(WITH_TLS TRUE)
+else()
+  message(STATUS "LibreSSL NOT Found - Will compile with TLS Support")
+  message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+  set(WITH_TLS FALSE)
+endif()
+
+################################################################################
 # Get repository information
 ################################################################################
 
@@ -200,6 +214,9 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
+if(WITH_TLS)
+  add_subdirectory(FDBLibTLS)
+endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)

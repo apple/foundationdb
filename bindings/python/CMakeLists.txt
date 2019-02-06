@@ -29,7 +29,6 @@ foreach(src ${SRCS})
     string(REPLACE "/" "\\" from_path "${from_path}")
     string(REPLACE "/" "\\" to_path "${to_path}")
   endif()
-  message(STATUS "COPY Command: ${copy_command} ${from_path} ${to_path}")
   add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bindings/python/${src}
     COMMAND ${copy_command} ${from_path} ${to_path}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${src}
