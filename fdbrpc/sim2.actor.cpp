@@ -32,6 +32,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 bool simulator_should_inject_fault( const char* context, const char* file, int line, int error_code ) {
 	if (!g_network->isSimulated()) return false;
@@ -521,6 +522,8 @@ private:
 	}
 
 	ACTOR static Future<int> read_impl( SimpleFile* self, void* data, int length, int64_t offset ) {
+		ASSERT( ( self->flags & IAsyncFile::OPEN_NO_AIO ) != 0 ||
+		        ( (uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0 ) );  // Required by KAIO.
 		state UID opId = g_random->randomUniqueID();
 		if (randLog)
 			fprintf( randLog, "SFR1 %s %s %s %d %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
