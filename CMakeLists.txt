@@ -66,14 +66,19 @@ include(ConfigureCompiler)
 # LibreSSL
 ################################################################################
 
-set(LIBRESSL_USE_STATIC_LIBS TRUE)
-find_package(LibreSSL)
-if(LibreSSL_FOUND)
-  set(WITH_TLS TRUE)
-else()
-  message(STATUS "LibreSSL NOT Found - Will compile with TLS Support")
-  message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
+if(DISABLE_TLS)
   set(WITH_TLS FALSE)
+else()
+  set(LIBRESSL_USE_STATIC_LIBS TRUE)
+  find_package(LibreSSL)
+  if(LibreSSL_FOUND)
+    set(WITH_TLS TRUE)
+  else()
+    message(STATUS "LibreSSL NOT Found - Will compile with TLS Support")
+    message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+    set(WITH_TLS FALSE)
+  endif()
 endif()
 
 ################################################################################
