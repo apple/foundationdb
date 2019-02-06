@@ -36,7 +36,6 @@ if(WIN32)
 else()
   add_definitions(-DUSE_UCONTEXT)
 endif()
-enable_language(ASM)
 
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
