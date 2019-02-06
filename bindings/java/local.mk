@@ -122,7 +122,7 @@ javadoc_clean:
 	@rm -rf $(JAVADOC_DIR)/javadoc
 	@rm -f bindings/java/src/main/overview.html
 
-ifeq ($(PLATFORM),linux)
+ifeq ($(PLATFORM),$(filter $(PLATFORM),linux freebsd))
 
   # We only need javadoc from one source
   TARGETS += javadoc
@@ -223,84 +223,5 @@ else ifeq ($(PLATFORM),osx)
 	mkdir -p packages
 	cp lib/libfdb_java.$(java_DLEXT)-$(VERSION_ID) packages
 	cp lib/libfdb_java.$(java_DLEXT)-debug-$(VERSION_ID) packages
-
-else ifeq ($(PLATFORM),freebsd)
-
- # We only need javadoc from one source
-  TARGETS += javadoc
-  CLEAN_TARGETS += javadoc_clean
-
-  # _release builds the lib on macOS and the jars (including the macOS lib) on Linux
-  TARGETS += fdb_java_release
-  CLEAN_TARGETS += fdb_java_release_clean
-
-  ifneq ($(FATJAR),)
-	packages/fdb-java-$(JARVER).jar: $(MAC_OBJ_JAVA) $(WINDOWS_OBJ_JAVA)
-  endif
-
-  bindings/java/pom.xml: bindings/java/pom.xml.in $(ALL_MAKEFILES) versions.target
-	@echo "Generating     $@"
-	@m4 -DVERSION=$(JARVER) -DNAME=fdb-java $< > $@
-
-  bindings/java/fdb-java-$(APPLEJARVER).pom: bindings/java/pom.xml
-	@echo "Copying        $@"
-	sed -e 's/-PRERELEASE/-SNAPSHOT/g' bindings/java/pom.xml > "$@"
-
-  packages/fdb-java-$(JARVER).jar: fdb_java versions.target
-	@echo "Building       $@"
-	@rm -f $@
-	@rm -rf packages/jar_regular
-	@mkdir -p packages/jar_regular
-	@cd packages/jar_regular && unzip -qq $(TOPDIR)/bindings/java/foundationdb-client.jar
-  ifneq ($(FATJAR),)
-	@mkdir -p packages/jar_regular/lib/windows/amd64
-	@mkdir -p packages/jar_regular/lib/osx/x86_64
-	@cp $(MAC_OBJ_JAVA) packages/jar_regular/lib/osx/x86_64/libfdb_java.jnilib
-	@cp $(WINDOWS_OBJ_JAVA) packages/jar_regular/lib/windows/amd64/fdb_java.dll
-  endif
-	@cd packages/jar_regular && jar cf $(TOPDIR)/$@ *
-	@rm -r packages/jar_regular
-	@cd bindings && jar uf $(TOPDIR)/$@ ../LICENSE
-
-  packages/fdb-java-$(JARVER)-tests.jar: fdb_java versions.target
-	@echo "Building       $@"
-	@rm -f $@
-	@cp $(TOPDIR)/bindings/java/foundationdb-tests.jar packages/fdb-java-$(JARVER)-tests.jar
-
-  packages/fdb-java-$(JARVER)-sources.jar: $(JAVA_GENERATED_SOURCES) versions.target
-	@echo "Building       $@"
-	@rm -f $@
-	@jar cf $(TOPDIR)/$@ -C bindings/java/src/main com/apple/foundationdb
-
-  packages/fdb-java-$(JARVER)-javadoc.jar: javadoc versions.target
-	@echo "Building       $@"
-	@rm -f $@
-	@cd $(JAVADOC_DIR)/javadoc/ && jar cf $(TOPDIR)/$@ *
-	@cd bindings && jar uf $(TOPDIR)/$@ ../LICENSE
-
-  packages/fdb-java-$(JARVER)-bundle.jar: packages/fdb-java-$(JARVER).jar packages/fdb-java-$(JARVER)-javadoc.jar packages/fdb-java-$(JARVER)-sources.jar bindings/java/pom.xml bindings/java/fdb-java-$(APPLEJARVER).pom versions.target
-	@echo "Building       $@"
-	@rm -f $@
-	@rm -rf packages/bundle_regular
-	@mkdir -p packages/bundle_regular
-	@cp packages/fdb-java-$(JARVER).jar packages/fdb-java-$(JARVER)-javadoc.jar packages/fdb-java-$(JARVER)-sources.jar bindings/java/fdb-java-$(APPLEJARVER).pom packages/bundle_regular
-	@cp bindings/java/pom.xml packages/bundle_regular/pom.xml
-	@cd packages/bundle_regular && jar cf $(TOPDIR)/$@ *
-	@rm -rf packages/bundle_regular
-
-  fdb_java_release: packages/fdb-java-$(JARVER)-bundle.jar packages/fdb-java-$(JARVER)-tests.jar
-
-  fdb_java_release_clean:
-	@echo "Cleaning       Java release"
-	@rm -f packages/fdb-java-*.jar packages/fdb-java-*-sources.jar bindings/java/pom.xml bindings/java/fdb-java-$(APPLEJARVER).pom
-
-  # Linux is where we build all the java packages
-  packages: fdb_java_release
-  packages_clean: fdb_java_release_clean
-
-  ifneq ($(FATJAR),)
-	MAC_OBJ_JAVA := lib/libfdb_java.jnilib-$(VERSION_ID)
-	WINDOWS_OBJ_JAVA := lib/fdb_java.dll-$(VERSION_ID)
-  endif
 
 endif
