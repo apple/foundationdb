@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#define BOOST_DATE_TIME_NO_LIB
+#include <boost/interprocess/managed_shared_memory.hpp>
+
 #include "flow/flow.h"
 #include "flow/FastAlloc.h"
 #include "flow/serialize.h"
@@ -48,14 +51,10 @@ using std::endl;
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
-#undef min
-#undef max
 #endif
 #include <time.h>
-
-#define BOOST_DATE_TIME_NO_LIB
-#include <boost/interprocess/managed_shared_memory.hpp>
 
 #ifdef  __linux__
 #include <execinfo.h>
@@ -64,10 +63,7 @@ using std::endl;
 #endif
 #endif
 
-#ifndef WIN32
-#include "versions.h"
-#endif
-
+#include "fdbclient/versions.h"
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
