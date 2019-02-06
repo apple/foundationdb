@@ -10,4 +10,4 @@ set(SRCS
   ReferenceCounted.h)
 
 add_library(FDBLibTLS ${SRCS})
-target_link_libraries(FDBLibTLS PRIVATE LibreSSL)
+target_link_libraries(FDBLibTLS PRIVATE LibreSSL boost_target)
