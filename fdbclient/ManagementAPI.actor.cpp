@@ -1156,7 +1156,6 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					tr.clear( excludedServersKeys );
 					includeAll = true;
 				} else if (s.isWholeMachine()) {
-					// Eliminate both any ip-level exclusion (1.2.3.4) and any port-level exclusions (1.2.3.4:5)
 					// Eliminate both any ip-level exclusion (1.2.3.4) and any
 					// port-level exclusions (1.2.3.4:5)
 					// The range ['IP', 'IP;'] was originally deleted. ';' is
