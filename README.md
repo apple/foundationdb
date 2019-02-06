@@ -107,6 +107,22 @@ not yet supported.
 9. This should succeed. In which case you can build using msbuild:
    `msbuild /p:Configuration=Release fdb.sln`
 
+If you want TLS support to be enabled under Windows you currently have to build
+and install LibreSSL yourself as the newer LibreSSL versions are not provided
+for download from the LibreSSL homepage. To build LibreSSL:
+
+1. Download and unpack libressl (>= 2.8.2)
+2. `cd libressl-2.8.2`
+3. `mkdir build`
+4. `cd build`
+5. `cmake -G "Visual Studio 15 2017 Win64" ..`
+6. Open the generated `LibreSSL.sln` in Visual Studio as administrator (this is
+   necessary for the install)
+7. Build the `INSTALL` project in `Release` mode
+
+This will install LibreSSL under `C:\Program Files\LibreSSL`. After that `cmake`
+will automatically find it and build with TLS support.
+
 You can also open the generated solution file in Visual Studio and build from
 there. However, working on FDB in Visual Studio is currently not supported (as
 Visual Studio currently only sees the generated files).
