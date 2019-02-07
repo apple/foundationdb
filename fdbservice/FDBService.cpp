@@ -30,6 +30,7 @@
 
 #include "..\flow\SimpleOpt.h"
 #include "..\fdbmonitor\SimpleIni.h"
+#include "fdbclient/versions.h"
 
 // For PathFileExists
 #include "Shlwapi.h"

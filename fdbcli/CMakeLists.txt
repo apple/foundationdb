@@ -2,8 +2,11 @@ set(FDBCLI_SRCS
   fdbcli.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
-  linenoise/linenoise.c
   linenoise/linenoise.h)
+
+if(NOT WIN32)
+  list(APPEN FDBCLI_SRCS linenoise/linenoise.c)
+endif()
 
 actor_set(FDBCLI_BUILD "${FDBCLI_SRCS}")
 add_executable(fdbcli "${FDBCLI_BUILD}")
