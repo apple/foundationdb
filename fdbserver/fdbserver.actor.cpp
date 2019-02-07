@@ -40,12 +40,6 @@
 #include <stdio.h>
 #include <fstream>
 #include "fdbserver/pubsub.h"
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#undef min
-#undef max
-#endif
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.h"
@@ -56,6 +50,7 @@
 #include "fdbrpc/Platform.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
+#include "fdbclient/versions.h"
 
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
@@ -68,8 +63,10 @@
 #endif
 #endif
 
-#ifndef WIN32
-#include "versions.h"
+#ifdef WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #endif
 
 #include "flow/SimpleOpt.h"

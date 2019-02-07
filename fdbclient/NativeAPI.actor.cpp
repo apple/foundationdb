@@ -35,6 +35,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/versions.h"
 #include "fdbrpc/TLSConnection.h"
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
@@ -50,16 +51,15 @@
 #undef max
 #else
 #include <time.h>
-#include "versions.h"
 #endif
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 extern IRandom* trace_random;
 extern const char* getHGVersion();
 
-using std::min;
-using std::max;
 using std::make_pair;
+using std::max;
+using std::min;
 
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
