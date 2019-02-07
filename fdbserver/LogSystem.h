@@ -30,9 +30,6 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
 
-#include <bitset>
-#include <math.h>
-
 struct DBCoreState;
 
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
@@ -51,7 +48,6 @@ public:
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
 	std::vector<std::vector<int>> satelliteTagLocations;
-	std::map<unsigned long, Reference<LocalityGroup>> bitMembershipToLocalityGroup;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
@@ -75,23 +71,6 @@ public:
 			result += logServers[i]->get().id().toString();
 		}
 		return result;
-	}
-
-	void populateBitMembershipToLocalityGroupMap() {
-		bitMembershipToLocalityGroup.clear();
-
-		const int numOfTLogsLocalities = tLogLocalities.size();
-		const int totalSets = pow(2, numOfTLogsLocalities);
-
-		for (int i = 1; i < totalSets; i++) {
-			Reference<LocalityGroup> localities(new LocalityGroup());
-			for (int j = 0; j < numOfTLogsLocalities; j++){
-				if ((i & (1 << j)) > 0) {
-					localities->add(tLogLocalities[j]);
-				}
-			}
-			bitMembershipToLocalityGroup.insert(std::pair<unsigned long, Reference<LocalityGroup>>(i, localities));;
-		}
 	}
 
 	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
@@ -221,8 +200,6 @@ public:
 			logIndexArray.push_back(i);
 			logEntryArray.push_back(logServerMap->add(localities[i], &logIndexArray.back()));
 		}
-
-		populateBitMembershipToLocalityGroupMap();
 	}
 
 	bool satisfiesPolicy( const std::vector<LocalityEntry>& locations ) {

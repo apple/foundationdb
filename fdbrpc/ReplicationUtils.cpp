@@ -286,25 +286,37 @@ bool validateAllCombinations(
 	}
 	else
 	{
-		bool					bIsValidGroup;
+		// Preparing a locality group for the following iterations (i.e., localitySet + newItems)
 		LocalityGroup	localityGroup;
-		std::string bitmask(nCombinationSize, 1); // K leading 1's
+		localityGroup.deep_copy(localitySet);
+		for (int i = 0; i < newItems.size(); ++i) {
+			localityGroup.add(newItems[i]);
+		}
+		LocalitySetRef localityGroupSetRef = LocalitySetRef::addRef((LocalitySet*) &localityGroup);
 
+		std::string bitmask(nCombinationSize, 1); // K leading 1's
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
+
+		// A single combination to validate (i.e., localitySet + subset of newItems)
+		std::vector<LocalityEntry>	localityGroupEntries; 
+		bool					bIsValidGroup;
 
 		do
 		{
-			localityGroup.deep_copy(localitySet);
+			localityGroupEntries.clear();
+			for (int i = 0; i < localitySet.size(); i++) {
+				localityGroupEntries.push_back(localitySet.getEntry(i));
+			}
 
 			// [0..N-1] integers
 			for (int i = 0; i < newItems.size(); ++i) {
 				if (bitmask[i]) {
-					localityGroup.add(newItems[i]);
+					localityGroupEntries.push_back(localityGroup.getEntry(i));
 				}
 			}
 
 			// Check if the group combination passes validation
-			bIsValidGroup = localityGroup.validate(policy);
+ 			bIsValidGroup = policy->validate(localityGroupEntries, localityGroupSetRef);
 
 			if (((bCheckIfValid)	&&
 					 (!bIsValidGroup)	)			||
