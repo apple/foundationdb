@@ -35,6 +35,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "fdbrpc/Platform.h"
+#include "fdbrpc/TLSConnection.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -141,7 +142,9 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -182,7 +185,9 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -211,7 +216,9 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -238,7 +245,9 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -267,7 +276,9 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -296,7 +307,9 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -321,7 +334,9 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -358,7 +373,9 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_EXPIRE_BEFORE_DATETIME,                "--expire_before_timestamp",                SO_REQ_SEP },
 	{ OPT_EXPIRE_MIN_RESTORABLE_DAYS,            "--min_restorable_days",                    SO_REQ_SEP },
 	{ OPT_EXPIRE_DELETE_BEFORE_DAYS,             "--delete_before_days",                     SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -385,7 +402,9 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -416,7 +435,9 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -446,7 +467,9 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DUMP_BEGIN,      "--begin",          SO_REQ_SEP },
 	{ OPT_DUMP_END,        "--end",            SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -473,7 +496,9 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -512,7 +537,9 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -542,7 +569,9 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -573,7 +602,9 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -604,7 +635,9 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -633,7 +666,9 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -663,7 +698,9 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -690,7 +727,9 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
-
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
 	SO_END_OF_OPTIONS
 };
 
@@ -754,6 +793,9 @@ static void printAgentUsage(bool devhelp) {
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
+#ifndef TLS_DISABLED
+	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -818,6 +860,9 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  -n, --dryrun  For start or restore operations, performs a trial run with no actual changes made.\n");
+#ifndef TLS_DISABLED
+	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -862,6 +907,9 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --remove_prefix PREFIX   prefix to remove from the restored keys\n");
 	printf("  --add_prefix PREFIX      prefix to add to the restored keys\n");
 	printf("  -n, --dryrun  Perform a trial run with no changes made.\n");
+#ifndef TLS_DISABLED
+	printf(TLS_HELP);
+#endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -898,6 +946,9 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
+#ifndef TLS_DISABLED
+	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -925,6 +976,9 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
+#ifndef TLS_DISABLED
+	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
@@ -2448,6 +2502,7 @@ int main(int argc, char* argv[]) {
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
 		std::vector<std::string> blobCredentials;
+		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
 		Version dumpBegin = 0;
 		Version dumpEnd = std::numeric_limits<Version>::max();
 
@@ -2712,6 +2767,26 @@ int main(int argc, char* argv[]) {
 				case OPT_BLOB_CREDENTIALS:
 					blobCredentials.push_back(args->OptionArg());
 					break;
+#ifndef TLS_DISABLED
+				case TLSOptions::OPT_TLS_PLUGIN:
+					args->OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_CERTIFICATES:
+					tlsCertPath = args->OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_PASSWORD:
+					tlsPassword = args->OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_CA_FILE:
+					tlsCAPath = args->OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_KEY:
+					tlsKeyPath = args->OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+					tlsVerifyPeers = args->OptionArg();
+					break;
+#endif
 				case OPT_DUMP_BEGIN:
 					dumpBegin = parseVersion(args->OptionArg());
 					break;
@@ -2839,6 +2914,49 @@ int main(int argc, char* argv[]) {
 			setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 		}
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+
+		// deferred TLS options
+		if (tlsCertPath.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
+			}
+			catch (Error& e) {
+				fprintf(stderr, "ERROR: cannot set TLS certificate path to `%s' (%s)\n", tlsCertPath.c_str(), e.what());
+				return 1;
+			}
+		}
+
+		if (tlsCAPath.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
+			}
+			catch (Error& e) {
+				fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", tlsCAPath.c_str(), e.what());
+				return 1;
+			}
+		}
+		if (tlsKeyPath.size()) {
+			try {
+				if (tlsPassword.size())
+					setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
+
+				setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
+			}
+			catch (Error& e) {
+				fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", tlsKeyPath.c_str(), e.what());
+				return 1;
+			}
+		}
+		if (tlsVerifyPeers.size()) {
+			try {
+				setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
+			}
+			catch (Error& e) {
+				fprintf(stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", tlsVerifyPeers.c_str(), e.what());
+				return 1;
+			}
+		}
+
 		Error::init();
 		std::set_new_handler( &platform::outOfMemory );
 		setMemoryQuota( memLimit );
