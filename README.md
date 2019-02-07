@@ -34,8 +34,8 @@ The CMake build system is currently used by several developers. However, most of
 the testing and packaging infrastructure still uses the old VisualStudio+Make
 based build system.
 
-To build with CMake, generally the following is required (works on Linux and OS
-X - for Windows see below):
+To build with CMake, generally the following is required (works on Linux and
+Mac OS - for Windows see below):
 1. git clone https://github.com/apple/foundationdb.git
 2. mkdir build
 3. cd build

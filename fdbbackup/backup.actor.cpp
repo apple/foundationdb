@@ -63,7 +63,7 @@ using std::endl;
 #endif
 #endif
 
-#include "fdbclient/versions.h"
+#include "versions.h"
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

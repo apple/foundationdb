@@ -7,6 +7,10 @@ set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
+if(WITH_TLS)
+  add_compile_options(-DHAVE_OPENSSL)
+endif()
+
 find_package(Threads REQUIRED)
 if(ALLOC_INSTRUMENTATION)
   add_compile_options(-DALLOC_INSTRUMENTATION)

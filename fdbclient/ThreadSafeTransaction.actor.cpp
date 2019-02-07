@@ -21,7 +21,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/versions.h"
+#include "versions.h"
 #include <new>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).

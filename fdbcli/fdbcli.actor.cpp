@@ -47,7 +47,7 @@
 #include "fdbcli/linenoise/linenoise.h"
 #endif
 
-#include "fdbclient/versions.h"
+#include "versions.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
