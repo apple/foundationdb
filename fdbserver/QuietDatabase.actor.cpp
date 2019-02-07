@@ -110,7 +110,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBI
 }
 
 //Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
-int64_t getQueueSize( TraceEventFields md ) {
+int64_t getQueueSize( const TraceEventFields& md ) {
 	double inputRate, durableRate;
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;

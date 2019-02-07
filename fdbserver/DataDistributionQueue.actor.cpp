@@ -684,7 +684,7 @@ struct DDQueueData {
 			.detail("AffectedRanges", affectedQueuedItems.size()); */
 	}
 
-	void completeSourceFetch( RelocateData results ) {
+	void completeSourceFetch( const RelocateData& results ) {
 		ASSERT( fetchingSourcesQueue.count( results ) );
 
 		//logRelocation( results, "GotSourceServers" );
@@ -696,7 +696,7 @@ struct DDQueueData {
 		}
 	}
 
-	void logRelocation( RelocateData rd, const char *title ) {
+	void logRelocation( const RelocateData& rd, const char *title ) {
 		std::string busyString;
 		for(int i = 0; i < rd.src.size() && i < teamSize * 2; i++)
 			busyString += describe(rd.src[i]) + " - (" + busymap[ rd.src[i] ].toString() + "); ";
