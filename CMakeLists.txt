@@ -236,7 +236,11 @@ add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
 
-include(CPack)
+if(WIN32)
+  add_subdirectory(packaging/msi)
+else()
+  include(CPack)
+endif()
 
 ################################################################################
 # process compile commands for IDE
