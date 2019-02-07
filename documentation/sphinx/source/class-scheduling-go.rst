@@ -42,6 +42,7 @@ We're ready to use the database. First, let's write a key-value pair.
 .. code-block:: go
 
   _, err := db.Transact(func (tr fdb.Transaction) (ret interface{}, e error) {
+      tr.Options().SetTimeout(3000)
       tr.Set(fdb.Key("hello"), []byte("world"))
       return
   })
@@ -54,6 +55,7 @@ When this function returns without error, the modification is durably stored in 
 .. code-block:: go
 
   ret, err := db.Transact(func (tr fdb.Transaction) (ret interface{}, e error) {
+      tr.Options().SetTimeout(3000)
       ret = tr.Get(fdb.Key("hello")).MustGet()
       return
   })
@@ -84,6 +86,7 @@ If this is all working, it looks like we are ready to start building a real appl
       db := fdb.MustOpenDefault()
 
       _, err := db.Transact(func (tr fdb.Transaction) (ret interface{}, e error) {
+          tr.Options().SetTimeout(3000)
           tr.Set(fdb.Key("hello"), []byte("world"))
           return
       })
@@ -92,6 +95,7 @@ If this is all working, it looks like we are ready to start building a real appl
       }
 
       ret, err := db.Transact(func (tr fdb.Transaction) (ret interface{}, e error) {
+          tr.Options().SetTimeout(3000)
           ret = tr.Get(fdb.Key("hello")).MustGet()
           return
       })
@@ -166,9 +170,28 @@ Transactions
 We're going to rely on the powerful guarantees of transactions to help keep all of our modifications straight, so let's look at how the FoundationDB Go API lets you write a transactional function. We use :func:`Transact` to execute a code block transactionally. For example, to ``signup`` a ``studentID`` for a ``class``, we might use:
 
 .. code-block:: go
+  package main
+
+  import (
+    "github.com/apple/foundationdb/bindings/go/src/fdb"
+
+    "fmt"
+  )
+
+  func main() {
+      fdb.MustAPIVersion(610)
+      db := fdb.MustOpenDefault()
+      studentID := "s1"
+      class := "calc 101"
+      err := signup(db, studentID, class)
+      if err != nil {
+        fmt.Println("Failed to sign up student", studentID, "for", class)
+      }
+  }
 
   func signup(t fdb.Transactor, studentID, class string) (err error) {
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       tr.Set(attendSS.Pack(tuple.Tuple{studentID, class}), []byte{})
       return
     })
@@ -185,6 +208,7 @@ Without the :func:`Transact` method, signup would look something like:
 
   func signup(db fdb.Database, studentID, class string) (err error) {
     tr, err := d.CreateTransaction()
+    tr.Options().SetTimeout(3000)
     if err != nil {
       return
     }
@@ -255,6 +279,7 @@ Next, we initialize the database with our class list:
 .. code-block:: go
 
   _, err = db.Transact(func (tr fdb.Transaction) (interface{}, error) {
+    tr.Options().SetTimeout(3000)
     tr.ClearRange(schedulingDir)
 
     for i := range classes {
@@ -275,6 +300,7 @@ Before students can do anything else, they need to be able to retrieve a list of
 
   func availableClasses(t fdb.Transactor) (ac []string, err error) {
     r, err := t.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+      rtr.Options().SetTimeout(3000)
       var classes []string
       ri := rtr.GetRange(courseSS, fdb.RangeOptions{}).Iterator()
       for ri.Advance() {
@@ -306,6 +332,7 @@ We finally get to the crucial function (which we saw before when looking at :fun
     SCKey := attendSS.Pack(tuple.Tuple{studentID, class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       tr.Set(SCKey, []byte{})
       return
     })
@@ -325,6 +352,7 @@ Dropping a class is similar to signing up:
     SCKey := attendSS.Pack(tuple.Tuple{studentID, class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       tr.Clear(SCKey)
       return
     })
@@ -348,6 +376,7 @@ Let's go back to the data model. Remember that we stored the number of seats in 
 
   func availableClasses(t fdb.Transactor) (ac []string, err error) {
     r, err := t.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+      rtr.Options().SetTimeout(3000)
       var classes []string
       ri := rtr.GetRange(courseSS, fdb.RangeOptions{}).Iterator()
       for ri.Advance() {
@@ -382,6 +411,7 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
     classKey := courseSS.Pack(tuple.Tuple{class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       if tr.Get(SCKey).MustGet() != nil {
         return // already signed up
       }
@@ -433,6 +463,7 @@ Let's finish up the limited seats feature by modifying the drop function:
     classKey := courseSS.Pack(tuple.Tuple{class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       if tr.Get(SCKey).MustGet() == nil {
         return // not taking this class
       }
@@ -465,6 +496,7 @@ Of course, as soon as our new version of the system goes live, we hear of a tric
     classKey := courseSS.Pack(tuple.Tuple{class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       if tr.Get(SCKey).MustGet() != nil {
         return // already signed up
       }
@@ -505,6 +537,7 @@ Fortunately, we have FoundationDB, and this sounds an awful lot like the transac
 
   func swap(t fdb.Transactor, studentID, oldClass, newClass string) (err error) {
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       err = drop(tr, studentID, oldClass)
       if err != nil {
         return
@@ -570,6 +603,7 @@ Here's the code for the scheduling tutorial:
 
   func availableClasses(t fdb.Transactor) (ac []string, err error) {
     r, err := t.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+      rtr.Options().SetTimeout(3000)
       var classes []string
       ri := rtr.GetRange(courseSS, fdb.RangeOptions{}).Iterator()
       for ri.Advance() {
@@ -599,6 +633,7 @@ Here's the code for the scheduling tutorial:
     classKey := courseSS.Pack(tuple.Tuple{class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       if tr.Get(SCKey).MustGet() != nil {
         return // already signed up
       }
@@ -631,6 +666,7 @@ Here's the code for the scheduling tutorial:
     classKey := courseSS.Pack(tuple.Tuple{class})
 
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       if tr.Get(SCKey).MustGet() == nil {
         return // not taking this class
       }
@@ -650,6 +686,7 @@ Here's the code for the scheduling tutorial:
 
   func swap(t fdb.Transactor, studentID, oldClass, newClass string) (err error) {
     _, err = t.Transact(func (tr fdb.Transaction) (ret interface{}, err error) {
+      tr.Options().SetTimeout(3000)
       err = drop(tr, studentID, oldClass)
       if err != nil {
         return
@@ -688,6 +725,7 @@ Here's the code for the scheduling tutorial:
     }
 
     _, err = db.Transact(func (tr fdb.Transaction) (interface{}, error) {
+      tr.Options().SetTimeout(3000)
       tr.ClearRange(schedulingDir)
 
       for i := range classes {

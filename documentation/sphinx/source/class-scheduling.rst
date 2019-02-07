@@ -133,6 +133,10 @@ is equivalent to something like::
 
 If instead you pass a :class:`Transaction` for the ``tr`` parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits transactionally decorated functions to be composed into larger transactions.
 
+It is important to note that transactions will not timeout by default. You should set a timeout (adjust from 3000ms to fit your needs) with::
+
+    tr.options.set_timeout(3000)
+
 Making some sample classes
 --------------------------
 
