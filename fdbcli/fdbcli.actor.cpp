@@ -669,20 +669,36 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 	return outputString;
 }
 
-int getNumOfZones(StatusObjectReader statusObjCluster) {
-	StatusObjectReader machinesMap;
-	std::set<std::string> zones;
-	if (statusObjCluster.get("machines", machinesMap)) {
-		int machineExclusions = 0;
-		for (auto mach : machinesMap.obj()) {
+int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
+	StatusObjectReader machineMap;
+	int numOfNonExcludedMachines = 0;
+	if (statusObjCluster.get("machines", machineMap)) {
+		for (auto mach : machineMap.obj()) {
 			StatusObjectReader machine(mach.second);
+			if (machine.has("excluded") && !machine.last().get_bool())
+				numOfNonExcludedMachines++;
+		}
+	}
+	return numOfNonExcludedMachines;
+}
+
+std::pair<int, int> getNumOfNonExcludedProcessAndZones(StatusObjectReader statusObjCluster) {
+	StatusObjectReader processesMap;
+	std::set<std::string> zones;
+	int numOfNonExcludedProcesses = 0;
+	if (statusObjCluster.get("processes", processesMap)) {
+		for (auto proc : processesMap.obj()) {
+			StatusObjectReader process(proc.second);
+			if (process.has("excluded") && process.last().get_bool())
+				continue;
+			numOfNonExcludedProcesses++;
 			std::string zoneId;
-			if (machine.get("locality.zoneid", zoneId)) {
+			if (process.get("locality.zoneid", zoneId)) {
 				zones.insert(zoneId);
 			}
 		}
 	}
-	return zones.size();
+	return { numOfNonExcludedProcesses, zones.size() };
 }
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
@@ -768,8 +784,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 							if (name == "recruiting_transaction_servers") {
 								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
-								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
-									description += format("\nHave %d processes on %d machines across %d zone(s).", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size(), getNumOfZones(statusObjCluster));
+								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
+									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
+									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
+								}
 							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
 								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
