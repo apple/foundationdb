@@ -27,32 +27,13 @@ Developers interested in using the FoundationDB store for an application can get
 
 Developers on a OS for which there is no binary package, or who would like to start hacking on the code can get started by compiling from source.
 
-#### CMake (Experimental)
+Currently there are two build systems: a collection of Makefiles and a
+CMake-based. Both of them should work for most users and CMake will eventually
+become the only build system available.
 
-FoundationDB is currently in the process of migrating the build system to cmake.
-The CMake build system is currently used by several developers. However, most of
-the testing and packaging infrastructure still uses the old VisualStudio+Make
-based build system.
+## Makefile
 
-To build with CMake, generally the following is required (works on Linux and
-Mac OS - for Windows see below):
-1. git clone https://github.com/apple/foundationdb.git
-2. mkdir build
-3. cd build
-4. cmake ../foundationdb
-5. make
-
-CMake will try to find its dependencies. However, for LibreSSL this can be often
-problematic (especially if OpenSSL is installed as well). For that we recommend
-passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
-LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
-this:
-
-```
-cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
-```
-
-#### macOS
+#### MacOS
 
 1. Check out this repo on your Mac.
 1. Install the Xcode command-line tools.
@@ -89,23 +70,103 @@ cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 
 This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
 
-#### Windows (Experimental)
+#### macOS
+
+1. Check out this repo on your Mac.
+1. Install the Xcode command-line tools.
+1. Download version 1.52 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/).
+1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
+1. Install [Mono](http://www.mono-project.com/download/stable/).
+1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
+1. Navigate to the directory where you checked out the foundationdb repo.
+1. Run `make`.
+
+## CMake
+
+FoundationDB is currently in the process of migrating the build system to cmake.
+The CMake build system is currently used by several developers. However, most of
+the testing and packaging infrastructure still uses the old VisualStudio+Make
+based build system.
+
+To build with CMake, generally the following is required (works on Linux and
+Mac OS - for Windows see below):
+1. Check out this repository.
+2. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/). 
+1. Unpack boost (you don't need to compile it)
+1. Install [Mono](http://www.mono-project.com/download/stable/).
+1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
+1. Create a build directory (you can have the build directory anywhere you
+   like): `mkdir build`
+1. `cd build`
+1. `cmake -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. `make`
+
+CMake will try to find its dependencies. However, for LibreSSL this can be often
+problematic (especially if OpenSSL is installed as well). For that we recommend
+passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
+LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
+this:
+
+```
+cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
+```
+
+FoundationDB will build just fine without LibreSSL, however, the resulting
+binaries won't support TLS connections.
+
+### Generating compile_commands.json
+
+CMake can build a compilation database for you. However, the default generatd
+one is not too useful as it operates on the generated files. When running make,
+the build system will create another `compile_commands.json` file in the source
+directory. This can than be used for tools like
+[CCLS](https://github.com/MaskRay/ccls),
+[CQuery](https://github.com/cquery-project/cquery), etc. This way you can get
+code-completion and code navigation in flow. It is not yet perfect (it will show
+a few errors) but we are constantly working on improving the developement experience.
+
+### Linux
+
+There are no special requirements for Linux. However, we are currently working
+on a Docker-based build as well.
+
+### MacOS
+
+The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
+can use [Hombrew](https://brew.sh/). LibreSSL will not be installed in
+`/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
+will look somethink like this:
+
+```
+cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
+```
 
 The Windows build is currently experimental and the creation of installers is
 not yet supported.
 
+### Windows
+
+Under Windows, the build instructions are very similar, with the main difference
+that Visual Studio is used to compile.
+
 1. Install Visual Studio 2017 (Community Edition is tested)
-2. Install cmake (>= 3.12)
-3. Download OpenJDK (>= 8) and unpack it somewhere
-4. Set JAVA_HOME to the unpacked location and JAVA_COMPILE to
+2. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/). 
+1. Unpack boost (you don't need to compile it)
+1. Install [Mono](http://www.mono-project.com/download/stable/).
+1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
+1. Set JAVA_HOME to the unpacked location and JAVA_COMPILE to
    $JAVA_HOME/bin/javac
-5. Download boost 1.67 (this exact version is required)
-6. Unpack boost (in our example we use `C:\boost_1_67` - but you can chose any
-   other location)
-7. Open the `Developer Command Prompt for VS 2017`
-8. Run cmake like this: `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=C:\boost_167_0 Z:\Projects\foundationdb`
-9. This should succeed. In which case you can build using msbuild:
-   `msbuild /p:Configuration=Release fdb.sln`
+1. Create a build directory (you can have the build directory anywhere you
+   like): `mkdir build`
+1. `cd build`
+1. `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. This should succeed. In which case you can build using msbuild:
+   `msbuild /p:Configuration=Release fdb.sln`. You can also open the resulting
+   solution in Visual Studio and compile from there. However, be aware that
+   using Visual Studio for developement is currently not supported as Visual
+   Studio will only know about the generated files.
 
 If you want TLS support to be enabled under Windows you currently have to build
 and install LibreSSL yourself as the newer LibreSSL versions are not provided
@@ -122,7 +183,3 @@ for download from the LibreSSL homepage. To build LibreSSL:
 
 This will install LibreSSL under `C:\Program Files\LibreSSL`. After that `cmake`
 will automatically find it and build with TLS support.
-
-You can also open the generated solution file in Visual Studio and build from
-there. However, working on FDB in Visual Studio is currently not supported (as
-Visual Studio currently only sees the generated files).
