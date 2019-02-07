@@ -165,6 +165,16 @@ if(INSTALL_LAYOUT MATCHES "DEB")
 endif()
 
 ################################################################################
+# MacOS configuration
+################################################################################
+
+if(INSTALLATION_LAYOUT MATCHES "OSX")
+  set(CPACK_PREFLIGHT_server_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall)
+  set(CPACK_POSTFLIGHT_server_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/postinstall)
+  set(CPACK_POSTFLIGHT_clients_SCRIPT ${CMAKE_SOURCE_DIR}/packaging/osx/scripts-server/preinstall)
+endif()
+
+################################################################################
 # Server configuration
 ################################################################################
 
