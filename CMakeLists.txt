@@ -222,6 +222,7 @@ endif()
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
+add_subdirectory(documentation)
 
 if(WIN32)
   add_subdirectory(packaging/msi)
