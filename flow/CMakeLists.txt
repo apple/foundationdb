@@ -92,7 +92,7 @@ target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS}
 if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
-  target_link_libraries(flow PRIVATE FDBLibTLS)
+  target_link_libraries(flow PUBLIC FDBLibTLS)
 endif()
 
 if(APPLE)
