@@ -44,9 +44,6 @@ struct TimedRequest {
 	TimedRequest() {
 		requestTime = timer();
 	}
-
-	template <class Ar> 
-	void serialize(Ar& ar) {}
 };
 
 struct ICounter {
@@ -121,14 +118,19 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable 
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
 
+Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
+
 class LatencyBands {
 public:
-	LatencyBands(std::string name, CounterCollection &cc) : name(name), cc(cc), filteredCount(nullptr) {}
+	LatencyBands(std::string name, UID id, double loggingInterval) : name(name), id(id), loggingInterval(loggingInterval), cc(nullptr), filteredCount(nullptr) {}
 
 	void addThreshold(double value) {
 		if(value > 0 && bands.count(value) == 0) {
 			if(bands.size() == 0) {
-				filteredCount = new Counter(format("Filtered%s", name.c_str()), cc);
+				ASSERT(!cc && !filteredCount);
+				cc = new CounterCollection(name, id.toString());
+				logger = traceCounters(name, id, loggingInterval, cc, id.toString() + "/" + name);
+				filteredCount = new Counter("Filtered", *cc);
 				insertBand(std::numeric_limits<double>::infinity());
 			}
 
@@ -148,6 +150,8 @@ public:
 	}
 
 	void clearBands() {
+		logger = Void();
+
 		for(auto itr : bands) {
 			delete itr.second;
 		}
@@ -155,6 +159,10 @@ public:
 		bands.clear();
 
 		delete filteredCount;
+		delete cc;
+
+		filteredCount = nullptr;
+		cc = nullptr;
 	}
 
 	~LatencyBands() {
@@ -166,14 +174,14 @@ private:
 	Counter *filteredCount;
 
 	std::string name;
-	CounterCollection &cc;
+	UID id;
+	double loggingInterval;
+
+	CounterCollection *cc;
+	Future<Void> logger;
 
 	void insertBand(double value) {
-		bands.insert(std::make_pair(value, new Counter(format("%s%f", name.c_str(), value), cc)));
+		bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc)));
 	}
 };
-
-
-Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
-
 #endif

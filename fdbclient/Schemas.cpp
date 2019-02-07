@@ -126,25 +126,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "roughness":0.0
                   },
                   "grv_latency_bands":{
-                     "0.01": {
-                        "hz":0.0,
-                        "counter":0,
-                        "roughness":0.0
-                     }
+                     "$map": 1
                   },
                   "read_latency_bands":{
-                     "0.01": {
-                        "hz":0.0,
-                        "counter":0,
-                        "roughness":0.0
-                     }
+                     "$map": 1
                   },
                   "commit_latency_bands":{
-                     "0.01": {
-                        "hz":0.0,
-                        "counter":0,
-                        "roughness":0.0
-                     }
+                     "$map": 1
                   }
                }
             ],
