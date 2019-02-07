@@ -35,7 +35,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/versions.h"
+#include "versions.h"
 #include "fdbrpc/TLSConnection.h"
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"

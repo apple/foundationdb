@@ -203,7 +203,7 @@ else()
     RENAME "foundationdb.conf")
   install(FILES ${CMAKE_BINARY_DIR}/fdb.cluster
     DESTINATION "etc"
-    COMPONENTS server)
+    COMPONENT server)
 endif()
 if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb

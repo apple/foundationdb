@@ -55,7 +55,7 @@
 #include "fdbrpc/Platform.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
-#include "fdbclient/versions.h"
+#include "versions.h"
 
 #ifdef  __linux__
 #include <execinfo.h>
