@@ -268,21 +268,27 @@ ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWo
 			int64_t desiredTeamNumber;
 			int64_t maxTeamNumber;
 			int64_t currentMachineTeamNumber;
+			int64_t healthyMachineTeamCount;
 			int64_t desiredMachineTeamNumber;
 			int64_t maxMachineTeamNumber;
 			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld", &currentMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld", &healthyMachineTeamCount);
 			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
 
-			if (currentTeamNumber > desiredTeamNumber || currentMachineTeamNumber > desiredMachineTeamNumber) {
+			//if (currentTeamNumber > desiredTeamNumber || currentMachineTeamNumber > desiredMachineTeamNumber) {
+			if (currentMachineTeamNumber > maxMachineTeamNumber || healthyMachineTeamCount > desiredMachineTeamNumber) {
 //				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld\n",
 //						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
 				TraceEvent("GetTeamCollectionValid").detail("CurrentTeamNumber", currentTeamNumber)
-					.detail("DesiredTeamNumber", desiredTeamNumber).detail("MaxTeamNumber", maxTeamNumber)
-					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber).detail("DesiredMachineTeams", desiredMachineTeamNumber)
+					.detail("DesiredTeamNumber", desiredTeamNumber)
+					.detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+					.detail("MaxTeamNumber", maxTeamNumber)
+					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
+					.detail("DesiredMachineTeams", desiredMachineTeamNumber)
 					.detail("MaxMachineTeams", maxMachineTeamNumber);
 				return false;
 			} else {
@@ -406,7 +412,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				.detail("DataDistributionActive", dataDistributionActive.get())
 				.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
-			if( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
+			if ( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate
 				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true
 				|| teamCollectionValid.get() == false) {
