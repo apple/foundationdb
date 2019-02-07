@@ -149,7 +149,7 @@ struct StatusWorkload : TestWorkload {
 					wait(tr.commit());
 			
 					if(g_random->random01() < 0.3) {
-						return;
+						return Void();
 					}
 
 					wait(delay(g_random->random01() * 120));
