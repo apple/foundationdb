@@ -158,6 +158,8 @@ that Visual Studio is used to compile.
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
 1. Set JAVA_HOME to the unpacked location and JAVA_COMPILE to
    $JAVA_HOME/bin/javac
+1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
+   won't build the Windows installer.
 1. Create a build directory (you can have the build directory anywhere you
    like): `mkdir build`
 1. `cd build`
@@ -183,3 +185,6 @@ for download from the LibreSSL homepage. To build LibreSSL:
 
 This will install LibreSSL under `C:\Program Files\LibreSSL`. After that `cmake`
 will automatically find it and build with TLS support.
+
+If you installed WIX before running `cmake` you should find the
+`FDBInstaller.msi` in your build directory under `packaging/msi`. 
