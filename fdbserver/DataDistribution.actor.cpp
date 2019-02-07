@@ -568,6 +568,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
+	Future<Void> checkBuildTeam;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 
@@ -1667,6 +1668,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
+				TraceEvent("BuildMachineTeams").detail("Score", score).detail("BestScore", bestScore)
+				.detail("TeamSize", serverTeam.size()).detail("StorageTeamSize", configuration.storageTeamSize);
 				if (score < bestScore) {
 					bestScore = score;
 					bestServerTeam = serverTeam;
@@ -1752,22 +1755,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			state int teamsToBuild = std::min(desiredTeams - teamCount, maxTeams - totalTeamCount);
 
 			if (teamsToBuild > 0) {
-				std::set<UID> desiredServerSet;
-				for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
-					if (!self->server_status.get(i->first).isUnhealthy()) {
-						desiredServerSet.insert(i->second->id);
-					}
-				}
-
-				vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
-
-				state vector<std::vector<UID>> builtTeams;
-
 				int addedTeams = self->addTeamsBestOf(teamsToBuild);
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam")
-					    .detail("TeamNum", self->teams.size())
-					    .detail("Debug", "Check information below");
+						.detail("TeamNum", self->teams.size())
+						.detail("Debug", "Check information below");
 					// Debug: set true for traceAllInfo() to print out more information
 					self->traceAllInfo();
 				}
@@ -1793,12 +1785,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				desc += i->first.shortString() + " (" + i->second->lastKnownInterface.toString() + "), ";
 			}
 		}
-		vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
+		checkBuildTeam = DDTeamCollection::checkBuildTeams(this);
 
 		TraceEvent(SevWarn, "NoHealthyTeams", distributorId)
 			.detail("CurrentTeamCount", teams.size())
 			.detail("ServerCount", server_info.size())
-			.detail("NonFailedServerCount", desiredServerVector.size());
+			.detail("NonFailedServerCount", desiredServerSet.size());
 	}
 
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
@@ -2130,8 +2122,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 					if( self->healthyTeamCount == 0 ) {
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
-						    .detail("SignallingTeam", team->getDesc())
-						    .detail("Primary", self->primary);
+							.detail("SignallingTeam", team->getDesc())
+							.detail("Primary", self->primary);
+						self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
 					}
 
 					TraceEvent("TeamHealthDifference", self->distributorId)
@@ -2246,6 +2239,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			if( self->healthyTeamCount == 0 ) {
 				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
+				self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
 			}
 		}
 		throw;
@@ -2460,6 +2454,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 				status->isFailed = !status->isFailed;
 				if( !status->isFailed && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
 					self->doBuildTeams = true;
+					self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
 				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
@@ -2580,8 +2575,11 @@ ACTOR Future<Void> storageServerTracker(
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
-			if( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() )
+			TraceEvent("StatusMapChange", distributorId).detail("Status", status.toString()).detail("LastIsUnhealthy", lastIsUnhealthy);
+			if ( lastIsUnhealthy && !status.isUnhealthy() && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
 				self->doBuildTeams = true;
+				self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
+			}
 			lastIsUnhealthy = status.isUnhealthy();
 
 			choose {
