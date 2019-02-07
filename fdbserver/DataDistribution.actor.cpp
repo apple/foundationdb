@@ -1226,6 +1226,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return totalServerIndex;
 	}
 
+	void traceConfigInfo() {
+		TraceEvent("DDConfig").detail("StorageTeamSize", configuration.storageTeamSize)
+		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+			.detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+			.detail("DesiredMachineTeamsPerMachine", SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE)
+			.detail("MaxMachineTeamsPerMachine", SERVER_KNOBS->MAX_TEAMS_PER_MACHINE);
+	}
+
 	void traceServerInfo() {
 		int i = 0;
 
@@ -1268,6 +1276,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto& machine : machine_info) {
 			TraceEvent("MachineInfo")
 			    .detail("MachineInfoIndex", i++)
+			    .detail("Healthy", isMachineHealthy(machine.second))
 			    .detail("MachineID", machine.first.contents().toString())
 			    .detail("MachineTeamOwned", machine.second->machineTeams.size())
 			    .detail("ServerNumOnMachine", machine.second->serversOnMachine.size())
@@ -1308,7 +1317,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceAllInfo(bool shouldPrint = false) {
 		if (!shouldPrint) return;
 
-		TraceEvent("TraceAllInfo").detail("Primary", primary).detail("DesiredTeamSize", configuration.storageTeamSize);
+		TraceEvent("TraceAllInfo").detail("Primary", primary);
+		traceConfigInfo();
 		traceServerInfo();
 		traceServerTeamInfo();
 		traceMachineInfo();
@@ -1678,17 +1688,16 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	int getHealthyMachineTeamCount() {
-	 	int totalMachineTeamCount = 0;
+	 	int healthyTeamCount = 0;
 	 	for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
 			ASSERT((*mt)->machines.size() == configuration.storageTeamSize);
 
 			if (isMachineTeamHealthy(*mt)) {
-				++totalMachineTeamCount;
+				++healthyTeamCount;
 			}
-			++totalMachineTeamCount;
 		}
 
-		return totalMachineTeamCount;
+		return healthyTeamCount;
 	 }
 
 	// Create server teams based on machine teams
@@ -1818,6 +1827,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 //		teamBuildInfo.desiredMachineTeamNum = desiredMachineTeams;
 //		teamBuildInfo.maxMachineTeamNum = maxMachineTeams;
 
+		healthyMachineTeamCount = getHealthyMachineTeamCount();
 
 		TraceEvent("TeamCollectionInfo", masterId)
 		    .detail("Primary", primary)
@@ -1864,6 +1874,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
 		    .trackLatest( "TeamCollectionInfo" );
 
+		// Debug purpose
+		if ( healthyMachineTeamCount > desiredMachineTeams || machineTeams.size() > maxMachineTeams ) {
+			// When the number of machine teams is over the limit, print out the current team info.
+			traceAllInfo(true);
+		}
 	}
 
 	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
@@ -2280,10 +2295,13 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		int totalHealthyMachineCount = self->calculateHealthyMachineCount();
 
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE * totalHealthyMachineCount;
+		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 
-		if (self->machineTeams.size() > desiredMachineTeams) {
+		if (totalHealthyMachineCount > desiredMachineTeams || self->machineTeams.size() > maxMachineTeams) {
 			// Pick the machine team with the least number of process teams and mark in undesired
 			state Reference<TCMachineTeamInfo> mt;
+			// Q: Should we prefer to remove an unhealthy machine team?
+			// i.e., if the totalHealthyMachineCount < self->machineTeams.size(), find an unhealthy machine team to remove
 			state int minNumProcessTeams = self->getMachineTeamWithLeastProcessTeams(mt);
 			ASSERT(mt.isValid());
 			mt->redundant = true;  // unused as a placeholder to mark the machine team status

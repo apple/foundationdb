@@ -283,12 +283,13 @@ ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWo
 			if (currentMachineTeamNumber > maxMachineTeamNumber || healthyMachineTeamCount > desiredMachineTeamNumber) {
 //				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld\n",
 //						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
-				TraceEvent("GetTeamCollectionValid").detail("CurrentTeamNumber", currentTeamNumber)
+				TraceEvent("GetTeamCollectionValid")
+				    .detail("CurrentTeamNumber", currentTeamNumber)
 					.detail("DesiredTeamNumber", desiredTeamNumber)
-					.detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
 					.detail("MaxTeamNumber", maxTeamNumber)
-					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
+					.detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
 					.detail("DesiredMachineTeams", desiredMachineTeamNumber)
+					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
 					.detail("MaxMachineTeams", maxMachineTeamNumber);
 				return false;
 			} else {

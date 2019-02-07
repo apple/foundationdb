@@ -155,9 +155,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( FREE_SPACE_RATIO_CUTOFF,                               0.1 );
 	init( FREE_SPACE_RATIO_DD_CUTOFF,                            0.2 );
-	bool smallDesiredMachineTeamNumber =  (randomize && BUGGIFY &&  g_random->random01() < 0.1) ? true : false;
-	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = 1;
-	init( DESIRED_TEAMS_PER_MACHINE,                               5 ); if( smallDesiredMachineTeamNumber ) DESIRED_TEAMS_PER_SERVER = 5; DESIRED_TEAMS_PER_MACHINE = 1;
+	//bool smallDesiredMachineTeamNumber =  (randomize && BUGGIFY &&  g_random->random01() < 0.1) ? true : false;
+	bool smallDesiredTeams = randomize && BUGGIFY;
+	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( smallDesiredTeams ) DESIRED_TEAMS_PER_SERVER = 1;
+	init( DESIRED_TEAMS_PER_MACHINE,                               5 ); if( smallDesiredTeams ) DESIRED_TEAMS_PER_MACHINE = 1; // DESIRED_TEAMS_PER_MACHINE must always equal to DESIRED_TEAMS_PER_SERVER
 	init( MAX_TEAMS_PER_SERVER,           3*DESIRED_TEAMS_PER_SERVER );
 	init( MAX_TEAMS_PER_MACHINE,           3*DESIRED_TEAMS_PER_MACHINE );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
