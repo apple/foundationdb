@@ -70,17 +70,6 @@ become the only build system available.
 
 This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
 
-#### macOS
-
-1. Check out this repo on your Mac.
-1. Install the Xcode command-line tools.
-1. Download version 1.52 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/).
-1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
-1. Install [Mono](http://www.mono-project.com/download/stable/).
-1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
-1. Navigate to the directory where you checked out the foundationdb repo.
-1. Run `make`.
-
 ## CMake
 
 FoundationDB is currently in the process of migrating the build system to cmake.
