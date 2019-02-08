@@ -1161,7 +1161,9 @@ private:
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 
 		for(int i = 1; i >= 0; i--)
-			if ( firstPages(i).checkHash() && firstPages(i).seq <= (size_t)loc ) {
+			// FIXME: Removed `firstPages(i).checkHash() &&`
+			// Only put a page in firstPages() if its checksum is valid
+			if ( firstPages(i).seq <= (size_t)loc ) {
 				*file = i;
 				*page = (loc - firstPages(i).seq)/sizeof(Page);
 				if (context)
