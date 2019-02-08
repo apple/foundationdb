@@ -143,6 +143,8 @@ public:
 
 	Future<Void> setPoppedPage( int file, int64_t page, int64_t debugSeq ) { return setPoppedPage(this, file, page, debugSeq); }
 
+	// FIXME: let the caller pass in where to write the data.
+	Future<Standalone<StringRef>> read(int file, int page, int nPages) { return read(this, file, page, nPages); }
 	Future<Standalone<StringRef>> readNextPage() { return readNextPage(this); }
 	Future<Void> truncateBeforeLastReadPage() { return truncateBeforeLastReadPage(this); }
 
@@ -538,6 +540,15 @@ public:
 			if (!self->error.isSet()) self->error.sendError(e);
 			throw;
 		}
+	}
+
+	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+		state TrackMe trackMe(self);
+		state const size_t bytesRequested = nPages * sizeof(Page);
+		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
+		int bytesRead = wait( self->files[file].f->read( mutateString(result), bytesRequested, pageOffset*sizeof(Page) ) );
+		ASSERT_WE_THINK(bytesRead == bytesRequested);
+		return result;
 	}
 
 	Future<int> fillReadingBuffer() {
