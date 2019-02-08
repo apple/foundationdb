@@ -923,8 +923,9 @@ private:
 		self->findPhysicalLocation(end.lo-1, &toFile, &toPage, nullptr);
 		if (fromFile == 0) { ASSERT( fromPage < file0size / _PAGE_SIZE ); }
 		if (toFile == 0) { ASSERT( toPage < file0size / _PAGE_SIZE ); }
-		if (fromFile == 1) { ASSERT( fromPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
-		if (toFile == 1) { ASSERT( toPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
+		// FIXME I think there's something with nextReadLocation we can do here when initialized && !recovered.
+		if (fromFile == 1 && self->recovered) { ASSERT( fromPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
+		if (toFile == 1 && self->recovered) { ASSERT( toPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
 		if (fromFile == toFile) {
 			ASSERT(toPage >= fromPage);
 			Standalone<StringRef> pagedData = wait( self->rawQueue->read( fromFile, fromPage, toPage - fromPage + 1 ) );
