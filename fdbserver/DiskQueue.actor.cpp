@@ -680,7 +680,7 @@ public:
 	}
 };
 
-class DiskQueue : public IDiskQueue {
+class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
@@ -782,11 +782,18 @@ public:
 
 	virtual Future<Void> getError() { return rawQueue->getError(); }
 	virtual Future<Void> onClosed() { return rawQueue->onClosed(); }
+
 	virtual void dispose() {
 		TraceEvent("DQDestroy", dbgid).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq).detail("File0Name", rawQueue->files[0].dbgFilename);
-		rawQueue->dispose();
-		delete this;
+		dispose(this);
 	}
+	ACTOR static void dispose(DiskQueue* self) {
+		wait( self->onSafeToDestruct() );
+		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+		self->rawQueue->dispose();
+		delete self;
+	}
+
 	virtual void close() {
 		TraceEvent("DQClose", dbgid)
 			.detail("LastPoppedSeq", lastPoppedSeq)
@@ -794,8 +801,13 @@ public:
 			.detail("NextPageSeq", nextPageSeq)
 			.detail("PoppedCommitted", rawQueue->dbg_file0BeginSeq + rawQueue->files[0].popped + rawQueue->files[1].popped)
 			.detail("File0Name", rawQueue->files[0].dbgFilename);
-		rawQueue->close();
-		delete this;
+		close(this);
+	}
+	ACTOR static void close(DiskQueue* self) {
+		wait( self->onSafeToDestruct() );
+		TraceEvent("DQCloseDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+		self->rawQueue->close();
+		delete self;
 	}
 
 	virtual StorageBytes getStorageBytes() {
