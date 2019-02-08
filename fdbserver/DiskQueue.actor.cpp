@@ -890,11 +890,18 @@ private:
 
 	ACTOR static void verifyCommit(DiskQueue* self, Future<Void> commitSynced, StringBuffer* buffer, loc_t start, loc_t end) {
 		state TrackMe trackme(self);
-		wait( commitSynced );
-		Standalone<StringRef> pagedData = wait( readPages(self, start, end) );
-		const int startOffset = start % _PAGE_SIZE;
-		const int dataLen = end - start;
-		ASSERT( pagedData.substr(startOffset, dataLen).compare( buffer->ref().substr(0, dataLen) ) == 0 );
+		try {
+			wait( commitSynced );
+			Standalone<StringRef> pagedData = wait( readPages(self, start, end) );
+			const int startOffset = start % _PAGE_SIZE;
+			const int dataLen = end - start;
+			ASSERT( pagedData.substr(startOffset, dataLen).compare( buffer->ref().substr(0, dataLen) ) == 0 );
+		} catch (Error& e) {
+			if (e.code() != error_code_io_error) {
+				delete buffer;
+				throw;
+			}
+		}
 		delete buffer;
 	}
 
@@ -916,7 +923,18 @@ private:
 		if (fromFile == toFile) {
 			ASSERT(toPage >= fromPage);
 			Standalone<StringRef> pagedData = wait( self->rawQueue->read( fromFile, fromPage, toPage - fromPage + 1 ) );
+			if ( self->firstPages(0).seq > start.lo ) {
+				// Simulation allows for reads to be delayed and executed after overlapping subsequent
+				// write operations.  This means that by the time our read was executed, it's possible
+				// that both disk queue files have been completely overwritten.
+				// I'm not clear what is the actual contract for read/write in this case, so simulation
+				// might be a bit overly aggressive here, but it's behavior we need to tolerate.
+				throw io_error();
+			}
+			ASSERT( ((Page*)pagedData.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
 			ASSERT(pagedData.size() == (toPage - fromPage + 1) * _PAGE_SIZE );
+
+			ASSERT( ((Page*)pagedData.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
 			return pagedData;
 		} else {
 			ASSERT(fromFile == 0);
@@ -924,8 +942,14 @@ private:
 			state Standalone<StringRef> secondChunk;
 			wait( store(firstChunk, self->rawQueue->read( fromFile, fromPage, ( file0size / sizeof(Page) ) - fromPage )) &&
 			      store(secondChunk, self->rawQueue->read( toFile, 0, toPage + 1 )) );
+			if ( self->firstPages(0).seq > start.lo ) {
+				// See above.
+				throw io_error();
+			}
 			ASSERT(firstChunk.size() == ( ( file0size / sizeof(Page) ) - fromPage ) * _PAGE_SIZE );
+			ASSERT( ((Page*)firstChunk.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
 			ASSERT(secondChunk.size() == (toPage + 1) * _PAGE_SIZE);
+			ASSERT( ((Page*)secondChunk.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
 			return firstChunk.withSuffix(secondChunk);
 		}
 	}
