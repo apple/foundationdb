@@ -22,6 +22,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 typedef bool(*compare_pages)(void*,void*);
@@ -570,6 +571,7 @@ public:
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
+		if (file == 1) ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos );
 		int bytesRead = wait( self->files[file].f->read( mutateString(result), bytesRequested, pageOffset*sizeof(Page) ) );
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
 		return result;
@@ -879,6 +881,38 @@ private:
 		}
 	}
 
+	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue *self, location start, location end) {
+		state TrackMe trackme(self);
+		state int fromFile;
+		state int toFile;
+		state int64_t fromPage;
+		state int64_t toPage;
+		state uint64_t file0size = self->firstPages(1).seq - self->firstPages(0).seq;
+		ASSERT(end > start);
+		ASSERT(start.lo >= self->firstPages(0).seq);
+		self->findPhysicalLocation(start.lo, &fromFile, &fromPage, "read");
+		self->findPhysicalLocation(end.lo-1, &toFile, &toPage, "read");
+		if (fromFile == 0) { ASSERT( fromPage < file0size / _PAGE_SIZE ); }
+		if (toFile == 0) { ASSERT( toPage < file0size / _PAGE_SIZE ); }
+		if (fromFile == 1) { ASSERT( fromPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
+		if (toFile == 1) { ASSERT( toPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
+		if (fromFile == toFile) {
+			ASSERT(toPage >= fromPage);
+			Standalone<StringRef> pagedData = wait( self->rawQueue->read( fromFile, fromPage, toPage - fromPage + 1 ) );
+			ASSERT(pagedData.size() == (toPage - fromPage + 1) * _PAGE_SIZE );
+			return pagedData;
+		} else {
+			ASSERT(fromFile == 0);
+			state Standalone<StringRef> firstChunk;
+			state Standalone<StringRef> secondChunk;
+			wait( store(firstChunk, self->rawQueue->read( fromFile, fromPage, ( file0size / sizeof(Page) ) - fromPage )) &&
+			      store(secondChunk, self->rawQueue->read( toFile, 0, toPage + 1 )) );
+			ASSERT(firstChunk.size() == ( ( file0size / sizeof(Page) ) - fromPage ) * _PAGE_SIZE );
+			ASSERT(secondChunk.size() == (toPage + 1) * _PAGE_SIZE);
+			return firstChunk.withSuffix(secondChunk);
+		}
+	}
+
 	void readFromBuffer( StringBuffer* result, int* bytes ) {
 		// extract up to bytes from readBufPage into result
 		int len = std::min( readBufPage->payloadSize - readBufPos, *bytes );
@@ -999,6 +1033,10 @@ private:
 		self->rawQueue->setStartPage( file, page );
 
 		return true;
+	}
+
+	Page& firstPages(int i) {
+		return *(Page*)rawQueue->firstPages[i];
 	}
 
 	void findPhysicalLocation( loc_t loc, int* file, int64_t* page, const char* context ) {
