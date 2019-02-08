@@ -131,8 +131,6 @@ will look somethink like this:
 cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
-The Windows build is currently experimental and the creation of installers is
-not yet supported.
 
 ### Windows
 
