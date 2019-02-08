@@ -121,6 +121,13 @@ public:
 			fileExtensionBytes = 8<<10;
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
+		// We issue reads into firstPages, so it needs to be 4k aligned.
+		firstPages.reserve(firstPages.arena(), 2);
+		void* pageMemory = operator new (sizeof(Page) * 3, firstPages.arena());
+		firstPages[0] = (Page*)((((uintptr_t)pageMemory + 4095) / 4096) * 4096);
+		memset(firstPages[0], 0, sizeof(Page));
+		firstPages[1] = (Page*)((uintptr_t)firstPages[0] + 4096);
+		memset(firstPages[1], 0, sizeof(Page));
 		stallCount.init(LiteralStringRef("RawDiskQueue.StallCount"));
 	}
 
@@ -180,6 +187,7 @@ public:
 		}
 	};
 	File files[2];  // After readFirstAndLastPages(), files[0] is logically before files[1] (pushes are always into files[1])
+	Standalone<VectorRef<Page*>> firstPages;
 
 	std::string basename;
 	std::string fileExtension;
@@ -245,6 +253,7 @@ public:
 
 				dbg_file0BeginSeq += files[0].size;
 				std::swap(files[0], files[1]);
+				std::swap(firstPages[0], firstPages[1]);
 				files[1].popped = 0;
 				writingPos = 0;
 			} else {
@@ -259,6 +268,10 @@ public:
 					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid).suppressFor(1.0).detail("Filename", filename(1)).detail("Size", files[1].size);
 				}
 			}
+		}
+
+		if (writingPos == 0) {
+			*firstPages[1] = *(const Page*)pageData.begin();
 		}
 
 		/*TraceEvent("RDQWrite", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
@@ -445,12 +458,8 @@ public:
 
 	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readFirstAndLastPages(RawDiskQueue_TwoFiles* self, compare_pages compare) {
 		state TrackMe trackMe(self);
-		state StringBuffer result( self->dbgid );
 
 		try {
-			result.alignReserve( sizeof(Page), sizeof(Page)*3 );
-			state Page* firstPage = (Page*)result.append(sizeof(Page)*3);
-
 			// Open both files or create both files
 			wait( openFiles(self) );
 
@@ -466,20 +475,19 @@ public:
 			}
 
 			// Read the first pages
-			memset(firstPage, 0, sizeof(Page)*2);
 			vector<Future<int>> reads;
 			for(int i=0; i<2; i++)
 				if( self->files[i].size > 0)
-					reads.push_back( self->files[i].f->read( &firstPage[i], sizeof(Page), 0 ) );
+					reads.push_back( self->files[i].f->read( self->firstPages[i], sizeof(Page), 0 ) );
 			wait( waitForAll(reads) );
 
 			// Determine which file comes first
-			if ( compare( &firstPage[1], &firstPage[0] ) ) {
-				std::swap( firstPage[0], firstPage[1] );
+			if ( compare( self->firstPages[1], self->firstPages[0] ) ) {
+				std::swap( self->firstPages[0], self->firstPages[1] );
 				std::swap( self->files[0], self->files[1] );
 			}
 
-			if ( !compare( &firstPage[1], &firstPage[1] ) ) {
+			if ( !compare( self->firstPages[1], self->firstPages[1] ) ) {
 				// Both files are invalid... the queue is empty!
 				// Begin pushing at the beginning of files[1]
 
@@ -500,12 +508,13 @@ public:
 				return Standalone<StringRef>();
 			}
 
-			// A page in files[1] is "valid" iff compare(&firstPage[1], page)
+			// A page in files[1] is "valid" iff compare(self->firstPages[1], page)
 			// Binary search to find a page in files[1] that is "valid" but the next page is not valid
 			// Invariant: the page at begin is valid, and the page at end is invalid
 			state int64_t begin = 0;
 			state int64_t end = self->files[1].size/sizeof(Page);
-			state Page *middlePage = &firstPage[2];
+			state Standalone<StringRef> middlePageAllocation = makeAlignedString(sizeof(Page), sizeof(Page));
+			state Page *middlePage = (Page*)middlePageAllocation.begin();
 			while ( begin + 1 != end ) {
 				state int64_t middle = (begin+end)/2;
 				ASSERT( middle > begin && middle < end );  // So the loop always changes begin or end
@@ -513,7 +522,7 @@ public:
 				int len = wait( self->files[1].f->read( middlePage, sizeof(Page), middle*sizeof(Page) ) );
 				ASSERT( len == sizeof(Page) );
 
-				bool middleValid = compare( &firstPage[1], middlePage );
+				bool middleValid = compare( self->firstPages[1], middlePage );
 
 				TraceEvent("RDQBS", self->dbgid).detail("Begin", begin).detail("End", end).detail("Middle", middle).detail("Valid", middleValid).detail("File0Name", self->files[0].dbgFilename);
 
@@ -524,16 +533,16 @@ public:
 			}
 			// Now by the invariant and the loop condition, begin is a valid page and begin+1 is an invalid page
 			// Check that begin+1 is invalid
-			int len = wait( self->files[1].f->read( &firstPage[2], sizeof(Page), (begin+1)*sizeof(Page) ) );
-			ASSERT( !(len == sizeof(Page) && compare( &firstPage[1], &firstPage[2] )) );
+			int len1 = wait( self->files[1].f->read( middlePage, sizeof(Page), (begin+1)*sizeof(Page) ) );
+			ASSERT( !(len1 == sizeof(Page) && compare( self->firstPages[1], middlePage )) );
 
 			// Read it
-			int len = wait( self->files[1].f->read( &firstPage[2], sizeof(Page), begin*sizeof(Page) ) );
-			ASSERT( len == sizeof(Page) && compare( &firstPage[1], &firstPage[2] ) );
+			int len2 = wait( self->files[1].f->read( middlePage, sizeof(Page), begin*sizeof(Page) ) );
+			ASSERT( len2 == sizeof(Page) && compare( self->firstPages[1], middlePage ) );
 
 			TraceEvent("RDQEndFound", self->dbgid).detail("File0Name", self->files[0].dbgFilename).detail("Pos", begin).detail("FileSize", self->files[1].size);
 
-			return result.str;
+			return middlePageAllocation;
 		} catch (Error& e) {
 			bool ok = e.code() == error_code_file_not_found;
 			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid).error(e, true).detail("File0Name", self->files[0].dbgFilename);
@@ -610,6 +619,9 @@ public:
 		state TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
 		state Reference<IAsyncFile> f = self->files[file].f;  // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
+		if (pos == 0) {
+			memset(self->firstPages[file], 0, _PAGE_SIZE);
+		}
 		wait( f->zeroRange( pos, self->files[file].size-pos ) );
 		wait(self->files[file].syncQueue->onSync());
 		// We intentionally don't return the f->zero future, so that TrackMe is destructed after f->zero finishes.
@@ -640,6 +652,7 @@ public:
 
 			if (swap) {
 				std::swap(self->files[0], self->files[1]);
+				std::swap(self->firstPages[0], self->firstPages[1]);
 				self->files[0].popped = self->files[0].size;
 			}
 
