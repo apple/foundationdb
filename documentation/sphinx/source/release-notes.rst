@@ -8,7 +8,7 @@ Release Notes
 Fixes
 -----
 
-* The ``include`` command in fdbcli would falsly include all machines with which IP-addresses
+* The ``include`` command in fdbcli would falsly include all machines with IP addresses that
   have the included IP-address as a prefix (for example ``include 1.0.0.1`` woudl also include
   ``1.0.0.10``) `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
 
