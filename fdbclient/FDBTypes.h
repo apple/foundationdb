@@ -513,6 +513,37 @@ private:
 	uint32_t type;
 };
 
+struct TLogSpillType {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	enum SpillType {
+		DEFAULT = 2,
+		VALUE = 1,
+		REFERENCE = 2,
+		UNSET,
+	};
+
+	TLogSpillType() : type(DEFAULT) {}
+	TLogSpillType( SpillType type ) : type(type) {
+		if ((uint32_t)type > UNSET)
+			this->type = UNSET;
+	}
+	operator SpillType() const { return SpillType(type); }
+
+	template <class Ar>
+	void serialize(Ar& ar) { serializer(ar, type); }
+
+	std::string toString() const {
+		switch( type ) {
+			case VALUE: return "";  // For backwards compatiblity.
+			case REFERENCE: return "reference";
+			default: return "unknown";
+		}
+	}
+
+private:
+	uint32_t type;
+};
+
 //Contains the amount of free and total space for a storage server, in bytes
 struct StorageBytes {
 	int64_t free;

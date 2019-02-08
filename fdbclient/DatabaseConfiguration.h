@@ -162,6 +162,7 @@ struct DatabaseConfiguration {
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	KeyValueStoreType tLogDataStoreType;
+	TLogSpillType tLogSpillType;
 
 	// Storage Servers
 	IRepPolicyRef storagePolicy;
