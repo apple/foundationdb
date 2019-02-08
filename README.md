@@ -120,6 +120,17 @@ a few errors) but we are constantly working on improving the developement experi
 There are no special requirements for Linux. However, we are currently working
 on a Docker-based build as well.
 
+If you want to create a package you have to tell cmake what platform it is for.
+And then you can build by simply calling `cpack`. So for debian, call:
+
+```
+cmake -DINSTALL_LAYOUT=DEB  <FDB_SOURCE_DIR>
+make
+cpack
+```
+
+For RPM simply replace `DEB` with `RPM`.
+
 ### MacOS
 
 The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
@@ -131,6 +142,14 @@ will look somethink like this:
 cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
+To generate a installable package, you have to call CMake with the corresponding
+arguments and then use cpack to generate the package:
+
+```
+cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
+make
+cpack
+```
 
 ### Windows
 
