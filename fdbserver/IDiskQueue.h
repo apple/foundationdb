@@ -34,6 +34,11 @@ public:
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
 		operator std::string() { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
 
+		template<class Ar>
+		void serialize_unversioned(Ar& ar) {
+			serializer(ar, hi, lo);
+		}
+
 		bool operator < (location const& r) const {
 			if (hi<r.hi) return true;
 			if (hi>r.hi) return false;
@@ -65,6 +70,10 @@ public:
 
 	virtual StorageBytes getStorageBytes() = 0;
 };
+
+// FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
+template <class Ar> void load( Ar& ar, IDiskQueue::location& loc ) { loc.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, const IDiskQueue::location& loc ) { const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar); }
 
 IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
