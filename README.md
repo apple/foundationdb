@@ -104,6 +104,16 @@ cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 FoundationDB will build just fine without LibreSSL, however, the resulting
 binaries won't support TLS connections.
 
+### Language Bindings
+
+The language bindings that are supported by cmake will have a corresponding
+`README.md` file in the corresponding `bindings/lang` directory.
+
+Generally, cmake will build all language bindings for which it can find all
+necessary dependencies. After each successful cmake run, cmake will tell you
+which language bindings it is going to build.
+
+
 ### Generating compile_commands.json
 
 CMake can build a compilation database for you. However, the default generatd
