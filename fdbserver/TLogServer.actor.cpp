@@ -648,8 +648,10 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					tagData->nothingPersistent = false;
 					BinaryWriter wr( Unversioned() );
 
-					for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg)
+					for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
+						// .toStringRef() strips off the length prefix, but << adds it back when serializing a StringRef.
 						wr << msg->second.toStringRef();
+					}
 
 					self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tagData->tag, currentVersion ), wr.toStringRef() ) );
 
