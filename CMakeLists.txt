@@ -55,6 +55,14 @@ find_package(PythonInterp 3.4 REQUIRED)
 set(Python_ADDITIONAL_VERSIONS 3.4 3.5 3.5)
 find_package(PythonLibs 3.4 REQUIRED)
 
+################################################################################
+# Pip
+################################################################################
+
+find_package(Virtualenv)
+if (Virtualenv_FOUND)
+  set(BUILD_DOCUMENTATION ON)
+endif()
 
 ################################################################################
 # Compiler configuration
@@ -222,7 +230,9 @@ endif()
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
-add_subdirectory(documentation)
+if(BUILD_DOCUMENTATION)
+  add_subdirectory(documentation)
+endif()
 
 if(WIN32)
   add_subdirectory(packaging/msi)
