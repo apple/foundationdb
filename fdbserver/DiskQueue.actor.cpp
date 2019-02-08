@@ -713,6 +713,7 @@ public:
 		}
 		return endLocation();
 	}
+
 	virtual void pop( location upTo ) {
 		ASSERT( !upTo.hi );
 		ASSERT( !recovered || upTo.lo <= endLocation() );
@@ -731,6 +732,8 @@ public:
 			anyPopped = true;
 		}
 	}
+
+	virtual Future<Standalone<StringRef>> read(location from, location to) { return read(this, from, to); }
 
 	int getMaxPayload() {
 		return Page::maxPayload;
@@ -1240,6 +1243,8 @@ public:
 	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
+
+	virtual Future<Standalone<StringRef>> read( location start, location end ) { return queue->read( start, end ); }
 
 	virtual location push( StringRef contents ) {
 		pushed = queue->push(contents);
