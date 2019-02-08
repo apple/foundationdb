@@ -109,7 +109,35 @@ private:
 	}
 };
 
-class RawDiskQueue_TwoFiles {
+template <typename T>
+class Tracked {
+protected:
+	struct TrackMe : NonCopyable {
+		T* self;
+		explicit TrackMe( T* self ) : self(self) {
+			self->actorCount++;
+			if (self->actorCount == 1) self->actorCountIsZero.set(false);
+		}
+		~TrackMe() {
+			self->actorCount--;
+			if (self->actorCount == 0) self->actorCountIsZero.set(true);
+		}
+	};
+
+	Future<Void> onSafeToDestruct() {
+		if (actorCountIsZero.get()) {
+			return Void();
+		} else {
+			return actorCountIsZero.onChange();
+		}
+	}
+
+private:
+	int actorCount = 0;
+	AsyncVar<bool> actorCountIsZero = true;
+};
+
+class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
@@ -212,19 +240,7 @@ public:
 
 	int64_t fileExtensionBytes;
 
-	AsyncMap<bool,int> recoveryActorCount;
-
 	Int64MetricHandle stallCount;
-
-	struct TrackMe : NonCopyable {
-		RawDiskQueue_TwoFiles* self;
-		TrackMe( RawDiskQueue_TwoFiles* self ) : self(self) {
-			self->recoveryActorCount.set(false, self->recoveryActorCount.get(false)+1);
-		}
-		~TrackMe() {
-			self->recoveryActorCount.set(false, self->recoveryActorCount.get(false)-1);
-		}
-	};
 
 	Future<Void> truncateFile(int file, int64_t pos) { return truncateFile(this, file, pos); }
 
@@ -426,8 +442,7 @@ public:
 		state Error error = success();
 		try {
 			wait(success(errorOr(self->lastCommit)));
-			while (self->recoveryActorCount.get(false))
-				wait( self->recoveryActorCount.onChange(false) );
+			wait( self->onSafeToDestruct() );
 
 			for(int i=0; i<2; i++)
 				self->files[i].f.clear();
