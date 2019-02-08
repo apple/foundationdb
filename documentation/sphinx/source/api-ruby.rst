@@ -92,17 +92,19 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
     .. method:: FDB.options.set_trace_enable(output_directory) -> nil
 
-        |option-trace-enable-blurb|
+       |option-trace-enable-blurb|
 
-        .. warning:: |option-trace-enable-warning|
+       .. warning:: |option-trace-enable-warning|
 
     .. method:: FDB.options.set_trace_max_logs_size(bytes) -> nil
 
-        |option-trace-max-logs-size-blurb|
+       |option-trace-max-logs-size-blurb|
 
     .. method:: FDB.options.set_trace_roll_size(bytes) -> nil
 
-        |option-trace-roll-size-blurb|
+       |option-trace-roll-size-blurb|
+
+    .. method:: FDB.options.set_disable_multi_version_client_api() -> nil
 
        |option-disable-multi-version-client-api|
 
