@@ -21,7 +21,9 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
+#endif
 #include <new>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
