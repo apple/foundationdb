@@ -502,6 +502,9 @@ void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
+
+// FIXME: Split pop into forgetBefore and pop, and maintain the poppedLocation per tag.
+// There's no need for us to remember spilled version locations, as we're spilling that information also.
 void TLogQueue::pop( Version upTo, Reference<LogData> logData ) {
 	// Keep only the given and all subsequent version numbers
 	// Find the first version >= upTo
@@ -725,8 +728,21 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	ASSERT(logData->bytesDurable.getValue() <= logData->bytesInput.getValue());
 	ASSERT(self->bytesDurable <= self->bytesInput);
 
-	if( self->queueCommitEnd.get() > 0 )
-		self->persistentQueue->pop( newPersistentDataVersion+1, logData ); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions. Should we limit the number of versions cleared at a time?
+	if( self->queueCommitEnd.get() > 0 ) {
+		// FIXME: Maintain a heap of tags ordered by version to make this O(1) instead of O(n).
+		Version minVersion = std::numeric_limits<Version>::max();
+		for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
+			for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
+				Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
+				if (tagData) {
+					minVersion = std::min(minVersion, tagData->popped);
+				}
+			}
+		}
+		if (minVersion != std::numeric_limits<Version>::max()) {
+			self->persistentQueue->pop( minVersion, logData ); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions. Should we limit the number of versions cleared at a time?
+		}
+	}
 
 	return Void();
 }
