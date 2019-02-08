@@ -43,7 +43,7 @@ using std::make_pair;
 using std::min;
 using std::max;
 
-namespace oldTLog {
+namespace oldTLog_4_6 {
 
 	typedef int16_t OldTag;
 

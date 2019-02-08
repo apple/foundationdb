@@ -1711,7 +1711,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
 		}
 
-		wait( oldTLog::tLog(self->persistentData, self->rawPersistentQueue, self->dbInfo, locality, self->dbgid) );
+		wait( oldTLog_4_6::tLog(self->persistentData, self->rawPersistentQueue, self->dbInfo, locality, self->dbgid) );
 		throw internal_error();
 	}
 

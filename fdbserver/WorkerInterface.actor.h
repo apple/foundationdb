@@ -363,7 +363,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<Async
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
 
-namespace oldTLog {
+namespace oldTLog_4_6 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId);
 }
