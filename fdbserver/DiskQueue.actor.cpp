@@ -689,9 +689,10 @@ public:
 
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
+	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
-		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), lastCommittedSeq(0), warnAlwaysForMemory(true)
+		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
 	{
 	}
 
@@ -786,8 +787,11 @@ public:
 		rawQueue->stall();
 	}
 
+	virtual Future<bool> initializeRecovery() { return initializeRecovery( this ); }
 	virtual Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
+	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
+	// to be changed to understand the new intiailizeRecovery protocol.
 	virtual location getNextReadLocation() { return nextReadLocation; }
 
 	virtual Future<Void> getError() { return rawQueue->getError(); }
@@ -1028,21 +1032,14 @@ private:
 
 		ASSERT( !self->recovered );
 
-		if (self->nextReadLocation < 0) {
-			bool nonempty = wait( findStart(self) );
-			if (!nonempty) {
-				// The constructor has already put everything in the right state for an empty queue
-				self->recovered = true;
-				ASSERT( self->poppedSeq <= self->endLocation() );
+		if (!self->initialized) {
+			bool recoveryComplete = wait( initializeRecovery(self) );
 
-				//The next read location isn't necessarily the end of the last commit, but this is sufficient for helping us check an ASSERTion
-				self->lastCommittedSeq = self->nextReadLocation;
+			if (recoveryComplete) {
+				ASSERT( self->poppedSeq <= self->endLocation() );
 
 				return Standalone<StringRef>();
 			}
-			self->readBufPos = self->nextReadLocation % sizeof(Page) - sizeof(PageHeader);
-			if (self->readBufPos < 0) { self->nextReadLocation -= self->readBufPos; self->readBufPos = 0; }
-			TraceEvent("DQRecStart", self->dbgid).detail("ReadBufPos", self->readBufPos).detail("NextReadLoc", self->nextReadLocation).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		}
 
 		loop {
@@ -1100,13 +1097,19 @@ private:
 		return result.str;
 	}
 
-	ACTOR static Future<bool> findStart( DiskQueue* self ) {
+	ACTOR static Future<bool> initializeRecovery( DiskQueue* self ) {
+		if (self->initialized) {
+			return self->recovered;
+		}
 		Standalone<StringRef> lastPageData = wait( self->rawQueue->readFirstAndLastPages( &comparePages ) );
+		self->initialized = true;
 
 		if (!lastPageData.size()) {
 			// There are no valid pages, so apparently this is a completely empty queue
 			self->nextReadLocation = 0;
-			return false;
+			self->lastCommittedSeq = 0;
+			self->recovered = true;
+			return true;
 		}
 
 		Page* lastPage = (Page*)lastPageData.begin();
@@ -1128,10 +1131,15 @@ private:
 		self->findPhysicalLocation( self->poppedSeq, &file, &page, "poppedSeq" );
 		self->rawQueue->setStartPage( file, page );
 
-		return true;
+		self->readBufPos = self->nextReadLocation % sizeof(Page) - sizeof(PageHeader);
+		if (self->readBufPos < 0) { self->nextReadLocation -= self->readBufPos; self->readBufPos = 0; }
+		TraceEvent("DQRecStart", self->dbgid).detail("ReadBufPos", self->readBufPos).detail("NextReadLoc", self->nextReadLocation).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+
+		return false;
 	}
 
 	Page& firstPages(int i) {
+		ASSERT( initialized );
 		return *(Page*)rawQueue->firstPages[i];
 	}
 
@@ -1204,6 +1212,7 @@ private:
 
 	// Recovery state
 	bool recovered;
+	bool initialized;
 	loc_t nextReadLocation;
 	Arena readBufArena;
 	Page* readBufPage;
@@ -1226,6 +1235,7 @@ public:
 	void close() { queue->close(); delete this; }
 
 	//IDiskQueue
+	Future<bool> initializeRecovery() { return queue->initializeRecovery(); }
 	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
