@@ -35,7 +35,9 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
+#endif
 #include "fdbrpc/TLSConnection.h"
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"

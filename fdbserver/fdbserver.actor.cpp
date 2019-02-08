@@ -55,7 +55,9 @@
 #include "fdbrpc/Platform.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
+#endif
 
 #ifdef  __linux__
 #include <execinfo.h>

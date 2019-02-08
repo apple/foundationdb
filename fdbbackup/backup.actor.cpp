@@ -63,7 +63,9 @@ using std::endl;
 #endif
 #endif
 
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
+#endif
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
