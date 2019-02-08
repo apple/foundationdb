@@ -57,3 +57,11 @@ endfunction()
 
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
+
+set(tar_file ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}-${CMAKE_PROJECT_VERSION}.tar.gz)
+add_custom_command(
+  OUTPUT ${tar_file}
+  COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} .
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html)
+add_custom_target(package_html DEPENDS ${tar_file})
+add_dependencies(package_html html)
