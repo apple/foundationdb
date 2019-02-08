@@ -368,7 +368,7 @@ func (k Key) FDBKey() Key {
 	return k
 }
 
-// String describes the key as a hexadecimal encoded string.
+// String describes the key as a human readable string.
 func (k Key) String() string {
 	return Printable(k)
 }
