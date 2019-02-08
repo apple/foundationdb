@@ -132,13 +132,18 @@ private:
 	IDiskQueue* queue;
 	UID dbgid;
 
-	void updateVersionSizes( const TLogQueueEntry& result, TLogData* tLog );
+	void updateVersionSizes( const TLogQueueEntry& result, TLogData* tLog, IDiskQueue::location start, IDiskQueue::location end );
 
 	ACTOR static Future<TLogQueueEntry> readNext( TLogQueue* self, TLogData* tLog ) {
 		state TLogQueueEntry result;
 		state int zeroFillSize = 0;
 
+		// FIXME: initializeRecovery should probably be called on its own by the caller of readNext.
+		bool recoveryFinished = wait( self->queue->initializeRecovery() );
+		if (recoveryFinished) throw end_of_stream();
+
 		loop {
+			state IDiskQueue::location startloc = self->queue->getNextReadLocation();
 			Standalone<StringRef> h = wait( self->queue->readNext( sizeof(uint32_t) ) );
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
@@ -162,10 +167,12 @@ private:
 			}
 
 			if (e[payloadSize]) {
+				ASSERT( e[payloadSize] == 1 );
 				Arena a = e.arena();
 				ArenaReader ar( a, e.substr(0, payloadSize), IncludeVersion() );
 				ar >> result;
-				self->updateVersionSizes(result, tLog);
+				const IDiskQueue::location endloc = self->queue->getNextReadLocation();
+				self->updateVersionSizes(result, tLog, startloc, endloc);
 				return result;
 			}
 		}
@@ -339,7 +346,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		}
 	};
 
-	Map<Version, IDiskQueue::location> versionLocation;  // For the version of each entry that was push()ed, the end location of the serialized bytes
+	Map<Version, std::pair<IDiskQueue::location, IDiskQueue::location>> versionLocation;  // For the version of each entry that was push()ed, the [start, end) location of the serialized bytes
 
 	/*
 	Popped version tracking contract needed by log system to implement ILogCursor::popped():
@@ -477,9 +484,11 @@ void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
-	auto loc = queue->push( wr.toStringRef() );
+	const IDiskQueue::location startloc = queue->getNextPushLocation();
+	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
+	const IDiskQueue::location endloc = queue->push( wr.toStringRef() );
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
-	logData->versionLocation[qe.version] = loc;
+	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
 void TLogQueue::pop( Version upTo, Reference<LogData> logData ) {
 	// Keep only the given and all subsequent version numbers
@@ -494,13 +503,14 @@ void TLogQueue::pop( Version upTo, Reference<LogData> logData ) {
 		v.decrementNonEnd();
 	}
 
-	queue->pop( v->value );
+	queue->pop( v->value.second );
 	logData->versionLocation.erase( logData->versionLocation.begin(), v );  // ... and then we erase that previous version and all prior versions
 }
-void TLogQueue::updateVersionSizes( const TLogQueueEntry& result, TLogData* tLog ) {
+void TLogQueue::updateVersionSizes( const TLogQueueEntry& result, TLogData* tLog,
+                                    IDiskQueue::location start, IDiskQueue::location end) {
 	auto it = tLog->id_data.find(result.id);
 	if(it != tLog->id_data.end()) {
-		it->second->versionLocation[result.version] = queue->getNextReadLocation();
+		it->second->versionLocation[result.version] = std::make_pair(start, end);
 	}
 }
 
