@@ -21,7 +21,7 @@ project(fdb
   VERSION 6.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES ASM C CXX Java)
+  LANGUAGES ASM C CXX)
 
 if(WIN32)
   # C# is currently only supported on Windows.
@@ -57,29 +57,16 @@ find_package(PythonLibs 3.4 REQUIRED)
 
 
 ################################################################################
-# LibreSSL
+# Compiler configuration
 ################################################################################
 
-set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
-if(DISABLE_TLS)
-  set(WITH_TLS FALSE)
-else()
-  set(LIBRESSL_USE_STATIC_LIBS TRUE)
-  find_package(LibreSSL)
-  if(LibreSSL_FOUND)
-    set(WITH_TLS TRUE)
-  else()
-    message(STATUS "LibreSSL NOT Found - Will compile without TLS Support")
-    message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
-    set(WITH_TLS FALSE)
-  endif()
-endif()
+include(ConfigureCompiler)
 
 ################################################################################
 # Compiler configuration
 ################################################################################
 
-include(ConfigureCompiler)
+include(FDBComponents)
 
 ################################################################################
 # Get repository information
@@ -256,3 +243,9 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS)
 	)
   add_custom_target(procossed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()
+
+################################################################################
+# Inform user which components we are going to build
+################################################################################
+
+print_components()
