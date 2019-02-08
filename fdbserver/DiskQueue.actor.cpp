@@ -331,7 +331,9 @@ public:
 			TEST(2==syncFiles.size());  // push spans both files
 			wait( pushed );
 
-			delete pageMem;
+			if (!g_network->isSimulated()) {
+				delete pageMem;
+			}
 			pageMem = 0;
 
 			Future<Void> sync = syncFiles[0]->onSync();
@@ -352,7 +354,9 @@ public:
 
 			committed.send(Void());
 		} catch (Error& e) {
-			delete pageMem;
+			if (!g_network->isSimulated()) {
+				delete pageMem;
+			}
 			TEST(true);  // push error
 			TEST(2==syncFiles.size());  // push spanning both files error
 			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).error(e, true).detail("InitialFilename0", filename);
@@ -769,6 +773,9 @@ public:
 
 		lastCommittedSeq = backPage().endSeq();
 		auto f = rawQueue->pushAndCommit( pushed_page_buffer->ref(), pushed_page_buffer, poppedSeq/sizeof(Page) - lastPoppedSeq/sizeof(Page) );
+		if (g_network->isSimulated()) {
+			verifyCommit(this, f, pushed_page_buffer, ((Page*)pushed_page_buffer->ref().begin())->seq, lastCommittedSeq);
+		}
 		lastPoppedSeq = poppedSeq;
 		pushed_page_buffer = 0;
 		return f;
@@ -879,6 +886,16 @@ private:
 				.detail("NextPageSeq", nextPageSeq)
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 		}
+	}
+
+	ACTOR static void verifyCommit(DiskQueue* self, Future<Void> commitSynced, StringBuffer* buffer, loc_t start, loc_t end) {
+		state TrackMe trackme(self);
+		wait( commitSynced );
+		Standalone<StringRef> pagedData = wait( readPages(self, start, end) );
+		const int startOffset = start % _PAGE_SIZE;
+		const int dataLen = end - start;
+		ASSERT( pagedData.substr(startOffset, dataLen).compare( buffer->ref().substr(0, dataLen) ) == 0 );
+		delete buffer;
 	}
 
 	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue *self, location start, location end) {
