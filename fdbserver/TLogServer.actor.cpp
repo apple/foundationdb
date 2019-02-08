@@ -248,8 +248,16 @@ static StringRef stripTagMessagesKey( StringRef key ) {
 	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
 }
 
+static StringRef stripTagMessageRefsKey( StringRef key ) {
+	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size() );
+}
+
 static Version decodeTagMessagesKey( StringRef key ) {
 	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
+}
+
+static Version decodeTagMessageRefsKey( StringRef key ) {
+	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessageRefsKey(key), Unversioned() ) );
 }
 
 struct TLogData : NonCopyable {
@@ -1038,6 +1046,42 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 	}
 }
 
+std::vector<StringRef> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
+	// See the comment in LogSystem.cpp for the binary format of commitBlob.
+	std::vector<StringRef> relevantMessages;
+	BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
+	while (!rd.empty()) {
+		uint32_t messageLength = 0;
+		uint32_t subsequence = 0;
+		uint16_t tagCount = 0;
+		rd >> messageLength;
+		rd.checkpoint();
+		rd >> subsequence >> tagCount;
+		Tag msgtag;
+		bool match = false;
+		for (int i = 0; i < tagCount; i++) {
+			rd >> msgtag;
+			if (msgtag == tag) {
+				match = true;
+				break;
+			} else if (tag.locality == tagLocalityLogRouter && msgtag.locality == tagLocalityLogRouter &&
+			           msgtag.id % logRouters == tag.id) {
+				// Mutations that are in the partially durable span between known comitted version and
+				// recovery version get copied to the new log generation.  These commits might have had more
+				// log router tags than what now exist, so we mod them down to what we have.
+				match = true;
+			}
+		}
+		rd.rewind();
+		const void* begin = rd.readBytes(messageLength);
+		if (match) {
+			relevantMessages.push_back( StringRef((uint8_t*)begin, messageLength) );
+		}
+		// FIXME: Yield here so Evan doesn't have to
+	}
+	return relevantMessages;
+}
+
 ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Reference<LogData> logData ) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
@@ -1140,21 +1184,56 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 		peekMessagesFromMemory( logData, req, messages2, endVersion );
 
-		Standalone<VectorRef<KeyValueRef>> kvs = wait(
+		// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+		state Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
 			self->persistentData->readRange(KeyRangeRef(
-				persistTagMessagesKey(logData->logId, req.tag, req.begin),
-				persistTagMessagesKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+				persistTagMessageRefsKey(logData->logId, req.tag, req.begin),
+				persistTagMessageRefsKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1))));
 
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? printable(kv1[0].key) : "").detail("Tag2ResultsLast", kv2.size() ? printable(kv2[0].key) : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
-		for (auto &kv : kvs) {
-			auto ver = decodeTagMessagesKey(kv.key);
-			messages << int32_t(-1) << ver;
-			messages.serializeBytes(kv.value);
+		state std::vector<Future<Standalone<StringRef>>> messageReads;
+		for (auto &kv : kvrefs) {
+			IDiskQueue::location begin, end;
+			BinaryReader r(kv.value, Unversioned());
+			r >> begin >> end;
+			messageReads.push_back( self->rawPersistentQueue->read(begin, end) );
+		}
+		wait( waitForAll( messageReads ) );
+
+		ASSERT( messageReads.size() == kvrefs.size() );
+		Version lastRefMessageVersion = 0;
+		for (int i = 0; i < messageReads.size(); i++ ) {
+			Standalone<StringRef> queueEntryData = messageReads[i].get();
+			uint8_t valid;
+			const uint32_t length = *(uint32_t*)queueEntryData.begin();
+			queueEntryData = queueEntryData.substr( 4, queueEntryData.size() - 4);
+			BinaryReader rd( queueEntryData, IncludeVersion() );
+			TLogQueueEntry entry;
+			rd >> entry >> valid;
+			Version version = decodeTagMessageRefsKey(kvrefs[i].key);
+			ASSERT( valid == 0x01 );
+			ASSERT( length + sizeof(valid) == queueEntryData.size() );
+
+			messages << int32_t(-1) << version;
+
+			// FIXME: push DESIRED_TOTAL_BYTES into parseMessagesForTag
+			// FIXME: maybe push this copy in as well
+			std::vector<StringRef> parsedMessages = parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags);
+			for (StringRef msg : parsedMessages) {
+				messages << msg;
+			}
+
+			lastRefMessageVersion = version;
+
+			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				break;
+			}
 		}
 
-		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
-			endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
+
+		if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+			endVersion = lastRefMessageVersion + 1;
 		else
 			messages.serializeBytes( messages2.toStringRef() );
 	} else {
