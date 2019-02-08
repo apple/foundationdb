@@ -796,6 +796,8 @@ public:
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
 	virtual location getNextReadLocation() { return nextReadLocation; }
+	virtual location getNextCommitLocation() { ASSERT( initialized ); return lastCommittedSeq + sizeof(Page); }
+	virtual location getNextPushLocation() { ASSERT( initialized ); return endLocation(); }
 
 	virtual Future<Void> getError() { return rawQueue->getError(); }
 	virtual Future<Void> onClosed() { return rawQueue->onClosed(); }
@@ -1247,6 +1249,9 @@ public:
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
 
 	virtual Future<Standalone<StringRef>> read( location start, location end ) { return queue->read( start, end ); }
+	virtual location getNextCommitLocation() { return queue->getNextCommitLocation(); }
+	virtual location getNextPushLocation() { return queue->getNextPushLocation(); }
+
 
 	virtual location push( StringRef contents ) {
 		pushed = queue->push(contents);
