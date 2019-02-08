@@ -1284,6 +1284,7 @@ def optionalParamToBytes(v):
 
 
 _FDBBase.capi = _capi
+_CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
 def init_c_api():
     _capi.fdb_select_api_version_impl.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -1326,8 +1327,6 @@ def init_c_api():
 
     _capi.fdb_future_is_ready.argtypes = [ctypes.c_void_p]
     _capi.fdb_future_is_ready.restype = ctypes.c_int
-
-    _CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
     _capi.fdb_future_set_callback.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _capi.fdb_future_set_callback.restype = int
