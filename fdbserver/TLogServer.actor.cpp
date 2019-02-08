@@ -572,6 +572,47 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 		data->nothingPersistent = true;
 }
 
+struct VerifyState {
+	std::vector<std::pair<IDiskQueue::location, IDiskQueue::location>> locations;
+	std::vector<Version> versions;
+	std::vector<Future<Standalone<StringRef>>> readfutures;
+};
+
+ACTOR void verifyPersistentData( TLogData* self, VerifyState* vs ) {
+	for (auto iter = vs->locations.begin(); iter != vs->locations.end(); iter++) {
+		vs->readfutures.push_back( self->rawPersistentQueue->read( iter->first, iter->second.lo ) );
+	}
+	try {
+		wait( waitForAll(vs->readfutures) );
+	} catch (Error& e) {
+		if (e.code() != error_code_io_error) {
+			delete vs;
+			throw;
+		} else {
+			delete vs;
+			return;
+		}
+	}
+	state int i = 0;
+	for (; i < vs->readfutures.size(); i++) {
+		state TLogQueueEntry entry;
+		state StringRef rawdata = vs->readfutures[i].get();
+		state uint32_t length = *(uint32_t*)rawdata.begin();
+		state uint8_t valid;
+		rawdata = rawdata.substr( 4, rawdata.size() - 4);
+		try {
+			BinaryReader rd( rawdata, IncludeVersion() );
+			rd >> entry >> valid;
+		} catch (Error& e) {
+			ASSERT(false);
+		}
+		// ASSERT( length == rawdata.size() );
+		ASSERT( entry.version == vs->versions[i] );
+		ASSERT( valid == 1 );
+	}
+	delete vs;
+}
+
 ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logData, Version newPersistentDataVersion ) {
 	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
 	ASSERT( newPersistentDataVersion <= logData->version.get() );
@@ -586,6 +627,10 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	// For all existing tags
 	state int tagLocality = 0;
 	state int tagId = 0;
+	state VerifyState *vs = nullptr;
+	if (g_network->isSimulated()) {
+		vs = new VerifyState;
+	}
 
 	for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
@@ -602,7 +647,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					anyData = true;
 					tagData->nothingPersistent = false;
 					BinaryWriter wr( Unversioned() );
-					BinaryWriter wr2( Unversioned() );
 
 					for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg)
 						wr << msg->second.toStringRef();
@@ -611,10 +655,16 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 
 					// FIXME: This loop is by tag, but verionLocation is by message, so we're rewriting the
 					// same Key,Value pair every time we process something of the same tag at the same version.
+					BinaryWriter wr2( Unversioned() );
 					const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
 					const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
 					wr2 << begin << end;
 					self->persistentData->set( KeyValueRef( persistTagMessageRefsKey( logData->logId, tagData->tag, currentVersion ), wr2.toStringRef() ) );
+
+					if (vs && (vs->versions.empty() || vs->versions.back() != currentVersion)) {
+						vs->versions.push_back( currentVersion );
+						vs->locations.push_back( std::make_pair( begin, end ) );
+					}
 
 					Future<Void> f = yield(TaskUpdateStorage);
 					if(!f.isReady()) {
@@ -626,6 +676,11 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 				wait(yield(TaskUpdateStorage));
 			}
 		}
+	}
+
+	// FIXME remove temporary verification
+	if (vs) {
+		verifyPersistentData( self, vs );
 	}
 
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
