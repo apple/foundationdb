@@ -98,6 +98,8 @@ extern bool isAssertDisabled( int line );
 	catch(Error &e) { criticalError(FDB_EXIT_ABORT, "AbortOnError", e.what()); } \
 	catch(...) { criticalError(FDB_EXIT_ABORT, "AbortOnError", "Aborted due to unknown error"); }
 
+EXTERNC void breakpoint_me();
+
 #ifdef FDB_CLEAN_BUILD
 #  define NOT_IN_CLEAN BOOST_STATIC_ASSERT_MSG(0, "This code can not be enabled in a clean build.");
 #else
