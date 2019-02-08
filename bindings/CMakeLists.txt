@@ -1,3 +1,5 @@
 add_subdirectory(c)
 add_subdirectory(python)
-add_subdirectory(java)
+if(BUILD_JAVA)
+  add_subdirectory(java)
+endif()

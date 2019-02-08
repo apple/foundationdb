@@ -1,7 +1,3 @@
-include(UseJava)
-find_package(JNI 1.8 REQUIRED)
-find_package(Java 1.8 COMPONENTS Development REQUIRED)
-
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
   src/main/com/apple/foundationdb/async/AsyncIterator.java
