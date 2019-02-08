@@ -27,6 +27,7 @@
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
+static const char* logTypes[] = { "log_engine:=1", "log_engine:=2" };
 static const char* redundancies[] = { "single", "double", "triple" };
 
 std::string generateRegions() {
@@ -261,7 +262,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if(g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = g_random->randomInt(0, 6);
+			state int randomChoice = g_random->randomInt(0, 7);
 			if( randomChoice == 0 ) {
 				double waitDuration = 3.0 * g_random->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
@@ -343,6 +344,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			else if ( randomChoice == 5) {
 				wait(success( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) ));
+			}
+			else if ( randomChoice == 6 ) {
+				ConfigurationResult::Type _ = wait( changeConfig( cx, logTypes[g_random->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], true ) );
 			}
 			else {
 				ASSERT(false);
