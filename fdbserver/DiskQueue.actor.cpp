@@ -890,8 +890,8 @@ private:
 		state uint64_t file0size = self->firstPages(1).seq - self->firstPages(0).seq;
 		ASSERT(end > start);
 		ASSERT(start.lo >= self->firstPages(0).seq);
-		self->findPhysicalLocation(start.lo, &fromFile, &fromPage, "read");
-		self->findPhysicalLocation(end.lo-1, &toFile, &toPage, "read");
+		self->findPhysicalLocation(start.lo, &fromFile, &fromPage, nullptr);
+		self->findPhysicalLocation(end.lo-1, &toFile, &toPage, nullptr);
 		if (fromFile == 0) { ASSERT( fromPage < file0size / _PAGE_SIZE ); }
 		if (toFile == 0) { ASSERT( toPage < file0size / _PAGE_SIZE ); }
 		if (fromFile == 1) { ASSERT( fromPage < self->rawQueue->writingPos / _PAGE_SIZE ); }
@@ -1042,7 +1042,8 @@ private:
 	void findPhysicalLocation( loc_t loc, int* file, int64_t* page, const char* context ) {
 		bool ok = false;
 
-		TraceEvent(SevInfo, "FindPhysicalLocation", dbgid)
+		if (context)
+			TraceEvent(SevInfo, "FindPhysicalLocation", dbgid)
 				.detail("Page0Valid", firstPages(0).checkHash())
 				.detail("Page0Seq", firstPages(0).seq)
 				.detail("Page1Valid", firstPages(1).checkHash())
@@ -1055,14 +1056,15 @@ private:
 			if ( firstPages(i).checkHash() && firstPages(i).seq <= (size_t)loc ) {
 				*file = i;
 				*page = (loc - firstPages(i).seq)/sizeof(Page);
-				TraceEvent("FoundPhysicalLocation", dbgid)
-					.detail("PageIndex", i)
-					.detail("PageLocation", *page)
-					.detail("SizeofPage", sizeof(Page))
-					.detail("PageSequence", firstPages(i).seq)
-					.detail("Location", loc)
-					.detail("Context", context)
-					.detail("File0Name", rawQueue->files[0].dbgFilename);
+				if (context)
+					TraceEvent("FoundPhysicalLocation", dbgid)
+						.detail("PageIndex", i)
+						.detail("PageLocation", *page)
+						.detail("SizeofPage", sizeof(Page))
+						.detail("PageSequence", firstPages(i).seq)
+						.detail("Location", loc)
+						.detail("Context", context)
+						.detail("File0Name", rawQueue->files[0].dbgFilename);
 				ok = true;
 				break;
 			}
@@ -1073,7 +1075,7 @@ private:
 				.detail("Page1Valid", firstPages(1).checkHash())
 				.detail("Page1Seq", firstPages(1).seq)
 				.detail("Location", loc)
-				.detail("Context", context)
+				.detail("Context", context ? context : "")
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 		ASSERT( ok );
 	}
