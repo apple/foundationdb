@@ -2216,7 +2216,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			if( self->healthyTeamCount == 0 ) {
 				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
-				self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
 			}
 		}
 		throw;
