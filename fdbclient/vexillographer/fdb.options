@@ -48,6 +48,9 @@ description is not currently required but encouraged.
     <Option name="trace_log_group" code="33"
             paramType="String" paramDescription="value of the LogGroup attribute"
             description="Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
+    <Option name="trace_format" code="34"
+            paramType="String" paramDescription="Format of trace files"
+            description="Select the format of the log files. xml (the default) and json are supported."/>
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>

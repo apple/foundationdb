@@ -117,6 +117,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-trace-roll-size-blurb|
 
+    .. method :: fdb.options.set_trace_format(format)
+
+       |option-trace-format-blurb|
+
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
        |option-disable-multi-version-client-api|

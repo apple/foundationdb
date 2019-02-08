@@ -104,6 +104,10 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
         |option-trace-roll-size-blurb|
 
+    .. method:: FDB.options.set_trace_format(format) -> nil
+
+        |option-trace-format-blurb|
+
        |option-disable-multi-version-client-api|
 
     .. method :: FDB.options.set_callbacks_on_external_threads() -> nil
