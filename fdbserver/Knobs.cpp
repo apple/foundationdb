@@ -141,6 +141,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( ALL_DATA_REMOVED_DELAY,                                1.0 );
 	init( INITIAL_FAILURE_REACTION_DELAY,                       30.0 ); if( randomize && BUGGIFY ) INITIAL_FAILURE_REACTION_DELAY = 0.0;
 	init( CHECK_TEAM_DELAY,                                     30.0 );
+	init( CHECK_REDUNDANT_TEAM_DELAY,                           30.0 ); // seconds
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
 	init( BEST_TEAM_OPTION_COUNT,                                  4 );

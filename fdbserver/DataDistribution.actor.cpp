@@ -630,6 +630,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> redundantTeamRemover;
+	Future<Void> redundantTeamRemoverPeriodic;
 
 	Reference<LocalitySet> storageServerSet;
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
@@ -1032,6 +1033,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			self->traceTeamCollectionInfo();
 			wait( yield() );
 		}
+		// Start periodic team remover in the background
+		self->redundantTeamRemoverPeriodic = teamRemoverPeriodic(self);
 
 		return Void();
 	}
@@ -1660,7 +1663,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (machineTeamProcessTeamCounts.find(team->machineTeam) == machineTeamProcessTeamCounts.end()) {
 				machineTeamProcessTeamCounts.insert(std::make_pair(team->machineTeam, 1));
 			} else {
-				printf("[DEBUG] more than 1 team for machine team:%s\n", team->machineTeam->getMachineIDsStr().c_str());
+				//printf("[DEBUG] more than 1 team for machine team:%s\n", team->machineTeam->getMachineIDsStr().c_str());
 				machineTeamProcessTeamCounts[team->machineTeam] += 1;
 			}
 		}
@@ -2290,18 +2293,31 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 }
 
 ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
+	state int numMachineTeamRemoved = 0;
 	loop {
+		// Wait on processingUnhealthy as removeBadTeams() does
+		loop {
+			while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+				wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+			}
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+			if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
+				break;
+			}
+		}
+
 		// loop until the number of machine teams <= desiredMachineTeams
 		int totalHealthyMachineCount = self->calculateHealthyMachineCount();
+		int currentHealthyMTCount = self->getHealthyMachineTeamCount();
 
 		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_MACHINE * totalHealthyMachineCount;
 
-		if (totalHealthyMachineCount > desiredMachineTeams || self->machineTeams.size() > maxMachineTeams) {
+		if (currentHealthyMTCount > desiredMachineTeams || self->machineTeams.size() > maxMachineTeams) {
 			// Pick the machine team with the least number of process teams and mark in undesired
 			state Reference<TCMachineTeamInfo> mt;
 			// Q: Should we prefer to remove an unhealthy machine team?
-			// i.e., if the totalHealthyMachineCount < self->machineTeams.size(), find an unhealthy machine team to remove
+			// i.e., if the currentHealthyMTCount < self->machineTeams.size(), find an unhealthy machine team to remove
 			state int minNumProcessTeams = self->getMachineTeamWithLeastProcessTeams(mt);
 			ASSERT(mt.isValid());
 			mt->redundant = true;  // unused as a placeholder to mark the machine team status
@@ -2349,13 +2365,45 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			// Remove the machine team
 			bool foundRemovedTeam = self->removeMachineTeam(mt);
 			ASSERT(foundRemovedTeam);
+			numMachineTeamRemoved++;
 		} else {
-			TraceEvent("TeamRemoverDone").detail("CurrentMachineTeamNumber",  self->machineTeams.size()).detail("DesiredMachineTeam", desiredMachineTeams);
-			self->traceTeamCollectionInfo();
+			if (numMachineTeamRemoved > 0) {
+				// Only trace the information when we remove a machine team,
+				// since teamRemover() may be called in the background
+				TraceEvent("TeamRemoverDone")
+					.detail("HealthyMachineNumber", totalHealthyMachineCount)
+					.detail("CurrentHealthyMachineTeamNumber", currentHealthyMTCount)
+					.detail("CurrentMachineTeamNumber",  self->machineTeams.size())
+					.detail("DesiredMachineTeam", desiredMachineTeams)
+					.detail("MaxMachineTeams", maxMachineTeams)
+					.detail("NumMachineTeamRemoved", numMachineTeamRemoved);
+				self->traceTeamCollectionInfo();
+			}
+//			// Should trace the event even when we did not remove any team because i
+//			TraceEvent("TeamRemoverDone").detail("CurrentMachineTeamNumber",  self->machineTeams.size())
+//					.detail("DesiredMachineTeam", desiredMachineTeams).detail("NumMachineTeamRemoved", numMachineTeamRemoved);
+//			self->traceTeamCollectionInfo();
+
+
 			break;
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<Void> teamRemoverPeriodic(DDTeamCollection* self) {
+	state int num = 0;
+	loop {
+		wait( delay(SERVER_KNOBS->CHECK_REDUNDANT_TEAM_DELAY) );
+		TraceEvent("TeamRemoverPeriodic").detail("InvokedNumber", num++)
+			.detail("TeamRemoverIsReady", self->redundantTeamRemover.isReady())
+			.detail("Now", now());
+		if (self->redundantTeamRemover.isReady()) {
+			self->redundantTeamRemover = teamRemover(self);
+			self->addActor.send(self->redundantTeamRemover);
+			wait( self->redundantTeamRemover );
+		}
+	};
 }
 
 // Track a team and issue RelocateShards when the level of degradation changes

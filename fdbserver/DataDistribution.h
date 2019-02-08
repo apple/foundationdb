@@ -256,3 +256,4 @@ int64_t getMaxShardSize( double dbSizeEstimate );
 
 class DDTeamCollection;
 Future<Void> teamRemover(DDTeamCollection* const& self);
+Future<Void> teamRemoverPeriodic(DDTeamCollection* const& self);
