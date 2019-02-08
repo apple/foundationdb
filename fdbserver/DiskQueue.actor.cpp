@@ -933,7 +933,6 @@ private:
 		TraceEvent("DQRecovered", self->dbgid).detail("LastPoppedSeq", self->lastPoppedSeq).detail("PoppedSeq", self->poppedSeq).detail("NextPageSeq", self->nextPageSeq).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->recovered = true;
 		ASSERT( self->poppedSeq <= self->endLocation() );
-		self->recoveryFirstPages = Standalone<StringRef>();
 
 		TEST( result.size() == 0 );  // End of queue at border between reads
 		TEST( result.size() != 0 );  // Partial read at end of queue
@@ -945,18 +944,15 @@ private:
 	}
 
 	ACTOR static Future<bool> findStart( DiskQueue* self ) {
-		Standalone<StringRef> epbuf = wait( self->rawQueue->readFirstAndLastPages( &comparePages ) );
-		ASSERT( epbuf.size() % sizeof(Page) == 0 );
-		self->recoveryFirstPages = epbuf;
+		Standalone<StringRef> lastPageData = wait( self->rawQueue->readFirstAndLastPages( &comparePages ) );
 
-		if (!epbuf.size()) {
+		if (!lastPageData.size()) {
 			// There are no valid pages, so apparently this is a completely empty queue
 			self->nextReadLocation = 0;
 			return false;
 		}
 
-		int n = epbuf.size() / sizeof(Page);
-		Page* lastPage = (Page*)epbuf.end() - 1;
+		Page* lastPage = (Page*)lastPageData.begin();
 		self->nextReadLocation = self->poppedSeq = lastPage->popped;
 
 		/*
@@ -980,28 +976,25 @@ private:
 
 	void findPhysicalLocation( loc_t loc, int* file, int64_t* page, const char* context ) {
 		bool ok = false;
-		Page*p = (Page*)recoveryFirstPages.begin();
 
 		TraceEvent(SevInfo, "FindPhysicalLocation", dbgid)
-				.detail("RecoveryFirstPages", recoveryFirstPages.size())
-				.detail("Page0Valid", p[0].checkHash())
-				.detail("Page0Seq", p[0].seq)
-				.detail("Page1Valid", p[1].checkHash())
-				.detail("Page1Seq", p[1].seq)
+				.detail("Page0Valid", firstPages(0).checkHash())
+				.detail("Page0Seq", firstPages(0).seq)
+				.detail("Page1Valid", firstPages(1).checkHash())
+				.detail("Page1Seq", firstPages(1).seq)
 				.detail("Location", loc)
 				.detail("Context", context)
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 
-		for(int i=recoveryFirstPages.size() / sizeof(Page) - 2; i>=0; i--)
-			if ( p[i].checkHash() && p[i].seq <= (size_t)loc ) {
+		for(int i = 1; i >= 0; i--)
+			if ( firstPages(i).checkHash() && firstPages(i).seq <= (size_t)loc ) {
 				*file = i;
-				*page = (loc - p[i].seq)/sizeof(Page);
+				*page = (loc - firstPages(i).seq)/sizeof(Page);
 				TraceEvent("FoundPhysicalLocation", dbgid)
 					.detail("PageIndex", i)
 					.detail("PageLocation", *page)
-					.detail("RecoveryFirstPagesSize", recoveryFirstPages.size())
 					.detail("SizeofPage", sizeof(Page))
-					.detail("PageSequence", p[i].seq)
+					.detail("PageSequence", firstPages(i).seq)
 					.detail("Location", loc)
 					.detail("Context", context)
 					.detail("File0Name", rawQueue->files[0].dbgFilename);
@@ -1010,11 +1003,10 @@ private:
 			}
 		if (!ok)
 			TraceEvent(SevError, "DiskQueueLocationError", dbgid)
-				.detail("RecoveryFirstPages", recoveryFirstPages.size())
-				.detail("Page0Valid", p[0].checkHash())
-				.detail("Page0Seq", p[0].seq)
-				.detail("Page1Valid", p[1].checkHash())
-				.detail("Page1Seq", p[1].seq)
+				.detail("Page0Valid", firstPages(0).checkHash())
+				.detail("Page0Seq", firstPages(0).seq)
+				.detail("Page1Valid", firstPages(1).checkHash())
+				.detail("Page1Seq", firstPages(1).seq)
 				.detail("Location", loc)
 				.detail("Context", context)
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
@@ -1053,7 +1045,6 @@ private:
 	Arena readBufArena;
 	Page* readBufPage;
 	int readBufPos;
-	Standalone<StringRef> recoveryFirstPages;
 };
 
 //A class wrapping DiskQueue which durably allows uncommitted data to be popped
