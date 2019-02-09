@@ -1,7 +1,77 @@
+define_property(TARGET PROPERTY SOURCE_FILES
+  BRIEF_DOCS "Source files a flow target is built off"
+  FULL_DOCS "When compiling a flow target, this property contains a list of the non-generated source files. \
+This property is set by the add_flow_target function")
+
+define_property(TARGET PROPERTY COVERAGE_FILTERS
+  BRIEF_DOCS "List of filters for the coverage tool"
+  FULL_DOCS "Holds a list of regular expressions. All filenames matching any regular \
+expression in this list will be ignored when the coverage.target.xml file is \
+generated. This property is set through the add_flow_target function.")
+
+function(generate_coverage_xml)
+  if(NOT (${ARGC} EQUAL "1"))
+    message(ERROR "generate_coverage_xml expects one argument")
+  endif()
+  set(target_name ${ARGV0})
+  get_target_property(sources ${target_name} SOURCE_FILES)
+  get_target_property(filters ${target_name} COVERAGE_FILTER_OUT)
+  foreach(src IN LISTS sources)
+    set(include TRUE)
+    foreach(f IN LISTS filters)
+      if("${f}" MATCHES "${src}")
+        set(include FALSE)
+      endif()
+    endforeach()
+    if(include)
+      list(APPEND in_files ${src})
+    endif()
+  endforeach()
+  set(target_file ${CMAKE_CURRENT_SOURCE_DIR}/coverage_target_${target_name})
+  # we can't get the targets output dir through a generator expression as this would
+  # create a cyclic dependency.
+  # Instead we follow the following rules:
+  # - For executable we place the coverage file into the directory EXECUTABLE_OUTPUT_PATH
+  # - For static libraries we place it into the directory LIBRARY_OUTPUT_PATH
+  # - For dynamic libraries we place it into LIBRARY_OUTPUT_PATH on Linux and MACOS
+  #   and to EXECUTABLE_OUTPUT_PATH on Windows
+  get_target_property(type ${target_name} TYPE)
+  # STATIC_LIBRARY, MODULE_LIBRARY, SHARED_LIBRARY, OBJECT_LIBRARY, INTERFACE_LIBRARY, EXECUTABLE
+  if(type STREQUAL "STATIC_LIBRARY")
+    set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
+  elseif(type STREQUAL "SHARED_LIBRARY")
+    if(WIN32)
+      set(target_file ${EXECUTABLE_OUTPUT_PATH}/coverage.${target_name}.xml)
+    else()
+      set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
+    endif()
+  elseif(type STREQUAL "EXECUTABLE")
+    set(target_file ${EXECUTABLE_OUTPUT_PATH}/coverage.${target_name}.xml)
+  endif()
+  if(WIN32)
+    add_custom_command(
+      OUTPUT ${target_file}
+      COMMAND $<TARGET_FILE:coveragetool> ${target_file} ${in_files}
+      DEPENDS ${in_files}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Generate coverage xml")
+  else()
+    add_custom_command(
+      OUTPUT ${target_file}
+      COMMAND ${MONO_EXECUTABLE} ${coveragetool_exe} ${target_file} ${in_files}
+      DEPENDS ${in_files}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Generate coverage xml")
+  endif()
+  add_custom_target(coverage_${target_name} DEPENDS ${target_file})
+  add_dependencies(coverage_${target_name} coveragetool)
+  add_dependencies(${target_name} coverage_${target_name})
+endfunction()
+
 function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY DYNAMIC_LIBRARY)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS)
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(NOT AFT_NAME)
     message(ERROR "add_flow_target requires option NAME")
@@ -51,7 +121,11 @@ function(add_flow_target)
     add_library(${AFT_NAME} DYNAMIC ${sources})
   endif()
 
+  set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
+  set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
+
   add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
   add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
+  generate_coverage_xml(${AFT_NAME})
   target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()
