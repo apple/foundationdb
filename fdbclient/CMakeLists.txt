@@ -87,8 +87,6 @@ set(FDBCLIENT_SRCS
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
-actor_set(FDBCLIENT_BUILD "${FDBCLIENT_SRCS}")
-add_library(fdbclient STATIC ${FDBCLIENT_BUILD})
+add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS})
 add_dependencies(fdbclient fdboptions)
-actor_compile(fdbclient "${FDBCLIENT_SRCS}")
 target_link_libraries(fdbclient PUBLIC fdbrpc)
