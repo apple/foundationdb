@@ -125,6 +125,29 @@ directory. This can than be used for tools like
 code-completion and code navigation in flow. It is not yet perfect (it will show
 a few errors) but we are constantly working on improving the developement experience.
 
+### Using IDEs
+
+CMake  has built in support for a number of popular IDEs. However, because flow
+files are precompiled with the actor compiler, an IDE will not be very useful as
+a user will only be presented with the generated code - which is not what she
+wants to edit and get IDE features for.
+
+The good news is, that it is possible to generate project files for edititing
+flow with a supported IDE. There is a cmake option called `OPEN_FOR_IDE` which
+will generate a project which can be opened in an IDE for editing. You won't be
+able to build this project, but you will be able to edit the files and get most
+edit and navigation features your IDE supports.
+
+For example, if you want to use XCode to make changes to FoundationDB you can
+create a XCode-project with the following command:
+
+```
+cmake -G Xcode -DOPEN_FOR_IDE=ON <FDB_SOURCE_DIRECTORY>
+```
+
+You should create a second build-directory which you will use for building
+(probably with make or ninja) and debugging.
+
 ### Linux
 
 There are no special requirements for Linux. However, we are currently working
