@@ -1,4 +1,5 @@
 add_subdirectory(c)
+add_subdirectory(flow)
 add_subdirectory(python)
 if(BUILD_JAVA)
   add_subdirectory(java)
