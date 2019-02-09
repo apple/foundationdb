@@ -4,7 +4,6 @@ set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
 set(USE_GOLD_LINKER OFF CACHE BOOL "Use gold linker")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
 if(WITH_TLS)
