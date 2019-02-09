@@ -23,12 +23,6 @@ project(foundationdb
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES ASM C CXX)
 
-if(WIN32)
-  # C# is currently only supported on Windows.
-  # On other platforms we find mono manually
-  enable_language(CSharp)
-endif()
-
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
@@ -122,9 +116,14 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CU
 # Flow
 ################################################################################
 
+# Flow and other tools are written in C# - so we need that dependency
+include(EnableCSharp)
+
 # First thing we need is the actor compiler - and to compile and run the
 # actor compiler, we need mono
 include(CompileActorCompiler)
+
+include(CompileCoverageTool)
 
 # with the actor compiler, we can now make the flow commands available
 include(FlowCommands)
