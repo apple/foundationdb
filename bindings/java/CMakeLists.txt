@@ -148,9 +148,10 @@ if(BUILD_FAT_JAR)
   add_custom_command(OUTPUT ${unpack_dir}/META-INF/MANIFEST.MF
     COMMAND ${Java_JAR_EXECUTABLE} xf ${jar_path}
     WORKING_DIRECTORY ${unpack_dir}
+    DEPENDS "${jar_path}"
     COMMENT "Unpack jar-file")
   add_custom_target(unpack_jar DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
-  add_dependencies(unpack_jar fdb_java)
+  add_dependencies(unpack_jar fdb-java)
   add_custom_command(OUTPUT ${unpack_dir}/LICENSE
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/LICENSE ${unpack_dir}
     COMMENT "copy license")

@@ -77,9 +77,7 @@ set(FLOW_SRCS
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
-actor_set(FLOW_BUILD "${FLOW_SRCS}")
-add_library(flow STATIC ${FLOW_BUILD})
-actor_compile(flow "${FLOW_SRCS}")
+add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE AND NOT WIN32)

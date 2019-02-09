@@ -1,9 +1,7 @@
 set(FDBBACKUP_SRCS
   backup.actor.cpp)
 
-actor_set(FDBBACKUP_BUILD "${FDBBACKUP_SRCS}")
-add_executable(fdbbackup "${FDBBACKUP_BUILD}")
-actor_compile(fdbbackup "${FDBBACKUP_SRCS}")
+add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
