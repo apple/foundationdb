@@ -7,9 +7,6 @@ set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
 add_compile_options(-DCMAKE_BUILD)
-if(WITH_TLS)
-  add_compile_options(-DHAVE_OPENSSL)
-endif()
 
 find_package(Threads REQUIRED)
 if(ALLOC_INSTRUMENTATION)
