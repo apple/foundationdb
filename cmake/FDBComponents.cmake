@@ -60,7 +60,8 @@ endif()
 ################################################################################
 
 find_program(GO_EXECUTABLE go)
-if(GO_EXECUTABLE)
+# building the go binaries is currently not supported on Windows
+if(GO_EXECUTABLE AND NOT WIN32)
   set(WITH_GO ON)
 else()
   set(WITH_GO OFF)
@@ -70,15 +71,11 @@ endif()
 # Ruby
 ################################################################################
 
-find_package(Ruby)
+find_program(GEM_EXECUTABLE gem)
 set(WITH_RUBY OFF)
-if(RUBY_FOUND)
-  get_filename_component(ruby_exec_dir ${RUBY_EXECUTABLE} DIRECTORY)
-  find_program(GEM_EXECUTABLE gem HINTS ${ruby_exec_dir})
-  if(GEM_EXECUTABLE)
-    set(GEM_COMMAND ${RUBY_EXECUTABLE} ${GEM_EXECUTABLE})
-    set(WITH_RUBY ON)
-  endif()
+if(GEM_EXECUTABLE)
+  set(GEM_COMMAND ${RUBY_EXECUTABLE} ${GEM_EXECUTABLE})
+  set(WITH_RUBY ON)
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)

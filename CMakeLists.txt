@@ -106,7 +106,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CU
 ################################################################################
 
 # Flow and other tools are written in C# - so we need that dependency
-include(EnableCSharp)
+include(EnableCsharp)
 
 # First thing we need is the actor compiler - and to compile and run the
 # actor compiler, we need mono
