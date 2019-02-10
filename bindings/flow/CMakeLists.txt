@@ -39,3 +39,4 @@ add_custom_command(OUTPUT ${tar_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/packages
   COMMENT "Build fdb_flow package")
 add_custom_target(package_flow DEPENDS ${tar_file})
+add_dependencies(packages package_flow)

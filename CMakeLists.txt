@@ -47,17 +47,6 @@ set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-find_package(Python COMPONENTS Interpreter)
-
-################################################################################
-# Pip
-################################################################################
-
-find_package(Virtualenv)
-if (Virtualenv_FOUND)
-  set(BUILD_DOCUMENTATION ON)
-endif()
-
 ################################################################################
 # Compiler configuration
 ################################################################################

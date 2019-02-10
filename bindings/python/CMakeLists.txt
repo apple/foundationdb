@@ -67,3 +67,4 @@ add_custom_command(OUTPUT ${package_file}
   COMMENT "Create Python sdist package")
 add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
+add_dependencies(packages python_package)
