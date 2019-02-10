@@ -2314,8 +2314,8 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
-			wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 		}
+		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 	}
 }
 
