@@ -179,9 +179,11 @@ public:
 };
 
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-public:
+private:
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
+
+public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 	bool healthy;
@@ -206,8 +208,12 @@ public:
 			v.push_back(servers[i]->lastKnownInterface);
 		return v;
 	}
-	virtual int size() { return servers.size(); }
+	virtual int size() {
+		ASSERT(servers.size() == serverIDs.size());
+		return servers.size();
+	}
 	virtual vector<UID> const& getServerIDs() { return serverIDs; }
+	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
 
 	virtual std::string getServerIDsStr() {
 		std::stringstream ss;
@@ -748,17 +754,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						for( int j = 0; j < teamList.size(); j++ ) {
 							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
 								int sharedMembers = 0;
-								for( int k = 0; k < teamList[j]->serverIDs.size(); k++ )
-									if( sources.count( teamList[j]->serverIDs[k] ) )
+								for( const UID& id : teamList[j]->getServerIDs() )
+									if( sources.count( id ) )
 										sharedMembers++;
 
-								if( !foundExact && sharedMembers == teamList[j]->serverIDs.size() ) {
+								if( !foundExact && sharedMembers == teamList[j]->size() ) {
 									foundExact = true;
 									bestOption = Optional<Reference<IDataDistributionTeam>>();
 									similarTeams.clear();
 								}
 
-								if( (sharedMembers == teamList[j]->serverIDs.size()) || (!foundExact && req.wantsTrueBest) ) {
+								if( (sharedMembers == teamList[j]->size()) || (!foundExact && req.wantsTrueBest) ) {
 									int64_t loadBytes = SOME_SHARED * teamList[j]->getLoadBytes(true, req.inflightPenalty);
 									if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 										bestLoadBytes = loadBytes;
@@ -841,15 +847,16 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
 							bool found = true;
-							for( int k = 0; k < teamList[j]->serverIDs.size(); k++ ) {
-								if( !completeSources.count( teamList[j]->serverIDs[k] ) ) {
+							auto serverIDs = teamList[j]->getServerIDs();
+							for( int k = 0; k < teamList[j]->size(); k++ ) {
+								if( !completeSources.count( serverIDs[k] ) ) {
 									found = false;
 									break;
 								}
 							}
-							if(found && teamList[j]->serverIDs.size() > bestSize) {
+							if(found && teamList[j]->size() > bestSize) {
 								bestOption = teamList[j];
-								bestSize = teamList[j]->serverIDs.size();
+								bestSize = teamList[j]->size();
 							}
 						}
 						break;
@@ -882,7 +889,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
-			for(auto server : self->badTeams[idx]->servers) {
+			for(const auto& server : self->badTeams[idx]->getServers()) {
 				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
 					servers.push_back(server);
 				}
@@ -1067,7 +1074,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers, bool isInitialTeam) {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
-		bool badTeam = !satisfiesPolicy(teamInfo->servers) || teamInfo->servers.size() != configuration.storageTeamSize;
+		bool badTeam = !satisfiesPolicy(teamInfo->getServers()) || teamInfo->size() != configuration.storageTeamSize;
 
 		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
@@ -1186,7 +1193,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-			    .detail("ServerNumber", team->serverIDs.size())
+			    .detail("ServerNumber", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
 	}
@@ -1506,15 +1513,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Check if it is true
 	bool isOnSameMachineTeam(Reference<TCTeamInfo>& team) {
 		std::vector<Standalone<StringRef>> machineIDs;
-		for (auto& server : team->servers) {
+		for (const auto& server : team->getServers()) {
 			if (!server->machine.isValid()) return false;
 			machineIDs.push_back(server->machine->machineID);
 		}
 		std::sort(machineIDs.begin(), machineIDs.end());
 
 		int numExistance = 0;
-		for (auto& server : team->servers) {
-			for (auto& candidateMachineTeam : server->machine->machineTeams) {
+		for (const auto& server : team->getServers()) {
+			for (const auto& candidateMachineTeam : server->machine->machineTeams) {
 				std::sort(candidateMachineTeam->machineIDs.begin(), candidateMachineTeam->machineIDs.end());
 				if (machineIDs == candidateMachineTeam->machineIDs) {
 					numExistance++;
@@ -1522,7 +1529,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 		}
-		return (numExistance == team->servers.size());
+		return (numExistance == team->size());
 	}
 
 	// Sanity check the property of teams in unit test
@@ -1805,7 +1812,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		for(auto& server : team->servers) {
+		for(const auto& server : team->getServers()) {
 			for(int t = 0; t<server->teams.size(); t++) {
 				if( server->teams[t] == team ) {
 					ASSERT(found);
@@ -1847,7 +1854,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Check if the serverTeam belongs to a machine team; If not, create the machine team
 	Reference<TCMachineTeamInfo> checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam) {
 		std::vector<Standalone<StringRef>> machineIDs;
-		for (auto& server : serverTeam->servers) {
+		for (auto& server : serverTeam->getServers()) {
 			Reference<TCMachineInfo> machine = server->machine;
 			machineIDs.push_back(machine->machineID);
 		}
@@ -1999,7 +2006,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 // Track a team and issue RelocateShards when the level of degradation changes
 ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam ) {
-	state int lastServersLeft = team->getServerIDs().size();
+	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
 	state bool logTeamEvents = g_network->isSimulated() || !badTeam;
 	state bool lastReady = false;
@@ -2022,14 +2029,13 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			    .detail("IsReady", self->initialFailureReactionDelay.isReady());
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
-			auto servers = team->getServerIDs();
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
 			int serversLeft = 0;
 
-			for(auto s = servers.begin(); s != servers.end(); ++s) {
-				change.push_back( self->server_status.onChange( *s ) );
-				auto& status = self->server_status.get(*s);
+			for (const UID& uid : team->getServerIDs()) {
+				change.push_back( self->server_status.onChange( uid ) );
+				auto& status = self->server_status.get(uid);
 				if (!status.isFailed) {
 					serversLeft++;
 				}
@@ -2164,7 +2170,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 									bool found = false;
 									for( int k = 0; k < info->teams.size(); k++ ) {
-										if( info->teams[k]->serverIDs == t.servers ) {
+										if( info->teams[k]->getServerIDs() == t.servers ) {
 											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
 											found = true;
 											break;
@@ -2192,7 +2198,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 								.detail("KeyBegin", printable(rs.keys.begin))
 								.detail("KeyEnd", printable(rs.keys.end))
 								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->getServerIDs().size()-serversLeft)
+								.detail("TeamFailedMachines", team->size() - serversLeft)
 								.detail("TeamOKMachines", serversLeft);
 						}
 					}
@@ -2657,7 +2663,7 @@ ACTOR Future<Void> storageServerTracker(
 						// Get the newBadTeams due to the locality change
 						vector<Reference<TCTeamInfo>> newBadTeams;
 						for (auto& serverTeam : server->teams) {
-							if (!self->satisfiesPolicy(serverTeam->servers)) {
+							if (!self->satisfiesPolicy(serverTeam->getServers())) {
 								newBadTeams.push_back(serverTeam);
 								continue;
 							}
@@ -2677,7 +2683,7 @@ ACTOR Future<Void> storageServerTracker(
 						bool addedNewBadTeam = false;
 						for(auto it : newBadTeams) {
 							if( self->removeTeam(it) ) {
-								self->addTeam(it->servers, true);
+								self->addTeam(it->getServers(), true);
 								addedNewBadTeam = true;
 							}
 						}
