@@ -61,6 +61,21 @@ else()
   set(WITH_GO OFF)
 endif()
 
+################################################################################
+# Ruby
+################################################################################
+
+find_package(Ruby)
+set(WITH_RUBY OFF)
+if(RUBY_FOUND)
+  get_filename_component(ruby_exec_dir ${RUBY_EXECUTABLE} DIRECTORY)
+  find_program(GEM_EXECUTABLE gem HINTS ${ruby_exec_dir})
+  if(GEM_EXECUTABLE)
+    set(GEM_COMMAND ${RUBY_EXECUTABLE} ${GEM_EXECUTABLE})
+    set(WITH_RUBY ON)
+  endif()
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
@@ -71,8 +86,10 @@ function(print_components)
   message(STATUS "=========================================")
   message(STATUS "Build Java Bindings:                  ${BUILD_JAoA}")
   message(STATUS "Build with TLS support:               ${WITH_TLS}")
-  message(STATUS "Build GO bindings:                    ${WITH_GO}")
+  message(STATUS "Build Go bindings:                    ${WITH_GO}")
+  message(STATUS "Build Ruby bindings:                  ${WITH_RUBY}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON}")
+  message(STATUS "Build Documentation (make html):      ${BUILD_DOCUMENTATION}")
   message(STATUS "Build Documentation (make html):      ${BUILD_DOCUMENTATION}")
   message(STATUS "=========================================")
 endfunction()
