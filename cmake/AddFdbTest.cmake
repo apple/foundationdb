@@ -101,7 +101,7 @@ function(add_fdb_test)
   endif()
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
   add_test(NAME ${test_name}
-    COMMAND ${PYTHON_EXECUTABLE} ${TestRunner}
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
     -n ${test_name}
     -b ${PROJECT_BINARY_DIR}
     -t ${test_type}

@@ -41,6 +41,7 @@ find_package(Python COMPONENTS Interpreter)
 if(Python_Interpreter_FOUND)
   set(WITH_PYTHON ON)
 else()
+  message(FATAL_ERROR "Could not found a suitable python interpreter")
   set(WITH_PYTHON OFF)
 endif()
 
