@@ -31,13 +31,13 @@ services:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh build/fast
 
-  rpm-fast: &rpm-fast
-    <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh rpm/fast
-
   rpm: &rpm
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh rpm
+
+  deb: &deb
+    <<: *build-setup
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh deb
 
   package: &package
     <<: *build-setup
