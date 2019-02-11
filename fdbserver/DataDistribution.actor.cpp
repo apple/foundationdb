@@ -1708,9 +1708,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		uniqueMachines = machines.size();
 		TraceEvent("BuildTeams")
-		    .detail("ServerNumber", self->server_info.size())
-		    .detail("UniqueMachines", uniqueMachines)
-		    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+			.detail("ServerNumber", self->server_info.size())
+			.detail("UniqueMachines", uniqueMachines)
+			.detail("Primary", self->primary)
+			.detail("StorageTeamSize", self->configuration.storageTeamSize);
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
 		if( uniqueMachines >= self->configuration.storageTeamSize ) {
@@ -2145,7 +2146,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 				if(logTeamEvents) {
 					TraceEvent("TeamPriorityChange", self->distributorId).detail("Priority", team->getPriority())
-					.detail("Info", team->getDesc());
+					.detail("Info", team->getDesc()).detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
 				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
@@ -2252,7 +2253,7 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 
 				TraceEvent("DDExcludedServersChanged", self->distributorId).detail("Rows", results.size()).detail("Exclusions", excluded.size());
 
-				// Reset and reassign self->excludedServers based on excluded, but weonly
+				// Reset and reassign self->excludedServers based on excluded, but we only
 				// want to trigger entries that are different
 				auto old = self->excludedServers.getKeys();
 				for(auto& o : old)
@@ -2430,6 +2431,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
+	state bool doBuildTeam = false;
 	loop {
 		if( statusMap->get(interf.id()).initialized ) {
 			bool unhealthy = statusMap->get(interf.id()).isUnhealthy();
@@ -2444,6 +2446,11 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		statusMap->set( interf.id(), *status );
+		if (doBuildTeam) {
+			doBuildTeam = false;
+			self->doBuildTeams = true;
+			self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
+		}
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2459,8 +2466,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 				}
 				status->isFailed = !status->isFailed;
 				if( !status->isFailed && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
-					self->doBuildTeams = true;
-					self->checkBuildTeam = DDTeamCollection::checkBuildTeams(self);
+					doBuildTeam = true;
 				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
