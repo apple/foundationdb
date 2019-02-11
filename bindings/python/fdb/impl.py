@@ -609,7 +609,12 @@ class Future(_FDBBase):
                 _thread_local_storage.future_block_semaphore = semaphore
 
             self.on_ready(lambda self: semaphore.release())
-            semaphore.acquire()
+
+            try:
+                semaphore.acquire()
+            except:
+                _thread_local_storage.future_block_semaphore = multiprocessing.Semaphore(0)
+                raise
 
     def on_ready(self, callback):
         def cb_and_delref(ignore):
