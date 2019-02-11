@@ -180,7 +180,8 @@ if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_PRE_UNINSTALL_SCRIPT_FILE
     ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
   set(CPACK_RPM_server_PACKAGE_REQUIRES
-    "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
+    "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}, initscripts >= 9.03")
+  set(CPACK_RPM_server_PACKAGE_RE)
   #set(CPACK_RPM_java_PACKAGE_REQUIRES
   #  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
   set(CPACK_RPM_python_PACKAGE_REQUIRES
