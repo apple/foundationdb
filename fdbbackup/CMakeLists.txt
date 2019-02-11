@@ -6,18 +6,18 @@ target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
 install_symlink(
-  FROM ${FDB_BIN_DIR}/fdbbackup
-  TO ${FDB_LIB_DIR}/foundationdb/backup_agent
+  TO /${FDB_BIN_DIR}/fdbbackup
+  DESTINATION ${FDB_LIB_DIR}/foundationdb/backup_agent/backup_agent
   COMPONENT clients)
 install_symlink(
-  FROM ${FDB_BIN_DIR}/fdbbackup
-  TO ${FDB_BIN_DIR}/fdbrestore
+  TO /${FDB_BIN_DIR}/fdbbackup
+  DESTINATION ${FDB_BIN_DIR}/fdbrestore
   COMPONENT clients)
 install_symlink(
-  FROM ${FDB_BIN_DIR}/fdbbackup
-  TO ${FDB_BIN_DIR}/dr_agent
+  TO /${FDB_BIN_DIR}/fdbbackup
+  DESTINATION ${FDB_BIN_DIR}/dr_agent
   COMPONENT clients)
 install_symlink(
-  FROM ${FDB_BIN_DIR}/fdbbackup
-  TO ${FDB_BIN_DIR}/fdbdr
+  TO /${FDB_BIN_DIR}/fdbbackup
+  DESTINATION ${FDB_BIN_DIR}/fdbdr
   COMPONENT clients)
