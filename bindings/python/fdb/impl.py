@@ -613,6 +613,8 @@ class Future(_FDBBase):
             try:
                 semaphore.acquire()
             except:
+                # If this semaphore didn't actually get released, then we need to replace our thread-local
+                # copy so that later callers still function correctly
                 _thread_local_storage.future_block_semaphore = multiprocessing.Semaphore(0)
                 raise
 
