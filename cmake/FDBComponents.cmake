@@ -1,3 +1,5 @@
+set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are found")
+
 ################################################################################
 # LibreSSL
 ################################################################################
@@ -82,7 +84,6 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
-
 function(print_components)
   message(STATUS "=========================================")
   message(STATUS "   Components Build Overview ")
@@ -95,3 +96,10 @@ function(print_components)
   message(STATUS "Build Documentation (make html):      ${BUILD_DOCUMENTATION}")
   message(STATUS "=========================================")
 endfunction()
+
+if(FORCE_ALL_COMPONENTS)
+  if(NOT BUILD_JAVA OR NOT WITH_TLS OR NOT WITH_GO OR NOT WITH_RUBY OR NOT WITH_PYTHON OR NOT BUILD_DOCUMENTATION)
+    print_components()
+    message(FATAL_ERROR "FORCE_ALL_COMPONENTS is set but not all dependencies could be found")
+  endif()
+endif()
