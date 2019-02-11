@@ -131,8 +131,11 @@ add_dependencies(fdb-java fdb_java_options fdb_java)
 add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
 add_dependencies(foundationdb-tests fdb_java_options)
 
-install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
-install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
+# TODO[mpilman]: The java RPM will require some more effort (mostly on debian). However,
+# most people will use the fat-jar, so it is not clear how high this priority is.
+
+#install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
+#install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
 
 set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
   "Path of a directory structure with libraries to include in fat jar (a lib directory)")

@@ -132,7 +132,7 @@ rpm() {
         then
             break
         fi
-        cpack
+        fakeroot cpack
         __res=$?
         if [ ${__res} -ne 0 ]
         then
