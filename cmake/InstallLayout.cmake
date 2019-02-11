@@ -4,25 +4,16 @@
 
 function(install_symlink)
   set(options "")
-  set(one_value_options COMPONENT FROM TO)
+  set(one_value_options COMPONENT TO DESTINATION)
   set(multi_value_options)
   cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
-  if(NOT SYM_COMPONENT OR NOT SYM_FROM OR NOT SYM_TO)
-    message(FATA_ERROR "Invalid call to install_symlink")
-  endif()
-  get_filename_component(dest_dir ${SYM_TO} DIRECTORY)
-  install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${dest_dir})" COMPONENT ${SYM_COMPONENT})
-  install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_FROM} ${SYM_TO})" COMPONENT ${SYM_COMPONENT})
-  install(CODE "message(\"-- Created symlink: ${SYM_FROM} -> ${SYM_TO}\")")
-endfunction()
-function(install_mkdir)
-  set(options "")
-  set(one_value_options COMPONENT NAME)
-  set(multi_value_options)
-  cmake_parse_arguments(MK "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-  install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${MK_NAME})" COMPONENT ${MK_COMPONENT})
-  install(CODE "message(\"-- Created directory: ${MK_NAME}\")")
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
+  get_filename_component(fname ${SYM_DESTINATION} NAME)
+  get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
+  set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
+  install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${SYM_COMPONENT})
 endfunction()
 
 if(NOT INSTALL_LAYOUT)
@@ -95,6 +86,7 @@ else()
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(FDB_CONFIG_DIR "etc/foundationdb")
   set(FDB_LIB_DIR "usr/lib${LIBSUFFIX}")
+  set(FDB_LIB_NOSUFFIX "usr/lib")
   set(FDB_LIBEXEC_DIR ${FDB_LIB_DIR})
   set(FDB_BIN_DIR "usr/bin")
   set(FDB_SBIN_DIR "usr/sbin")
@@ -149,6 +141,12 @@ endif()
 ################################################################################
 # Configuration for RPM
 ################################################################################
+################################################################################
+
+if(UNIX AND NOT APPLE)
+  install(DIRECTORY DESTINATION "var/log/foundationdb" COMPONENT server)
+  install(DIRECTORY DESTINATION "var/lib/foundationdb/data" COMPONENT server)
+endif()
 
 if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_USER_FILELIST
@@ -187,8 +185,6 @@ if(INSTALL_LAYOUT MATCHES "RPM")
   #  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
   set(CPACK_RPM_python_PACKAGE_REQUIRES
     "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-  install_mkdir(NAME "var/log/foundationdb" COMPONENT server)
-  install_mkdir(NAME "var/lib/foundationdb" COMPONENT server)
 endif()
 
 ################################################################################
@@ -204,7 +200,7 @@ if(INSTALL_LAYOUT MATCHES "DEB")
   set(CPACK_DEBIAN_CLIENTS_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12)")
   set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://www.foundationdb.org")
   set(CPACK_DEBIAN_CLIENTS_PACKAGE_CONTROL_EXTRA
-    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-CLIENTS/postinst)
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-clients/postinst)
   set(CPACK_DEBIAN_SERVER_PACKAGE_CONTROL_EXTRA
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/conffiles
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/preinst
