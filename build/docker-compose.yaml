@@ -2,10 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb-build:0.0.2
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: foundationdb/foundationdb-build:0.0.5
 
   build-setup: &build-setup
     <<: *common
@@ -52,6 +49,22 @@ services:
 
   prb-bindings:
     <<: *snapshot-bindings
+
+
+  snapshot-cmake: &snapshot-cmake
+    <<: *build-setup
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p work && cd work && cmake .. && make -j "$${MAKEJOBS}"; fi'
+
+  prb-cmake:
+    <<: *snapshot-cmake
+
+
+  snapshot-ctest: &snapshot-ctest
+    <<: *build-setup
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p work && cd work && cmake .. && make -j "$${MAKEJOBS}" && ctest; fi'
+
+  prb-ctest:
+    <<: *snapshot-ctest
 
 
   shell:
