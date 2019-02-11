@@ -42,10 +42,13 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
-target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
-add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
-target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
+# The tests don't build on windows
+if(NOT WIN32)
+  add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
+  add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
+  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
+endif()
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
