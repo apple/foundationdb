@@ -41,7 +41,8 @@ vexillographer_compile(TARGET fdb_python_options LANG python OUT ${options_file}
 add_dependencies(python_binding fdb_python_options)
 
 set(out_files "${out_files};${options_file}")
-install(FILES ${out_files} DESTINATION ${FDB_PYTHON_INSTALL_DIR} COMPONENT clients)
+# TODO[mpilman]: it is not clear whether we want to have rpms for python
+#install(FILES ${out_files} DESTINATION ${FDB_PYTHON_INSTALL_DIR} COMPONENT python)
 
 # Create sdist
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/setup.py.cmake ${CMAKE_CURRENT_BINARY_DIR}/setup.py)
