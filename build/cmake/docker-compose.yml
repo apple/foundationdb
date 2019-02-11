@@ -39,6 +39,10 @@ services:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh deb
 
+  linux-pkgs:
+    <<: *build-setup
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh linux-pkgs
+
   package: &package
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh package

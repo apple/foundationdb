@@ -275,23 +275,18 @@ if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
     RESULT_VARIABLE IS_SYSTEMD
     OUTPUT_QUIET
     ERROR_QUIET)
-  if(IS_SYSTEMD EQUAL "0")
-    configure_file(${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
-      ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service)
-    install(FILES ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service
-      DESTINATION "lib/systemd/system"
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+    DESTINATION "lib/systemd/system"
+    COMPONENT server)
+  if(INSTALL_LAYOUT MATCHES "RPM")
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+      DESTINATION "etc/rc.d/init.d"
+      RENAME "foundationdb"
       COMPONENT server)
   else()
-    if(INSTALL_LAYOUT MATCHES "RPM")
-      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
-        DESTINATION "etc/rc.d/init.d"
-        RENAME "foundationdb"
-        COMPONENT server)
-    else()
-      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
-        DESTINATION "etc/init.d"
-        RENAME "foundationdb"
-        COMPONENT server)
-    endif()
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+      DESTINATION "etc/init.d"
+      RENAME "foundationdb"
+      COMPONENT server)
   endif()
 endif()
