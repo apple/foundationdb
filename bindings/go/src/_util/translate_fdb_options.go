@@ -23,15 +23,15 @@
 package main
 
 import (
-	"flag"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"go/doc"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
-	"io"
 )
 
 type Option struct {
