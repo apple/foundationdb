@@ -200,12 +200,12 @@ if(INSTALL_LAYOUT MATCHES "DEB")
   set(CPACK_DEBIAN_PACKAGE_SECTION "database")
   set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 
-  set(CPACK_DEBIAN_server_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12), python (>= 2.6), foundationdb-clients (= ${FDB_VERSION})")
-  set(CPACK_DEBIAN_clients_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12)")
+  set(CPACK_DEBIAN_SERVER_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12), python (>= 2.6), foundationdb-clients (= ${FDB_VERSION})")
+  set(CPACK_DEBIAN_CLIENTS_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12)")
   set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://www.foundationdb.org")
-  set(CPACK_DEBIAN_clients_PACKAGE_CONTROL_EXTRA
-    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-clients/postinst)
-  set(CPACK_DEBIAN_server_PACKAGE_CONTROL_EXTRA
+  set(CPACK_DEBIAN_CLIENTS_PACKAGE_CONTROL_EXTRA
+    ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-CLIENTS/postinst)
+  set(CPACK_DEBIAN_SERVER_PACKAGE_CONTROL_EXTRA
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/conffiles
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/preinst
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postinst
