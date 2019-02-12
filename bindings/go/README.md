@@ -35,7 +35,7 @@ Documentation
 Modules
 -------
 
-If you used the bindings with modules before the addition of the `go.mod` file,
+If you used the bindings with modules before the addition of the `go.mod` file in the foundation repo,
 it may be necessary to update the import path in your `go.mod`.
 
 By default, a module enabled `go get` will add something like this to your `go.mod`:
