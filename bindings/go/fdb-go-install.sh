@@ -11,6 +11,9 @@
 # library.
 #
 
+# Currently, this script doesn't work with modules enabled.
+GO111MODULE=off
+
 DESTDIR="${DESTDIR:-}"
 FDBVER="${FDBVER:-}"
 REMOTE="${REMOTE:-github.com}"
