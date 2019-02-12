@@ -252,15 +252,15 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, Reference<Async
 	return inQueue;
 }
 
-//Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
-ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWorker) {
+// Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
+ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface masterWorker) {
 	state int attempts = 0;
 	loop {
 		try {
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
-			TraceEventFields teamCollectionInfoMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-				EventLogRequest( LiteralStringRef("TeamCollectionInfo") ) ), 1.0 ) );
+			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
+			    masterWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TeamCollectionInfo"))), 1.0));
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
@@ -274,47 +274,48 @@ ACTOR Future<bool> getTeamCollectionValid( Database cx, WorkerInterface masterWo
 			sscanf(teamCollectionInfoMessage.getValue("CurrentTeamNumber").c_str(), "%lld", &currentTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("DesiredTeamNumber").c_str(), "%lld", &desiredTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxTeamNumber").c_str(), "%lld", &maxTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld", &currentMachineTeamNumber);
-			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld", &healthyMachineTeamCount);
-			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld", &desiredMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("CurrentMachineTeamNumber").c_str(), "%lld",
+			       &currentMachineTeamNumber);
+			sscanf(teamCollectionInfoMessage.getValue("CurrentHealthyMachineTeamNumber").c_str(), "%lld",
+			       &healthyMachineTeamCount);
+			sscanf(teamCollectionInfoMessage.getValue("DesiredMachineTeams").c_str(), "%lld",
+			       &desiredMachineTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
 
-			//if (currentTeamNumber > desiredTeamNumber || currentMachineTeamNumber > desiredMachineTeamNumber) {
 			if (currentMachineTeamNumber > maxMachineTeamNumber || healthyMachineTeamCount > desiredMachineTeamNumber) {
-//				printf("getTeamCollectionValid: currentTeamNumber:%ld, desiredTeamNumber:%ld, maxTeamNumber:%ld currentMachineTeamNumber:%ld, desiredMachineTeamNumber:%ld, maxMachineTeamNumber:%ld\n",
-//						currentTeamNumber, desiredTeamNumber, maxTeamNumber, currentMachineTeamNumber, desiredMachineTeamNumber, maxMachineTeamNumber);
 				TraceEvent("GetTeamCollectionValid")
 				    .detail("CurrentTeamNumber", currentTeamNumber)
-					.detail("DesiredTeamNumber", desiredTeamNumber)
-					.detail("MaxTeamNumber", maxTeamNumber)
-					.detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
-					.detail("DesiredMachineTeams", desiredMachineTeamNumber)
-					.detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
-					.detail("MaxMachineTeams", maxMachineTeamNumber);
+				    .detail("DesiredTeamNumber", desiredTeamNumber)
+				    .detail("MaxTeamNumber", maxTeamNumber)
+				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
+				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
+				    .detail("MaxMachineTeams", maxMachineTeamNumber);
 				return false;
 			} else {
 				return true;
 			}
 
-		} catch( Error &e ) {
-			TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract GetTeamCollectionValid information");
+		} catch (Error& e) {
+			TraceEvent("QuietDatabaseFailure", masterWorker.id())
+			    .detail("Reason", "Failed to extract GetTeamCollectionValid information");
 			attempts++;
-			if ( attempts > 10 ) {
-				TraceEvent("QuietDatabaseNoTeamCollectionInfo", masterWorker.id()).detail("Reason", "Had never called build team to build any team");
+			if (attempts > 10) {
+				TraceEvent("QuietDatabaseNoTeamCollectionInfo", masterWorker.id())
+				    .detail("Reason", "Had never called build team to build any team");
 				return true;
 			}
-			//throw;
-			wait( delay(10.0) );
+			// throw;
+			wait(delay(10.0));
 		}
 	};
-
 }
 
-//Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
-//Convenience method that first finds the master worker from a zookeeper interface
-ACTOR Future<bool> getTeamCollectionValid( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+// Gets if the number of process and machine teams does not exceed the maximum allowed number of teams
+// Convenience method that first finds the master worker from a zookeeper interface
+ACTOR Future<bool> getTeamCollectionValid(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	WorkerInterface masterWorker = wait(getMasterWorker(cx, dbInfo));
-	bool valid = wait(getTeamCollectionValid( cx, masterWorker));
+	bool valid = wait(getTeamCollectionValid(cx, masterWorker));
 	return valid;
 }
 
@@ -401,22 +402,22 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, masterWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, dbInfo, masterWorker );
 
-			wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
-			                && success( teamCollectionValid ) && success( storageQueueSize )
-			                && success( dataDistributionActive ) && success( storageServersRecruiting ) );
+			wait(success(dataInFlight) && success(tLogQueueSize) && success(dataDistributionQueueSize) &&
+			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
+			     success(storageServersRecruiting));
 			TraceEvent(("QuietDatabase" + phase).c_str())
-				.detail("DataInFlight", dataInFlight.get())
-				.detail("MaxTLogQueueSize", tLogQueueSize.get())
-				.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-				.detail("TeamCollectionValid", teamCollectionValid.get())
-				.detail("MaxStorageQueueSize", storageQueueSize.get())
-				.detail("DataDistributionActive", dataDistributionActive.get())
-				.detail("StorageServersRecruiting", storageServersRecruiting.get());
+			    .detail("DataInFlight", dataInFlight.get())
+			    .detail("MaxTLogQueueSize", tLogQueueSize.get())
+			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+			    .detail("TeamCollectionValid", teamCollectionValid.get())
+			    .detail("MaxStorageQueueSize", storageQueueSize.get())
+			    .detail("DataDistributionActive", dataDistributionActive.get())
+			    .detail("StorageServersRecruiting", storageServersRecruiting.get());
 
-			if ( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
-				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate
-				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true
-				|| teamCollectionValid.get() == false) {
+			if (dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate ||
+			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
+			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
+			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
 
 				wait( delay( 1.0 ) );
 				numSuccesses = 0;
