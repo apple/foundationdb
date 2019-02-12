@@ -70,18 +70,21 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker( Database cx, Reference<A
 
 	loop {
 		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( dbInfo ) );
+		if (!dbInfo->get().distributor.present()) continue;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.address() == dbInfo->get().distributor.address() ) {
-				TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers").detail("DataDistributorId", dbInfo->get().distributor.id()).detail("WorkerId", workers[i].first.id());
+			if( workers[i].first.address() == dbInfo->get().distributor.get().address() ) {
+				TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers")
+				.detail("DataDistributorId", dbInfo->get().distributor.get().id())
+				.detail("WorkerId", workers[i].first.id());
 				return workers[i].first;
 			}
 		}
 
 		TraceEvent(SevWarn, "GetDataDistributorWorker")
 		.detail("Error", "DataDistributorWorkerNotFound")
-		.detail("DataDistributorId", dbInfo->get().distributor.id())
-		.detail("DataDistributorAddress", dbInfo->get().distributor.address())
+		.detail("DataDistributorId", dbInfo->get().distributor.get().id())
+		.detail("DataDistributorAddress", dbInfo->get().distributor.get().address())
 		.detail("WorkerCount", workers.size());
 	}
 }
@@ -334,7 +337,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor");
 			WorkerInterface distributorWorker = wait( getDataDistributorWorker( cx, dbInfo ) );
-			UID distributorUID = dbInfo->get().distributor.id();
+			UID distributorUID = dbInfo->get().distributor.get().id();
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID).detail("Locality", distributorWorker.locality.toString());
 
 			state Future<int64_t> dataInFlight = getDataInFlight( cx, distributorWorker);

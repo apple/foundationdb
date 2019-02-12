@@ -2422,7 +2422,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 	Version addedVersion )
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
-	state bool doBuildTeam = false;
 	loop {
 		if( self->server_status.get(interf.id()).initialized ) {
 			bool unhealthy = self->server_status.get(interf.id()).isUnhealthy();
@@ -2437,10 +2436,6 @@ ACTOR Future<Void> storageServerFailureTracker(
 		}
 
 		self->server_status.set( interf.id(), *status );
-		if (doBuildTeam) {
-			doBuildTeam = false;
-			self->doBuildTeams = true;
-		}
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2455,8 +2450,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 					wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
 				}
 				status->isFailed = !status->isFailed;
-				if( !status->isFailed && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
-					doBuildTeam = true;
+				if(!status->isFailed && !server->teams.size()) {
+					self->doBuildTeams = true;
 				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
@@ -2572,9 +2567,7 @@ ACTOR Future<Void> storageServerTracker(
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
-			TraceEvent("StatusMapChange", self->distributorId).detail("Status", status.toString())
-			.detail("Server", server->id).detail("LastIsUnhealthy", lastIsUnhealthy);
-			if ( lastIsUnhealthy && !status.isUnhealthy() && (!server->teams.size() || self->zeroHealthyTeams->get()) ) {
+			if ( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() ) {
 				self->doBuildTeams = true;
 			}
 			lastIsUnhealthy = status.isUnhealthy();
@@ -2921,14 +2914,12 @@ ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db 
 }
 
 ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
-	state Future<Void> checkHealth;
 	loop choose {
-		when ( wait( delay( SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY ) ) ) {
-			if ( self->healthyTeamCount == 0 ) {
-				self->doBuildTeams = true;
-				checkHealth = DDTeamCollection::checkBuildTeams(self);
-			}
+		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY) : Never()) ) {
+			self->doBuildTeams = true;
+			wait( DDTeamCollection::checkBuildTeams(self) );
 		}
+		when ( wait(self->zeroHealthyTeams->onChange()) ) {}
 	}
 }
 
@@ -3289,7 +3280,6 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	Reference<AsyncVar<DatabaseConfiguration>> configuration;
 	std::vector<Optional<Key>> primaryDcId;
 	std::vector<Optional<Key>> remoteDcIds;
-	AsyncTrigger configurationTrigger;
 	UID ddId;
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 	PromiseStream<Future<Void>> addActor;
@@ -3332,7 +3322,6 @@ ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
 				if ( conf != self->configuration->get() ) {
 					TraceEvent("DataDistributor_UpdateConfiguration", self->ddId).detail("Config", conf.toString());
 					self->configuration->set( conf );
-					self->configurationTrigger.trigger();
 				}
 
 				state Future<Void> watchFuture = tr.watch(configVersionKey);
@@ -3380,7 +3369,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
-		when ( wait( self->configuration.onChange() ) ) {
+		when ( wait( self->configuration->onChange() ) ) {
 			self->refreshDcIds();
 			break;
 		}
@@ -3392,22 +3381,21 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-		self->addActor.send( distributor );
 		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
 		loop choose {
-			when ( wait( self->configurationTrigger.onTrigger() ) ) {
+			when ( wait( self->configuration->onChange() ) ) {
 				TraceEvent("DataDistributor_Restart", di.id())
 				.detail("ClusterControllerID", lastClusterControllerID)
 				.detail("Configuration", self->configuration->get().toString());
 				self->refreshDcIds();
 				distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-				self->addActor.send( distributor );
 			}
 			when ( wait( collection ) ) {
 				ASSERT(false);
 				throw internal_error();
 			}
+			when ( wait( distributor ) ) {}
 		}
 	}
 	catch ( Error &err ) {

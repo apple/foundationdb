@@ -780,7 +780,9 @@ Future<Void> setWhenDoneOrError( Future<Void> condition, Reference<AsyncVar<T>> 
 	try {
 		wait( condition );
 	}
-	catch ( Error& e ) {}
+	catch ( Error& e ) {
+		if (e.code() == error_code_actor_cancelled) throw;
+	}
 	var->set( val );
 	return Void();
 }

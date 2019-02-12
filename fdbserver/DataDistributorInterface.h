@@ -28,13 +28,11 @@ struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	struct LocalityData locality;
-	bool valid;
 
-	DataDistributorInterface() : valid(false) {}
-	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l), valid(true) {}
+	DataDistributorInterface() {}
+	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
 
 	void initEndpoints() {}
-	bool isValid() const { return valid; }
 	UID id() const { return getRateInfo.getEndpoint().token; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
 	bool operator== (const DataDistributorInterface& r) const {
@@ -46,7 +44,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, locality, valid);
+		serializer(ar, waitFailure, getRateInfo, locality);
 	}
 };
 

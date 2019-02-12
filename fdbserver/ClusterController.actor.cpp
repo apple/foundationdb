@@ -116,6 +116,13 @@ public:
 			newInfo.distributor = distributorInterf;
 			serverInfo->set( newInfo );
 		}
+
+		void clearDistributor() {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			newInfo.distributor = Optional<DataDistributorInterface>();
+			serverInfo->set( newInfo );
+		}
 	};
 
 	struct UpdateWorkerList {
@@ -511,15 +518,19 @@ public:
 		return result;
 	}
 
+	void updateKnownIds(std::map< Optional<Standalone<StringRef>>, int>* id_used) {
+		(*id_used)[masterProcessId]++;
+		(*id_used)[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.present()) {
+			(*id_used)[db.serverInfo->get().distributor.get().locality.processId()]++;
+		}
+	}
+
 	RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration( RecruitRemoteFromConfigurationRequest const& req ) {
 		RecruitRemoteFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
-		id_used[masterProcessId]++;
-		id_used[clusterControllerProcessId]++;
-		if (db.serverInfo->get().distributor.isValid()) {
-			id_used[db.serverInfo->get().distributor.locality.processId()]++;
-		}
+		updateKnownIds(&id_used);
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
@@ -557,11 +568,7 @@ public:
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfiguration( RecruitFromConfigurationRequest const& req, Optional<Key> dcId ) {
 		RecruitFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
-		id_used[masterProcessId]++;
-		id_used[clusterControllerProcessId]++;
-		if (db.serverInfo->get().distributor.isValid()) {
-			id_used[db.serverInfo->get().distributor.locality.processId()]++;
-		}
+		updateKnownIds(&id_used);
 
 		ASSERT(dcId.present());
 
@@ -689,11 +696,7 @@ public:
 		} else {
 			RecruitFromConfigurationReply result;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
-			id_used[masterProcessId]++;
-			id_used[clusterControllerProcessId]++;
-			if (db.serverInfo->get().distributor.isValid()) {
-				id_used[db.serverInfo->get().distributor.locality.processId()]++;
-			}
+			updateKnownIds(&id_used);
 			
 			auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used );
 			for(int i = 0; i < tlogs.size(); i++) {
@@ -916,8 +919,8 @@ public:
 
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[clusterControllerProcessId]++;
-		if (db.serverInfo->get().distributor.isValid()) {
-			id_used[db.serverInfo->get().distributor.locality.processId()]++;
+		if (db.serverInfo->get().distributor.present()) {
+			id_used[db.serverInfo->get().distributor.get().locality.processId()]++;
 		}
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 
@@ -1012,49 +1015,31 @@ public:
 		return false;
 	}
 
-	void updateUsedIds(RegisterMasterRequest const& req) {
-		auto dbInfo = db.serverInfo->get();
+	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
-		idUsed[clusterControllerProcessId]++;
-		idUsed[masterProcessId]++;
-		if (dbInfo.distributor.isValid()) {
-			idUsed[dbInfo.distributor.locality.processId()]++;
-		}
-		for (const auto& tlogset : req.logSystemConfig.tLogs) {
+		updateKnownIds(&idUsed);
+
+		auto dbInfo = db.serverInfo->get();
+		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
 					idUsed[tlog.interf().locality.processId()]++;
 				}
 			}
 		}
-		for (const MasterProxyInterface& interf : req.proxies) {
+		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
-		for (const ResolverInterface& interf: req.resolvers) {
+		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
-		usedIds.swap( idUsed );
-	}
-
-	void traceUsedIds() {
-		for (const auto& it : usedIds) {
-			TraceEvent ev("UsedID");
-			if (it.first.present()) ev.detail("Key", it.first.get().contents().toString());
-			ev.detail("Value", usedIds[it.first]);
-			if (id_worker.find(it.first) != id_worker.end()) {
-				ev.detail("Locality", id_worker[it.first].interf.locality.toString());
-				ev.detail("Addr", id_worker[it.first].interf.address().toString());
-			} else {
-				ev.detail("Locality", "Not found!");
-			}
-		}
+		return idUsed;
 	}
 
 	std::map< Optional<Standalone<StringRef>>, WorkerInfo > id_worker;
 	std::map< Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
-	std::map< Optional<Standalone<StringRef>>, int> usedIds;  // current used process IDs reported by master
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
@@ -1119,8 +1104,8 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[cluster->clusterControllerProcessId]++;
-			if (cluster->db.serverInfo->get().distributor.isValid()) {
-				id_used[cluster->db.serverInfo->get().distributor.locality.processId()]++;
+			if (cluster->db.serverInfo->get().distributor.present()) {
+				id_used[cluster->db.serverInfo->get().distributor.get().locality.processId()]++;
 			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.first.locality.processId() == cluster->clusterControllerProcessId )
@@ -1396,7 +1381,6 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.priorityInfo) );
 				}
 				cluster->id_worker.erase( worker.locality.processId() );
-				cluster->usedIds.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
 			}
@@ -1703,11 +1687,6 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		dbInfo.recoveryCount = req.recoveryCount;
 	}
 
-	// The master may tell us processes that we are not aware of. Thus, when
-	// using usedIds, proceed with caution as id_workers may not have the process.
-	self->updateUsedIds(req);
-	self->traceUsedIds();
-
 	if( isChanged ) {
 		dbInfo.id = g_random->randomUniqueID();
 		self->db.serverInfo->set( dbInfo );
@@ -1770,9 +1749,9 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 	}
 
-	if ( req.distributorInterf.present() && !self->db.serverInfo->get().distributor.isValid() ) {
+	if ( req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() ) {
 		const DataDistributorInterface& di = req.distributorInterf.get();
-		TraceEvent("ClusterController").detail("RegisterDataDistributor", di.id()).detail("Valid", di.isValid());
+		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
 		self->db.setDistributor( di );
 	}
 	if( info == self->id_worker.end() ) {
@@ -2297,20 +2276,20 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 				wait( self->db.serverInfo->onChange() );
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->usedIds;
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
 			state InitializeDataDistributorRequest req;
 			req.reqId = g_random->randomUniqueID();
-			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruit", data_distributor.worker.first.address());
+			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
 
-			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, 1, 0) );
+			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
 			if (distributor.present()) {
-				TraceEvent("ClusterController_DataDistributorReqID", req.reqId).detail("Recruited", data_distributor.worker.first.address());
+				TraceEvent("ClusterController_DataDistributorRecruited", req.reqId).detail("Addr", data_distributor.worker.first.address());
 				return distributor.get();
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_DataDistributorReqID", req.reqId).error(e);
+			TraceEvent("ClusterController_DataDistributorRecruitError", req.reqId).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
@@ -2320,44 +2299,29 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 }
 
 ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterControllerFullInterface *clusterInterface ) {
-	state Future<DataDistributorInterface> newDistributor = Never();
+	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY);
 
 	// wait for a while to see if existing data distributor will join.
 	loop choose {
-		when ( wait( delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY) ) ) { break; }
-		when ( wait( self->db.serverInfo->onChange() ) ) {  // Rejoins via worker registration
-			if ( self->db.serverInfo->get().distributor.isValid() ) {
-				TraceEvent("ClusterController_InfoChange", self->id).detail("DataDistributorID", self->db.serverInfo->get().distributor.id());
+		when ( wait(initialDelay) ) { break; }
+		when ( wait(self->db.serverInfo->onChange()) ) {  // Rejoins via worker registration
+			if ( self->db.serverInfo->get().distributor.present() ) {
+				TraceEvent("ClusterController_InfoChange", self->id)
+				.detail("DataDistributorID", self->db.serverInfo->get().distributor.get().id());
 				break;
 			}
 		}
 	}
 
-	if ( !self->db.serverInfo->get().distributor.isValid() ) {
-		newDistributor = startDataDistributor( self );
-	}
-
-	// Wait on failures and restart it.
 	loop {
-		state Future<Void> distributorFailed = Never();
-		if ( self->db.serverInfo->get().distributor.isValid() ) {
-			distributorFailed = waitFailureClient( self->db.serverInfo->get().distributor.waitFailure, SERVER_KNOBS->DD_FAILURE_TIME );
-		}
-
-		choose {
-			when ( DataDistributorInterface distributorInterf = wait( newDistributor ) ) {
-				TraceEvent("ClusterController", self->id)
-				.detail("DataDistributorID", distributorInterf.id())
-				.detail("Valid", distributorInterf.isValid());
-				self->db.setDistributor( distributorInterf );
-				newDistributor = Never();
-			}
-			when ( wait( distributorFailed ) ) {
-				TraceEvent("ClusterController", self->id)
-				.detail("DataDistributorDied", self->db.serverInfo->get().distributor.id());
-				self->db.setDistributor( DataDistributorInterface() );
-				newDistributor = startDataDistributor( self );
-			}
+		if ( self->db.serverInfo->get().distributor.present() ) {
+			wait( waitFailureClient( self->db.serverInfo->get().distributor.get().waitFailure, SERVER_KNOBS->DD_FAILURE_TIME ) );
+			TraceEvent("ClusterController", self->id)
+			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.get().id());
+			self->db.clearDistributor();
+		} else {
+			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
+			self->db.setDistributor( distributorInterf );
 		}
 	}
 }

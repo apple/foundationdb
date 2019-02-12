@@ -514,7 +514,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		choose {
 			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
-				.detail("DataDistributorID", ni.distributor.id());
+				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
 				ServerDBInfo localInfo = ni;
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
@@ -729,6 +729,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				if ( ddInterf->get().present() ) {
 					recruited = ddInterf->get().get();
+					TEST(true);  // Recruited while already a data distributor.
 				} else {
 					startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
 

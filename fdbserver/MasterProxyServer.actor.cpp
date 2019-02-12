@@ -93,22 +93,22 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
-	if (db->get().distributor.isValid()) nextRequestTimer = Void();
+	if (db->get().distributor.present()) nextRequestTimer = Void();
 	loop choose {
 		when ( wait( db->onChange() ) ) {
-			if ( db->get().distributor.isValid() ) {
-				TraceEvent("Proxy", myID)
-				.detail("DataDistributorChangedID", db->get().distributor.id());
+			if ( db->get().distributor.present() ) {
+				TraceEvent("Proxy_DataDistributorChanged", myID)
+				.detail("DDID", db->get().distributor.get().id());
 				nextRequestTimer = Void();  // trigger GetRate request
 			} else {
-				TraceEvent("Proxy", myID)
-				.detail("DataDistributorDied", db->get().distributor.id());
+				TraceEvent("Proxy_DataDistributorDied", myID);
 				nextRequestTimer = Never();
+				reply = Never();
 			}
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(db->get().distributor.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
