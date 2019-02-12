@@ -33,12 +33,16 @@ namespace actorcompiler
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  actorcompiler [input] [output]");
+                Console.WriteLine("  actorcompiler <input> <output> [--disable-actor-without-wait-error]");
                 return 100;
             }
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
             string input = args[0], output = args[1], outputtmp = args[1] + ".tmp";
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
+            if (args.Contains("--disable-actor-without-wait-error"))
+            {
+                errorMessagePolicy.ActorWithoutWaitEnabled = false;
+            }
             try
             {
                 var inputData = File.ReadAllText(input);
