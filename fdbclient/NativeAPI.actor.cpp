@@ -1052,7 +1052,8 @@ Future<Standalone<RangeResultRef>> getRange(
 	bool const& reverse,
 	TransactionInfo const& info);
 
-Future<Optional<Value>> getValue( Future<Version> const& version, Key const& key, Database const& cx, TransactionInfo const& info, Reference<TransactionLogInfo> const& trLogInfo ) ;
+ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
+                                       Reference<TransactionLogInfo> trLogInfo);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface( Database cx, TransactionInfo info, UID id, Future<Version> ver = latestVersion ) {
 	Optional<Value> val = wait( getValue(ver, serverListKeyFor(id), cx, info, Reference<TransactionLogInfo>()) );
@@ -1353,7 +1354,9 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	}
 }
 
-Future<Void> readVersionBatcher( DatabaseContext* const& cx, FutureStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > const& versionStream, uint32_t const& flags );
+ACTOR Future<Void> readVersionBatcher(
+    DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
+    uint32_t flags);
 
 ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Value> value, Database cx, int readVersionFlags, TransactionInfo info )
 {
