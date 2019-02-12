@@ -13,7 +13,7 @@ EOF
 
 arguments_parse() {
     local __res=0
-    while getopts ":ho:" opt
+    while getopts ":h" opt
     do
         case ${opt} in
             h )

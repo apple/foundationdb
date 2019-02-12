@@ -53,5 +53,4 @@ services:
 
   shell:
     <<: *build-setup
-    volumes:
-      - ..:/foundationdb
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash
