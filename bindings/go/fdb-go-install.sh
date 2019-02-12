@@ -11,9 +11,6 @@
 # library.
 #
 
-# This script will not work correctly with Go Modules enabled.
-GO111MODULE=off
-
 DESTDIR="${DESTDIR:-}"
 FDBVER="${FDBVER:-}"
 REMOTE="${REMOTE:-github.com}"
@@ -327,12 +324,6 @@ else
             echo "   CGO_CPPFLAGS=\"${cgo_cppflags}\""
             echo "   CGO_CFLAGS=\"${cgo_cflags}\""
             echo "   CGO_LDFLAGS=\"${cgo_ldflags}\""
-            echo
-            echo "If you use modules, it may be necessary to add this replace directive in your go.mod:"
-            echo "   replace github.com/apple/foundationdb/bindings/go => ${GOPATH}/src/${REMOTE}/${FDBREPO}/bindings/go"
-            echo
-            echo "Note: this replace directive is an absolute path and will only work for your system."
-            echo "For shared repositories you may need to use a relative path pointing to \$GOPATH/src/github.com/apple/foundationdb."
         fi
     fi
 fi
