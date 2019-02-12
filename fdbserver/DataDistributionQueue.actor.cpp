@@ -944,8 +944,12 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			for(int i = 0; i < bestTeams.size(); i++) {
 				auto& serverIds = bestTeams[i].first->getServerIDs();
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
-				if (allHealthy && anyWithSource && !bestTeams[i].second) { // bestTeams[i] is not the source of the
-					                                                       // shard
+
+				if (allHealthy && anyWithSource && !bestTeams[i].second) {
+					// When all teams in bestTeams[i] do not hold the shard
+					// We randomly choose a server in bestTeams[i] as the shard's destination and
+					// move the shard to the randomly chosen server (in the remote DC), which will later
+					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
 					int idx = g_random->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);

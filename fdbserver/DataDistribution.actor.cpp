@@ -887,6 +887,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 
 			req.reply.send( bestOption );
+			// We may create a new team to get a team, check if the team number is above the desired number
+			if (self->redundantTeamRemover.isReady()) {
+				self->redundantTeamRemover = teamRemover(self);
+				self->addActor.send(self->redundantTeamRemover);
+			}
+
 			return Void();
 		} catch( Error &e ) {
 			if( e.code() != error_code_actor_cancelled)
@@ -2508,6 +2514,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
 							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
+								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
 									maxPriority = PRIORITY_TEAM_0_LEFT;
