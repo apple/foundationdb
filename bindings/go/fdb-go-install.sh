@@ -314,7 +314,7 @@ else
             fi
         fi
 
-        # Step 5: Explain CGO flags and modules usage.
+        # Step 5: Explain CGO flags.
 
         if [[ "${status}" -eq 0 && ("${operation}" == "localinstall" || "${operation}" == "install" ) ]] ; then
             echo
