@@ -101,7 +101,7 @@ From 6.1, `wait()` on `Void` actors shouldn't assign the resulting value. So, th
 
 ```c++
 Future<Void> asyncTask(); //defined elsewhere
-Void _ = wait(asyncTask());
+wait(asyncTask());
 ```
 
 becomes
@@ -303,7 +303,7 @@ some operation more than once:
 ```c++
 ACTOR Future<Void> periodically(PromiseStream<Void> ps, int seconds) {
     loop {
-        Void _ = wait( delay( seconds ) );
+        wait( delay( seconds ) );
         ps.send(Void());
     }
 }
@@ -494,7 +494,7 @@ ACTOR Future<void> foo(StringRef param)
 ACTOR Future<Void> bar()
 {
     Standalone<StringRef> str("string");
-    Void _ = wait(foo(str));
+    wait(foo(str));
     return Void();
 }
 ```
