@@ -185,6 +185,9 @@ template <class T>
 constexpr bool is_vector_like = vector_like_traits<T>::value;
 
 template <class T>
+constexpr bool is_vector_of_union_like = is_vector_like<T>&& is_union_like<typename vector_like_traits<T>::value_type>;
+
+template <class T>
 constexpr bool is_struct_like = struct_like_traits<T>::value;
 
 template <class T>
@@ -415,7 +418,9 @@ constexpr auto fields_helper() {
 	if constexpr (_SizeOf<Member>::size == 0) {
 		return pack<>{};
 	} else if constexpr (is_union_like<Member>) {
-		return pack<uint8_t, uint32_t>{};
+		return pack</*type*/ uint8_t, /*offset*/ uint32_t>{};
+	} else if constexpr (is_vector_of_union_like<Member>) {
+		return pack</*type vector*/ uint32_t, /*offset vector*/ uint32_t>{};
 	} else {
 		return pack<Member>{};
 	}
@@ -480,7 +485,6 @@ struct TraverseMessageTypes {
 	std::enable_if_t<is_vector_like<VectorLike>> operator()(const VectorLike& members) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
-		static_assert(!is_union_like<T>, "vector<union> not yet supported");
 		// we don't need to check for recursion here because the next call
 		// to operator() will do that and we don't generate a vtable for the
 		// vector-like type itself
@@ -643,7 +647,37 @@ struct SaveVisitorLambda {
 		for_each(
 		    [&](const auto& member) {
 			    using Member = std::decay_t<decltype(member)>;
-			    if constexpr (is_union_like<Member>) {
+			    if constexpr (is_vector_of_union_like<Member>) {
+				    using VectorTraits = vector_like_traits<Member>;
+				    using T = typename VectorTraits::value_type;
+				    using UnionTraits = union_like_traits<T>;
+				    uint32_t num_entries = VectorTraits::num_entries(member);
+				    auto typeVectorWriter = writer.getMessageWriter(num_entries); // type tags are one byte
+				    auto offsetVectorWriter = writer.getMessageWriter(num_entries * sizeof(RelativeOffset));
+				    auto iter = VectorTraits::begin(member);
+				    for (int i = 0; i < num_entries; ++i) {
+					    uint8_t type_tag = UnionTraits::index(*iter);
+					    uint8_t fb_type_tag =
+					        UnionTraits::empty(*iter) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
+					    typeVectorWriter.write(&fb_type_tag, i, sizeof(fb_type_tag));
+					    if (!UnionTraits::empty(*iter)) {
+						    RelativeOffset offset =
+						        (SaveAlternative<Writer, UnionTraits>{ writer, vtableset }).save(type_tag, *iter);
+						    offsetVectorWriter.write(&offset, i * sizeof(offset), sizeof(offset));
+					    }
+					    ++iter;
+				    }
+				    int start = RightAlign(writer.current_buffer_size + num_entries, 4) + 4;
+				    writer.write(&num_entries, start, sizeof(uint32_t));
+				    typeVectorWriter.writeTo(writer, start - sizeof(uint32_t));
+				    auto typeVectorOffset = RelativeOffset{ writer.current_buffer_size };
+				    start = RightAlign(writer.current_buffer_size + num_entries * sizeof(RelativeOffset), 4) + 4;
+				    writer.write(&num_entries, start, sizeof(uint32_t));
+				    offsetVectorWriter.writeTo(writer, start - sizeof(uint32_t));
+				    auto offsetVectorOffset = RelativeOffset{ writer.current_buffer_size };
+				    self.write(&typeVectorOffset, vtable[i++], sizeof(typeVectorOffset));
+				    self.write(&offsetVectorOffset, vtable[i++], sizeof(offsetVectorOffset));
+			    } else if constexpr (is_union_like<Member>) {
 				    using UnionTraits = union_like_traits<Member>;
 				    uint8_t type_tag = UnionTraits::index(member);
 				    uint8_t fb_type_tag = UnionTraits::empty(member) ? 0 : type_tag + 1; // Flatbuffers indexes from 1.
@@ -682,7 +716,38 @@ struct LoadMember {
 	Context& context;
 	template <class Member>
 	void operator()(Member& member) {
-		if constexpr (is_union_like<Member>) {
+		if constexpr (is_vector_of_union_like<Member>) {
+			if (!field_present()) {
+				i += 2;
+				return;
+			}
+			const uint8_t* types_current = &message[vtable[i++]];
+			uint32_t types_current_offset = interpret_as<uint32_t>(types_current);
+			types_current += types_current_offset;
+			types_current += sizeof(uint32_t); // num entries in types vector
+			using VectorTraits = vector_like_traits<Member>;
+			using T = typename Member::value_type;
+			const uint8_t* current = &message[vtable[i++]];
+			uint32_t current_offset = interpret_as<uint32_t>(current);
+			current += current_offset;
+			uint32_t numEntries = interpret_as<uint32_t>(current);
+			current += sizeof(uint32_t);
+			VectorTraits::reserve(member, numEntries, context);
+			auto inserter = VectorTraits::insert(member);
+			for (int i = 0; i < numEntries; ++i) {
+				T value;
+				if (types_current[i] > 0) {
+					uint8_t type_tag = types_current[i] - 1; // Flatbuffers indexes from 1.
+					(LoadAlternative<Context, union_like_traits<T>>{ context, current }).load(type_tag, value);
+				}
+				*inserter = std::move(value);
+				++inserter;
+				current += sizeof(RelativeOffset);
+			}
+			if constexpr (has_deserialization_done<VectorTraits>::value) {
+				VectorTraits::deserialization_done(member);
+			}
+		} else if constexpr (is_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
 				return;
