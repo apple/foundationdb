@@ -219,7 +219,7 @@ class XMLParser(LogParser):
             return None
         handler = XMLParser.XMLHandler()
         errorHandler = XMLParser.XMLErrorHandler()
-        xml.sax.parseString(line, handler, errorHandler=errorHandler)
+        xml.sax.parseString(line.encode('utf-8'), handler, errorHandler=errorHandler)
         if len(errorHandler.fatalErrors) > 0:
             return self.log_trace_parse_error(linenr, errorHandler.fatalErrors[0])
         return handler.result
