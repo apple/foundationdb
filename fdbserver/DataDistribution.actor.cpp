@@ -2019,7 +2019,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					ASSERT(found);
 					server->teams[t--] = server->teams.back();
 					server->teams.pop_back();
-					break;
+					break; // The teams on a server should not be duplicate
 				}
 			}
 		}
@@ -2077,6 +2077,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (!machineTeam.isValid()) { // Create the machine team if it does not exist
 			machineTeam = addMachineTeam(machineIDs.begin(), machineIDs.end());
 		}
+
+		machineTeam->serverTeams.push_back(serverTeam);
 
 		return machineTeam;
 	}
@@ -2216,9 +2218,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent("TeamRemoved")
 				    .detail("Primary", primary)
 				    .detail("TeamServerIDs", teams[t]->getServerIDsStr());
-				teams[t]->tracker.cancel();
-				teams[t--] = teams.back();
-				teams.pop_back();
+				// removeTeam also needs to remove the team from the machine team info.
+				removeTeam(teams[t]);
 				removedCount++;
 			}
 		}
