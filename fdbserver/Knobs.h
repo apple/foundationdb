@@ -129,6 +129,10 @@ public:
 	int64_t DD_LOCATION_CACHE_SIZE;
 	double MOVEKEYS_LOCK_POLLING_DELAY;
 	double DEBOUNCE_RECRUITING_DELAY;
+	// TeamRemover to remove redundant teams
+	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
+	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
+	double TR_WAIT_FOR_ALL_MACHINES_HEALTHY_DELAY; // wait before checking if all machines are healthy
 
 	// Redwood Storage Engine
 	int PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT;

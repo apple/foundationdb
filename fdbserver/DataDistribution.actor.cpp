@@ -2268,6 +2268,11 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 	state int numMachineTeamRemoved = 0;
 	loop {
+		// In case the teamRemover cause problems in production, we can disable it
+		if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
+			break; // directly return Void()
+		}
+
 		// Wait on processingUnhealthy as removeBadTeams() does
 		loop {
 			while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
@@ -2280,6 +2285,10 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 				break;
 			}
 		}
+		// To avoid removing machine teams too fast, which is unlikely happen though
+		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
+
+
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
@@ -2289,7 +2298,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all machines will become healthy.
 		if (totalHealthyMachineCount != self->machine_info.size()) {
-			wait(delay(1.0));
+			wait( delay(SERVER_KNOBS->TR_WAIT_FOR_ALL_MACHINES_HEALTHY_DELAY) );
 			continue;
 		}
 
