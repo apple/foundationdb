@@ -1,5 +1,4 @@
 set(FDBRPC_SRCS
-  ActorFuzz.actor.cpp
   AsyncFileCached.actor.h
   AsyncFileEIO.actor.h
   AsyncFileKAIO.actor.h
@@ -11,9 +10,7 @@ set(FDBRPC_SRCS
   AsyncFileWriteChecker.cpp
   batcher.actor.h
   crc32c.cpp
-  dsltest.actor.cpp
   FailureMonitor.actor.cpp
-  FlowTests.actor.cpp
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
@@ -55,8 +52,14 @@ if(NOT WIN32)
   list(APPEND FDBRPC_SRCS libcoroutine/context.c libeio/eio.c)
 endif()
 
-actor_set(FDBRPC_BUILD "${FDBRPC_SRCS}")
+set(FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING
+  ActorFuzz.actor.cpp
+  FlowTests.actor.cpp
+  dsltest.actor.cpp)
+
+actor_set(FDBRPC_BUILD "${FDBRPC_SRCS};${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING}")
 add_library(fdbrpc STATIC ${FDBRPC_BUILD})
 actor_compile(fdbrpc "${FDBRPC_SRCS}")
+actor_compile(fdbrpc "${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING}" DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow)
