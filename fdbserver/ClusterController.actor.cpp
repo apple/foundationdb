@@ -2291,7 +2291,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
-	while (true) {
+	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
 				wait( self->db.serverInfo->onChange() );
