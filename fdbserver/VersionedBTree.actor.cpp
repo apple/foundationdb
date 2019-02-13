@@ -1317,7 +1317,7 @@ private:
 
 		self->printMutationBuffer(mutations);
 
-		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey, endKey));
+		wait(success(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey, endKey)));
 
 		self->m_pager->setLatestVersion(writeVersion);
 		debug_printf("%s: Committing pager %lld\n", self->m_name.c_str(), writeVersion);

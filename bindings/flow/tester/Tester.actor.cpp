@@ -353,7 +353,7 @@ struct PopFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
 		for(StackItem item : items) {
-			Standalone<StringRef> _ = wait(item.value);
+			wait(success(item.value));
 		}
 		return Void();
 	}

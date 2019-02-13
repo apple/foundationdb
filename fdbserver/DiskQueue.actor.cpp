@@ -410,7 +410,7 @@ public:
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
 		state Error error = success();
 		try {
-			ErrorOr<Void> _ = wait(errorOr(self->lastCommit));
+			wait(success(errorOr(self->lastCommit)));
 			while (self->recoveryActorCount.get(false))
 				wait( self->recoveryActorCount.onChange(false) );
 
@@ -941,7 +941,7 @@ private:
 		for( fileNum=0; fileNum<2; fileNum++) {
 			state int sizeNum;
 			for( sizeNum=0; sizeNum < self->rawQueue->files[fileNum].size; sizeNum += sizeof(Page) ) {
-				int _ = wait( self->rawQueue->files[fileNum].f->read( testPage.get(), sizeof(Page), sizeNum ) );
+				wait(success( self->rawQueue->files[fileNum].f->read( testPage.get(), sizeof(Page), sizeNum ) ));
 				TraceEvent("PageData").detail("File", self->rawQueue->files[fileNum].dbgFilename).detail("SizeNum", sizeNum).detail("Seq", testPage->seq).detail("Hash", testPage->checkHash()).detail("Popped", testPage->popped);
 			}
 		}

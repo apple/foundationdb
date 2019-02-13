@@ -1387,7 +1387,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(readRequestServer(proxy, &commitData));
 
 	// wait for txnStateStore recovery
-	Optional<Value> _ = wait(commitData.txnStateStore->readValue(StringRef()));
+	wait(success(commitData.txnStateStore->readValue(StringRef())));
 
 	int commitBatchByteLimit = 
 		(int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX, 

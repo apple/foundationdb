@@ -70,7 +70,7 @@ struct MoveKeysWorkload : TestWorkload {
 			wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
-			int _ = wait( setDDMode( cx, oldMode ) );
+			wait(success( setDDMode( cx, oldMode ) ));
 			TraceEvent("RMKDoneModeSetting");
 		}
 		return Void();

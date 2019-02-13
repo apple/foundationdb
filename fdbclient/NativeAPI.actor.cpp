@@ -256,7 +256,7 @@ ACTOR static Future<Standalone<StringRef> > getSampleVersionStamp(Transaction *t
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
+			wait(success(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793"))));
 			state Future<Standalone<StringRef> > vstamp = tr->getVersionstamp();
 			tr->makeSelfConflicting();
 			wait(tr->commit());
@@ -1204,7 +1204,7 @@ ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys
 				try {
 					tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 					tr.setOption( FDBTransactionOptions::CAUSAL_READ_RISKY );
-					Version _ = wait( tr.getReadVersion() );
+					wait(success( tr.getReadVersion() ));
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );

@@ -124,7 +124,7 @@ namespace HTTP {
 			// Next search will start at the current end of the buffer - delim size + 1
 			if(sPos >= lookBack)
 				sPos -= lookBack;
-			int _ = wait(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE));
+			wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
 		}
 	}
 
@@ -132,7 +132,7 @@ namespace HTTP {
 	ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string *buf, size_t pos) {
 		state int stop_size = pos + len;
 		while(buf->size() < stop_size)
-			int _ = wait(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE));
+			wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
 		return Void();
 	}
 

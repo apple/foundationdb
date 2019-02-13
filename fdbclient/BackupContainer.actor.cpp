@@ -345,7 +345,7 @@ public:
 		state Reference<IAsyncFile> f = wait(bc->readFile(snapshot.fileName));
 		int64_t size = wait(f->size());
 		state Standalone<StringRef> buf = makeString(size);
-		int _ = wait(f->read(mutateString(buf), buf.size(), 0));
+		wait(success(f->read(mutateString(buf), buf.size(), 0)));
 		json_spirit::mValue json;
 		json_spirit::read_string(buf.toString(), json);
 		JSONDoc doc(json);
