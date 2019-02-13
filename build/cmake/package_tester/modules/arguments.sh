@@ -9,17 +9,20 @@ then
     arguments_usage() {
         cat <<EOF
 usage: test_packages.sh [-h] [commands]
-       -h:      print this help message and
-                abort execution
-       -b DIR:  point set the fdb build directory
-                (this is a required argument).
-       -s DIR:  Path to fdb source directory.
-       -p STR:  Colon-separated list of package
-                file names (without path) to
-                test.
-       -c PATH: Path to a ini-file with the docker
-                configuration
-       -t TEST: One of DEB, RPM, ALL
+       -h:       print this help message and
+                 abort execution
+       -b DIR:   point set the fdb build directory
+                 (this is a required argument).
+       -s DIR:   Path to fdb source directory.
+       -p STR:   Colon-separated list of package
+                 file names (without path) to
+                 test.
+       -c PATH:  Path to a ini-file with the docker
+                 configuration
+       -t TEST:  One of DEB, RPM, ALL
+       -n TESTS: Colon separated list of test names
+                 to run (will run all if this option
+                 is not set)
 
        Will execute the passed commands
        in the order they were passed
@@ -63,6 +66,9 @@ EOF
                         echo "Note: Currently known tests are: RPM, DEB, and ALL"
                         exit 1
                     fi
+                    ;;
+                n )
+                    tests_to_run="${OPTARG}"
                     ;;
                 \? )
                     curr_index="$((OPTIND-1))"

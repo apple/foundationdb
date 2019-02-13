@@ -18,6 +18,11 @@ then
         popd > /dev/null
     }
 
+    fail() {
+        false
+        success ${@:1}
+    }
+
     success() {
         local __res=$?
         if [ ${__res} -ne 0 ]

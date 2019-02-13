@@ -1,8 +1,13 @@
+#!/usr/bin/env bash
+
 if [ -z "${docker_sh_included+x}" ]
 then
     docker_sh_included=1
     source ${source_dir}/modules/util.sh
     source ${source_dir}/modules/config.sh
+    source ${source_dir}/modules/tests.sh
+
+    failed_tests=()
 
     docker_build_and_run() {
         local __res=0
@@ -17,8 +22,24 @@ then
             fi
             docker build . -t ${name}
             # we start docker in interactive mode, otherwise CTRL-C won't work
-            docker run -it -v "${fdb_source}:/foundationdb" -v "${fdb_build}:/build" ${name} bash /foundationdb/build/cmake/package_tester/${PKG,,}_tests.sh ${packages_to_test[@]}
-            __res=$?
+            if [ ! -z "${tests_to_run+x}"]
+            then
+                tests=()
+                IFS=';' read -ra tests <<< "${tests_to_run}"
+            fi
+            for t in "${tests[@]}"
+            do
+                docker run -it -v "${fdb_source}:/foundationdb"\
+                    -v "${fdb_build}:/build"\
+                    ${name}\
+                    bash /foundationdb/build/cmake/package_tester/${PKG,,}_tests.sh -n ${t} ${packages_to_test[@]}
+                if [ "$?" -ne 0 ]
+                then
+                    __res=1
+                    failed_tests+=( "${PKG} - ${t}" )
+                fi
+
+            done
         done
         exitfun
         return ${__res}
@@ -148,7 +169,7 @@ then
                 then
                     echo -e "${GREEN}RPM tests succeeded${NC}"
                 else
-                    echo -e "${RED}Debian tests failed${NC}"
+                    echo -e "${RED}RPM tests failed${NC}"
                     __res=1
                 fi
             fi
@@ -156,8 +177,13 @@ then
             then
                 echo -e "${GREEN}SUCCESS${NC}"
             else
-                echo -e "${RED}FAILURE${NC}"
-                __res=1
+                echo -e "${RED}FAILURE"
+                echo "The following tests failed:"
+                for t in "${failed_tests[@]}"
+                do
+                    echo -e "\t- ${t}"
+                done
+                echo -e "${NC}"
             fi
         done
         exitfun
