@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+if [ -z "${testing_sh_included}" ]
+then
+
+    testing_sh_included=1
+
+    desired_state() {
+        case $1 in
+            CLEAN )
+                :
+                ;;
+            INSTALLED )
+                install
+                ;;
+        esac
+    }
+
+    tests_healthy() {
+        cd /
+        fdbcli --exec status
+        if [ $? -ne 0 ]
+        then
+            return 1
+        fi
+        healthy="$(fdbcli --exec status | grep HEALTHY | wc -l)"
+        if [ -z "${healthy}" ]
+        then
+            __res=1
+            break
+        fi
+    }
+
+    tests_clean() {
+        uninstall purge
+        success FoundationDB was not uninstalled correctly
+        # systemd/initd are not running, so we have to kill manually here
+        pidof fdbmonitor | xargs kill
+        tests_clean_nouninstall
+        rm -rf /etc/foundationdb
+        rm -rf /var/lib/foundationdb
+        rm -rf /var/log/foundationdb
+    }
+
+    tests_main() {
+        new_state="${test_start_state[${test_name}]}"
+        echo "Setting desired state ${new_state} for ${test_name}"
+        desired_state "${new_state}"
+        ${test_name}
+        success ${test_name} Failed
+        echo -e "${GREEN}======================================================================="
+        echo -e "Test $t successfully finished"
+        echo -e "=======================================================================${NC}"
+        current_state="${test_exit_state[${test_name}]}"
+    }
+fi

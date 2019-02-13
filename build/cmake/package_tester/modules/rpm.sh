@@ -26,7 +26,12 @@ then
    uninstall() {
        local __res=0
        enterfun
-       yum remove -y ${package_names[@]}
+       if [ "$1" == "purge" ]
+       then
+           yum remove --purge -y ${package_names[@]}
+       else
+           yum remove -y ${package_names[@]}
+       fi
        __res=$?
        exitfun
        return ${__res}

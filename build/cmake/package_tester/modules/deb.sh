@@ -9,17 +9,17 @@ then
    install() {
        local __res=0
        enterfun
+       echo "Install FoundationDB"
        cd /build
-       declare -ga package_names
+       package_names=()
        for f in "${package_files[@]}"
        do
            package_name="$(dpkg -I ${f} | grep Package | sed 's/.*://')"
            package_names+=( "${package_name}" )
        done
        dpkg -i ${package_files[@]}
-       apt-get -yf install
+       apt-get -yf -o Dpkg::Options::="--force-confold" install
        __res=$?
-       # give the server some time to come up
        sleep 5
        exitfun
        return ${__res}
