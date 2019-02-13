@@ -33,7 +33,7 @@ namespace actorcompiler
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  actorcompiler <input> <output> [--disable-actor-without-wait-error]");
+                Console.WriteLine("  actorcompiler <input> <output> [--disable-actor-without-wait-warning]");
                 return 100;
             }
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
@@ -41,7 +41,7 @@ namespace actorcompiler
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
             if (args.Contains("--disable-actor-without-wait-error"))
             {
-                errorMessagePolicy.ActorWithoutWaitEnabled = false;
+                errorMessagePolicy.DisableActorWithoutWaitWarning = true;
             }
             try
             {

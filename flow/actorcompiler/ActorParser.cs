@@ -38,10 +38,10 @@ namespace actorcompiler
 
     class ErrorMessagePolicy
     {
-        public bool ActorWithoutWaitEnabled = true;
+        public bool DisableActorWithoutWaitWarning = false;
         public void HandleActorWithoutWait(String sourceFile, Actor actor)
         {
-            if (ActorWithoutWaitEnabled && !actor.isTestCase)
+            if (!DisableActorWithoutWaitWarning && !actor.isTestCase)
             {
                 // TODO(atn34): Once cmake is the only build system we can make this an error instead of a warning.
                 Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);

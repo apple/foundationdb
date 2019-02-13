@@ -52,14 +52,14 @@ if(NOT WIN32)
   list(APPEND FDBRPC_SRCS libcoroutine/context.c libeio/eio.c)
 endif()
 
-set(FDBRPC_SRCS_ALLOW_ACTOR_WITHOUT_WAIT
+set(FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING
   ActorFuzz.actor.cpp
   FlowTests.actor.cpp
   dsltest.actor.cpp)
 
-actor_set(FDBRPC_BUILD "${FDBRPC_SRCS};${FDBRPC_SRCS_ALLOW_ACTOR_WITHOUT_WAIT}")
+actor_set(FDBRPC_BUILD "${FDBRPC_SRCS};${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING}")
 add_library(fdbrpc STATIC ${FDBRPC_BUILD})
 actor_compile(fdbrpc "${FDBRPC_SRCS}")
-actor_compile(fdbrpc "${FDBRPC_SRCS_ALLOW_ACTOR_WITHOUT_WAIT}" DISABLE_ACTOR_WITHOUT_WAIT)
+actor_compile(fdbrpc "${FDBRPC_SRCS_DISABLE_ACTOR_WITHOUT_WAIT_WARNING}" DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow)
