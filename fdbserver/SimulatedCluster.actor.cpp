@@ -981,7 +981,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
 	} else if (generateMachineTeamTestConfig) {
-		// When DESIRED_TEAMS_PER_MACHINE is set to 1, the desired machine team number is 5
+		// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
 		// while the max possible machine team number is 10
 		machine_count = 5;
 	} else {
@@ -1002,9 +1002,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if(generateFearless) {
 		processes_per_machine = 1;
 	} else if (generateMachineTeamTestConfig) {
-		// The total process number is 5*5 = 25. The max possible server teams is 3 combination out of 25 (2300).
-		// The buildMachine logic aims to build process_number (25) * server_teams_per_machine (5) = 125 server machines
-		// But we should guarantee the machine team number is no larger than 5.
+		// The total process number is 5*5 = 25 when extraDB = 0. The max possible server teams is 3 combination out of 25 (2300).
+		// The buildMachine logic aims to build process_number (25) * server_teams_per_machine (1) = 25 server machines
+		// But the machine team number we generated should always be no larger than 5.
 		processes_per_machine = (extraDB ? 2 : 5);
 	} else {
 		processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );

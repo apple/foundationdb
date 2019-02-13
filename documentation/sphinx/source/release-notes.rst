@@ -7,7 +7,7 @@ Release Notes
 
 Features
 --------
-MachineTeam replication, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`.
+Improved replication mechanism, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`.
 
 
 Performance
