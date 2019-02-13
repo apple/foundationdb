@@ -740,20 +740,34 @@ Optional<bool> checkBuggifyOverride(const char *testFile) {
 
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
-																		const vector<std::string>& publicAddressStrs,
-																		const vector<std::string>& listenAddressStrs) {
-	ASSERT(publicAddressStrs.size() == listenAddressStrs.size());
+                                                                        const vector<std::string>& publicAddressStrs,
+                                                                        vector<std::string>& listenAddressStrs) {
+	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
+		fprintf(stderr,
+		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+	listenAddressStrs.resize(publicAddressStrs.size(), "public");
+
+	if (publicAddressStrs.size() > 2) {
+		fprintf(stderr, "ERROR: maximum 2 public/listen addresses are allowed\n");
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
 	const NetworkAddressList& coordinators = connectionFile.getConnectionString().coordinators();
-	bool clusterIsTLS = std::any_of(coordinators.begin(), coordinators.end(), [](const NetworkAddress& address) {
-																				  return address.isTLS();
-																			  });
+	ASSERT(coordinators.size() > 0);
+	bool clusterIsTLS = coordinators[0].isTLS();
+	for (int ii = 1; ii < coordinators.size(); ++ii) {
+		if (coordinators[ii].isTLS() != clusterIsTLS) {
+			fprintf(stderr, "ERROR: coordinators cannot have mixed TLS state.\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+	}
 
-	// If a cluster has a coordinator with TLS enabled, at-least one of the given public addresses
-	// must be TLS enabled.
-	bool hasTLSAddress = false;
+	int numTLSAddress = 0;
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -779,7 +793,11 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 
 		if (!publicNetworkAddresses.back().isValid()) {
 			fprintf(stderr, "ERROR: %s is not valid a public ip address\n");
-			throw;
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (publicNetworkAddresses.back().isTLS()) {
+			numTLSAddress += 1;
 		}
 
 		const std::string& listenAddressStr = listenAddressStrs[ii];
@@ -792,21 +810,30 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
 				throw;
 			}
+
+			if (listenNetworkAddresses.back().isTLS() != publicNetworkAddresses.back().isTLS()) {
+				fprintf(stderr,
+				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
+				        listenAddressStr.c_str(), publicAddressStr.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
-		//TODO: This is awkward. Need to be more clear on this, when we actually deal with TLS.
-		if (clusterIsTLS && !hasTLSAddress && publicNetworkAddresses.back().isTLS()) {
-			hasTLSAddress |= std::any_of(coordinators.begin(), coordinators.end(),
-										 [&](const NetworkAddress& address) {
-											 return address.toString() == publicAddressStr;
-										 });
+		if ((clusterIsTLS && publicNetworkAddresses.back().isTLS()) ||
+		    (!clusterIsTLS && !publicNetworkAddresses.back().isTLS())) {
+			bool hasSameCoord =
+			    std::any_of(coordinators.begin(), coordinators.end(),
+			                [&](const NetworkAddress& address) { return address.toString() == publicAddressStr; });
+			if (!hasSameCoord) {
+				fprintf(stderr, "ERROR: public address %s not found in coordinator list.\n", publicAddressStr.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 	}
 
-	// If any  the coordinators has TLS enabled, then some address from coordinator list must have TLS enabled.
-	if (hasTLSAddress != clusterIsTLS) {
-		fprintf(stderr, "ERROR: public address must not specify TLS if coordinators are non-TLS\n");
-		throw;
+	if (numTLSAddress > 1 || publicNetworkAddresses.size() - numTLSAddress > 1) {
+		fprintf(stderr, "ERROR: only one public address of each TLS state is allowed.\n");
+		flushAndExit(FDB_EXIT_ERROR);
 	}
 
 	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
@@ -994,10 +1021,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_PUBLICADDR:
 					publicAddressStrs.push_back(args.OptionArg());
-					listenAddressStrs.push_back("public");
 					break;
 				case OPT_LISTEN:
-					listenAddressStrs[publicAddressStrs.size() - 1] = args.OptionArg();
+					listenAddressStrs.push_back(args.OptionArg());
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();

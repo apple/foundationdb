@@ -1814,8 +1814,8 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 			try {
 				// SOMEDAY: Check for keywords
 				auto const& addr = NetworkAddress::parse( t->toString() );
-				if( addr.isTLS() != isClusterTLS ) {
-					printf("ERROR: cannot use coordinator with incompatible TLS state: `%s'\n", t->toString().c_str());
+				if (addresses.size() > 0 && addr.isTLS() != addresses.begin()->isTLS()) {
+					printf("ERROR: cannot use coordinators with different TLS states: `%s'\n", t->toString().c_str());
 					return true;
 				}
 				if (addresses.count(addr)){
