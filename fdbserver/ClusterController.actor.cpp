@@ -110,7 +110,7 @@ public:
 		{
 		}
 
-		void setDistributor(DataDistributorInterface distributorInterf) {
+		void setDistributor(const DataDistributorInterface& distributorInterf) {
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
 			newInfo.distributor = distributorInterf;
