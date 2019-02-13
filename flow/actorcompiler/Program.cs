@@ -39,7 +39,7 @@ namespace actorcompiler
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
             string input = args[0], output = args[1], outputtmp = args[1] + ".tmp";
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
-            if (args.Contains("--disable-actor-without-wait-error"))
+            if (args.Contains("--disable-actor-without-wait-warning"))
             {
                 errorMessagePolicy.DisableActorWithoutWaitWarning = true;
             }
