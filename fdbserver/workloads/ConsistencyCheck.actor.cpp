@@ -249,6 +249,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 					bool workerListCorrect = wait( self->checkWorkerList(cx, self) );
 					if(!workerListCorrect)
 						self->testFailure("Worker list incorrect");
+
+					bool coordinatorsCorrect = wait( self->checkCoordinators(cx) );
+					if(!coordinatorsCorrect)
+						self->testFailure("Coordinators incorrect");
 				}
 
 				//Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -349,11 +353,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 							if (!self->performQuiescentChecks)
 								break;
 						}
-					} // End of For	
+					} // End of For
 				}
 				when(wait(cx->onMasterProxiesChanged())) { }
-			} // End of choose		
-			
+			} // End of choose
+
 			if (!keyServersInsertedForThisIteration) // Retry the entire workflow
 				wait(delay(1.0));
 
@@ -1217,6 +1221,46 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return "NotSet";
 	}
 
+	ACTOR Future<bool> checkCoordinators(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+				Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
+
+				if (!currentKey.present()) {
+					TraceEvent("ConsistencyCheck_NoCoordinatorKey");
+					return false;
+				}
+
+				state ClusterConnectionString old( currentKey.get().toString() );
+
+				vector<ProcessData> workers = wait(::getWorkers(&tr));
+
+				std::map<NetworkAddress, LocalityData> addr_locality;
+				for(auto w : workers) {
+					addr_locality[w.address] = w.locality;
+				}
+
+				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
+				for (auto addr : old.coordinators()) {
+					auto findResult = addr_locality.find(addr);
+					if (findResult != addr_locality.end()) {
+						if(checkDuplicates.count(findResult->second.zoneId())) {
+							TraceEvent("ConsistencyCheck_BadCoordinator").detail("Addr", addr).detail("NotFound", findResult == addr_locality.end());
+							return false;
+						}
+						checkDuplicates.insert(findResult->second.zoneId());
+					}
+				}
+
+				return true;
+			} catch( Error &e ) {
+				wait( tr.onError(e) );
+			}
+		}
+	}
+
 	typedef std::pair<WorkerInterface, ProcessClass> WorkerClassPair;
 	//Returns true if all machines in the cluster that specified a desired class are operating in that class
 	ACTOR Future<bool> checkUsingDesiredClasses(Database cx, ConsistencyCheckWorkload *self) {
@@ -1226,7 +1270,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state vector<WorkerClassPair> allWorkers = wait(getWorkers(self->dbInfo));
 		state vector<WorkerClassPair> nonExcludedWorkers = wait(getWorkers(self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
 		auto& db = self->dbInfo->get();
-		
+
 		std::map<NetworkAddress, WorkerClassPair> allWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
 		for (auto worker : allWorkers) {

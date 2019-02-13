@@ -6,20 +6,41 @@ set(VEXILLOGRAPHER_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/ruby.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/vexillographer.cs)
 
-set(VEXILLOGRAPHER_REFERENCES "-r:System,System.Core,System.Data,System.Xml,System.Xml.Linq")
-set(VEXILLOGRAPHER_EXE "${CMAKE_CURRENT_BINARY_DIR}/vexillographer.exe")
-add_custom_command(OUTPUT ${VEXILLOGRAPHER_EXE}
-  COMMAND ${MCS_EXECUTABLE} ARGS ${VEXILLOGRAPHER_REFERENCES} ${VEXILLOGRAPHER_SRCS} -target:exe -out:${VEXILLOGRAPHER_EXE}
-  DEPENDS ${VEXILLOGRAPHER_SRCS}
-  COMMENT "Compile Vexillographer")
-add_custom_target(vexillographer DEPENDS ${VEXILLOGRAPHER_EXE})
+if(WIN32)
+  add_executable(vexillographer ${VEXILLOGRAPHER_SRCS})
+  target_compile_options(vexillographer PRIVATE  "/langversion:6")
+  set_property(TARGET vexillographer PROPERTY VS_DOTNET_REFERENCES
+    "System"
+    "System.Core"
+    "System.Data"
+    "System.Xml"
+    "System.Xml.Linq")
+else()
+  set(VEXILLOGRAPHER_REFERENCES "-r:System,System.Core,System.Data,System.Xml,System.Xml.Linq")
+  set(VEXILLOGRAPHER_EXE "${CMAKE_CURRENT_BINARY_DIR}/vexillographer.exe")
+  add_custom_command(OUTPUT ${VEXILLOGRAPHER_EXE}
+    COMMAND ${MCS_EXECUTABLE} ARGS ${VEXILLOGRAPHER_REFERENCES} ${VEXILLOGRAPHER_SRCS} -target:exe -out:${VEXILLOGRAPHER_EXE}
+    DEPENDS ${VEXILLOGRAPHER_SRCS}
+    COMMENT "Compile Vexillographer")
+  add_custom_target(vexillographer DEPENDS ${VEXILLOGRAPHER_EXE})
+endif()
 
-set(ERROR_GEN_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/flow/error_gen.cs)
-set(ERROR_GEN_REFERENCES "-r:System,System.Core,System.Data,System.Xml,System.Xml.Linq")
-set(ERROR_GEN_EXE "${CMAKE_CURRENT_BINARY_DIR}/error_gen.exe")
-add_custom_command (OUTPUT ${ERROR_GEN_EXE}
-  COMMAND ${MCS_EXECUTABLE} ARGS ${ERROR_GEN_REFERENCES} ${ERROR_GEN_SRCS} -target:exe -out:${ERROR_GEN_EXE}
-  DEPENDS ${ERROR_GEN_SRCS}
-  COMMENT "Compile error_gen")
-add_custom_target(error_gen DEPENDS ${ERROR_GEN_EXE})
+macro(vexillographer_compile)
+  set(CX_ONE_VALUE_ARGS TARGET LANG OUT)
+  set(CX_MULTI_VALUE_ARGS OUTPUT)
+  cmake_parse_arguments(VX "" "${CX_ONE_VALUE_ARGS}" "${CX_MULTI_VALUE_ARGS}" "${ARGN}")
+  if(WIN32)
+    add_custom_command(
+      OUTPUT ${VX_OUTPUT}
+      COMMAND $<TARGET_FILE:vexillographer> ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG} ${VX_OUT}
+      DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
+      COMMENT "Generate FDBOptions ${VX_LANG} files")
+  else()
+    add_custom_command(
+      OUTPUT ${VX_OUTPUT}
+      COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG} ${VX_OUT}
+      DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
+      COMMENT "Generate FDBOptions ${VX_LANG} files")
+  endif()
+  add_custom_target(${VX_TARGET} DEPENDS ${VX_OUTPUT})
+endmacro()

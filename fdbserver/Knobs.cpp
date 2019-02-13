@@ -402,6 +402,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
+	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 
 	// IPager

@@ -396,8 +396,7 @@ ACTOR Future<Message> getMessage(Transaction *tr, Feed feed, MessageId id) {
 	return m;
 }
 
-Future<std::vector<Message>> _listInboxMessages(Database const& cx,
-	uint64_t const& inbox, int const& count, uint64_t const& cursor);
+ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int count, uint64_t cursor);
 
 // inboxes with MANY fast feeds may be punished by the following checks
 // SOMEDAY: add a check on global lists (or on dispatching list)

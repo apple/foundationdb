@@ -225,7 +225,7 @@ struct PingWorkload : TestWorkload {
 	}
 
 	// ACTOR Future<Void> receptionLogger( PingWorkload* self, Future<PingReply> done, NetworkAddress to, UID id ) {
-	// 	PingReply _ = wait( done );
+	// 	wait(success( done ));
 	// 	if( now() > self->testStart + 29 && now() < self->testStart + 31 )
 	// 		TraceEvent("PayloadReplyReceived", id).detail("To", to);
 	// 	return Void();

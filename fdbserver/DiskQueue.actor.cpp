@@ -410,7 +410,7 @@ public:
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
 		state Error error = success();
 		try {
-			ErrorOr<Void> _ = wait(errorOr(self->lastCommit));
+			wait(success(errorOr(self->lastCommit)));
 			while (self->recoveryActorCount.get(false))
 				wait( self->recoveryActorCount.onChange(false) );
 
@@ -704,9 +704,9 @@ public:
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
-			anyPopped = false;
 			addEmptyPage();
 		}
+		anyPopped = false;
 		backPage().popped = poppedSeq;
 		backPage().zeroPad();
 		backPage().updateHash();
@@ -732,6 +732,7 @@ public:
 		pushed_page_buffer = 0;
 		return f;
 	}
+
 	void stall() {
 		rawQueue->stall();
 	}
@@ -827,15 +828,15 @@ private:
 		}
 	}
 
-	void readFromBuffer( StringBuffer& result, int& bytes ) {
+	void readFromBuffer( StringBuffer* result, int* bytes ) {
 		// extract up to bytes from readBufPage into result
-		int len = std::min( readBufPage->payloadSize - readBufPos, bytes );
+		int len = std::min( readBufPage->payloadSize - readBufPos, *bytes );
 		if (len<=0) return;
 
-		result.append( StringRef(readBufPage->payload+readBufPos, len) );
+		result->append( StringRef(readBufPage->payload+readBufPos, len) );
 
 		readBufPos += len;
-		bytes -= len;
+		*bytes -= len;
 		nextReadLocation += len;
 	}
 
@@ -865,7 +866,7 @@ private:
 
 		loop {
 			if (self->readBufPage) {
-				self->readFromBuffer( result, bytes );
+				self->readFromBuffer( &result, &bytes );
 				// if done, return
 				if (!bytes) return result.str;
 				ASSERT( self->readBufPos == self->readBufPage->payloadSize );
@@ -898,7 +899,7 @@ private:
 		// The fully durable popped point is self->lastPoppedSeq; tell the raw queue that.
 		int f; int64_t p;
 		TEST( self->lastPoppedSeq/sizeof(Page) != self->poppedSeq/sizeof(Page) );  // DiskQueue: Recovery popped position not fully durable
-		self->findPhysicalLocation( self->lastPoppedSeq, f, p, "lastPoppedSeq" );
+		self->findPhysicalLocation( self->lastPoppedSeq, &f, &p, "lastPoppedSeq" );
 		wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
 
 		// Writes go at the end of our reads (but on the next page)
@@ -940,20 +941,20 @@ private:
 		for( fileNum=0; fileNum<2; fileNum++) {
 			state int sizeNum;
 			for( sizeNum=0; sizeNum < self->rawQueue->files[fileNum].size; sizeNum += sizeof(Page) ) {
-				int _ = wait( self->rawQueue->files[fileNum].f->read( testPage.get(), sizeof(Page), sizeNum ) );
+				wait(success( self->rawQueue->files[fileNum].f->read( testPage.get(), sizeof(Page), sizeNum ) ));
 				TraceEvent("PageData").detail("File", self->rawQueue->files[fileNum].dbgFilename).detail("SizeNum", sizeNum).detail("Seq", testPage->seq).detail("Hash", testPage->checkHash()).detail("Popped", testPage->popped);
 			}
 		}
 		*/
 
 		int file; int64_t page;
-		self->findPhysicalLocation( self->poppedSeq, file, page, "poppedSeq" );
+		self->findPhysicalLocation( self->poppedSeq, &file, &page, "poppedSeq" );
 		self->rawQueue->setStartPage( file, page );
 
 		return true;
 	}
 
-	void findPhysicalLocation( loc_t loc, int& file, int64_t& page, const char* context ) {
+	void findPhysicalLocation( loc_t loc, int* file, int64_t* page, const char* context ) {
 		bool ok = false;
 		Page*p = (Page*)recoveryFirstPages.begin();
 
@@ -969,11 +970,11 @@ private:
 
 		for(int i=recoveryFirstPages.size() / sizeof(Page) - 2; i>=0; i--)
 			if ( p[i].checkHash() && p[i].seq <= (size_t)loc ) {
-				file = i;
-				page = (loc - p[i].seq)/sizeof(Page);
+				*file = i;
+				*page = (loc - p[i].seq)/sizeof(Page);
 				TraceEvent("FoundPhysicalLocation", dbgid)
 					.detail("PageIndex", i)
-					.detail("PageLocation", page)
+					.detail("PageLocation", *page)
 					.detail("RecoveryFirstPagesSize", recoveryFirstPages.size())
 					.detail("SizeofPage", sizeof(Page))
 					.detail("PageSequence", p[i].seq)
@@ -1007,7 +1008,7 @@ private:
 	RawDiskQueue_TwoFiles *rawQueue;
 	UID dbgid;
 
-	bool anyPopped;  // pop() has been called since the most recent commit()
+	bool anyPopped;  // pop() has been called since the most recent call to commit()
 	bool warnAlwaysForMemory;
 	loc_t nextPageSeq, poppedSeq;
 	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called
