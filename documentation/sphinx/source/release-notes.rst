@@ -8,9 +8,10 @@ Release Notes
 Fixes
 -----
 
+* The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. `(PR #1053) <https://github.com/apple/foundationdb/pull/1053>`_
 * The ``include`` command in fdbcli would falsly include all machines with IP addresses that
   have the included IP address as a prefix (for example ``include 1.0.0.1`` would also include
-  ``1.0.0.10``) `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
+  ``1.0.0.10``). `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
 
 6.0.18
 ======
