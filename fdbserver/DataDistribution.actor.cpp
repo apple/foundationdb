@@ -3380,7 +3380,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	self->addActor.send( configurationMonitor( self ) );
 
 	loop choose {
-		when ( wait( self->configurationTrigger.onTrigger() ) ) {
+		when ( wait( self->configuration.onChange() ) ) {
 			self->refreshDcIds();
 			break;
 		}
