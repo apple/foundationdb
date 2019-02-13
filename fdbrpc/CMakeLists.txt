@@ -33,9 +33,7 @@ set(FDBRPC_SRCS
   TraceFileIO.cpp
   # C files
   libcoroutine/Common.c
-  libcoroutine/context.c
   libcoroutine/Coro.c
-  libeio/eio.c
   zlib/adler32.c
   zlib/crc32.c
   zlib/deflate.c
@@ -51,7 +49,10 @@ set(FDBRPC_SRCS
   zlib/zutil.c)
 
 if(APPLE)
-  list(APPEND FDBRPC_SRCS libcoroutine/asm.S libcoroutine/context.c)
+  list(APPEND FDBRPC_SRCS libcoroutine/asm.S)
+endif()
+if(NOT WIN32)
+  list(APPEND FDBRPC_SRCS libcoroutine/context.c libeio/eio.c)
 endif()
 
 actor_set(FDBRPC_BUILD "${FDBRPC_SRCS}")

@@ -47,9 +47,8 @@
 #include "flow/FaultInjection.h"
 
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
-#undef max
-#undef min
 #include <io.h>
 #include <psapi.h>
 #include <stdio.h>
@@ -2594,13 +2593,13 @@ extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
 extern volatile double net2liveness;
-extern volatile int profilingEnabled;
+extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
 volatile thread_local bool profileThread = false;
 #endif
 
-volatile int profilingEnabled = 1;
+volatile thread_local int profilingEnabled = 1;
 
 void setProfilingEnabled(int enabled) { 
 	profilingEnabled = enabled; 

@@ -85,7 +85,7 @@ Specifying the cluster file
 All FoundationDB components can be configured to use a specified cluster file: 
 
 * The ``fdbcli`` tool allows a cluster file to be passed on the command line using the ``-C`` option.
-* The :doc:`client APIs <api-reference>` allow a cluster file to be passed when connecting to a cluster, usually via ``open()`` or ``create_cluster()``.
+* The :doc:`client APIs <api-reference>` allow a cluster file to be passed when connecting to a cluster, usually via ``open()``.
 * A FoundationDB server or ``backup-agent`` allow a cluster file to be specified in :ref:`foundationdb.conf <foundationdb-conf>`.
 
 In addition, FoundationDB allows you to use the environment variable ``FDB_CLUSTER_FILE`` to specify a cluster file. This approach is helpful if you operate or access more than one cluster.

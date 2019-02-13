@@ -29,6 +29,7 @@
 #include <string>
 #include <cstring>
 #include <deque>
+#include <random>
 #include "flow/UnitTest.h"
 
 template <class Node>
@@ -383,11 +384,12 @@ TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 
 TEST_CASE("/flow/IndexedSet/all numbers") {
 	IndexedSet<int, int64_t> is;
+	std::mt19937_64 urng(g_random->randomUInt32());
 
 	std::vector<int> allNumbers;
 	for (int i = 0; i<1000000; i++)
 		allNumbers.push_back(i);
-	std::random_shuffle(allNumbers.begin(), allNumbers.end());
+	std::shuffle(allNumbers.begin(), allNumbers.end(), urng);
 
 	for (int i = 0; i<allNumbers.size(); i++)
 		is.insert(allNumbers[i], allNumbers[i]);

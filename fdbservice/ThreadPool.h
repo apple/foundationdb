@@ -52,7 +52,7 @@ public:
         T *object, ULONG flags = WT_EXECUTELONGFUNCTION)
     {
         typedef std::pair<void (T::*)(), T *> CallbackType;
-        std::auto_ptr<CallbackType> p(new CallbackType(function, object));
+        std::unique_ptr<CallbackType> p(new CallbackType(function, object));
 
         if (::QueueUserWorkItem(ThreadProc<T>, p.get(), flags))
         {
@@ -72,7 +72,7 @@ private:
     {
         typedef std::pair<void (T::*)(), T *> CallbackType;
 
-        std::auto_ptr<CallbackType> p(static_cast<CallbackType *>(context));
+        std::unique_ptr<CallbackType> p(static_cast<CallbackType *>(context));
 
         (p->second->*p->first)();
         return 0;

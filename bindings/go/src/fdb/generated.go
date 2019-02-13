@@ -92,6 +92,13 @@ func (o NetworkOptions) SetTraceLogGroup(param string) error {
 	return o.setOpt(33, []byte(param))
 }
 
+// Selects trace output format for this client. xml (the default) and json are supported.
+//
+// Parameter: trace format
+func (o NetworkOptions) SetTraceFormat(param string) error {
+	return o.setOpt(34, []byte(param))
+}
+
 // Set internal tuning or debugging knobs
 //
 // Parameter: knob_name=knob_value

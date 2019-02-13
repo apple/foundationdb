@@ -34,8 +34,7 @@ THREAD_FUNC networkThread(void* fdb) {
 
 ACTOR Future<Void> _test() {
 	API *fdb = FDB::API::selectAPIVersion(610);
-	auto c = fdb->createCluster( std::string() );
-	auto db = c->createDatabase();
+	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr( new Transaction(db) );
 
 	// tr->setVersion(1);
@@ -189,13 +188,13 @@ namespace FDB {
 	}
 
 	Reference<Cluster> API::createCluster( std::string const& connFilename ) {
-		CFuture f( fdb_create_cluster( connFilename.c_str() ) );
-		f.blockUntilReady();
+		return Reference<Cluster>(new Cluster(connFilename));
+	}
 
-		FDBCluster* c;
-		throw_on_error( fdb_future_get_cluster( f.f, &c ) );
-
-		return Reference<Cluster>( new Cluster(c) );
+	Reference<DatabaseContext> API::createDatabase(std::string const& connFilename) {
+		FDBDatabase *db;
+		throw_on_error(fdb_create_database(connFilename.c_str(), &db));
+		return Reference<DatabaseContext>(new DatabaseContext(db));
 	}
 
 	int API::getAPIVersion() const {
@@ -203,14 +202,7 @@ namespace FDB {
 	}
 
 	Reference<DatabaseContext> Cluster::createDatabase() {
-		const char *dbName = "DB";
-		CFuture f( fdb_cluster_create_database( c, (uint8_t*)dbName, (int)strlen(dbName) ) );
-		f.blockUntilReady();
-
-		FDBDatabase* db;
-		throw_on_error( fdb_future_get_database( f.f, &db ) );
-
-		return Reference<DatabaseContext>( new DatabaseContext(db) );
+		return API::getInstance()->createDatabase(connFilename.c_str());
 	}
 
 	void DatabaseContext::setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value) {

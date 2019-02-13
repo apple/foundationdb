@@ -45,7 +45,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 	virtual std::string description() { return "MoveKeysWorkload"; }
 	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) { 
+	virtual Future<Void> start( Database const& cx ) {
 		return _start( cx, this );
 	}
 
@@ -70,7 +70,7 @@ struct MoveKeysWorkload : TestWorkload {
 			wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
-			int _ = wait( setDDMode( cx, oldMode ) );
+			wait(success( setDDMode( cx, oldMode ) ));
 			TraceEvent("RMKDoneModeSetting");
 		}
 		return Void();
@@ -130,7 +130,7 @@ struct MoveKeysWorkload : TestWorkload {
 			.detail("Priority", 0)
 			.detail("Source", "RandomMoveKeys")
 			.detail("DestinationTeam", desc);
-			
+
 		try {
 			state Promise<Void> signal;
 			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, invalidVersion, false, relocateShardInterval.pairID ) );
@@ -159,7 +159,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure( Database cx, MoveKeysWorkload *self ) {
 		ASSERT( g_network->isSimulated() );
 		loop {
-			if( g_simulator.killMachine( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
+			if( g_simulator.killZone( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
 				return Void();
 			wait( delay(1.0) );
 		}
@@ -176,7 +176,7 @@ struct MoveKeysWorkload : TestWorkload {
 			return Void();
 		}
 
-		loop { 
+		loop {
 			try {
 				state MoveKeysLock lock = wait( takeMoveKeysLock(cx, UID()) );
 				state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
