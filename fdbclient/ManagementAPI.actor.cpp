@@ -1522,7 +1522,7 @@ ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) 
 		wait(clusterInterface->onChange());
 	}
 
-	ErrorOr<Void> _ = wait(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() ));
+	wait(success(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() )));
 	return Void();
 }
 

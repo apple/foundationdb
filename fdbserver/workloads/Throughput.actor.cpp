@@ -92,7 +92,7 @@ struct RWTransactor : ITransactor {
 		loop {
 			try {
 				state double t_start = now();
-				Version _ = wait( tr.getReadVersion() );
+				wait(success( tr.getReadVersion() ));
 				state double t_rv = now();
 				state double rrLatency = -t_rv * self->reads;
 

@@ -1201,7 +1201,7 @@ namespace fileBackup {
 
 			if (nextKey != endKey) {
 				// Add task to cover nextKey to the end, using the priority of the current task
-				Key _ = wait(addTask(tr, taskBucket, task, task->getPriority(), nextKey, endKey, TaskCompletionKey::joinWith(onDone), Reference<TaskFuture>(), task->getPriority()));
+				wait(success(addTask(tr, taskBucket, task, task->getPriority(), nextKey, endKey, TaskCompletionKey::joinWith(onDone), Reference<TaskFuture>(), task->getPriority())));
 			}
 
 			return Void();
@@ -2051,13 +2051,13 @@ namespace fileBackup {
 			state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run after this batch is done
-			Key _ = wait(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture)));
-			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture));
+			wait(success(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture))));
+			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture)));
 
 			// Do not erase at the first time
 			if (prevBeginVersion > 0) {
 				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-				Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), destUidValue, beginVersion));
+				wait(success(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), destUidValue, beginVersion)));
 			}
 
 			wait(taskBucket->finish(tr, task));
@@ -2108,7 +2108,7 @@ namespace fileBackup {
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
-			Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, backup.getUid(), TaskCompletionKey::noSignal(), destUidValue));
+			wait(success(EraseLogRangeTaskFunc::addTask(tr, taskBucket, backup.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
 			
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -2348,12 +2348,12 @@ namespace fileBackup {
 			wait(config.initNewSnapshot(tr, 0));
 
 			// Using priority 1 for both of these to at least start both tasks soon
-			Key _ = wait(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished)));
-			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
+			wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
 			// task will clean up and set the completed state.
-			Key _ = wait(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished));
+			wait(success(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
 			wait(taskBucket->finish(tr, task));
 			return Void();
@@ -2845,7 +2845,7 @@ namespace fileBackup {
 			if(!addingToExistingBatch && applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 				// Wait a small amount of time and then re-add this same task.
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize, remainingInBatch));
+				wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize, remainingInBatch)));
 
 				TraceEvent("FileRestoreDispatch")
 					.detail("RestoreUID", restore.getUid())
@@ -2885,7 +2885,7 @@ namespace fileBackup {
 				// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits for them to finish
 				if(addingToExistingBatch) {
 					// Setting next begin to restoreVersion + 1 so that any files in the file map at the restore version won't be dispatched again.
-					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion + 1, "", 0, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
+					wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion + 1, "", 0, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone)));
 
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
@@ -2899,7 +2899,7 @@ namespace fileBackup {
 				}
 				else if(beginVersion < restoreVersion) {
 					// If beginVersion is less than restoreVersion then do one more dispatch task to get there
-					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize));
+					wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize)));
 
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
@@ -2913,7 +2913,7 @@ namespace fileBackup {
 				}
 				else if(applyLag == 0) {
 					// If apply lag is 0 then we are done so create the completion task
-					Key _ = wait(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
+					wait(success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
 
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
@@ -2926,7 +2926,7 @@ namespace fileBackup {
 				} else {
 					// Applying of mutations is not yet finished so wait a small amount of time and then re-add this same task.
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize));
+					wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize)));
 
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
@@ -3320,7 +3320,7 @@ namespace fileBackup {
 			if(firstVersion == invalidVersion) {
 				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
 				std::string tag = wait(restore.tag().getD(tr));
-				ERestoreState _ = wait(abortRestore(tr, StringRef(tag)));
+				wait(success(abortRestore(tr, StringRef(tag))));
 				return Void();
 			}
 
@@ -3331,7 +3331,7 @@ namespace fileBackup {
 			restore.setApplyEndVersion(tr, firstVersion);
 
 			// Apply range data and log data in order
-			Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE));
+			wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 			wait(taskBucket->finish(tr, task));
 			return Void();
@@ -3672,7 +3672,7 @@ public:
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 			state Version endVersion = wait(tr->getReadVersion());
 
-			Key _ = wait(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue));
+			wait(success(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
 
 			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3712,7 +3712,7 @@ public:
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
 
-		Key _ = wait(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue));
+		wait(success(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
@@ -4010,7 +4010,7 @@ public:
 			}
 		}
 
-		int _ = wait( waitBackup(backupAgent, cx, tagName.toString(), true) );
+		wait(success( waitBackup(backupAgent, cx, tagName.toString(), true) ));
 		TraceEvent("AS_BackupStopped");
 
 		ryw_tr->reset();

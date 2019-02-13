@@ -2592,7 +2592,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if( tokencmp(tokens[0], "waitopen")) {
-					Version _ = wait( getTransaction(db,tr,options,intrans)->getReadVersion() );
+					wait(success( getTransaction(db,tr,options,intrans)->getReadVersion() ));
 					continue;
 				}
 
@@ -3203,10 +3203,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						if(tokencmp(tokens[1], "on")) {
-							int _ = wait(setDDMode(db, 1));
+							wait(success(setDDMode(db, 1)));
 							printf("Data distribution is enabled\n");
 						} else if(tokencmp(tokens[1], "off")) {
-							int _ = wait(setDDMode(db, 0));
+							wait(success(setDDMode(db, 0)));
 							printf("Data distribution is disabled\n");
 						} else {
 							printf("Usage: datadistribution <on|off>\n");
