@@ -12,12 +12,14 @@ services:
     working_dir: /foundationdb
     environment:
       - MAKEJOBS=1
+      - BUILD_DIR=./work
 
   release-setup: &release-setup
     <<: *build-setup
     environment:
       - MAKEJOBS=1
       - RELEASE=true
+      - BUILD_DIR=./work
 
   snapshot-setup: &snapshot-setup
     <<: *build-setup
@@ -53,7 +55,7 @@ services:
 
   snapshot-cmake: &snapshot-cmake
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p work && cd work && cmake .. && make -j "$${MAKEJOBS}"; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}"; fi'
 
   prb-cmake:
     <<: *snapshot-cmake
@@ -61,7 +63,7 @@ services:
 
   snapshot-ctest: &snapshot-ctest
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p work && cd work && cmake .. && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
 
   prb-ctest:
     <<: *snapshot-ctest
@@ -69,7 +71,7 @@ services:
 
   snapshot-correctness: &snapshot-correctness
     <<: *build-setup
-    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p work && cd work && cmake .. && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
 
   prb-correctness:
     <<: *snapshot-correctness
