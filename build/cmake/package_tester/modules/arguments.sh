@@ -23,6 +23,11 @@ usage: test_packages.sh [-h] [commands]
        -n TESTS: Colon separated list of test names
                  to run (will run all if this option
                  is not set)
+       -j NUM    Number of threads the tester should
+                 run in parallel.
+       -P STR    Pruning strategy for docker container
+                 (Can be ALL|FAILED|SUCCEEDED|NONE)
+                 Defaults to "SUCCEEDED"
 
        Will execute the passed commands
        in the order they were passed
@@ -33,7 +38,9 @@ EOF
         local __res=0
         run_deb_tests=1
         run_rpm_tests=1
-        while getopts ":hb:s:t:" opt
+        docker_parallelism=1
+        pruning_strategy=SUCCEEDED
+        while getopts ":hb:s:p:c:t:n:j:P:" opt
         do
             case ${opt} in
                 h )
@@ -69,6 +76,27 @@ EOF
                     ;;
                 n )
                     tests_to_run="${OPTARG}"
+                    ;;
+                j )
+                    docker_parallelism="${OPTARG}"
+                    if [[ $docker_parallelism =~ "^[0-9]+$" ]]
+                    then
+                        echo -e "${RED}Error: -j expects a number, ${OPTARG}, is not a number" >&2
+                        __res=1
+                        break
+                    elif [ $docker_parallelism -lt 1 ]
+                    then
+                        echo -e "${RED}Error: -j ${OPTARG} makes no sense" >&2
+                        __res=1
+                        break
+                    fi
+                    ;;
+                P )
+                    pruning_strategy="${OPTARG}"
+                    if ! [[ "${pruning_strategy}" =~ ^(ALL|FAILED|SUCCEEDED|NONE)$ ]]
+                    then
+                        fail "Unknown pruning strategy ${pruning_strategy}"
+                    fi
                     ;;
                 \? )
                     curr_index="$((OPTIND-1))"

@@ -10,6 +10,7 @@ then
     YELLOW='\033[1;33m'
     NC='\033[0m' # No Color
 
+
     enterfun() {
         pushd . > /dev/null
     }
@@ -29,7 +30,7 @@ then
         then
             if [ "$#" -gt 1 ]
             then
-                echo -e "${RED}${@:1}${NC}"
+                >&2 echo -e "${RED}${@:1} ${NC}"
             fi
             exit ${__res}
         fi

@@ -48,9 +48,9 @@ then
         desired_state "${new_state}"
         ${test_name}
         success ${test_name} Failed
-        echo -e "${GREEN}======================================================================="
-        echo -e "Test $t successfully finished"
-        echo -e "=======================================================================${NC}"
+        echo  "======================================================================="
+        echo  "Test $t successfully finished"
+        echo  "======================================================================="
         current_state="${test_exit_state[${test_name}]}"
     }
 fi
