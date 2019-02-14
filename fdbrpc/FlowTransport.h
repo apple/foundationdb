@@ -44,6 +44,17 @@ public:
 		if(addresses.size() < 2) {
 			return;
 		}
+
+		if (g_network->getLocalAddresses().size() == 0) {
+			// At client, we always prefer non-TLS ports during TLS transition.
+			for (int i = 1; addresses[0].isTLS() && i < addresses.size(); i++) {
+				if (!addresses[i].isTLS()) {
+					std::swap(addresses[0], addresses[i]);
+				}
+			}
+			return;
+		}
+
 		for(int i = 0; i < addresses.size(); i++) {
 			bool compatible = false;
 			for(auto& addr : g_network->getLocalAddresses()) {
