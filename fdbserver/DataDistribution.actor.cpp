@@ -887,6 +887,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 
 			req.reply.send( bestOption );
+			// TODO: Remove this and track down where we should put the teamRemover
 			// We may create a new team to get a team, check if the team number is above the desired number
 			if (self->redundantTeamRemover.isReady()) {
 				self->redundantTeamRemover = teamRemover(self);
@@ -2036,8 +2037,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
+		ASSERT_WE_THINK(foundInMachineTeam);
 		team->tracker.cancel();
-		return found && foundInMachineTeam;
+		return found;
 	}
 
 	// Check if the server belongs to a machine; if not, create the machine.

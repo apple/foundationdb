@@ -739,7 +739,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 	// if we do not remove the surplus server and machine teams, the simulation test will report error.
 	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
-	bool generateMachineTeamTestConfig = (BUGGIFY && g_random->random01() < 0.1) ? true : false;
+	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
 	bool generateFearless = simple ? false : (minimumRegions > 1 || g_random->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 ) );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
