@@ -26,6 +26,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/LatencyBandConfig.h"
 
 struct ServerDBInfo {
 	// This structure contains transient information which is broadcast to all workers for a database,
@@ -43,6 +44,7 @@ struct ServerDBInfo {
 	LocalityData myLocality;       // (Not serialized) Locality information, if available, for the *local* process
 	LogSystemConfig logSystemConfig;
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
+	Optional<LatencyBandConfig> latencyBandConfig;
 
 	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
 
@@ -51,7 +53,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, master, resolvers, recoveryCount, masterLifetime, logSystemConfig, priorCommittedLogServers, recoveryState);
+		serializer(ar, id, clusterInterface, client, master, resolvers, recoveryCount, masterLifetime, logSystemConfig, priorCommittedLogServers, recoveryState, latencyBandConfig);
 	}
 };
 

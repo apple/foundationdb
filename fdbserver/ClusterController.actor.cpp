@@ -30,6 +30,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
+#include "fdbserver/LatencyBandConfig.h"
 #include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
@@ -1969,6 +1970,43 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
+	loop {
+		state ReadYourWritesTransaction tr(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
+				Optional<LatencyBandConfig> config;
+				if(configVal.present()) {
+					config = LatencyBandConfig::parse(configVal.get());
+				}
+
+				ServerDBInfo serverInfo = db->serverInfo->get();
+				if(config != serverInfo.latencyBandConfig) {
+					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
+					serverInfo.id = g_random->randomUniqueID();
+					serverInfo.latencyBandConfig = config;
+					db->serverInfo->set(serverInfo);
+				}
+
+				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
+
+				wait(tr.commit());
+				wait(configChangeFuture);
+
+				break;
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));		
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
@@ -2192,6 +2230,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
 	addActor.send( timeKeeper(&self) );
 	addActor.send( monitorProcessClasses(&self) );
+	addActor.send( monitorServerInfoConfig(&self.db) );
 	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	addActor.send( updatedChangingDatacenters(&self) );
 	addActor.send( updatedChangedDatacenters(&self) );

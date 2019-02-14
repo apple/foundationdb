@@ -1,3 +1,4 @@
+
 /*
  * MasterProxyInterface.h
  *
@@ -25,6 +26,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+
+#include "flow/Stats.h"
 
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
@@ -74,7 +77,7 @@ struct CommitID {
 	CommitID( Version version, uint16_t txnBatchId ) : version(version), txnBatchId(txnBatchId) {}
 };
 
-struct CommitTransactionRequest {
+struct CommitTransactionRequest : TimedRequest {
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
 		FLAG_FIRST_IN_BATCH = 0x2
@@ -120,7 +123,7 @@ struct GetReadVersionReply {
 	}
 };
 
-struct GetReadVersionRequest {
+struct GetReadVersionRequest : TimedRequest {
 	enum { 
 		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,

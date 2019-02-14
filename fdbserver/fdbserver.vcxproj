@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(SolutionDir)versions.target" />
   <PropertyGroup Condition="'$(Release)' != 'true' ">
@@ -58,6 +58,7 @@
     <ActorCompiler Include="MemoryPager.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ClCompile Include="LatencyBandConfig.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
@@ -163,6 +164,7 @@
     <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="IPager.h" />
     <ClInclude Include="IVersionedStore.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="LogSystem.h" />

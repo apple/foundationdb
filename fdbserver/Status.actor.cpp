@@ -80,7 +80,8 @@ extern int limitReasonEnd;
 extern const char* limitReasonName[];
 extern const char* limitReasonDesc[];
 
-struct WorkerEvents : std::map<NetworkAddress, TraceEventFields>  {};
+struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
+typedef std::map<std::string, TraceEventFields> EventMap;
 
 ACTOR static Future< Optional<TraceEventFields> > latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
@@ -160,39 +161,52 @@ static Optional<std::pair<WorkerInterface, ProcessClass>> getWorker(std::map<Net
 }
 
 class StatusCounter {
-	public:
-		StatusCounter(double hz=0.0, double roughness=0.0, int64_t counter=0) : _hz(hz), _roughness(roughness), _counter(counter) {}
-		StatusCounter(const std::string& parsableText) {
-			parseText(parsableText);
-		}
+public:
+	StatusCounter() : hz(0), roughness(0), counter(0) {}
+	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
+	StatusCounter(const std::string& parsableText) {
+		parseText(parsableText);
+	}
 
-		StatusCounter& parseText(const std::string& parsableText) {
-			sscanf(parsableText.c_str(), "%lf %lf %lld", &_hz, &_roughness, &_counter);
-			return *this;
-		}
+	StatusCounter& parseText(const std::string& parsableText) {
+		sscanf(parsableText.c_str(), "%lf %lf %lld", &hz, &roughness, &counter);
+		return *this;
+	}
 
-		StatusCounter& updateValues(const StatusCounter& statusCounter) {
-			double hzNew = _hz + statusCounter._hz;
-			double roughnessNew = (_hz + statusCounter._hz) ? (_roughness*_hz + statusCounter._roughness*statusCounter._hz) / (_hz + statusCounter._hz) : 0.0;
-			int64_t counterNew = _counter + statusCounter._counter;
-			_hz = hzNew;
-			_roughness = roughnessNew;
-			_counter = counterNew;
-			return *this;
-		}
+	StatusCounter& updateValues(const StatusCounter& statusCounter) {
+		double hzNew = hz + statusCounter.hz;
+		double roughnessNew = (hz + statusCounter.hz) ? (roughness*hz + statusCounter.roughness*statusCounter.hz) / (hz + statusCounter.hz) : 0.0;
+		int64_t counterNew = counter + statusCounter.counter;
+		hz = hzNew;
+		roughness = roughnessNew;
+		counter = counterNew;
+		return *this;
+	}
 
-		JsonBuilderObject getStatus() const {
-			JsonBuilderObject statusObject;
-			statusObject["hz"] = _hz;
-			statusObject["roughness"] = _roughness;
-			statusObject["counter"] = _counter;
-			return statusObject;
-		}
+	JsonBuilderObject getStatus() const {
+		JsonBuilderObject statusObject;
+		statusObject["hz"] = hz;
+		statusObject["roughness"] = roughness;
+		statusObject["counter"] = counter;
+		return statusObject;
+	}
 
-	protected:
-		double	_hz;
-		double	_roughness;
-		int64_t	_counter;
+	double getHz() {
+		return hz;
+	}
+
+	double getRoughness() {
+		return roughness;
+	}
+
+	int64_t getCounter() {
+		return counter;
+	}
+
+protected:
+	double hz;
+	double roughness;
+	int64_t counter;
 };
 
 static double parseDouble(std::string const& s, bool permissive = false) {
@@ -290,7 +304,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 	std::map<std::string, int32_t> workerContribMap;
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
-	for (auto worker : workers){
+	for (auto const& worker : workers){
 		locality[worker.first.address()] = worker.first.locality;
 		if (worker.first.locality.dcId().present())
 			dcIds[worker.first.address()] = worker.first.locality.dcId().get().printable();
@@ -394,40 +408,65 @@ struct MachineMemoryInfo {
 
 struct RolesInfo {
 	std::multimap<NetworkAddress, JsonBuilderObject> roles;
+
+	JsonBuilderObject addLatencyBandInfo(TraceEventFields const& metrics) {
+		JsonBuilderObject latency;
+		std::map<std::string, JsonBuilderObject> bands;
+
+		for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
+			std::string band;
+			if(itr->first.substr(0, 4) == "Band") {
+				band = itr->first.substr(4);
+			}
+			else if(itr->first == "Filtered") {
+				band = "filtered";
+			}
+			else {
+				continue;
+			}
+
+			latency[band] = StatusCounter(itr->second).getCounter();
+		}
+
+		return latency;
+	}
+
 	JsonBuilderObject& addRole( NetworkAddress address, std::string const& role, UID id) {
 		JsonBuilderObject obj;
 		obj["id"] = id.shortString();
 		obj["role"] = role;
 		return roles.insert( std::make_pair(address, obj ))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, StorageServerInterface& iface, TraceEventFields const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
+	JsonBuilderObject& addRole(std::string const& role, StorageServerInterface& iface, EventMap const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
 		JsonBuilderObject obj;
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj.setKeyRawNumber("stored_bytes", metrics.getValue("BytesStored"));
-			obj.setKeyRawNumber("kvstore_used_bytes", metrics.getValue("KvstoreBytesUsed"));
-			obj.setKeyRawNumber("kvstore_free_bytes", metrics.getValue("KvstoreBytesFree"));
-			obj.setKeyRawNumber("kvstore_available_bytes", metrics.getValue("KvstoreBytesAvailable"));
-			obj.setKeyRawNumber("kvstore_total_bytes", metrics.getValue("KvstoreBytesTotal"));
-			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
-			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
-			obj.setKeyRawNumber("query_queue_max", metrics.getValue("QueryQueueMax"));
-			obj["total_queries"] = StatusCounter(metrics.getValue("QueryQueue")).getStatus();
-			obj["finished_queries"] = StatusCounter(metrics.getValue("FinishedQueries")).getStatus();
-			obj["bytes_queried"] = StatusCounter(metrics.getValue("BytesQueried")).getStatus();
-			obj["keys_queried"] = StatusCounter(metrics.getValue("RowsQueried")).getStatus();
-			obj["mutation_bytes"] = StatusCounter(metrics.getValue("MutationBytes")).getStatus();
-			obj["mutations"] = StatusCounter(metrics.getValue("Mutations")).getStatus();
+			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
 
-			Version version = parseInt64(metrics.getValue("Version"));
-			Version durableVersion = parseInt64(metrics.getValue("DurableVersion"));
+			obj.setKeyRawNumber("stored_bytes", storageMetrics.getValue("BytesStored"));
+			obj.setKeyRawNumber("kvstore_used_bytes", storageMetrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes", storageMetrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes", storageMetrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes", storageMetrics.getValue("KvstoreBytesTotal"));
+			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
+			obj["durable_bytes"] = StatusCounter(storageMetrics.getValue("BytesDurable")).getStatus();
+			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
+			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
+			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
+			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
+			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
+			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
+
+			Version version = parseInt64(storageMetrics.getValue("Version"));
+			Version durableVersion = parseInt64(storageMetrics.getValue("DurableVersion"));
 
 			obj["data_version"] = version;
 			obj["durable_version"] = durableVersion;
 
-			int64_t versionLag = parseInt64(metrics.getValue("VersionLag"));
+			int64_t versionLag = parseInt64(storageMetrics.getValue("VersionLag"));
 			if(maxTLogVersion > 0) {
 				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be aware of how far behind it is.
 				// To account for that, we also compute the version difference between each storage server and the tlog with the largest version.
@@ -435,6 +474,11 @@ struct RolesInfo {
 				// Because this data is only logged periodically, this difference will likely be an overestimate for the lag. We subtract off the logging interval
 				// in order to make this estimate a bounded underestimate instead.
 				versionLag = std::max<int64_t>(versionLag, maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
+			}
+
+			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
+			if(readLatencyMetrics.size()) {
+				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyMetrics);
 			}
 
 			JsonBuilderObject dataLag;
@@ -453,27 +497,32 @@ struct RolesInfo {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
 		}
-		if (pDataLagSeconds)
+
+		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
+		}
+
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, TraceEventFields const& metrics, Version* pMetricVersion) {
+	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, EventMap const& metrics, Version* pMetricVersion) {
 		JsonBuilderObject obj;
 		Version	metricVersion = 0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj.setKeyRawNumber("kvstore_used_bytes",metrics.getValue("KvstoreBytesUsed"));
-			obj.setKeyRawNumber("kvstore_free_bytes",metrics.getValue("KvstoreBytesFree"));
-			obj.setKeyRawNumber("kvstore_available_bytes",metrics.getValue("KvstoreBytesAvailable"));
-			obj.setKeyRawNumber("kvstore_total_bytes",metrics.getValue("KvstoreBytesTotal"));
-			obj.setKeyRawNumber("queue_disk_used_bytes",metrics.getValue("QueueDiskBytesUsed"));
-			obj.setKeyRawNumber("queue_disk_free_bytes",metrics.getValue("QueueDiskBytesFree"));
-			obj.setKeyRawNumber("queue_disk_available_bytes",metrics.getValue("QueueDiskBytesAvailable"));
-			obj.setKeyRawNumber("queue_disk_total_bytes",metrics.getValue("QueueDiskBytesTotal"));
-			obj["input_bytes"] = StatusCounter(metrics.getValue("BytesInput")).getStatus();
-			obj["durable_bytes"] = StatusCounter(metrics.getValue("BytesDurable")).getStatus();
-			metricVersion = parseInt64(metrics.getValue("Version"));
+			TraceEventFields const& tlogMetrics = metrics.at("TLogMetrics");
+
+			obj.setKeyRawNumber("kvstore_used_bytes", tlogMetrics.getValue("KvstoreBytesUsed"));
+			obj.setKeyRawNumber("kvstore_free_bytes", tlogMetrics.getValue("KvstoreBytesFree"));
+			obj.setKeyRawNumber("kvstore_available_bytes", tlogMetrics.getValue("KvstoreBytesAvailable"));
+			obj.setKeyRawNumber("kvstore_total_bytes", tlogMetrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("queue_disk_used_bytes", tlogMetrics.getValue("QueueDiskBytesUsed"));
+			obj.setKeyRawNumber("queue_disk_free_bytes", tlogMetrics.getValue("QueueDiskBytesFree"));
+			obj.setKeyRawNumber("queue_disk_available_bytes", tlogMetrics.getValue("QueueDiskBytesAvailable"));
+			obj.setKeyRawNumber("queue_disk_total_bytes", tlogMetrics.getValue("QueueDiskBytesTotal"));
+			obj["input_bytes"] = StatusCounter(tlogMetrics.getValue("BytesInput")).getStatus();
+			obj["durable_bytes"] = StatusCounter(tlogMetrics.getValue("BytesDurable")).getStatus();
+			metricVersion = parseInt64(tlogMetrics.getValue("Version"));
 			obj["data_version"] = metricVersion;
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
@@ -481,6 +530,28 @@ struct RolesInfo {
 		}
 		if (pMetricVersion)
 			*pMetricVersion = metricVersion;
+		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+	}
+	JsonBuilderObject& addRole(std::string const& role, MasterProxyInterface& iface, EventMap const& metrics) {
+		JsonBuilderObject obj;
+		obj["id"] = iface.id().shortString();
+		obj["role"] = role;
+		try {
+			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
+			if(grvLatencyMetrics.size()) {
+				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyMetrics);
+			}
+
+			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
+			if(commitLatencyMetrics.size()) {
+				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyMetrics);
+			}
+		} catch (Error &e) {
+			if(e.code() != error_code_attribute_not_found) {
+				throw e;
+			}
+		}
+
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
 	template <class InterfaceType>
@@ -507,8 +578,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		WorkerEvents traceFileOpenErrors,
 		WorkerEvents programStarts,
 		std::map<std::string, JsonBuilderObject> processIssues,
-		vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers,
-		vector<std::pair<TLogInterface, TraceEventFields>> tLogs,
+		vector<std::pair<StorageServerInterface, EventMap>> storageServers,
+		vector<std::pair<TLogInterface, EventMap>> tLogs,
+		vector<std::pair<MasterProxyInterface, EventMap>> proxies,
 		Database cx,
 		Optional<DatabaseConfiguration> configuration,
 		std::set<std::string> *incomplete_reasons) {
@@ -567,16 +639,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	roles.addRole("master", db->get().master);
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
 
-	state Reference<ProxyInfo> proxies = cx->getMasterProxies();
-	if (proxies) {
-		state int proxyIndex;
-		for(proxyIndex = 0; proxyIndex < proxies->size(); proxyIndex++) {
-			roles.addRole( "proxy", proxies->getInterface(proxyIndex) );
-			wait(yield());
-		}
+	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
+	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
+		roles.addRole( "proxy", proxy->first, proxy->second );
+		wait(yield());
 	}
 
-	state std::vector<std::pair<TLogInterface, TraceEventFields>>::iterator log;
+	state std::vector<std::pair<TLogInterface, EventMap>>::iterator log;
 	state Version maxTLogVersion = 0;
 
 	// Get largest TLog version
@@ -587,7 +656,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	state std::vector<std::pair<StorageServerInterface, TraceEventFields>>::iterator ss;
+	state std::vector<std::pair<StorageServerInterface, EventMap>>::iterator ss;
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
 	for(ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
@@ -1217,37 +1286,68 @@ namespace std
 }
 
 ACTOR template <class iface>
-static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::string suffix) {
+static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::vector<std::string> eventNames) {
 	state vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
-		futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + suffix));
+		for (auto name : eventNames) {
+			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
+		}
 	}
 
 	wait(waitForAll(futures));
 
-	vector<std::pair<iface, TraceEventFields>> results;
+	vector<std::pair<iface, EventMap>> results;
+	auto futureItr = futures.begin();
+
 	for (int i = 0; i < servers.size(); i++) {
-		results.push_back(std::make_pair(servers[i], futures[i].get().present() ? futures[i].get().get() : TraceEventFields()));
+		EventMap serverResults;
+		for (auto name : eventNames) {
+			ASSERT(futureItr != futures.end());
+			serverResults[name] = futureItr->get().present() ? futureItr->get().get() : TraceEventFields();
+			++futureItr;
+		}
+
+		results.push_back(std::make_pair(servers[i], serverResults));
 	}
+
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<StorageServerInterface, TraceEventFields>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	vector<std::pair<StorageServerInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "/StorageMetrics"));
+	vector<std::pair<StorageServerInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
+		std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics" }));
+
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<TLogInterface, TraceEventFields>>> getTLogsAndMetrics(Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
-	vector<std::pair<TLogInterface, TraceEventFields>> results = wait(getServerMetrics(servers, address_workers, "/TLogMetrics"));
+	vector<std::pair<TLogInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
+		std::vector<std::string>{ "TLogMetrics" }));
+
+	return results;
+}
+
+ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	Reference<ProxyInfo> proxyInfo = cx->getMasterProxies();
+	std::vector<MasterProxyInterface> servers;
+	if(proxyInfo) {
+		for(int i = 0; i < proxyInfo->size(); ++i) {
+			servers.push_back(proxyInfo->getInterface(i));
+		}
+	}
+
+	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(servers, address_workers, 
+		std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
+
 	return results;
 }
 
 static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
 	std::set<StringRef> allMachines;
 	std::map<Key,std::set<StringRef>> dcId_machine;
-	for(auto worker : workers) {
+	for(auto const& worker : workers) {
 		if(worker.second.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
 			&& !configuration.isExcludedServer(worker.first.address()))
 		{
@@ -1284,7 +1384,7 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 }
 
 ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker,
-	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture)
+	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
 {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
@@ -1295,7 +1395,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 	try {
 		vector<Future<TraceEventFields>> proxyStatFutures;
 		std::map<NetworkAddress, std::pair<WorkerInterface, ProcessClass>> workersMap;
-		for (auto w : workers) {
+		for (auto const& w : workers) {
 			workersMap[w.first.address()] = w;
 		}
 		for (auto &p : db->get().client.proxies) {
@@ -1387,7 +1487,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Reads
 	try {
-		ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>> storageServers = wait(storageServerFuture);
+		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
 		if(!storageServers.present()) {
 			throw storageServers.getError();
 		}
@@ -1398,10 +1498,12 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter readBytes;
 
 		for(auto &ss : storageServers.get()) {
-			readRequests.updateValues( StatusCounter(ss.second.getValue("QueryQueue")));
-			reads.updateValues( StatusCounter(ss.second.getValue("FinishedQueries")));
-			readKeys.updateValues( StatusCounter(ss.second.getValue("RowsQueried")));
-			readBytes.updateValues( StatusCounter(ss.second.getValue("BytesQueried")));
+			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+
+			readRequests.updateValues( StatusCounter(storageMetrics.getValue("QueryQueue")));
+			reads.updateValues( StatusCounter(storageMetrics.getValue("FinishedQueries")));
+			readKeys.updateValues( StatusCounter(storageMetrics.getValue("RowsQueried")));
+			readBytes.updateValues( StatusCounter(storageMetrics.getValue("BytesQueried")));
 		}
 
 		operationsObj["read_requests"] = readRequests.getStatus();
@@ -1778,8 +1880,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		state std::map<std::string, JsonBuilderObject> processIssues = getProcessIssuesAsMessages(workerIssues);
-		state vector<std::pair<StorageServerInterface, TraceEventFields>> storageServers;
-		state vector<std::pair<TLogInterface, TraceEventFields>> tLogs;
+		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
+		state vector<std::pair<TLogInterface, EventMap>> tLogs;
+		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
@@ -1814,10 +1917,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
-			for (auto worker : workers)
+			for (auto const& worker : workers) {
 				address_workers[worker.first.address()] = worker.first;
-			state Future<ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
-			state Future<ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+			}
+
+			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
+			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(cx, address_workers));
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
@@ -1870,20 +1976,31 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
-			ErrorOr<vector<std::pair<StorageServerInterface, TraceEventFields>>> _storageServers = wait(storageServerFuture);
+			ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> _storageServers = wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
 			}
-			else
+			else {
 				messages.push_back(JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
+			}
 
 			// ...also tlogs
-			ErrorOr<vector<std::pair<TLogInterface, TraceEventFields>>> _tLogs = wait(tLogFuture);
+			ErrorOr<vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
 			}
-			else
+			else {
 				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
+			}
+
+			// ...also proxies
+			ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>> _proxies = wait(proxyFuture);
+			if (_proxies.present()) {
+				proxies = _proxies.get();
+			}
+			else {
+				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
+			}
 		}
 		else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -1893,7 +2010,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 
