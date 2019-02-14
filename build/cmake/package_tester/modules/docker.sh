@@ -9,6 +9,64 @@ then
 
     failed_tests=()
 
+    docker_threads=()
+    docker_ids=()
+
+    docker_wait_any() {
+        # docker wait waits on all containers (unlike what is documented)
+        # so we need to do polling
+        success=0
+        while [ "${success}" -eq 0 ]
+        do
+            for ((i=0;i<"${#docker_ids[@]}";++i))
+            do
+                docker_id="${docker_ids[$i]}"
+                status="$(docker ps -a -f id=${docker_id} --format '{{.Status}}' | awk '{print $1;}')"
+                if [ "${status}" = "Exited" ]
+                then
+                    success=1
+                    ret_code="$(docker wait ${docker_id})"
+                    if [ "${ret_code}" -ne 0 ]
+                    then
+                        failed_tests+=( "${docker_threads[$i]}" )
+                        echo -e "${RED}Test failed: ${docker_threads[$i]} ${NC}"
+                    else
+                        echo -e "${GREEN}Test succeeded: ${docker_threads[$i]} ${NC}"
+                    fi
+                    # remove it
+                    n=$((i+1))
+                    docker_ids=( "${docker_ids[@]:0:$i}" "${docker_ids[@]:$n}" )
+                    docker_threads=( "${docker_threads[@]:0:$i}" "${docker_threads[@]:$n}" )
+                    # prune
+                    if [ "${pruning_strategy}" = "ALL" ]
+                    then
+                        docker rmi "${docker_id}" > /dev/null
+                    elif [ "${ret_code}" -eq 0 ] && [ "${pruning_strategt}" = "SUCCEEDED" ]
+                    then
+                         docker rmi "${docker_id}" > /dev/null
+                    elif [ "${ret_code}" -ne 0 ] && [ "${pruning_strategt}" = "FAILED" ]
+                    then
+                         docker rmi "${docker_id}" > /dev/null
+                    fi
+                fi
+            done
+            sleep 1
+        done
+    }
+
+    docker_wait_all() {
+        local __res=0
+        while [ "${#docker_ids[@]}" -gt 0 ]
+        do
+            docker_wait_any
+            if [ "$?" -ne 0 ]
+            then
+                __res=1
+            fi
+        done
+        return ${__res}
+    }
+
     docker_build_and_run() {
         local __res=0
         enterfun
@@ -20,7 +78,9 @@ then
             else
                 cd ${source_dir}/../${location}
             fi
-            docker build . -t ${name}
+            docker_logs="${log_dir}/docker_build_${name}"
+            docker build . -t ${name} 1> "${docker_logs}.log" 2> "${docker_logs}.err"
+            success "Building Docker image ${name} failed - see ${docker_logs}.log and ${docker_logs}.err"
             # we start docker in interactive mode, otherwise CTRL-C won't work
             if [ ! -z "${tests_to_run+x}"]
             then
@@ -29,16 +89,17 @@ then
             fi
             for t in "${tests[@]}"
             do
-                docker run -it -v "${fdb_source}:/foundationdb"\
+                if [ "${#docker_ids[@]}" -ge "${docker_parallelism}" ]
+                then
+                    docker_wait_any
+                fi
+                echo "Starting Test ${PKG,,}_${t}"
+                docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
                     -v "${fdb_build}:/build"\
                     ${name}\
-                    bash /foundationdb/build/cmake/package_tester/${PKG,,}_tests.sh -n ${t} ${packages_to_test[@]}
-                if [ "$?" -ne 0 ]
-                then
-                    __res=1
-                    failed_tests+=( "${PKG} - ${t}" )
-                fi
-
+                    bash /foundationdb/build/cmake/package_tester/${PKG,,}_tests.sh -n ${t} ${packages_to_test[@]} )
+                docker_ids+=( "${docker_id}" )
+                docker_threads+=( "${PKG} - ${t} (ID: ${docker_id})" )
             done
         done
         exitfun
@@ -102,6 +163,8 @@ then
         enterfun
         for _ in 1
         do
+            log_dir="${fdb_build}/pkg_tester"
+            mkdir -p "${log_dir}"
             # create list of package files to test
             IFS=':' read -ra packages <<< "${fdb_packages}"
             deb_packages=()
@@ -132,7 +195,7 @@ then
                 do
                     echo " - ${i}"
                 done
-                echo -e "\n"
+                echo
             fi
             if [ "${#rpm_packages[@]}" -gt 0 ]
             then
@@ -147,33 +210,17 @@ then
             if [ "${do_deb_tests}" -eq 0 ] && [ "${do_rpm_tests}" -eq 0 ]
             then
                 echo "nothing to do"
-            else
-                read -n 1 -s -r -p "Press any key to continue (or Ctrl-C to cancel)"
-                echo -e "\n"
             fi
             if [ "${do_deb_tests}" -ne 0 ]
             then
                 docker_debian_tests
-                if [ $? -eq 0 ]
-                then
-                    echo -e "${GREEN}Debian tests succeeded${NC}"
-                else
-                    echo -e "${RED}Debian tests failed${NC}"
-                    __res=1
-                fi
             fi
             if [ "${do_rpm_tests}" -ne 0 ]
             then
                 docker_rpm_tests
-                if [ $? -eq 0 ]
-                then
-                    echo -e "${GREEN}RPM tests succeeded${NC}"
-                else
-                    echo -e "${RED}RPM tests failed${NC}"
-                    __res=1
-                fi
             fi
-            if [ "${__res}" -eq 0 ]
+            docker_wait_all
+            if [ "${#failed_tests[@]}" -eq 0 ]
             then
                 echo -e "${GREEN}SUCCESS${NC}"
             else
@@ -181,7 +228,7 @@ then
                 echo "The following tests failed:"
                 for t in "${failed_tests[@]}"
                 do
-                    echo -e "\t- ${t}"
+                    echo "    - ${t}"
                 done
                 echo -e "${NC}"
             fi
