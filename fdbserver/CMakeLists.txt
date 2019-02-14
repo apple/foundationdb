@@ -27,6 +27,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
+  LatencyBandConfig.cpp
+  LatencyBandConfig.h
   LeaderElection.actor.cpp
   LeaderElection.h
   LogProtocolMessage.h
