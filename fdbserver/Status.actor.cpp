@@ -930,7 +930,7 @@ ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionO
 				tr->setOption(priority.get());
 			}
 
-			Version _ = wait(tr->getReadVersion());
+			wait(success(tr->getReadVersion()));
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {

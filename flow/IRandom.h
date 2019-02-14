@@ -29,6 +29,7 @@
 #else
 #include <unordered_map>
 #endif
+#include <functional>
 
 class UID {
 	uint64_t part[2];
@@ -60,7 +61,7 @@ template <class Ar> void save( Ar& ar, UID const& uid ) { const_cast<UID&>(uid).
 
 namespace std {
 	template <>
-	class hash<UID> : public unary_function<UID,size_t> {
+	class hash<UID> {
 	public:
 		size_t operator()(UID const& u) const { return u.hash(); }
 	};

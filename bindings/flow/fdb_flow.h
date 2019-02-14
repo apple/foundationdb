@@ -44,20 +44,21 @@ namespace FDB {
 	private:
 		FDBDatabase* db;
 		explicit DatabaseContext( FDBDatabase* db ) : db(db) {}
+
+		friend class API;
 	};
 
+	// Deprecated: Use createDatabase instead.
 	class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
 	public:
-		~Cluster() {
-			fdb_cluster_destroy( c );
-		}
+		~Cluster() {}
 
 		Reference<DatabaseContext> createDatabase();
 
 	private:
-		explicit Cluster( FDBCluster* c ) : c(c) {}
-		FDBCluster* c;
+		explicit Cluster( std::string connFilename ) : connFilename(connFilename) {}
 
+		std::string connFilename;
 		friend class API;
 	};
 
@@ -73,7 +74,10 @@ namespace FDB {
 		void runNetwork();
 		void stopNetwork();
 
+		// Deprecated: Use createDatabase instead.
 		Reference<Cluster> createCluster( std::string const& connFilename );
+
+		Reference<DatabaseContext> createDatabase( std::string const& connFilename="" );
 
 		bool evaluatePredicate(FDBErrorPredicate pred, Error const& e);
 		int getAPIVersion() const;

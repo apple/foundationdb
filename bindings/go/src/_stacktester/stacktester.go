@@ -893,7 +893,7 @@ func main() {
 		log.Fatal("API version not equal to value selected")
 	}
 
-	db, e = fdb.Open(clusterFile, []byte("DB"))
+	db, e = fdb.OpenDatabase(clusterFile)
 	if e != nil {
 		log.Fatal(e)
 	}

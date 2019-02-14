@@ -16,7 +16,9 @@ packaging/msi/FDBInstaller.msi
 *.pom
 bindings/java/pom*.xml
 bindings/java/src*/main/overview.html
-bindings/java/src*/main/com/apple/foundationdb/*Options.java
+bindings/java/src*/main/com/apple/foundationdb/NetworkOptions.java
+bindings/java/src*/main/com/apple/foundationdb/DatabaseOptions.java
+bindings/java/src*/main/com/apple/foundationdb/TransactionOptions.java
 bindings/java/src*/main/com/apple/foundationdb/StreamingMode.java
 bindings/java/src*/main/com/apple/foundationdb/MutationType.java
 bindings/java/src*/main/com/apple/foundationdb/ConflictRangeType.java
@@ -74,6 +76,8 @@ foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
 compile_commands.json
+flow/actorcompiler/obj
+flow/coveragetool/obj
 
 # Temporary and user configuration files
 *~

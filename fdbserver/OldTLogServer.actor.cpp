@@ -1014,7 +1014,7 @@ namespace oldTLog {
 		state Reference<LogData> logData;
 
 		loop {
-			bool foundCount = 0;
+			int foundCount = 0;
 			for(auto it : self->id_data) {
 				if(!it.second->stopped) {
 					 logData = it.second;
@@ -1023,7 +1023,7 @@ namespace oldTLog {
 			}
 
 			ASSERT(foundCount < 2);
-			if(!foundCount) {
+			if(foundCount == 0) {
 				wait( self->newLogData.onTrigger() );
 				continue;
 			}

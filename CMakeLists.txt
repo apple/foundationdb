@@ -21,7 +21,13 @@ project(fdb
   VERSION 6.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Java)
+  LANGUAGES ASM C CXX Java)
+
+if(WIN32)
+  # C# is currently only supported on Windows.
+  # On other platforms we find mono manually
+  enable_language(CSharp)
+endif()
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
@@ -49,6 +55,25 @@ find_package(PythonInterp 3.4 REQUIRED)
 set(Python_ADDITIONAL_VERSIONS 3.4 3.5 3.5)
 find_package(PythonLibs 3.4 REQUIRED)
 
+
+################################################################################
+# LibreSSL
+################################################################################
+
+set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
+if(DISABLE_TLS)
+  set(WITH_TLS FALSE)
+else()
+  set(LIBRESSL_USE_STATIC_LIBS TRUE)
+  find_package(LibreSSL)
+  if(LibreSSL_FOUND)
+    set(WITH_TLS TRUE)
+  else()
+    message(STATUS "LibreSSL NOT Found - Will compile without TLS Support")
+    message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+    set(WITH_TLS FALSE)
+  endif()
+endif()
 
 ################################################################################
 # Compiler configuration
@@ -194,16 +219,28 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
+if(WITH_TLS)
+  add_subdirectory(FDBLibTLS)
+endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
-add_subdirectory(fdbmonitor)
+if(NOT WIN32)
+  add_subdirectory(fdbmonitor)
+else()
+  add_subdirectory(fdbservice)
+endif()
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
+add_subdirectory(tests)
 
-include(CPack)
+if(WIN32)
+  add_subdirectory(packaging/msi)
+else()
+  include(CPack)
+endif()
 
 ################################################################################
 # process compile commands for IDE
