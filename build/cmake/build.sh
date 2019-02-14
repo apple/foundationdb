@@ -168,6 +168,40 @@ deb() {
     return ${__res}
 }
 
+test-fast() {
+    local __res=0
+    for _ in 1
+    do
+        ctest -j`nproc`
+        __res=$?
+        if [ ${__res} -ne 0 ]
+        then
+            break
+        fi
+    done
+    return ${__res}
+}
+
+test() {
+    local __res=0
+    for _ in 1
+    do
+        build
+        __res=$?
+        if [ ${__res} -ne 0 ]
+        then
+            break
+        fi
+        test-fast
+        __res=$?
+        if [ ${__res} -ne 0 ]
+        then
+            break
+        fi
+    done
+    return ${__res}
+}
+
 main() {
     local __res=0
     for _ in 1
@@ -218,6 +252,12 @@ main() {
                 linux-pkgs)
                     rpm
                     deb
+                    ;;
+                test-fast)
+                    test-fast
+                    ;;
+                test)
+                    test
                     ;;
                 * )
                     echo "ERROR: Command not found ($command)"

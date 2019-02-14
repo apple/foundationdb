@@ -51,6 +51,15 @@ services:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh package/fast
 
+  test-fast: &test-fast
+    <<: *build-setup
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh test-fast
+
+  test: &test
+    <<: *build-setup
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh test
+
   shell:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash
+
