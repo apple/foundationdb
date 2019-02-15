@@ -2156,12 +2156,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		// Remove the machine team from its server teams' machineTeam vector
-		// Sanity check
-		for (auto& serverTeam : targetMT->serverTeams) {
-			ASSERT_WE_THINK(std::count(teams.begin(), teams.end(), serverTeam) == 0);
-		}
-
 		return foundMachineTeam;
 	}
 
@@ -2192,6 +2186,27 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
+		// Step: Remove all teams that contain removedServer
+		// SOMEDAY: can we avoid walking through all teams, since we have an index of teams in which removedServer participated
+		int removedCount = 0;
+		for (int t = 0; t < teams.size(); t++) {
+			if ( std::count( teams[t]->getServerIDs().begin(), teams[t]->getServerIDs().end(), removedServer ) ) {
+				TraceEvent("TeamRemoved")
+				    .detail("Primary", primary)
+				    .detail("TeamServerIDs", teams[t]->getServerIDsStr());
+				// removeTeam also needs to remove the team from the machine team info.
+				removeTeam(teams[t]);
+				removedCount++;
+			}
+		}
+
+		if (removedCount == 0) {
+			TraceEvent(SevInfo, "NoneTeamRemovedWhenServerRemoved")
+			    .detail("Primary", primary)
+			    .detail("Debug", "ThisShouldRarelyHappen_CheckInfoBelow");
+			traceAllInfo();
+		}
+
 		// Step: Remove machine info related to removedServer
 		// Remove the server from its machine
 		Reference<TCMachineInfo> removedMachineInfo = removedServerInfo->machine;
@@ -2204,6 +2219,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 		// Remove machine if no server on it
+		// Note: Remove machine (and machine team) after server teams have been removed, because
+		// we remove a machine team only when the server teams on it have been removed
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
 			removeMachine(self, removedMachineInfo);
 		}
@@ -2229,27 +2246,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		//FIXME: add remove support to localitySet so we do not have to recreate it
 		resetLocalitySet();
-
-		// remove all teams that contain removedServer
-		// SOMEDAY: can we avoid walking through all teams, since we have an index of teams in which removedServer participated
-		int removedCount = 0;
-		for (int t = 0; t < teams.size(); t++) {
-			if ( std::count( teams[t]->getServerIDs().begin(), teams[t]->getServerIDs().end(), removedServer ) ) {
-				TraceEvent("TeamRemoved")
-				    .detail("Primary", primary)
-				    .detail("TeamServerIDs", teams[t]->getServerIDsStr());
-				// removeTeam also needs to remove the team from the machine team info.
-				removeTeam(teams[t]);
-				removedCount++;
-			}
-		}
-
-		if (removedCount == 0) {
-			TraceEvent(SevInfo, "NoneTeamRemovedWhenServerRemoved")
-			    .detail("Primary", primary)
-			    .detail("Debug", "ThisShouldRarelyHappen_CheckInfoBelow");
-			traceAllInfo();
-		}
 
 		doBuildTeams = true;
 		restartTeamBuilder.trigger();
