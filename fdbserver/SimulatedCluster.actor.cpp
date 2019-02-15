@@ -980,14 +980,17 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		machine_count = 12;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
-	} else if (generateMachineTeamTestConfig) {
-		// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
-		// while the max possible machine team number is 10
-		machine_count = 5;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
 		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minMachinesRequiredPerDatacenter()));
 		machine_count = g_random->randomInt( machine_count, std::max(machine_count+1, extraDB ? 6 : 10) );
+		if (generateMachineTeamTestConfig) {
+			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
+			// while the max possible machine team number is 10.
+			// If machine_count > 5, we can still test the effectivenss of machine teams
+			// Note: machine_count may be much larger than 5 because we may have a big replication factor
+			machine_count = std::max(machine_count, g_random->randomInt(5, extraDB ? 6 : 10));
+		}
 	}
 
 	//because we protect a majority of coordinators from being killed, it is better to run with low numbers of coordinators to prevent too many processes from being protected
@@ -1001,11 +1004,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 	if(generateFearless) {
 		processes_per_machine = 1;
-	} else if (generateMachineTeamTestConfig) {
-		// The total process number is 5*5 = 25 when extraDB = 0. The max possible server teams is 3 combination out of 25 (2300).
-		// The buildMachine logic aims to build process_number (25) * server_teams_per_machine (1) = 25 server machines
-		// But the machine team number we generated should always be no larger than 5.
-		processes_per_machine = (extraDB ? 2 : 5);
 	} else {
 		processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	}
