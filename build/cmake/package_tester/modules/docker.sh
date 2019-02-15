@@ -38,16 +38,18 @@ then
                     docker_ids=( "${docker_ids[@]:0:$i}" "${docker_ids[@]:$n}" )
                     docker_threads=( "${docker_threads[@]:0:$i}" "${docker_threads[@]:$n}" )
                     # prune
+                    set -x
                     if [ "${pruning_strategy}" = "ALL" ]
                     then
-                        docker rmi "${docker_id}" > /dev/null
-                    elif [ "${ret_code}" -eq 0 ] && [ "${pruning_strategt}" = "SUCCEEDED" ]
+                        docker container rm "${docker_id}" > /dev/null
+                    elif [ "${ret_code}" -eq 0 ] && [ "${pruning_strategy}" = "SUCCEEDED" ]
                     then
-                         docker rmi "${docker_id}" > /dev/null
-                    elif [ "${ret_code}" -ne 0 ] && [ "${pruning_strategt}" = "FAILED" ]
+                        docker container rm "${docker_id}" > /dev/null
+                    elif [ "${ret_code}" -ne 0 ] && [ "${pruning_strategy}" = "FAILED" ]
                     then
-                         docker rmi "${docker_id}" > /dev/null
+                        docker container rm "${docker_id}" > /dev/null
                     fi
+                    set +x
                 fi
             done
             sleep 1
