@@ -97,18 +97,15 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 
 	state int64_t lastTC = 0;
 
-	if (db->get().distributor.present()) {
-		nextRequestTimer = Void();
-	}
-
+	if (db->get().ratekeeper.present()) nextRequestTimer = Void();
 	loop choose {
 		when ( wait( db->onChange() ) ) {
-			if ( db->get().distributor.present() ) {
-				TraceEvent("Proxy_DataDistributorChanged", myID)
-				.detail("DDID", db->get().distributor.get().id());
-				nextRequestTimer = Void(); // trigger GetRate request
+			if ( db->get().ratekeeper.present() ) {
+				TraceEvent("Proxy_RatekeeperChanged", myID)
+				.detail("RKID", db->get().ratekeeper.get().id());
+				nextRequestTimer = Void();  // trigger GetRate request
 			} else {
-				TraceEvent("Proxy_DataDistributorDied", myID);
+				TraceEvent("Proxy_RatekeeperDied", myID);
 				nextRequestTimer = Never();
 				reply = Never();
 			}
@@ -116,7 +113,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, detailed)));
+			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, detailed)));
 			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {

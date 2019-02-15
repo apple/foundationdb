@@ -19,13 +19,14 @@
  */
 
 #include "flow/IndexedSet.h"
-#include "fdbserver/Ratekeeper.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbserver/Knobs.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/DataDistribution.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
@@ -146,7 +147,7 @@ struct TransactionCounts {
 	TransactionCounts() : total(0), batch(0), time(0) {}
 };
 
-struct Ratekeeper {
+struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
@@ -154,6 +155,7 @@ struct Ratekeeper {
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
+	PromiseStream<Future<Void>> addActor;
 
 	Int64MetricHandle actualTpsMetric;
 
@@ -163,7 +165,7 @@ struct Ratekeeper {
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
 
-	Ratekeeper() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
+	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
 		lastWarning(0),
 		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE),
@@ -172,7 +174,7 @@ struct Ratekeeper {
 };
 
 //SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
-ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerInterface ssi ) {
+ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageServerInterface ssi ) {
 	self->storageQueueInfo.insert( mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality) ) );
 	state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 	TraceEvent("RkTracking", ssi.id());
@@ -217,7 +219,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 	}
 }
 
-ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
+ACTOR Future<Void> trackTLogQueueInfo( RatekeeperData* self, TLogInterface tli ) {
 	self->tlogQueueInfo.insert( mapPair(tli.id(), TLogQueueInfo(tli.id()) ) );
 	state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
 	TraceEvent("RkTracking", tli.id());
@@ -270,7 +272,7 @@ ACTOR Future<Void> splitError( Future<Void> in, Promise<Void> errOut ) {
 }
 
 ACTOR Future<Void> trackEachStorageServer(
-	Ratekeeper* self,
+	RatekeeperData* self,
 	FutureStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges )
 {
 	state Map<UID, Future<Void>> actors;
@@ -289,7 +291,59 @@ ACTOR Future<Void> trackEachStorageServer(
 	}
 }
 
-void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
+ACTOR Future<Void> monitorServerListChange(
+		Reference<AsyncVar<ServerDBInfo>> dbInfo,
+		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
+	state Database db = openDBOnServer(dbInfo, TaskRateKeeper, true, true);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
+	state std::map<UID, StorageServerInterface> oldServers;
+	state Transaction tr(db);
+
+	loop {
+		try {
+			choose {
+				when ( wait( checkSignal ) ) {
+					checkSignal = Never();
+					serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+				}
+				when ( vector<std::pair<StorageServerInterface, ProcessClass>> results = wait( serverListAndProcessClasses ) ) {
+					serverListAndProcessClasses = Never();
+
+					std::map<UID, StorageServerInterface> newServers;
+					for( int i = 0; i < results.size(); i++ ) {
+						UID serverId = results[i].first.id();
+						StorageServerInterface const& ssi = results[i].first;
+						newServers[serverId] = ssi;
+
+						if ( oldServers.count( serverId ) ) {
+							if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
+								serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
+							}
+							oldServers.erase(serverId);
+						} else {
+							serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
+						}
+					}
+
+					for (auto it : oldServers) {
+						serverChanges.send( std::make_pair(it.first, Optional<StorageServerInterface>()) );
+					}
+
+					oldServers.swap(newServers);
+					tr = Transaction(db);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+				}
+			}
+		} catch(Error& e) {
+			wait( tr.onError(e) );
+			serverListAndProcessClasses = Never();
+			checkSignal = Void();
+		}
+	}
+}
+
+void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -566,7 +620,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 	}
 }
 
-ACTOR Future<Void> configurationMonitor( Ratekeeper* self, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo, DatabaseConfiguration* conf) {
 	state Database cx = openDBOnServer(dbInfo, TaskDefaultEndpoint, true, true);
 	loop {
 		state ReadYourWritesTransaction tr(cx);
@@ -578,7 +632,7 @@ ACTOR Future<Void> configurationMonitor( Ratekeeper* self, Reference<AsyncVar<Se
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
-				self->configuration.fromKeyValues( (VectorRef<KeyValueRef>) results );
+				conf->fromKeyValues( (VectorRef<KeyValueRef>) results );
 
 				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
 				wait( tr.commit() );
@@ -591,21 +645,26 @@ ACTOR Future<Void> configurationMonitor( Ratekeeper* self, Reference<AsyncVar<Se
 	}
 }
 
-ACTOR Future<Void> rateKeeper(
-	Reference<AsyncVar<ServerDBInfo>> dbInfo,
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
-	FutureStream< struct GetRateInfoRequest > getRateInfo,
-	double* lastLimited)
-{
-	state Ratekeeper self;
-	state Future<Void> track = trackEachStorageServer( &self, serverChanges.getFuture() );
+ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state RatekeeperData self;
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> actors;
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
-	state Future<Void> configMonitor = configurationMonitor(&self, dbInfo);
-	self.lastLimited = lastLimited;
+	state Future<Void> collection = actorCollection( self.addActor.getFuture() );
+
+	// TODOs:
+	double lastLimited;
+	self.lastLimited = &lastLimited;
+
+	TraceEvent("Ratekeeper_Starting", rkInterf.id());
+	self.addActor.send( waitFailureServer(rkInterf.waitFailure.getFuture()) );
+	self.addActor.send( configurationMonitor(dbInfo, &self.configuration) );
+
+	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges;
+	self.addActor.send( monitorServerListChange(dbInfo, serverChanges) );
+	self.addActor.send( trackEachStorageServer(&self, serverChanges.getFuture()) );
 
 	TraceEvent("RkTLogQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
@@ -619,7 +678,6 @@ ACTOR Future<Void> rateKeeper(
 
 	loop{
 		choose {
-			when (wait( track )) { break; }
 			when (wait( timeout )) {
 				updateRate(&self, self.normalLimits);
 				updateRate(&self, self.batchLimits);
@@ -638,7 +696,7 @@ ACTOR Future<Void> rateKeeper(
 				}
 				timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
 			}
-			when (GetRateInfoRequest req = waitNext(getRateInfo)) {
+			when (GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
 				GetRateInfoReply reply;
 
 				auto& p = self.proxy_transactionCounts[ req.requesterID ];
@@ -672,8 +730,10 @@ ACTOR Future<Void> rateKeeper(
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 				}
 			}
-			when(wait(configMonitor)) {}
+			when ( wait(collection) ) {
+				ASSERT(false);
+				throw internal_error();
+			}
 		}
 	}
-	return Void();
 }

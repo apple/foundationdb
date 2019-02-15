@@ -28,6 +28,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -46,6 +47,7 @@ struct WorkerInterface {
 	RequestStream< struct RecruitMasterRequest > master;
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
+	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
@@ -68,7 +70,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
 	}
 };
 
@@ -147,6 +149,16 @@ struct InitializeDataDistributorRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
+		serializer(ar, reqId, reply);
+	}
+};
+
+struct InitializeRatekeeperRequest {
+	UID reqId;
+	ReplyPromise<RatekeeperInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
 	}
 };
@@ -300,6 +312,7 @@ struct Role {
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
+	static const Role RATE_KEEPER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -361,6 +374,7 @@ ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest i
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> rateKeeper(RatekeeperInterface const& rki, Reference<AsyncVar<ServerDBInfo>> const& db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

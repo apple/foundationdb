@@ -27,15 +27,14 @@
 
 struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	struct LocalityData locality;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
 
 	void initEndpoints() {}
-	UID id() const { return getRateInfo.getEndpoint().token; }
-	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
+	UID id() const { return waitFailure.getEndpoint().token; }
+	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	bool operator== (const DataDistributorInterface& r) const {
 		return id() == r.id();
 	}
@@ -45,36 +44,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, locality);
-	}
-};
-
-struct GetRateInfoRequest {
-	UID requesterID;
-	int64_t totalReleasedTransactions;
-	int64_t batchReleasedTransactions;
-	bool detailed;
-	ReplyPromise<struct GetRateInfoReply> reply;
-
-	GetRateInfoRequest() {}
-	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, bool detailed)
-		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions), detailed(detailed) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, detailed, reply);
-	}
-};
-
-struct GetRateInfoReply {
-	double transactionRate;
-	double batchTransactionRate;
-	double leaseDuration;
-	HealthMetrics healthMetrics;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
+		serializer(ar, waitFailure, locality);
 	}
 };
 

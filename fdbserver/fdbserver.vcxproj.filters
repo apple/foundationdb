@@ -310,6 +310,7 @@
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
     <ClInclude Include="DataDistribution.actor.h" />
+    <ClInclude Include="DataDistributorInterface.h" />
     <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
@@ -343,7 +344,7 @@
     </ClInclude>
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="StorageMetrics.h" />
-    <ClInclude Include="Ratekeeper.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="CoroFlow.h" />

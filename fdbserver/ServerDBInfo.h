@@ -26,6 +26,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
 
@@ -39,6 +40,7 @@ struct ServerDBInfo {
 	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
 	Optional<DataDistributorInterface> distributor;  // The best guess of current data distributor.
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
+	Optional<RatekeeperInterface> ratekeeper;
 	vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;

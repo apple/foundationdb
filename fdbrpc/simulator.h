@@ -99,6 +99,7 @@ public:
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
+				case ProcessClass::RateKeeperClass: return false;
 				default: return false;
 			}
 		}

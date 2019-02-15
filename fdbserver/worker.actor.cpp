@@ -349,14 +349,15 @@ ACTOR Future<Void> registrationClient(
 		WorkerInterface interf,
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
 		ProcessClass initialClass,
-		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf) {
+		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
+		Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	// The registration request piggybacks optional distributor interface if it exists.
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
@@ -365,6 +366,7 @@ ACTOR Future<Void> registrationClient(
 			}
 			when ( wait( ccInterface->onChange() )) { }
 			when ( wait( ddInterf->onChange() ) ) {}
+			when ( wait( rkInterf->onChange() ) ) {}
 		}
 	}
 }
@@ -610,6 +612,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
+	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -756,7 +759,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -835,6 +838,22 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					ddInterf->set(Optional<DataDistributorInterface>(recruited));
 				}
 				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when ( InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture()) ) {
+				RatekeeperInterface recruited(locality);
+				recruited.initEndpoints();
+
+				if (rkInterf->get().present()) {
+					recruited = rkInterf->get().get();
+					TEST(true);  // Recruited while already a ratekeeper.
+				} else {
+					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
+					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
+					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );
+					rkInterf->set(Optional<RatekeeperInterface>(recruited));
+				}
+				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
@@ -1244,3 +1263,4 @@ const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
 const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
+const Role Role::RATE_KEEPER("RateKeeper", "RK");
