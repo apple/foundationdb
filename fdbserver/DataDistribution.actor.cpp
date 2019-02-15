@@ -1684,16 +1684,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Exclude machine teams who have members in the wrong configuration.
 		// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
-		int healthyMachineTeamCount = 0;
-		int totalMachineTeamCount = 0;
-		for (auto mt = machineTeams.begin(); mt != machineTeams.end(); ++mt) {
-			ASSERT((*mt)->machines.size() == configuration.storageTeamSize);
-
-			if (isMachineTeamHealthy(*mt)) {
-				++healthyMachineTeamCount;
-			}
-			++totalMachineTeamCount;
-		}
+		int healthyMachineTeamCount = getHealthyMachineTeamCount();
+		int totalMachineTeamCount = machineTeams.size();
 
 		int totalHealthyMachineCount = calculateHealthyMachineCount();
 
@@ -2081,7 +2073,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Remove the removedMachineInfo machine and any related machine team
-	void removeMachine(Reference<TCMachineInfo> removedMachineInfo) {
+	void removeMachine(DDTeamCollection* self, Reference<TCMachineInfo> removedMachineInfo) {
 		// Find machines that share teams with the removed machine
 		std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
 		for (auto& machineTeam : removedMachineInfo->machineTeams) {
@@ -2118,6 +2110,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
 		// addBestMachineTeams()
 		// rebuildMachineLocalityMap();
+
+		// When the machine number changes, the desiredMachineTeam number changes
+		// Whenever this happens, we need to check if there exists redundant teams
+		if (self->redundantTeamRemover.isReady()) {
+			self->redundantTeamRemover = teamRemover(self);
+			self->addActor.send(self->redundantTeamRemover);
+		}
 	}
 
 	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT) {
@@ -2144,7 +2143,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return foundMachineTeam;
 	}
 
-	void removeServer( UID removedServer ) {
+	void removeServer(DDTeamCollection* self, UID removedServer) {
 		TraceEvent("RemovedStorageServer", masterId).detail("ServerID", removedServer);
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
 		Reference<TCServerInfo> removedServerInfo = server_info[removedServer];
@@ -2184,7 +2183,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		// Remove machine if no server on it
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
-			removeMachine(removedMachineInfo);
+			removeMachine(self, removedMachineInfo);
 		}
 		// If the machine uses removedServer's locality and the machine still has servers, the the machine's
 		// representative server will be updated when it is used in addBestMachineTeams()
@@ -2954,7 +2953,7 @@ ACTOR Future<Void> storageServerTracker(
 							if (machine->serversOnMachine.size() == 1) {
 								// When server is the last server on the machine,
 								// remove the machine and the related machine team
-								self->removeMachine(machine);
+								self->removeMachine(self, machine);
 							} else {
 								// we remove the server from the machine, and
 								// update locality entry for the machine and the global machineLocalityMap
@@ -3293,7 +3292,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		loop choose {
 			when( UID removedServer = waitNext( self->removedServers.getFuture() ) ) {
 				TEST(true);  // Storage server removed from database
-				self->removeServer( removedServer );
+				self->removeServer(self, removedServer);
 				serverRemoved.send( Void() );
 
 				self->restartRecruiting.trigger();
