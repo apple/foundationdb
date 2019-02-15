@@ -87,28 +87,40 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 
 int getBytes(Promise<Version> const& r) { return 0; }
 
-ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransactionCount, double* outTransactionRate) {
-	state Future<Void> nextRequestTimer = Void();
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate) {
+	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
-	state Future<GetRateInfoReply> reply;
+	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
-	loop choose{
-		when(wait(nextRequestTimer)) {
-			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(master.getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+	if (db->get().distributor.present()) nextRequestTimer = Void();
+	loop choose {
+		when ( wait( db->onChange() ) ) {
+			if ( db->get().distributor.present() ) {
+				TraceEvent("Proxy_DataDistributorChanged", myID)
+				.detail("DDID", db->get().distributor.get().id());
+				nextRequestTimer = Void();  // trigger GetRate request
+			} else {
+				TraceEvent("Proxy_DataDistributorDied", myID);
+				nextRequestTimer = Never();
+				reply = Never();
+			}
 		}
-		when(GetRateInfoReply rep = wait(reply)) {
+		when ( wait( nextRequestTimer ) ) {
+			nextRequestTimer = Never();
+			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+		}
+		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			// TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
 		}
-		when(wait(leaseTimeout)) {
+		when ( wait(leaseTimeout ) ) {
 			*outTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
+			// TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
@@ -1079,7 +1091,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 ACTOR static Future<Void> transactionStarter(
 	MasterProxyInterface proxy,
-	MasterInterface master,
 	Reference<AsyncVar<ServerDBInfo>> db,
 	PromiseStream<Future<Void>> addActor,
 	ProxyCommitData* commitData
@@ -1096,7 +1107,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), master, &transactionCount, &transactionRate));
+	addActor.send( getRate(proxy.id(), db, &transactionCount, &transactionRate) );
 	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1413,7 +1424,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData, db));
-	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
+	addActor.send(transactionStarter(proxy, db, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, &commitData));
 
 	// wait for txnStateStore recovery

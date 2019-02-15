@@ -775,6 +775,18 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 	return Void();
 }
 
+ACTOR template <class T>
+Future<Void> setWhenDoneOrError( Future<Void> condition, Reference<AsyncVar<T>> var, T val ) {
+	try {
+		wait( condition );
+	}
+	catch ( Error& e ) {
+		if (e.code() == error_code_actor_cancelled) throw;
+	}
+	var->set( val );
+	return Void();
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );

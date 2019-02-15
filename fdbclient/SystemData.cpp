@@ -381,6 +381,8 @@ std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	return excludedServersPrefix.toString() + as;
 }
 
+const KeyRef configVersionKey = LiteralStringRef("\xff/conf/confChange");
+
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 

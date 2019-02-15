@@ -1344,7 +1344,7 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
-static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
+static int getExtraTLogEligibleMachines(const vector<std::pair<WorkerInterface, ProcessClass>>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allMachines;
 	std::map<Key,std::set<StringRef>> dcId_machine;
 	for(auto const& worker : workers) {

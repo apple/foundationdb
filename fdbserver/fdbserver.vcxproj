@@ -158,6 +158,7 @@
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="CoroFlow.h" />
     <ClInclude Include="DataDistribution.h" />
+    <ClInclude Include="DataDistributorInterface.h" />
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="IKeyValueStore.h" />

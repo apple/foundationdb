@@ -13,6 +13,7 @@ set(FDBSERVER_SRCS
   DataDistribution.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
+  DataDistributorInterface.h
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
