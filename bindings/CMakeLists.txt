@@ -1,7 +1,7 @@
 add_subdirectory(c)
 add_subdirectory(flow)
 add_subdirectory(python)
-if(BUILD_JAVA)
+if(WITH_JAVA)
   add_subdirectory(java)
 endif()
 if(WITH_GO)

@@ -174,7 +174,7 @@ endif()
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
-if(BUILD_DOCUMENTATION)
+if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
 
