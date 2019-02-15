@@ -2023,6 +2023,18 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
+		// Check if we need to remove redundant machine teams
+		// A machine team can be created when a new server team is created.
+		// Machine team number may become larger than the desired number due to server team creation.
+		// Although we do not remove a machine team with no server team on it as long as the machine team number is
+		// no larger than the desired number, we should at least check if the machine team number is too big.
+		// If it does, we should kick off the teamRemover
+		if (redundantTeamRemover.isReady()) {
+			redundantTeamRemover = teamRemover(this); // this is DDTeamCollection*
+			this->addActor.send(redundantTeamRemover);
+		}
+
+
 		ASSERT_WE_THINK(foundInMachineTeam);
 		team->tracker.cancel();
 		return found;
@@ -2098,8 +2110,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			auto& machineTeam = machineTeams[t];
 			if (std::count(machineTeam->machineIDs.begin(), machineTeam->machineIDs.end(),
 			               removedMachineInfo->machineID)) {
-				machineTeams[t--] = machineTeams.back();
-				machineTeams.pop_back();
+				removeMachineTeam(machineTeam);
 			}
 		}
 
@@ -2119,6 +2130,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 	}
 
+	// Invariant: Remove a machine team only when the server teams on it has been removed
+	// We never actively remove a machine team.
+	// A machine team is removed when a machine is removed, which is caused by the event when all servers on the machine
+	// is removed.
 	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT) {
 		bool foundMachineTeam = false;
 		for (int i = 0; i < machineTeams.size(); i++) {
@@ -2140,6 +2155,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 		}
+
+		// Remove the machine team from its server teams' machineTeam vector
+		// Sanity check
+		for (auto& serverTeam : targetMT->serverTeams) {
+			ASSERT_WE_THINK(std::count(teams.begin(), teams.end(), serverTeam) == 0);
+		}
+
 		return foundMachineTeam;
 	}
 
@@ -2185,6 +2207,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (removedMachineInfo->serversOnMachine.size() == 0) {
 			removeMachine(self, removedMachineInfo);
 		}
+
 		// If the machine uses removedServer's locality and the machine still has servers, the the machine's
 		// representative server will be updated when it is used in addBestMachineTeams()
 		// Note that since we do not rebuildMachineLocalityMap() here, the machineLocalityMap can be stale.
@@ -2234,7 +2257,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		TraceEvent("DataDistributionTeamCollectionUpdate", masterId)
 		    .detail("Teams", teams.size())
 		    .detail("BadTeams", badTeams.size())
-		    .detail("Servers", allServers.size());
+		    .detail("Servers", allServers.size())
+		    .detail("Machines", machine_info.size())
+		    .detail("MachineTeams", machineTeams.size())
+		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 	}
 };
 
