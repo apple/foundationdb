@@ -1,4 +1,4 @@
-#!env bash
+#!/usr/bin/env bash
 
 arguments_usage() {
     cat <<EOF
@@ -106,7 +106,7 @@ package() {
         then
             break
         fi
-
+        package_fast
         __res=$?
         if [ ${__res} -ne 0 ]
         then
