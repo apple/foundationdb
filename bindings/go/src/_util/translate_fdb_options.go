@@ -209,12 +209,10 @@ import (
 	"encoding/binary"
 )
 
-func int64ToBytes(i int64) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	if e := binary.Write(buf, binary.LittleEndian, i); e != nil {
-		return nil, e
-	}
-	return buf.Bytes(), nil
+func int64ToBytes(i int64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	return buf
 }
 `)
 

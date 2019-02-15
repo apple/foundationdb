@@ -34,12 +34,10 @@ import (
 	"encoding/binary"
 )
 
-func int64ToBytes(i int64) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	if e := binary.Write(buf, binary.LittleEndian, i); e != nil {
-		return nil, e
-	}
-	return buf.Bytes(), nil
+func int64ToBytes(i int64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	return buf
 }
 
 // Deprecated
@@ -495,7 +493,7 @@ const (
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
+	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -612,15 +610,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns ``true`` if the error indicates the operations in the
-	// transactions should be retried because of transient error.
+	// Returns “true“ if the error indicates the operations in the transactions
+	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns ``true`` if the error indicates the transaction may have
-	// succeeded, though not in a way the system can verify.
+	// Returns “true“ if the error indicates the transaction may have succeeded,
+	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns ``true`` if the error indicates the transaction has not
-	// committed, though in a way that can be retried.
+	// Returns “true“ if the error indicates the transaction has not committed,
+	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )
