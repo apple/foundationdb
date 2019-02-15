@@ -1166,8 +1166,17 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					tr.clear( excludedServersKeys );
 					includeAll = true;
 				} else if (s.isWholeMachine()) {
-					// Eliminate both any ip-level exclusion (1.2.3.4) and any port-level exclusions (1.2.3.4:5)
-					tr.clear( KeyRangeRef( encodeExcludedServersKey(s), encodeExcludedServersKey(s) + char(':'+1) ) );
+					// Eliminate both any ip-level exclusion (1.2.3.4) and any
+					// port-level exclusions (1.2.3.4:5)
+					// The range ['IP', 'IP;'] was originally deleted. ';' is
+					// char(':' + 1). This does not work, as other for all
+					// x between 0 and 9, 'IPx' will also be in this range.
+					//
+					// This is why we now make two clears: first only of the ip
+					// address, the second will delete all ports.
+					auto addr = encodeExcludedServersKey(s);
+					tr.clear(singleKeyRange(addr));
+					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
 				} else {
 					tr.clear( encodeExcludedServersKey(s) );
 				}
