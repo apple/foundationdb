@@ -1491,7 +1491,7 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer) {
+			if (role == FDBD || role == NetworkTestServer || role == Restore) {
 				for (int ii = 0; ii < publicAddresses.size(); ++ii) {
 					const NetworkAddress& publicAddress = publicAddresses[ii];
 					const NetworkAddress& listenAddress = listenAddresses[ii];
