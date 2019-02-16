@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1769,6 +1769,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
 		self->db.setDistributor(di);
 	}
+	if ( req.ratekeeperInterf.present() && !self->db.serverInfo->get().ratekeeper.present() ) {
+		const RatekeeperInterface& rki = req.ratekeeperInterf.get();
+		TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
+		self->db.setRatekeeper(rki);
+	}
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo );
 		checkOutstandingRequests( self );
@@ -2398,7 +2403,7 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			req.reqId = g_random->randomUniqueID();
 			TraceEvent("ClusterController_RecruitRatekeeper", req.reqId).detail("Addr", rkWorker.worker.first.address());
 
-			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.first.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
+			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.first.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
 			if (interf.present()) {
 				TraceEvent("ClusterController_RatekeeperRecruited", req.reqId).detail("Addr", rkWorker.worker.first.address());
 				return interf.get();
@@ -2414,7 +2419,7 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 	}
 }
 
-ACTOR Future<Void> waitRKRejoinOrStartRK(ClusterControllerData *self) {
+ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY);
 
 	// wait for a while to see if an existing ratekeeper will join.
@@ -2432,8 +2437,8 @@ ACTOR Future<Void> waitRKRejoinOrStartRK(ClusterControllerData *self) {
 	loop {
 		if ( self->db.serverInfo->get().ratekeeper.present() ) {
 			wait( waitFailureClient( self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME ) );
-			TraceEvent("ClusterController", self->id)
-			.detail("RatekeeperDied", self->db.serverInfo->get().ratekeeper.get().id());
+			TraceEvent("ClusterController_RateKeeperDied", self->id)
+			.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 			self->db.clearInterf(ProcessClass::RateKeeperClass);
 		} else {
 			RatekeeperInterface rkInterf = wait( startRatekeeper(self) );
@@ -2460,7 +2465,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( updateDatacenterVersionDifference(&self) );
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( waitDDRejoinOrStartDD(&self) );
-	self.addActor.send( waitRKRejoinOrStartRK(&self) );
+	self.addActor.send( monitorRatekeeper(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

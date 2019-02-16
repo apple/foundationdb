@@ -3454,6 +3454,39 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state DatabaseConfiguration configuration = self->configuration->get();
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
+<<<<<<< HEAD
+=======
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+
+			Standalone<RangeResultRef> replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+
+			for(auto& kv : replicaKeys) {
+				auto dcId = decodeDatacenterReplicasKey(kv.key);
+				auto replicas = decodeDatacenterReplicasValue(kv.value);
+				if ((self->primaryDcId.size() && self->primaryDcId[0] == dcId) ||
+						(self->remoteDcIds.size() && self->remoteDcIds[0] == dcId && configuration.usableRegions > 1)) {
+					if(replicas > configuration.storageTeamSize) {
+						tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
+					}
+				} else {
+					tr.clear(kv.key);
+				}
+			}
+
+			wait(tr.commit());
+			break;
+		}
+		catch(Error &e) {
+			wait(tr.onError(e));
+		}
+	}
+
+
+>>>>>>> Minor fix on ratekeeper work registration.
 	//cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*) &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) );
 	//ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE );
 

@@ -29,7 +29,6 @@
 struct RatekeeperInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
-	RequestStream<struct StorageChangeRequest> changeStorage;
 	struct LocalityData locality;
 
 	RatekeeperInterface() {}
@@ -47,7 +46,7 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, changeStorage, locality);
+		serializer(ar, waitFailure, getRateInfo, locality);
 	}
 };
 
@@ -77,16 +76,6 @@ struct GetRateInfoReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
-	}
-};
-
-struct StorageChangeRequest {
-	UID ssID;
-	Optional<StorageServerInterface> ssInterf;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ssID, ssInterf);
 	}
 };
 
