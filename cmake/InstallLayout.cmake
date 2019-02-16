@@ -3,17 +3,19 @@
 ################################################################################
 
 function(install_symlink)
-  set(options "")
-  set(one_value_options COMPONENT TO DESTINATION)
-  set(multi_value_options)
-  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+  if (NOT WIN32)
+    set(options "")
+    set(one_value_options COMPONENT TO DESTINATION)
+    set(multi_value_options)
+    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
-  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
-  get_filename_component(fname ${SYM_DESTINATION} NAME)
-  get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
-  set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
-  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
-  install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${SYM_COMPONENT})
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
+    get_filename_component(fname ${SYM_DESTINATION} NAME)
+    get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
+    set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
+    install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${SYM_COMPONENT})
+  endif()
 endfunction()
 
 if(NOT INSTALL_LAYOUT)
@@ -121,6 +123,8 @@ set(CPACK_PACKAGE_VENDOR "FoundationDB <fdb-dist@apple.com>")
 set(CPACK_PACKAGE_VERSION_MAJOR ${FDB_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${FDB_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${FDB_PATCH})
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${FDB_VERSION}-${CPACK_SYSTEM_NAME}")
+set(CPACK_OUTPUT_FILE_PREFIX "${CMAKE_BINARY_DIR}/packages")
 set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_SOURCE_DIR}/packaging/description)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
   "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions.")
@@ -138,9 +142,12 @@ else()
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
 endif()
 
+if(NOT WIN32)
+  add_dependencies(packages package)
+endif()
+
 ################################################################################
 # Configuration for RPM
-################################################################################
 ################################################################################
 
 if(UNIX AND NOT APPLE)
