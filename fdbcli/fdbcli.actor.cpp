@@ -1682,7 +1682,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	StatusObject configJSON = config.get_obj();
 
 	json_spirit::mValue schema;
-	if(!json_spirit::read_string( JSONSchemas::configurationSchema.toString(), schema )) {
+	if(!json_spirit::read_string( JSONSchemas::clusterConfigurationSchema.toString(), schema )) {
 		ASSERT(false);
 	}
 

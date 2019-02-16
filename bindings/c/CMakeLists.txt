@@ -16,7 +16,7 @@ elseif(WIN32)
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
-  COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${platform}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${platform}
       ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
       ${asm_file}
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -41,6 +41,15 @@ if(WIN32)
   enable_language(ASM_MASM)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
+
+# The tests don't build on windows
+if(NOT WIN32)
+  add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
+  add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
+  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
+endif()
+
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)

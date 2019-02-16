@@ -104,16 +104,49 @@ cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 FoundationDB will build just fine without LibreSSL, however, the resulting
 binaries won't support TLS connections.
 
+### Language Bindings
+
+The language bindings that are supported by cmake will have a corresponding
+`README.md` file in the corresponding `bindings/lang` directory.
+
+Generally, cmake will build all language bindings for which it can find all
+necessary dependencies. After each successful cmake run, cmake will tell you
+which language bindings it is going to build.
+
+
 ### Generating compile_commands.json
 
-CMake can build a compilation database for you. However, the default generatd
+CMake can build a compilation database for you. However, the default generated
 one is not too useful as it operates on the generated files. When running make,
 the build system will create another `compile_commands.json` file in the source
 directory. This can than be used for tools like
 [CCLS](https://github.com/MaskRay/ccls),
 [CQuery](https://github.com/cquery-project/cquery), etc. This way you can get
 code-completion and code navigation in flow. It is not yet perfect (it will show
-a few errors) but we are constantly working on improving the developement experience.
+a few errors) but we are constantly working on improving the development experience.
+
+### Using IDEs
+
+CMake  has built in support for a number of popular IDEs. However, because flow
+files are precompiled with the actor compiler, an IDE will not be very useful as
+a user will only be presented with the generated code - which is not what she
+wants to edit and get IDE features for.
+
+The good news is, that it is possible to generate project files for editing
+flow with a supported IDE. There is a cmake option called `OPEN_FOR_IDE` which
+will generate a project which can be opened in an IDE for editing. You won't be
+able to build this project, but you will be able to edit the files and get most
+edit and navigation features your IDE supports.
+
+For example, if you want to use XCode to make changes to FoundationDB you can
+create a XCode-project with the following command:
+
+```
+cmake -G Xcode -DOPEN_FOR_IDE=ON <FDB_SOURCE_DIRECTORY>
+```
+
+You should create a second build-directory which you will use for building
+(probably with make or ninja) and debugging.
 
 ### Linux
 
@@ -173,7 +206,7 @@ that Visual Studio is used to compile.
 1. This should succeed. In which case you can build using msbuild:
    `msbuild /p:Configuration=Release fdb.sln`. You can also open the resulting
    solution in Visual Studio and compile from there. However, be aware that
-   using Visual Studio for developement is currently not supported as Visual
+   using Visual Studio for development is currently not supported as Visual
    Studio will only know about the generated files.
 
 If you want TLS support to be enabled under Windows you currently have to build

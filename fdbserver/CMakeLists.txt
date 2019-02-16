@@ -13,6 +13,7 @@ set(FDBSERVER_SRCS
   DataDistribution.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
+  DataDistributorInterface.h
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
@@ -27,6 +28,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
+  LatencyBandConfig.cpp
+  LatencyBandConfig.h
   LeaderElection.actor.cpp
   LeaderElection.h
   LogProtocolMessage.h
@@ -173,9 +176,7 @@ set(FDBSERVER_SRCS
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
-actor_set(FDBSERVER_BUILD "${FDBSERVER_SRCS}")
-add_executable(fdbserver ${FDBSERVER_BUILD})
-actor_compile(fdbserver "${FDBSERVER_SRCS}")
+add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)

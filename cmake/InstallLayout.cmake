@@ -1,3 +1,21 @@
+################################################################################
+# Helper Functions
+################################################################################
+
+function(install_symlink)
+  set(options "")
+  set(one_value_options COMPONENT TO DESTINATION)
+  set(multi_value_options)
+  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
+  get_filename_component(fname ${SYM_DESTINATION} NAME)
+  get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
+  set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
+  install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${SYM_COMPONENT})
+endfunction()
+
 if(NOT INSTALL_LAYOUT)
   if(WIN32)
     set(DEFAULT_INSTALL_LAYOUT "WIN")
@@ -14,6 +32,9 @@ if(DIR_LAYOUT MATCHES "TARGZ")
 endif()
 
 get_property(LIB64 GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS)
+
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+
 set(FDB_CONFIG_DIR "etc/foundationdb")
 if("${LIB64}" STREQUAL "TRUE")
   set(LIBSUFFIX 64)
@@ -54,8 +75,24 @@ elseif(DIR_LAYOUT MATCHES "OSX")
   set(FDB_PYTHON_INSTALL_DIR "Library/Python/2.7/site-packages/fdb")
   set(FDB_SHARE_DIR "usr/local/share")
 else()
-  # DEB
-  set(CPACK_GENERATOR "DEB")
+  if(DIR_LAYOUT MATCHES "RPM")
+    set(CPACK_GENERATOR RPM)
+  else()
+    # DEB
+    set(CPACK_GENERATOR "DEB")
+    set(LIBSUFFIX "")
+  endif()
+  set(CMAKE_INSTALL_PREFIX "/")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/")
+  set(FDB_CONFIG_DIR "etc/foundationdb")
+  set(FDB_LIB_DIR "usr/lib${LIBSUFFIX}")
+  set(FDB_LIB_NOSUFFIX "usr/lib")
+  set(FDB_LIBEXEC_DIR ${FDB_LIB_DIR})
+  set(FDB_BIN_DIR "usr/bin")
+  set(FDB_SBIN_DIR "usr/sbin")
+  set(FDB_INCLUDE_INSTALL_DIR "usr/include")
+  set(FDB_PYTHON_INSTALL_DIR "${FDB_LIB_DIR}/python2.7/site-packages/fdb")
+  set(FDB_SHARE_DIR "usr/share")
 endif()
 
 if(INSTALL_LAYOUT MATCHES "OSX")
@@ -104,6 +141,12 @@ endif()
 ################################################################################
 # Configuration for RPM
 ################################################################################
+################################################################################
+
+if(UNIX AND NOT APPLE)
+  install(DIRECTORY DESTINATION "var/log/foundationdb" COMPONENT server)
+  install(DIRECTORY DESTINATION "var/lib/foundationdb/data" COMPONENT server)
+endif()
 
 if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_USER_FILELIST
@@ -122,7 +165,8 @@ if(INSTALL_LAYOUT MATCHES "RPM")
     "/lib/systemd"
     "/lib/systemd/system"
     "/etc/rc.d/init.d")
-  set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+  set(CPACK_RPM_server_DEBUGINFO_PACKAGE ON)
+  set(CPACK_RPM_clients_DEBUGINFO_PACKAGE ON)
   set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
   set(CPACK_RPM_COMPONENT_INSTALL ON)
   set(CPACK_RPM_clients_PRE_INSTALL_SCRIPT_FILE
@@ -136,6 +180,11 @@ if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_PRE_UNINSTALL_SCRIPT_FILE
     ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
   set(CPACK_RPM_server_PACKAGE_REQUIRES
+    "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}, initscripts >= 9.03")
+  set(CPACK_RPM_server_PACKAGE_RE)
+  #set(CPACK_RPM_java_PACKAGE_REQUIRES
+  #  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
+  set(CPACK_RPM_python_PACKAGE_REQUIRES
     "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 endif()
 
@@ -148,12 +197,12 @@ if(INSTALL_LAYOUT MATCHES "DEB")
   set(CPACK_DEBIAN_PACKAGE_SECTION "database")
   set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 
-  set(CPACK_DEBIAN_server_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11), python (>= 2.6)")
-  set(CPACK_DEBIAN_clients_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11)")
+  set(CPACK_DEBIAN_SERVER_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12), python (>= 2.6), foundationdb-clients (= ${FDB_VERSION})")
+  set(CPACK_DEBIAN_CLIENTS_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12)")
   set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://www.foundationdb.org")
-  set(CPACK_DEBIAN_clients_PACKAGE_CONTROL_EXTRA
+  set(CPACK_DEBIAN_CLIENTS_PACKAGE_CONTROL_EXTRA
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-clients/postinst)
-  set(CPACK_DEBIAN_server_PACKAGE_CONTROL_EXTRA
+  set(CPACK_DEBIAN_SERVER_PACKAGE_CONTROL_EXTRA
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/conffiles
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/preinst
     ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postinst
@@ -223,36 +272,18 @@ if((INSTALL_LAYOUT MATCHES "RPM") OR (INSTALL_LAYOUT MATCHES "DEB"))
     RESULT_VARIABLE IS_SYSTEMD
     OUTPUT_QUIET
     ERROR_QUIET)
-  if(IS_SYSTEMD EQUAL "0")
-    configure_file(${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
-      ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service)
-    install(FILES ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service
-      DESTINATION "lib/systemd/system"
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+    DESTINATION "lib/systemd/system"
+    COMPONENT server)
+  if(INSTALL_LAYOUT MATCHES "RPM")
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+      DESTINATION "etc/rc.d/init.d"
+      RENAME "foundationdb"
       COMPONENT server)
   else()
-    if(INSTALL_LAYOUT MATCHES "RPM")
-      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
-        DESTINATION "etc/rc.d/init.d"
-        RENAME "foundationdb"
-        COMPONENT server)
-    else()
-      install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
-        DESTINATION "etc/init.d"
-        RENAME "foundationdb"
-        COMPONENT server)
-    endif()
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+      DESTINATION "etc/init.d"
+      RENAME "foundationdb"
+      COMPONENT server)
   endif()
 endif()
-
-################################################################################
-# Helper Macros
-################################################################################
-
-macro(install_symlink filepath sympath compondent)
-  install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${filepath} ${sympath})" COMPONENT ${component})
-  install(CODE "message(\"-- Created symlink: ${sympath} -> ${filepath}\")")
-endmacro()
-macro(install_mkdir dirname component)
-  install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${dirname})" COMPONENT ${component})
-  install(CODE "message(\"-- Created directory: ${dirname}\")")
-endmacro()

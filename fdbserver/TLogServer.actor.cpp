@@ -1909,7 +1909,6 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
 	state TLogInterface recruited(self->dbgid, locality);
-	recruited.locality = locality;
 	recruited.initEndpoints();
 
 	DUMPTOKEN( recruited.peekMessages );

@@ -47,6 +47,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/LatencyBandConfig.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -431,6 +432,8 @@ public:
 		return val;
 	}
 
+	Optional<LatencyBandConfig> latencyBandConfig;
+
 	struct Counters {
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried, watchQueries;
@@ -440,6 +443,8 @@ public:
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
+
+		LatencyBands readLatencyBands;
 
 		Counters(StorageServer* self)
 			: cc("StorageServer", self->thisServerID.toString()),
@@ -465,7 +470,8 @@ public:
 			fetchWaitingMS("FetchWaitingMS", cc),
 			fetchWaitingCount("FetchWaitingCount", cc),
 			fetchExecutingMS("FetchExecutingMS", cc),
-			fetchExecutingCount("FetchExecutingCount", cc)
+			fetchExecutingCount("FetchExecutingCount", cc),
+			readLatencyBands("ReadLatencyMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
@@ -733,15 +739,16 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 }
 
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
-	state double startTime = timer();
+	state int64_t resultSize = 0;
+
 	try {
-		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
-		// so we need to downgrade here
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
 		++data->readQueueSizeMetric;
 		data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
+		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
+		// so we need to downgrade here
 		wait( delay(0, TaskDefaultEndpoint) );
 
 		if( req.debugID.present() )
@@ -788,7 +795,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
-			data->counters.bytesQueried += v.get().size();
+			resultSize = v.get().size();
+			data->counters.bytesQueried += resultSize;
 		}
 
 		if( req.debugID.present() )
@@ -805,6 +813,10 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes);
+	}
 
 	return Void();
 };
@@ -1241,6 +1253,8 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
 {
+	state int64_t resultSize = 0;
+
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
@@ -1329,8 +1343,9 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			r.penalty = data->getPenalty();
 			req.reply.send( r );
 
+			resultSize = req.limitBytes - remainingLimitBytes;
+			data->counters.bytesQueried += resultSize;
 			data->counters.rowsQueried += r.data.size();
-			data->counters.bytesQueried += req.limitBytes - remainingLimitBytes;
 		}
 	} catch (Error& e) {
 		if(!canReplyWith(e))
@@ -1340,11 +1355,19 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset || abs(req.end.offset) > maxSelectorOffset);
+	}
 
 	return Void();
 }
 
 ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
+	state int64_t resultSize = 0;
+
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
 	++data->readQueueSizeMetric;
@@ -1371,8 +1394,10 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 			updated = firstGreaterOrEqual(k)+offset-1;	// first thing on next shard OR (large offset case) keyAfter largest key retrieved in range read
 		else
 			updated = KeySelectorRef(k,true,0); //found
+
+		resultSize = k.size();
+		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
-		data->counters.bytesQueried += k.size();
 
 		GetKeyReply reply(updated);
 		reply.penalty = data->getPenalty();
@@ -1387,6 +1412,11 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+	if(data->latencyBandConfig.present()) {
+		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(timer()-req.requestTime, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+	}
 
 	return Void();
 }
@@ -3308,6 +3338,20 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					// cancelling it could cause problems (e.g. fetchKeys that already committed to transitioning to waiting state)
 					if (!updateReceived) {
 						doUpdate = Void();
+					}
+				}
+
+				Optional<LatencyBandConfig> newLatencyBandConfig = self->db->get().latencyBandConfig;
+				if(newLatencyBandConfig.present() != self->latencyBandConfig.present()
+					|| (newLatencyBandConfig.present() && newLatencyBandConfig.get().readConfig != self->latencyBandConfig.get().readConfig))
+				{
+					self->latencyBandConfig = newLatencyBandConfig;
+					self->counters.readLatencyBands.clearBands();
+					TraceEvent("LatencyBandReadUpdatingConfig").detail("Present", newLatencyBandConfig.present());
+					if(self->latencyBandConfig.present()) {
+						for(auto band : self->latencyBandConfig.get().readConfig.bands) {
+							self->counters.readLatencyBands.addThreshold(band);
+						}
 					}
 				}
 			}

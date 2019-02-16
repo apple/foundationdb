@@ -22,6 +22,7 @@
 #define FDBSERVER_WORKERINTERFACE_H
 #pragma once
 
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
@@ -40,6 +41,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
+	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
@@ -58,11 +60,11 @@ struct WorkerInterface {
 	NetworkAddress address() const { return tLog.getEndpoint().getPrimaryAddress(); }
 
 	WorkerInterface() {}
-	WorkerInterface( LocalityData locality ) : locality( locality ) {}
+	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
 	}
 };
 
@@ -130,6 +132,16 @@ struct InitializeMasterProxyRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+	}
+};
+
+struct InitializeDataDistributorRequest {
+	UID reqId;
+	ReplyPromise<DataDistributorInterface> reply;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, reqId, reply);
 	}
 };
 
@@ -281,6 +293,7 @@ struct Role {
 	static const Role CLUSTER_CONTROLLER;
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
+	static const Role DATA_DISTRIBUTOR;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -330,6 +343,7 @@ Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue
 Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& ccInterface, Reference<ClusterConnectionFile> const&, LocalityData const&, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> resolver( ResolverInterface const& proxy, InitializeResolverRequest const&, Reference<AsyncVar<ServerDBInfo>> const& db );
 Future<Void> logRouter( TLogInterface const& interf, InitializeLogRouterRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db );
+Future<Void> dataDistributor( DataDistributorInterface const& ddi, Reference<AsyncVar<ServerDBInfo>> const& db );
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
