@@ -15,6 +15,7 @@ import multiprocessing
 import re
 import shutil
 import io
+import random
 
 
 _logger = None
@@ -279,7 +280,14 @@ def run_simulation_test(basedir, options):
     test_dir = td.get_current_test_dir()
     if options.seed is not None:
         pargs.append('-s')
-        pargs.append("{}".format(int(options.seed, 0)))
+        seed = int(options.seed, 0)
+        if options.test_number:
+            idx = int(options.test_number)
+            random.seed(seed)
+            for i in range(idx):
+                # Python does not have a limit for integers
+                seed = random.randint(0, 2**32 - 1)
+        pargs.append("{}".format(seed))
     wd = os.path.join(test_dir,
                       'test_{}'.format(options.name.replace('/', '_')))
     os.mkdir(wd)
@@ -354,6 +362,8 @@ if __name__ == '__main__':
                         default='INFO')
     parser.add_argument('-x', '--seed', required=False, default=None,
                         help='The seed to use for this test')
+    parser.add_argument('-N', '--test-number', required=False, default=None,
+                        help='A unique number for this test (for seed generation)')
     parser.add_argument('-F', '--log-format', required=False, default='xml',
                         choices=['xml', 'json'], help='Log format (json or xml)')
     parser.add_argument('-O', '--old-binary', required=False, default=None,

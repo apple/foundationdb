@@ -99,6 +99,9 @@ function(add_fdb_test)
   if (ENABLE_BUGGIFY)
     set(BUGGIFY_OPTION "-B")
   endif()
+  math(EXPR test_idx "${CURRENT_TEST_INDEX} + 1")
+  set(CURRENT_TEST_INDEX "${test_idx}" CACHE INTERNAL "The index used for the last added test" FORCE)
+  message("Added ${test_name} with idx ${CURRENT_TEST_INDEX}")
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
   add_test(NAME ${test_name}
     COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
@@ -110,6 +113,7 @@ function(add_fdb_test)
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
     --seed ${SEED}
+    --test-number ${CURRENT_TEST_INDEX}
     ${BUGGIFY_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
