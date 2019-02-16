@@ -304,6 +304,7 @@ namespace actorcompiler
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
             if (actor.isForwardDeclaration) {
+                if (actor.isStatic) writer.Write("static ");
                 writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
                 return;
             }
@@ -815,7 +816,7 @@ namespace actorcompiler
                 if (firstChoice)
                 {
                     // Do this check only after evaluating the expression for the first wait expression, so that expression cannot be short circuited by cancellation.
-                    // So Void _ = wait( expr() ) will always evaluate `expr()`, but choose { when ( Void _ = wait( expr1() ) ) {} when (Void _ = wait( expr2() ) {} } need
+                    // So wait( expr() ) will always evaluate `expr()`, but choose { when ( wait(success( expr2() )) {} } need
                     // not evaluate `expr2()`.
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);

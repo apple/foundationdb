@@ -65,7 +65,7 @@ struct LowLatencyWorkload : TestWorkload {
 					try {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Version _ = wait(tr.getReadVersion());
+						wait(success(tr.getReadVersion()));
 						break;
 					} catch( Error &e ) {
 						wait( tr.onError(e) );

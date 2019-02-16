@@ -94,6 +94,7 @@ public:
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
+				case ProcessClass::DataDistributorClass: return false;
 				default: return false;
 			}
 		}
@@ -115,7 +116,7 @@ public:
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
-		Optional<Standalone<StringRef>>	zoneId;
+		Optional<Standalone<StringRef>>	machineId;
 
 		MachineInfo() : machineProcess(0) {}
 	};
@@ -149,7 +150,8 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
@@ -266,10 +268,10 @@ public:
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
-	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& zoneId) = 0;
+	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) = 0;
 	virtual void run() {}
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
-	virtual void destroyMachine(Optional<Standalone<StringRef>> const& zoneId ) = 0;
+	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId ) = 0;
 
 	int desiredCoordinators;
 	int physicalDatacenters;

@@ -29,6 +29,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
@@ -179,9 +180,11 @@ public:
 };
 
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-public:
+private:
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
+
+public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 	bool healthy;
@@ -206,8 +209,12 @@ public:
 			v.push_back(servers[i]->lastKnownInterface);
 		return v;
 	}
-	virtual int size() { return servers.size(); }
+	virtual int size() {
+		ASSERT(servers.size() == serverIDs.size());
+		return servers.size();
+	}
 	virtual vector<UID> const& getServerIDs() { return serverIDs; }
+	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
 
 	virtual std::string getServerIDsStr() {
 		std::stringstream ss;
@@ -370,32 +377,8 @@ struct ServerStatus {
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
-ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion ) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Version ver = wait( tr.getReadVersion() );
-
-			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
-			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-				if (canRemove) {
-					return Void();
-				}
-			}
-
-			// Wait for any change to the serverKeys for this server
-			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskDataDistribution) );
-			tr.reset();
-		} catch (Error& e) {
-			wait( tr.onError(e) );
-		}
-	}
-}
-
 // Read keyservers, return unique set of teams
-ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Database cx, UID masterId, MoveKeysLock moveKeysLock, std::vector<Optional<Key>> remoteDcIds ) {
+ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Database cx, UID distributorId, MoveKeysLock moveKeysLock, std::vector<Optional<Key>> remoteDcIds ) {
 	state Reference<InitialDataDistribution> result = Reference<InitialDataDistribution>(new InitialDataDistribution);
 	state Key beginKey = allKeys.begin;
 
@@ -445,7 +428,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			wait( tr.onError(e) );
 
 			ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-			TraceEvent("GetInitialTeamsRetry", masterId);
+			TraceEvent("GetInitialTeamsRetry", distributorId);
 		}
 	}
 
@@ -532,7 +515,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				wait( tr.onError(e) );
 
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsKeyServersRetry", masterId);
+				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId);
 			}
 		}
 
@@ -549,11 +532,6 @@ Future<Void> storageServerTracker(
 	struct DDTeamCollection* const& self,
 	Database const& cx,
 	TCServerInfo* const& server,
-	ServerStatusMap* const& statusMap,
-	MoveKeysLock const& lock,
-	UID const& masterId,
-	std::map<UID, Reference<TCServerInfo>>* const& other_servers,
-	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> const& changes,
 	Promise<Void> const& errorOut,
 	Version const& addedVersion);
 
@@ -566,7 +544,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
 	Database cx;
-	UID masterId;
+	UID distributorId;
 	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
@@ -646,7 +624,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		return result && resultEntries.size() == 0;
 	}
 
-	DDTeamCollection(Database const& cx, UID masterId, MoveKeysLock const& lock,
+	DDTeamCollection(Database const& cx, UID distributorId, MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
 	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	                 DatabaseConfiguration configuration, std::vector<Optional<Key>> includedDCs,
@@ -654,7 +632,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Optional<PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>> const& serverChanges,
 	                 Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy)
-	  : cx(cx), masterId(masterId), lock(lock), output(output),
+	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantTeamRemover(Void()), configuration(configuration),
 	    serverChanges(serverChanges), readyToStart(readyToStart),
@@ -668,7 +646,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
 	    processingUnhealthy(processingUnhealthy) {
 		if(!primary || configuration.usableRegions == 1) {
-			TraceEvent("DDTrackerStarting", masterId)
+			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
 				.trackLatest( "DDTrackerStarting" );
 		}
@@ -697,7 +675,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskDataDistribution));
 
 		if(!self->primary || self->configuration.usableRegions == 1) {
-			TraceEvent("DDTrackerStarting", self->masterId)
+			TraceEvent("DDTrackerStarting", self->distributorId)
 				.detail( "State", "Active" )
 				.trackLatest( "DDTrackerStarting" );
 		}
@@ -777,17 +755,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						for( int j = 0; j < teamList.size(); j++ ) {
 							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
 								int sharedMembers = 0;
-								for( int k = 0; k < teamList[j]->serverIDs.size(); k++ )
-									if( sources.count( teamList[j]->serverIDs[k] ) )
+								for( const UID& id : teamList[j]->getServerIDs() )
+									if( sources.count( id ) )
 										sharedMembers++;
 
-								if( !foundExact && sharedMembers == teamList[j]->serverIDs.size() ) {
+								if( !foundExact && sharedMembers == teamList[j]->size() ) {
 									foundExact = true;
 									bestOption = Optional<Reference<IDataDistributionTeam>>();
 									similarTeams.clear();
 								}
 
-								if( (sharedMembers == teamList[j]->serverIDs.size()) || (!foundExact && req.wantsTrueBest) ) {
+								if( (sharedMembers == teamList[j]->size()) || (!foundExact && req.wantsTrueBest) ) {
 									int64_t loadBytes = SOME_SHARED * teamList[j]->getLoadBytes(true, req.inflightPenalty);
 									if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 										bestLoadBytes = loadBytes;
@@ -870,15 +848,16 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
 							bool found = true;
-							for( int k = 0; k < teamList[j]->serverIDs.size(); k++ ) {
-								if( !completeSources.count( teamList[j]->serverIDs[k] ) ) {
+							auto serverIDs = teamList[j]->getServerIDs();
+							for( int k = 0; k < teamList[j]->size(); k++ ) {
+								if( !completeSources.count( serverIDs[k] ) ) {
 									found = false;
 									break;
 								}
 							}
-							if(found && teamList[j]->serverIDs.size() > bestSize) {
+							if(found && teamList[j]->size() > bestSize) {
 								bestOption = teamList[j];
-								bestSize = teamList[j]->serverIDs.size();
+								bestSize = teamList[j]->size();
 							}
 						}
 						break;
@@ -912,7 +891,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		for(; idx < self->badTeams.size(); idx++ ) {
 			servers.clear();
-			for(auto server : self->badTeams[idx]->servers) {
+			for(const auto& server : self->badTeams[idx]->getServers()) {
 				if(server->inDesiredDC && !self->server_status.get(server->id).isUnhealthy()) {
 					servers.push_back(server);
 				}
@@ -976,7 +955,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						for(auto it : servers) {
 							serverIds.push_back(it->id);
 						}
-						TraceEvent(SevWarnAlways, "CannotAddSubset", self->masterId).detail("Servers", describe(serverIds));
+						TraceEvent(SevWarnAlways, "CannotAddSubset", self->distributorId).detail("Servers", describe(serverIds));
 					}
 				}
 			}
@@ -1051,7 +1030,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent(
 			minTeams>0 ? SevInfo : SevWarn,
-			"DataDistributionTeamQuality", masterId)
+			"DataDistributionTeamQuality", distributorId)
 			.detail("Servers", serverCount)
 			.detail("Teams", teamCount)
 			.detail("TeamsPerServer", teamsPerServer)
@@ -1119,8 +1098,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	             bool redundantTeam = false) {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
 
-		bool badTeam = !satisfiesPolicy(teamInfo->servers) ||
-		               teamInfo->servers.size() != configuration.storageTeamSize || redundantTeam;
+		bool badTeam = !satisfiesPolicy(teamInfo->getServers()) || teamInfo->size() != configuration.storageTeamSize
+						|| redundantTeam;
 
 		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
@@ -1247,7 +1226,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo")
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-			    .detail("ServerNumber", team->serverIDs.size())
+			    .detail("ServerNumber", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}
 	}
@@ -1466,7 +1445,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				addMachineTeam(machines);
 				addedMachineTeams++;
 			} else {
-				TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId)
+				TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 				    .detail("Primary", primary)
 				    .detail("Reason", "Unable to make desired machine Teams");
 				break;
@@ -1572,15 +1551,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Check if it is true
 	bool isOnSameMachineTeam(Reference<TCTeamInfo>& team) {
 		std::vector<Standalone<StringRef>> machineIDs;
-		for (auto& server : team->servers) {
+		for (const auto& server : team->getServers()) {
 			if (!server->machine.isValid()) return false;
 			machineIDs.push_back(server->machine->machineID);
 		}
 		std::sort(machineIDs.begin(), machineIDs.end());
 
 		int numExistance = 0;
-		for (auto& server : team->servers) {
-			for (auto& candidateMachineTeam : server->machine->machineTeams) {
+		for (const auto& server : team->getServers()) {
+			for (const auto& candidateMachineTeam : server->machine->machineTeams) {
 				std::sort(candidateMachineTeam->machineIDs.begin(), candidateMachineTeam->machineIDs.end());
 				if (machineIDs == candidateMachineTeam->machineIDs) {
 					numExistance++;
@@ -1588,7 +1567,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 		}
-		return (numExistance == team->servers.size());
+		return (numExistance == team->size());
 	}
 
 	// Sanity check the property of teams in unit test
@@ -1764,6 +1743,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
+				TraceEvent("BuildMachineTeams").detail("Score", score).detail("BestScore", bestScore)
+				.detail("TeamSize", serverTeam.size()).detail("StorageTeamSize", configuration.storageTeamSize);
 				if (score < bestScore) {
 					bestScore = score;
 					bestServerTeam = serverTeam;
@@ -1786,7 +1767,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-		TraceEvent("TeamCollectionInfo", masterId)
+		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", addedTeams)
 		    .detail("AimToBuildTeamNumber", teamsToBuild)
@@ -1815,7 +1796,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 		int healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-		TraceEvent("TeamCollectionInfo", masterId)
+		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeamNumber", 0)
 		    .detail("AimToBuildTeamNumber", 0)
@@ -1862,9 +1843,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		uniqueMachines = machines.size();
 		TraceEvent("BuildTeams")
-		    .detail("ServerNumber", self->server_info.size())
-		    .detail("UniqueMachines", uniqueMachines)
-		    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+			.detail("ServerNumber", self->server_info.size())
+			.detail("UniqueMachines", uniqueMachines)
+			.detail("Primary", self->primary)
+			.detail("StorageTeamSize", self->configuration.storageTeamSize);
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
 		if( uniqueMachines >= self->configuration.storageTeamSize ) {
@@ -1883,7 +1865,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
-			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("MaxTeams", maxTeams).detail("BadTeams", self->badTeams.size())
+			TraceEvent("BuildTeamsBegin", self->distributorId).detail("DesiredTeams", desiredTeams).detail("MaxTeams", maxTeams).detail("BadTeams", self->badTeams.size())
 				.detail("UniqueMachines", uniqueMachines).detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
 				.detail("CurrentTrackedTeams", self->teams.size()).detail("HealthyTeamCount", teamCount).detail("TotalTeamCount", totalTeamCount);
 
@@ -1907,10 +1889,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				// If the team number is more than the desired, the extra teams are added in the code path when
 				// a team is added as an initial team
 				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams);
+
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam")
-					    .detail("TeamNum", self->teams.size())
-					    .detail("Debug", "Check information below");
+						.detail("TeamNum", self->teams.size())
+						.detail("Debug", "Check information below");
 					// Debug: set true for traceAllInfo() to print out more information
 					self->traceAllInfo();
 				}
@@ -1921,7 +1904,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 				int healthyMachineTeamCount = self->getHealthyMachineTeamCount();
 
-				TraceEvent("TeamCollectionInfo", self->masterId)
+				TraceEvent("TeamCollectionInfo", self->distributorId)
 				    .detail("Primary", self->primary)
 				    .detail("AddedTeamNumber", 0)
 				    .detail("AimToBuildTeamNumber", teamsToBuild)
@@ -1957,12 +1940,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				desc += i->first.shortString() + " (" + i->second->lastKnownInterface.toString() + "), ";
 			}
 		}
-		vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
 
-		TraceEvent(SevWarn, "NoHealthyTeams", masterId)
+		TraceEvent(SevWarn, "NoHealthyTeams", distributorId)
 			.detail("CurrentTeamCount", teams.size())
 			.detail("ServerCount", server_info.size())
-			.detail("NonFailedServerCount", desiredServerVector.size());
+			.detail("NonFailedServerCount", desiredServerSet.size());
 	}
 
 	bool shouldHandleServer(const StorageServerInterface &newServer) {
@@ -1978,19 +1960,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 		allServers.push_back( newServer.id() );
 
-		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().address);
+		TraceEvent("AddedStorageServer", distributorId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().address);
 		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, processClass, includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(), storageServerSet ) );
 
 		// Establish the relation between server and machine
 		checkAndCreateMachine(r);
 
-		r->tracker = storageServerTracker( this, cx, r.getPtr(), &server_status, lock, masterId, &server_info, serverChanges, errorOut, addedVersion );
+		r->tracker = storageServerTracker( this, cx, r.getPtr(), errorOut, addedVersion );
 		doBuildTeams = true; // Adding a new server triggers to build new teams
 		restartTeamBuilder.trigger();
 	}
 
 	bool removeTeam( Reference<TCTeamInfo> team ) {
-		TraceEvent("RemovedTeam", masterId).detail("Team", team->getDesc());
+		TraceEvent("RemovedTeam", distributorId).detail("Team", team->getDesc());
 		bool found = false;
 		for(int t=0; t<teams.size(); t++) {
 			if( teams[t] == team ) {
@@ -2001,7 +1983,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		for(auto& server : team->servers) {
+		for(const auto& server : team->getServers()) {
 			for(int t = 0; t<server->teams.size(); t++) {
 				if( server->teams[t] == team ) {
 					ASSERT(found);
@@ -2068,7 +2050,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Note: This function may make the machine team number larger than the desired machine team number
 	Reference<TCMachineTeamInfo> checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam) {
 		std::vector<Standalone<StringRef>> machineIDs;
-		for (auto& server : serverTeam->servers) {
+		for (auto& server : serverTeam->getServers()) {
 			Reference<TCMachineInfo> machine = server->machine;
 			machineIDs.push_back(machine->machineID);
 		}
@@ -2160,7 +2142,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	void removeServer(DDTeamCollection* self, UID removedServer) {
-		TraceEvent("RemovedStorageServer", masterId).detail("ServerID", removedServer);
+		TraceEvent("RemovedStorageServer", distributorId).detail("ServerID", removedServer);
+
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
 		Reference<TCServerInfo> removedServerInfo = server_info[removedServer];
 
@@ -2250,7 +2233,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		doBuildTeams = true;
 		restartTeamBuilder.trigger();
 
-		TraceEvent("DataDistributionTeamCollectionUpdate", masterId)
+		TraceEvent("DataDistributionTeamCollectionUpdate", distributorId)
 		    .detail("Teams", teams.size())
 		    .detail("BadTeams", badTeams.size())
 		    .detail("Servers", allServers.size())
@@ -2274,7 +2257,7 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 		}
 	}
 	wait(self->addSubsetComplete.getFuture());
-	TraceEvent("DDRemovingBadTeams", self->masterId).detail("Primary", self->primary);
+	TraceEvent("DDRemovingBadTeams", self->distributorId).detail("Primary", self->primary);
 	for (auto it : self->badTeams) {
 		it->tracker.cancel();
 	}
@@ -2356,7 +2339,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 				// removeTeam() has side effect of swapping the last element to the current pos
 				// in the serverTeams vector in the machine team.
 				--teamIndex;
-				self->addTeam(team->servers, true, true);
+				self->addTeam(team->getServers(), true, true);
 				TEST(true);
 			}
 
@@ -2395,7 +2378,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 
 // Track a team and issue RelocateShards when the level of degradation changes
 ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam ) {
-	state int lastServersLeft = team->getServerIDs().size();
+	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
 	state bool logTeamEvents = g_network->isSimulated() || !badTeam;
 	state bool lastReady = false;
@@ -2407,25 +2390,24 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 	state bool firstCheck = true;
 
 	if(logTeamEvents) {
-		TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
+		TraceEvent("TeamTrackerStarting", self->distributorId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 	}
 	self->priority_teams[team->getPriority()]++;
 
 	try {
 		loop {
-			TraceEvent("TeamHealthChangeDetected", self->masterId)
+			TraceEvent("TeamHealthChangeDetected", self->distributorId)
 			    .detail("Primary", self->primary)
 			    .detail("IsReady", self->initialFailureReactionDelay.isReady());
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
-			auto servers = team->getServerIDs();
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
 			int serversLeft = 0;
 
-			for(auto s = servers.begin(); s != servers.end(); ++s) {
-				change.push_back( self->server_status.onChange( *s ) );
-				auto& status = self->server_status.get(*s);
+			for (const UID& uid : team->getServerIDs()) {
+				change.push_back( self->server_status.onChange( uid ) );
+				auto& status = self->server_status.get(uid);
 				if (!status.isFailed) {
 					serversLeft++;
 				}
@@ -2468,7 +2450,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			if (serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
 			    anyWrongConfiguration != lastWrongConfiguration || recheck) { // NOTE: do not check wrongSize
 				if(logTeamEvents) {
-					TraceEvent("TeamHealthChanged", self->masterId)
+					TraceEvent("TeamHealthChanged", self->distributorId)
 						.detail("Team", team->getDesc()).detail("ServersLeft", serversLeft)
 						.detail("LastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
 						.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
@@ -2493,12 +2475,12 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 					self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
 
 					if( self->healthyTeamCount == 0 ) {
-						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->masterId)
-						    .detail("SignallingTeam", team->getDesc())
-						    .detail("Primary", self->primary);
+						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+							.detail("SignallingTeam", team->getDesc())
+							.detail("Primary", self->primary);
 					}
 
-					TraceEvent("TeamHealthDifference", self->masterId)
+					TraceEvent("TeamHealthDifference", self->distributorId)
 						.detail("LastOptimal", lastOptimal)
 						.detail("LastHealthy", lastHealthy)
 						.detail("Optimal", optimal)
@@ -2533,7 +2515,8 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 				}
 
 				if(logTeamEvents) {
-					TraceEvent("TeamPriorityChange", self->masterId).detail("Priority", team->getPriority());
+					TraceEvent("TeamPriorityChange", self->distributorId).detail("Priority", team->getPriority())
+					.detail("Info", team->getDesc()).detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
 				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
@@ -2559,7 +2542,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 									bool found = false;
 									for( int k = 0; k < info->teams.size(); k++ ) {
-										if( info->teams[k]->serverIDs == t.servers ) {
+										if( info->teams[k]->getServerIDs() == t.servers ) {
 											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
 											found = true;
 											break;
@@ -2582,18 +2565,18 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 						self->output.send(rs);
 						if(g_random->random01() < 0.01) {
-							TraceEvent("SendRelocateToDDQx100", self->masterId)
+							TraceEvent("SendRelocateToDDQx100", self->distributorId)
 								.detail("Team", team->getDesc())
 								.detail("KeyBegin", printable(rs.keys.begin))
 								.detail("KeyEnd", printable(rs.keys.end))
 								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->getServerIDs().size()-serversLeft)
+								.detail("TeamFailedMachines", team->size() - serversLeft)
 								.detail("TeamOKMachines", serversLeft);
 						}
 					}
 				} else {
 					if(logTeamEvents) {
-						TraceEvent("TeamHealthNotReady", self->masterId).detail("HealthyTeamCount", self->healthyTeamCount);
+						TraceEvent("TeamHealthNotReady", self->distributorId).detail("HealthyTeamCount", self->healthyTeamCount);
 					}
 				}
 			}
@@ -2609,7 +2592,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			ASSERT( self->healthyTeamCount >= 0 );
 
 			if( self->healthyTeamCount == 0 ) {
-				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->masterId).detail("SignallingTeam", team->getDesc());
+				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
 			}
 		}
@@ -2639,9 +2622,9 @@ ACTOR Future<Void> trackExcludedServers( DDTeamCollection* self ) {
 						excluded.insert( addr );
 				}
 
-				TraceEvent("DDExcludedServersChanged", self->masterId).detail("Rows", results.size()).detail("Exclusions", excluded.size());
+				TraceEvent("DDExcludedServersChanged", self->distributorId).detail("Rows", results.size()).detail("Exclusions", excluded.size());
 
-				// Reset and reassign self->excludedServers based on excluded, but weonly
+				// Reset and reassign self->excludedServers based on excluded, but we only
 				// want to trigger entries that are different
 				auto old = self->excludedServers.getKeys();
 				for(auto& o : old)
@@ -2766,19 +2749,41 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 	return type;
 }
 
+ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion, DDTeamCollection* teams ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Version ver = wait( tr.getReadVersion() );
+
+			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
+			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
+				if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
+					return Void();
+				}
+			}
+
+			// Wait for any change to the serverKeys for this server
+			wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskDataDistribution) );
+			tr.reset();
+		} catch (Error& e) {
+			wait( tr.onError(e) );
+		}
+	}
+}
 
 ACTOR Future<Void> storageServerFailureTracker(
 	DDTeamCollection* self,
 	TCServerInfo *server,
 	Database cx,
-	ServerStatusMap *statusMap,
 	ServerStatus *status,
 	Version addedVersion )
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
-		if( statusMap->get(interf.id()).initialized ) {
-			bool unhealthy = statusMap->get(interf.id()).isUnhealthy();
+		if( self->server_status.get(interf.id()).initialized ) {
+			bool unhealthy = self->server_status.get(interf.id()).isUnhealthy();
 			if(unhealthy && !status->isUnhealthy()) {
 				self->unhealthyServers--;
 			}
@@ -2789,7 +2794,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 			self->unhealthyServers++;
 		}
 
-		statusMap->set( interf.id(), *status );
+		self->server_status.set( interf.id(), *status );
 		if( status->isFailed )
 			self->restartRecruiting.trigger();
 
@@ -2808,10 +2813,10 @@ ACTOR Future<Void> storageServerFailureTracker(
 					self->doBuildTeams = true;
 				}
 
-				TraceEvent("StatusMapChange", self->masterId).detail("ServerID", interf.id()).detail("Status", status->toString())
+				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
-			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion) : Never() ) ) { break; }
+			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
 		}
 	}
 
@@ -2824,11 +2829,6 @@ ACTOR Future<Void> storageServerTracker(
 	DDTeamCollection* self,
 	Database cx,
 	TCServerInfo *server, //This actor is owned by this TCServerInfo
-	ServerStatusMap *statusMap,
-	MoveKeysLock lock,
-	UID masterId,
-	std::map<UID, Reference<TCServerInfo>>* other_servers,
-	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> changes,
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
@@ -2841,8 +2841,8 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
 	state bool hasWrongStoreTypeOrDC = false;
 
-	if(changes.present()) {
-		changes.get().send( std::make_pair(server->id, server->lastKnownInterface) );
+	if(self->serverChanges.present()) {
+		self->serverChanges.get().send( std::make_pair(server->id, server->lastKnownInterface) );
 	}
 
 	try {
@@ -2853,33 +2853,33 @@ ACTOR Future<Void> storageServerTracker(
 			// If there is any other server on this exact NetworkAddress, this server is undesired and will eventually be eliminated
 			state std::vector<Future<Void>> otherChanges;
 			std::vector<Promise<Void>> wakeUpTrackers;
-			for(auto i = other_servers->begin(); i != other_servers->end(); ++i) {
-				if (i->second.getPtr() != server && i->second->lastKnownInterface.address() == server->lastKnownInterface.address()) {
-					auto& statusInfo = statusMap->get( i->first );
-					TraceEvent("SameAddress", masterId)
+			for(const auto& i : self->server_info) {
+				if (i.second.getPtr() != server && i.second->lastKnownInterface.address() == server->lastKnownInterface.address()) {
+					auto& statusInfo = self->server_status.get( i.first );
+					TraceEvent("SameAddress", self->distributorId)
 						.detail("Failed", statusInfo.isFailed)
 						.detail("Undesired", statusInfo.isUndesired)
-						.detail("Server", server->id).detail("OtherServer", i->second->id)
+						.detail("Server", server->id).detail("OtherServer", i.second->id)
 						.detail("Address", server->lastKnownInterface.address())
 						.detail("NumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
-						.detail("OtherNumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(i->second->id))
-						.detail("OtherHealthy", !statusMap->get( i->second->id ).isUnhealthy());
+						.detail("OtherNumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id))
+						.detail("OtherHealthy", !self->server_status.get( i.second->id ).isUnhealthy());
 					// wait for the server's ip to be changed
-					otherChanges.push_back(statusMap->onChange(i->second->id));
-					if(!statusMap->get( i->second->id ).isUnhealthy()) {
-						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i->second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
+					otherChanges.push_back(self->server_status.onChange(i.second->id));
+					if(!self->server_status.get( i.second->id ).isUnhealthy()) {
+						if(self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id) >= self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
 						{
-							TraceEvent(SevWarn, "UndesiredStorageServer", masterId)
+							TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 								.detail("Server", server->id)
 								.detail("Address", server->lastKnownInterface.address())
-								.detail("OtherServer", i->second->id)
+								.detail("OtherServer", i.second->id)
 								.detail("NumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(server->id))
-								.detail("OtherNumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(i->second->id));
+								.detail("OtherNumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->id));
 
 							status.isUndesired = true;
 						}
 						else
-							wakeUpTrackers.push_back(i->second->wakeUpTracker);
+							wakeUpTrackers.push_back(i.second->wakeUpTracker);
 					}
 				}
 			}
@@ -2891,7 +2891,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			if( server->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
 				if( self->optimalTeamCount > 0 ) {
-					TraceEvent(SevWarn, "UndesiredStorageServer", masterId)
+					TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 					    .detail("Server", server->id)
 					    .detail("OptimalTeamCount", self->optimalTeamCount)
 					    .detail("Fitness", server->lastKnownClass.machineClassFitness(ProcessClass::Storage));
@@ -2902,7 +2902,7 @@ ACTOR Future<Void> storageServerTracker(
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
 			if(hasWrongStoreTypeOrDC) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", masterId).detail("Server", server->id).detail("StoreType", "?");
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id).detail("StoreType", "?");
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 			}
@@ -2912,7 +2912,7 @@ ACTOR Future<Void> storageServerTracker(
 			AddressExclusion addr( a.ip, a.port );
 			AddressExclusion ipaddr( a.ip );
 			if (self->excludedServers.get( addr ) || self->excludedServers.get( ipaddr )) {
-				TraceEvent(SevWarn, "UndesiredStorageServer", masterId).detail("Server", server->id)
+				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId).detail("Server", server->id)
 					.detail("Excluded", self->excludedServers.get( addr ) ? addr.toString() : ipaddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
@@ -2920,22 +2920,23 @@ ACTOR Future<Void> storageServerTracker(
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
 			otherChanges.push_back( self->excludedServers.onChange( ipaddr ) );
 
-			failureTracker = storageServerFailureTracker( self, server, cx, statusMap, &status, addedVersion );
+			failureTracker = storageServerFailureTracker( self, server, cx, &status, addedVersion );
 
 			//We need to recruit new storage servers if the key value store type has changed
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
-			if( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() )
+			if ( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() ) {
 				self->doBuildTeams = true;
+			}
 			lastIsUnhealthy = status.isUnhealthy();
 
 			choose {
 				when( wait( failureTracker ) ) {
 					// The server is failed AND all data has been removed from it, so permanently remove it.
-					TraceEvent("StatusMapChange", masterId).detail("ServerID", server->id).detail("Status", "Removing");
-					if(changes.present()) {
-						changes.get().send( std::make_pair(server->id, Optional<StorageServerInterface>()) );
+					TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", server->id).detail("Status", "Removing");
+					if(self->serverChanges.present()) {
+						self->serverChanges.get().send( std::make_pair(server->id, Optional<StorageServerInterface>()) );
 					}
 
 					if(server->updated.canBeSet()) {
@@ -2943,9 +2944,9 @@ ACTOR Future<Void> storageServerTracker(
 					}
 
 					// Remove server from FF/serverList
-					wait( removeStorageServer( cx, server->id, lock ) );
+					wait( removeStorageServer( cx, server->id, self->lock ) );
 
-					TraceEvent("StatusMapChange", masterId).detail("ServerID", server->id).detail("Status", "Removed");
+					TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", server->id).detail("Status", "Removed");
 					// Sets removeSignal (alerting dataDistributionTeamCollection to remove the storage server from its own data structures)
 					server->removed.send( Void() );
 					self->removedServers.send( server->id );
@@ -2956,7 +2957,7 @@ ACTOR Future<Void> storageServerTracker(
 					bool localityChanged = server->lastKnownInterface.locality != newInterface.first.locality;
 					bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
 					                              newInterface.first.locality.zoneId().get();
-					TraceEvent("StorageServerInterfaceChanged", masterId).detail("ServerID", server->id)
+					TraceEvent("StorageServerInterfaceChanged", self->distributorId).detail("ServerID", server->id)
 						.detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
 						.detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
 						.detail("LocalityChanged", localityChanged);
@@ -3005,7 +3006,7 @@ ACTOR Future<Void> storageServerTracker(
 						// Get the newBadTeams due to the locality change
 						vector<Reference<TCTeamInfo>> newBadTeams;
 						for (auto& serverTeam : server->teams) {
-							if (!self->satisfiesPolicy(serverTeam->servers)) {
+							if (!self->satisfiesPolicy(serverTeam->getServers())) {
 								newBadTeams.push_back(serverTeam);
 								continue;
 							}
@@ -3031,7 +3032,7 @@ ACTOR Future<Void> storageServerTracker(
 						bool addedNewBadTeam = false;
 						for(auto it : newBadTeams) {
 							if( self->removeTeam(it) ) {
-								self->addTeam(it->servers, true);
+								self->addTeam(it->getServers(), true);
 								addedNewBadTeam = true;
 							}
 						}
@@ -3046,8 +3047,8 @@ ACTOR Future<Void> storageServerTracker(
 					}
 
 					interfaceChanged = server->onInterfaceChanged;
-					if(changes.present()) {
-						changes.get().send( std::make_pair(server->id, server->lastKnownInterface) );
+					if(self->serverChanges.present()) {
+						self->serverChanges.get().send( std::make_pair(server->id, server->lastKnownInterface) );
 					}
 					// We rely on the old failureTracker being actorCancelled since the old actor now has a pointer to an invalid location
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
@@ -3060,10 +3061,10 @@ ACTOR Future<Void> storageServerTracker(
 						self->restartRecruiting.trigger();
 				}
 				when( wait( otherChanges.empty() ? Never() : quorum( otherChanges, 1 ) ) ) {
-					TraceEvent("SameAddressChangedStatus", masterId).detail("ServerID", server->id);
+					TraceEvent("SameAddressChangedStatus", self->distributorId).detail("ServerID", server->id);
 				}
 				when( KeyValueStoreType type = wait( storeTracker ) ) {
-					TraceEvent("KeyValueStoreTypeChanged", masterId)
+					TraceEvent("KeyValueStoreTypeChanged", self->distributorId)
 						.detail("ServerID", server->id)
 						.detail("StoreType", type.toString())
 						.detail("DesiredType", self->configuration.storageServerStoreType.toString());
@@ -3087,17 +3088,17 @@ ACTOR Future<Void> storageServerTracker(
 //Monitor whether or not storage servers are being recruited.  If so, then a database cannot be considered quiet
 ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool recruiting = false;
-	TraceEvent("StorageServerRecruitment", self->masterId)
+	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
+	    .trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
 	loop {
 		if( !recruiting ) {
 			while(self->recruitingStream.get() == 0) {
 				wait( self->recruitingStream.onChange() );
 			}
-			TraceEvent("StorageServerRecruitment", self->masterId)
+			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Recruiting")
-				.trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
+				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
 			recruiting = true;
 		} else {
 			loop {
@@ -3106,9 +3107,9 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 					when( wait( self->recruitingStream.get() == 0 ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskDataDistribution) : Future<Void>(Never()) ) ) { break; }
 				}
 			}
-			TraceEvent("StorageServerRecruitment", self->masterId)
+			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Idle")
-				.trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
+				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
 			recruiting = false;
 		}
 	}
@@ -3152,9 +3153,6 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection* self, RecruitStorageRepl
 			TraceEvent(SevWarn, "DDRecruitmentError").detail("Reason", "Server ID already recruited");
 
 		self->doBuildTeams = true;
-		if( self->healthyTeamCount == 0 ) {
-			wait( self->checkBuildTeams( self ) );
-		}
 	}
 
 	self->restartRecruiting.trigger();
@@ -3198,7 +3196,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 			.detail("Exclusions", rsr.excludeAddresses.size()).detail("Critical", rsr.criticalRecruitment);
 
 			if( rsr.criticalRecruitment ) {
-				TraceEvent(SevWarn, "DDRecruitingEmergency", self->masterId);
+				TraceEvent(SevWarn, "DDRecruitingEmergency", self->distributorId);
 			}
 
 			if(!fCandidateWorker.isValid() || fCandidateWorker.isReady() || rsr.excludeAddresses != lastRequest.excludeAddresses || rsr.criticalRecruitment != lastRequest.criticalRecruitment) {
@@ -3235,7 +3233,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
 	loop {
 		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
-			TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
+			TraceEvent("DDUpdatingStalled", self->distributorId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 		}
 		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
@@ -3243,14 +3241,14 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 			break;
 		}
 	}
-	TraceEvent("DDUpdatingReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);
 	loop {
 		try {
 			Optional<Value> val = wait( tr.get(datacenterReplicasKeyFor(dcId)) );
 			state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 			if(oldReplicas == self->configuration.storageTeamSize) {
-				TraceEvent("DDUpdatedAlready", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+				TraceEvent("DDUpdatedAlready", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 				return Void();
 			}
 			if(oldReplicas < self->configuration.storageTeamSize) {
@@ -3258,7 +3256,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 			}
 			tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(self->configuration.storageTeamSize));
 			wait( tr.commit() );
-			TraceEvent("DDUpdatedReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
+			TraceEvent("DDUpdatedReplicas", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
 			return Void();
 		} catch( Error &e ) {
 			wait( tr.onError(e) );
@@ -3270,6 +3268,25 @@ ACTOR Future<Void> serverGetTeamRequests(TeamCollectionInterface tci, DDTeamColl
 	loop {
 		GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 		self->addActor.send( self->getTeam( self, req ) );
+	}
+}
+
+ACTOR Future<Void> remoteRecovered( Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	TraceEvent("DDTrackerStarting");
+	while ( db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
+		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
+		wait( db->onChange() );
+	}
+	return Void();
+}
+
+ACTOR Future<Void> monitorHealthyTeams( DDTeamCollection* self ) {
+	loop choose {
+		when ( wait(self->zeroHealthyTeams->get() ? delay(SERVER_KNOBS->DD_ZERO_HEALTHY_TEAM_DELAY) : Never()) ) {
+			self->doBuildTeams = true;
+			wait( DDTeamCollection::checkBuildTeams(self) );
+		}
+		when ( wait(self->zeroHealthyTeams->onChange()) ) {}
 	}
 }
 
@@ -3290,9 +3307,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		initData = Reference<InitialDataDistribution>();
 		self->addActor.send(serverGetTeamRequests(tci, self));
 
-		TraceEvent("DDTeamCollectionBegin", self->masterId).detail("Primary", self->primary);
+		TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
 		wait( self->readyToStart || error );
-		TraceEvent("DDTeamCollectionReadyToStart", self->masterId).detail("Primary", self->primary);
+		TraceEvent("DDTeamCollectionReadyToStart", self->distributorId).detail("Primary", self->primary);
 
 		if(self->badTeamRemover.isReady()) {
 			self->badTeamRemover = removeBadTeams(self);
@@ -3308,6 +3325,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(monitorStorageServerRecruitment( self ));
 		self->addActor.send(waitServerListChange( self, serverRemoved.getFuture() ));
 		self->addActor.send(trackExcludedServers( self ));
+		self->addActor.send(monitorHealthyTeams( self ));
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
@@ -3333,7 +3351,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 					}
 				}
 
-				TraceEvent("TotalDataInFlight", self->masterId)
+				TraceEvent("TotalDataInFlight", self->distributorId)
 				    .detail("Primary", self->primary)
 				    .detail("TotalBytes", self->getDebugTotalDataInFlight())
 				    .detail("UnhealthyServers", self->unhealthyServers)
@@ -3348,7 +3366,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "DataDistributionTeamCollectionError", self->masterId).error(e);
+			TraceEvent(SevError, "DataDistributionTeamCollectionError", self->distributorId).error(e);
 		throw e;
 	}
 }
@@ -3454,14 +3472,11 @@ ACTOR Future<Void> pollMoveKeysLock( Database cx, MoveKeysLock lock ) {
 
 ACTOR Future<Void> dataDistribution(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
-		MasterInterface mi, DatabaseConfiguration configuration,
+		UID myId, DatabaseConfiguration configuration,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
-		Reference<ILogSystem> logSystem,
-		Version recoveryCommitVersion,
 		std::vector<Optional<Key>> primaryDcId,
 		std::vector<Optional<Key>> remoteDcIds,
-		double* lastLimited,
-		Future<Void> remoteRecovered)
+		double* lastLimited)
 {
 	state Database cx = openDBOnServer(db, TaskDataDistributionLaunch, true, true);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
@@ -3503,25 +3518,25 @@ ACTOR Future<Void> dataDistribution(
 	loop {
 		try {
 			loop {
-				TraceEvent("DDInitTakingMoveKeysLock", mi.id());
-				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, mi.id() ) );
-				TraceEvent("DDInitTookMoveKeysLock", mi.id());
-				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
+				TraceEvent("DDInitTakingMoveKeysLock", myId);
+				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, myId ) );
+				TraceEvent("DDInitTookMoveKeysLock", myId);
+				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				if(initData->shards.size() > 1) {
-					TraceEvent("DDInitGotInitialDD", mi.id())
+					TraceEvent("DDInitGotInitialDD", myId)
 					    .detail("B", printable(initData->shards.end()[-2].key))
 					    .detail("E", printable(initData->shards.end()[-1].key))
 					    .detail("Src", describe(initData->shards.end()[-2].primarySrc))
 					    .detail("Dest", describe(initData->shards.end()[-2].primaryDest))
 					    .trackLatest("InitialDD");
 				} else {
-					TraceEvent("DDInitGotInitialDD", mi.id()).detail("B","").detail("E", "").detail("Src", "[no items]").detail("Dest", "[no items]").trackLatest("InitialDD");
+					TraceEvent("DDInitGotInitialDD", myId).detail("B","").detail("E", "").detail("Src", "[no items]").detail("Dest", "[no items]").trackLatest("InitialDD");
 				}
 
 				if (initData->mode) break; // mode may be set true by system operator using fdbcli
-				TraceEvent("DataDistributionDisabled", mi.id());
+				TraceEvent("DataDistributionDisabled", myId);
 
-				TraceEvent("MovingData", mi.id())
+				TraceEvent("MovingData", myId)
 					.detail( "InFlight", 0 )
 					.detail( "InQueue", 0 )
 					.detail( "AverageShardSize", -1 )
@@ -3530,8 +3545,8 @@ ACTOR Future<Void> dataDistribution(
 					.detail( "HighestPriority", 0 )
 					.trackLatest( "MovingData" );
 
-				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
-				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", false).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1).trackLatest("TotalDataInFlightRemote");
+				TraceEvent("TotalDataInFlight", myId).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
+				TraceEvent("TotalDataInFlight", myId).detail("Primary", false).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1).trackLatest("TotalDataInFlightRemote");
 
 				wait( waitForDataDistributionEnabled(cx) );
 				TraceEvent("DataDistributionEnabled");
@@ -3596,20 +3611,20 @@ ACTOR Future<Void> dataDistribution(
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, myId ), "DDTracker", myId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, myId, storageTeamSize, lastLimited ), "DDQueue", myId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, mi.id(), lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy) );
+				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, myId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered(db), zeroHealthyTeams[1], false, processingUnhealthy) );
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
-				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], db ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
+				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], db ), "DDTeamCollectionSecondary", myId, &normalDDQueueErrors() ) );
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], db ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], db ), "DDTeamCollectionPrimary", myId, &normalDDQueueErrors() ) );
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait( waitForAll( actors ) );
@@ -3625,6 +3640,140 @@ ACTOR Future<Void> dataDistribution(
 				throw err;
 		}
 	}
+}
+
+struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
+	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<DatabaseConfiguration>> configuration;
+	std::vector<Optional<Key>> primaryDcId;
+	std::vector<Optional<Key>> remoteDcIds;
+	UID ddId;
+	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
+	PromiseStream<Future<Void>> addActor;
+
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id)
+		: dbInfo(db), configuration(dbConfig), ddId(id) {}
+
+	void refreshDcIds() {
+		primaryDcId.clear();
+		remoteDcIds.clear();
+
+		const std::vector<RegionInfo>& regions = configuration->get().regions;
+		TraceEvent ev("DataDistributor", ddId);
+		if ( regions.size() > 0 ) {
+			primaryDcId.push_back( regions[0].dcId );
+			ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
+		}
+		if ( regions.size() > 1 ) {
+			remoteDcIds.push_back( regions[1].dcId );
+			ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
+		}
+	}
+};
+
+ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
+	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		loop {
+			try {
+				TraceEvent("DataDistributor_MonitorConfigurationStart", self->ddId);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
+
+				DatabaseConfiguration conf;
+				conf.fromKeyValues( (VectorRef<KeyValueRef>) results );
+				if ( conf != self->configuration->get() ) {
+					TraceEvent("DataDistributor_UpdateConfiguration", self->ddId).detail("Config", conf.toString());
+					self->configuration->set( conf );
+				}
+
+				state Future<Void> watchFuture = tr.watch(configVersionKey);
+				wait( tr.commit() );
+				wait( watchFuture );
+				break;
+			} catch (Error& e) {
+				wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
+static std::set<int> const& normalDataDistributorErrors() {
+	static std::set<int> s;
+	if (s.empty()) {
+		s.insert( error_code_worker_removed );
+		s.insert( error_code_broken_promise );
+		s.insert( error_code_actor_cancelled );
+		s.insert( error_code_please_reboot );
+		s.insert( error_code_movekeys_conflict );
+	}
+	return s;
+}
+
+static std::set<int> const& normalRateKeeperErrors() {
+	static std::set<int> s;
+	if (s.empty()) {
+		s.insert( error_code_worker_removed );
+		s.insert( error_code_broken_promise );
+		s.insert( error_code_actor_cancelled );
+		s.insert( error_code_please_reboot );
+	}
+	return s;
+}
+
+ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+	state UID lastClusterControllerID(0,0);
+	state Reference<AsyncVar<DatabaseConfiguration>> configuration( new AsyncVar<DatabaseConfiguration>(DatabaseConfiguration()) );
+	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id()) );
+	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
+
+	TraceEvent("DataDistributor_Starting", di.id());
+	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
+	self->addActor.send( configurationMonitor( self ) );
+
+	loop choose {
+		when ( wait( self->configuration->onChange() ) ) {
+			self->refreshDcIds();
+			break;
+		}
+		when ( wait(self->dbInfo->onChange()) ) {}
+	}
+
+	try {
+		TraceEvent("DataDistributor_Running", di.id());
+		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
+		state double lastLimited = 0;
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
+
+		loop choose {
+			when ( wait( self->configuration->onChange() ) ) {
+				TraceEvent("DataDistributor_Restart", di.id())
+				.detail("ClusterControllerID", lastClusterControllerID)
+				.detail("Configuration", self->configuration->get().toString());
+				self->refreshDcIds();
+				distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+			}
+			when ( wait( collection ) ) {
+				ASSERT(false);
+				throw internal_error();
+			}
+			when ( wait( distributor ) ) {}
+		}
+	}
+	catch ( Error &err ) {
+		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
+			TraceEvent("DataDistributor_Error", di.id()).error(err, true);
+			throw err;
+		}
+		TraceEvent("DataDistributor_Died", di.id()).error(err, true);
+	}
+
+	return Void();
 }
 
 DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int processCount) {

@@ -126,7 +126,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		int _ = wait( backupAgent->waitBackup(self->extraDB, tag, false) );
+		wait(success( backupAgent->waitBackup(self->extraDB, tag, false) ));
 
 		return Void();
 	}
@@ -445,7 +445,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					throw;
 			}
 
-			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
+			wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
 			wait(restoreAgent.unlockBackup(cx, self->restoreTag));
 			wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 

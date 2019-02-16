@@ -591,7 +591,7 @@ public:
 
 				bool is_busy = wait(isBusy(tr, taskBucket));
 				if (!is_busy) {
-					Key _ = wait(addIdle(tr, taskBucket));
+					wait(success(addIdle(tr, taskBucket)));
 				}
 
 				Optional<Value> val = wait(tr->get(taskBucket->active.key()));

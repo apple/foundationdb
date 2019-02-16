@@ -47,9 +47,8 @@
 #include "flow/FaultInjection.h"
 
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
-#undef max
-#undef min
 #include <io.h>
 #include <psapi.h>
 #include <stdio.h>

@@ -524,7 +524,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						throw;
 				}
 
-				int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
+				wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
 				wait(restoreAgent.unlockBackup(cx, self->restoreTag));
 			}
 

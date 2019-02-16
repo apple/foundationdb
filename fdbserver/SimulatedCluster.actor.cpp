@@ -34,8 +34,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
-
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -379,15 +378,15 @@ ACTOR Future<Void> simulatedMachine(
 
 		for (int i = 0; i < ips.size(); i++) {
 			if (restarting) {
-				myFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
+				myFolders.push_back( ini.GetValue(printable(localities.machineId()).c_str(), format("%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
 
 				if(i == 0) {
-					std::string coordinationFolder = ini.GetValue(printable(localities.zoneId()).c_str(), "coordinationFolder", "");
+					std::string coordinationFolder = ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
 					if(!coordinationFolder.size())
-						coordinationFolder = ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str());
+						coordinationFolder = ini.GetValue(printable(localities.machineId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str());
 					coordFolders.push_back(coordinationFolder);
 				} else {
-					coordFolders.push_back( ini.GetValue(printable(localities.zoneId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
+					coordFolders.push_back( ini.GetValue(printable(localities.machineId()).c_str(), format("c%d", i).c_str(), joinPath(baseFolder, g_random->randomUniqueID().toString()).c_str()) );
 				}
 			}
 			else {
@@ -439,7 +438,7 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("DataHall", localities.dataHallId());
 
 			//Kill all open files, which may cause them to write invalid data.
-			auto& machineCache = g_simulator.getMachineById(localities.zoneId())->openFiles;
+			auto& machineCache = g_simulator.getMachineById(localities.machineId())->openFiles;
 
 			//Copy the file pointers to a vector because the map may be modified while we are killing files
 			std::vector<AsyncFileNonDurable*> files;
@@ -456,14 +455,14 @@ ACTOR Future<Void> simulatedMachine(
 
 			state std::set<std::string> filenames;
 			state std::string closingStr;
-			auto& machineCache = g_simulator.getMachineById(localities.zoneId())->openFiles;
+			auto& machineCache = g_simulator.getMachineById(localities.machineId())->openFiles;
 			for( auto it : machineCache ) {
 				filenames.insert( it.first );
 				closingStr += it.first + ", ";
 				ASSERT( it.second.isReady() && !it.second.isError() );
 			}
 
-			for( auto it : g_simulator.getMachineById(localities.zoneId())->deletingFiles ) {
+			for( auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles ) {
 				filenames.insert( it );
 				closingStr += it + ", ";
 			}
@@ -476,9 +475,9 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId());
 
-			ISimulator::MachineInfo* machine = g_simulator.getMachineById(localities.zoneId());
+			ISimulator::MachineInfo* machine = g_simulator.getMachineById(localities.machineId());
 			machine->closingFiles = filenames;
-			g_simulator.getMachineById(localities.zoneId())->openFiles.clear();
+			g_simulator.getMachineById(localities.machineId())->openFiles.clear();
 
 			// During a reboot:
 			//   The process is expected to close all files and be inactive in zero time, but not necessarily
@@ -488,7 +487,7 @@ ACTOR Future<Void> simulatedMachine(
 			state int shutdownDelayCount = 0;
 			state double backoff = 0;
 			loop {
-				auto& machineCache = g_simulator.getMachineById(localities.zoneId())->closingFiles;
+				auto& machineCache = g_simulator.getMachineById(localities.machineId())->closingFiles;
 
 				if( !machineCache.empty() ) {
 					std::string openFiles;
@@ -518,7 +517,7 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId());
 
-			g_simulator.destroyMachine(localities.zoneId());
+			g_simulator.destroyMachine(localities.machineId());
 
 			// SOMEDAY: when processes can be rebooted, this check will be needed
 			//ASSERT( this machine is rebooting );
@@ -585,7 +584,7 @@ ACTOR Future<Void> simulatedMachine(
 			//this machine is rebooting = false;
 		}
 	} catch( Error &e ) {
-		g_simulator.getMachineById(localities.zoneId())->openFiles.clear();
+		g_simulator.getMachineById(localities.machineId())->openFiles.clear();
 		throw;
 	}
 }
@@ -619,26 +618,35 @@ ACTOR Future<Void> restartSimulatedSystem(
 		std::vector<std::string> dcIds;
 		for( int i = 0; i < machineCount; i++) {
 			Optional<Standalone<StringRef>> dcUID;
-			std::string zoneIdString = ini.GetValue("META", format("%d", i).c_str());
-			Standalone<StringRef> zoneId = StringRef(zoneIdString);
-			std::string	dcUIDini = ini.GetValue(zoneIdString.c_str(), "dcUID");
-			
+			Optional<Standalone<StringRef>> zoneId;
+			std::string machineIdString = ini.GetValue("META", format("%d", i).c_str());
+			Standalone<StringRef> machineId = StringRef(machineIdString);
+
+			std::string	dcUIDini = ini.GetValue(machineIdString.c_str(), "dcUID");
 			if (!dcUIDini.empty()) {
 				dcUID = StringRef(dcUIDini);
 			}
-			ProcessClass processClass = ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(zoneIdString.c_str(), "mClass")), ProcessClass::CommandLineSource);
+
+			auto zoneIDini = ini.GetValue(machineIdString.c_str(), "zoneId");
+			if( zoneIDini == NULL ) {
+				zoneId = machineId;
+			} else {
+				zoneId = StringRef(zoneIDini);
+			}
+
+			ProcessClass processClass = ProcessClass((ProcessClass::ClassType)atoi(ini.GetValue(machineIdString.c_str(), "mClass")), ProcessClass::CommandLineSource);
 			if(processClass != ProcessClass::TesterClass) {
 				dcIds.push_back(dcUIDini);
 			}
 
 			std::vector<uint32_t> ipAddrs;
-			int processes = atoi(ini.GetValue(zoneIdString.c_str(), "processes"));
+			int processes = atoi(ini.GetValue(machineIdString.c_str(), "processes"));
 
-			auto ip = ini.GetValue(zoneIdString.c_str(), "ipAddr");
+			auto ip = ini.GetValue(machineIdString.c_str(), "ipAddr");
 
 			if( ip == NULL ) {
 				for (int i = 0; i < processes; i++){
-					ipAddrs.push_back(strtoul(ini.GetValue(zoneIdString.c_str(), format("ipAddr%d", i).c_str()), NULL, 10));
+					ipAddrs.push_back(strtoul(ini.GetValue(machineIdString.c_str(), format("ipAddr%d", i).c_str()), NULL, 10));
 				}
 			}
 			else {
@@ -649,7 +657,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 				}
 			}
 
-			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
+			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
 			// SOMEDAY: parse backup agent from test file
@@ -994,7 +1002,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	}
 
 	//because we protect a majority of coordinators from being killed, it is better to run with low numbers of coordinators to prevent too many processes from being protected
-	coordinators = ( minimumRegions <= 1 && BUGGIFY ) ? g_random->randomInt(1, machine_count+1) : 1;
+	coordinators = ( minimumRegions <= 1 && BUGGIFY ) ? g_random->randomInt(1, std::max(machine_count,2)) : 1;
 
 	if(minimumReplication > 1 && datacenters == 3) {
 		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
@@ -1020,11 +1028,11 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	for( auto kv : startingConfigJSON) {
 		startingConfigString += " ";
 		if( kv.second.type() == json_spirit::int_type ) {
-			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int()); 
+			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if( kv.second.type() == json_spirit::str_type ) {
-			startingConfigString += kv.second.get_str(); 
+			startingConfigString += kv.second.get_str();
 		} else if( kv.second.type() == json_spirit::array_type ) {
-			startingConfigString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none); 
+			startingConfigString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
 		} else {
 			ASSERT(false);
 		}
@@ -1100,14 +1108,26 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			}
 		}
 	} else {
+		int assignedMachines = 0;
+		int coordCount = coordinatorCount;
+		if(coordinatorCount>4) {
+			++coordCount;
+		}
 		for( int dc = 0; dc < dataCenters; dc++ ) {
-			int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
-
+			int dcCoordinators = coordCount / dataCenters + (dc < coordCount%dataCenters);
+			int machines = machineCount / dataCenters + (dc < machineCount % dataCenters);
 			for(int m = 0; m < dcCoordinators; m++) {
-				uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
-				coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
-				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
+				if(coordinatorCount>4 && (assignedMachines==4 || (m+1==dcCoordinators && assignedMachines<4 && assignedMachines+machines-dcCoordinators>=4))) {
+					uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
+					TraceEvent("SkippedCoordinator").detail("Address", ip).detail("M", m).detail("Machines", machines).detail("Assigned", assignedMachines).detail("DcCoord", dcCoordinators).detail("CoordinatorCount", coordinatorCount);
+				} else {
+					uint32_t ip = 2<<24 | dc<<16 | 1<<8 | m;
+					coordinatorAddresses.push_back(NetworkAddress(ip, 1, true, sslEnabled));
+					TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back()).detail("M", m).detail("Machines", machines).detail("Assigned", assignedMachines).detail("DcCoord", dcCoordinators).detail("P1", (m+1==dcCoordinators)).detail("P2", (assignedMachines<4)).detail("P3", (assignedMachines+machines-dcCoordinators>=4)).detail("CoordinatorCount", coordinatorCount);
+				}
+				assignedMachines++;
 			}
+			assignedMachines += machines-dcCoordinators;
 		}
 	}
 
@@ -1147,8 +1167,14 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
 		ASSERT( dcCoordinators <= machines );
 		int useSeedForMachine = g_random->randomInt(0, machines);
+		Standalone<StringRef> zoneId;
+		Standalone<StringRef> newZoneId;
 		for( int machine = 0; machine < machines; machine++ ) {
-			Standalone<StringRef> zoneId(g_random->randomUniqueID().toString());
+			Standalone<StringRef> machineId(g_random->randomUniqueID().toString());
+			if(machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 || simconfig.db.regions.size() || g_random->random01() < 0.5) {
+				zoneId = g_random->randomUniqueID().toString();
+				newZoneId = g_random->randomUniqueID().toString();
+			}
 
 			//Choose a machine class
 			ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
@@ -1168,7 +1194,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 				ips.push_back(2 << 24 | dc << 16 | g_random->randomInt(1, i+2) << 8 | machine);
 			}
 			// check the sslEnablementMap using only one ip(
-			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
+			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled, tlsOptions,
 				localities, processClass, baseFolder, false, machine == useSeedForMachine, true ), "SimulatedMachine"));
@@ -1179,8 +1205,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 					extraIps.push_back(4 << 24 | dc << 16 | g_random->randomInt(1, i + 2) << 8 | machine);
 				}
 
-				Standalone<StringRef> newZoneId = Standalone<StringRef>(g_random->randomUniqueID().toString());
-				LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, dcUID);
+				Standalone<StringRef> newMachineId(g_random->randomUniqueID().toString());
+
+				LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 				localities.set(LiteralStringRef("data_hall"), dcUID);
 				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled, tlsOptions,
 					localities,
@@ -1294,7 +1321,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	checkExtraDB(testFile, extraDB, minimumReplication, minimumRegions);
 
 	wait( g_simulator.onProcess( g_simulator.newProcess(
-			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
+			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(1);
 	if (tlsOptions->enabled()) {

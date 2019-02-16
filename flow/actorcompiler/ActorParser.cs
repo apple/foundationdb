@@ -36,6 +36,19 @@ namespace actorcompiler
         }
     };
 
+    class ErrorMessagePolicy
+    {
+        public bool DisableActorWithoutWaitWarning = false;
+        public void HandleActorWithoutWait(String sourceFile, Actor actor)
+        {
+            if (!DisableActorWithoutWaitWarning && !actor.isTestCase)
+            {
+                // TODO(atn34): Once cmake is the only build system we can make this an error instead of a warning.
+                Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+            }
+        }
+    }
+
     class Token
     {
         public string Value;
@@ -200,10 +213,12 @@ namespace actorcompiler
 
         Token[] tokens;
         string sourceFile;
+        ErrorMessagePolicy errorMessagePolicy;
 
-        public ActorParser(string text, string sourceFile)
+        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy)
         {
             this.sourceFile = sourceFile;
+            this.errorMessagePolicy = errorMessagePolicy;
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -872,21 +887,21 @@ namespace actorcompiler
                 var body = range(heading.End+1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-                bool warnOnNoWait = false;
                 if (head_token.Value == "ACTOR")
                 {
                     ParseActorHeading(actor, heading);
-                    warnOnNoWait = true;
                 }
-                else if (head_token.Value == "TEST_CASE")
+                else if (head_token.Value == "TEST_CASE") {
                     ParseTestCaseHeading(actor, heading);
+                    actor.isTestCase = true;
+                }
                 else
                     head_token.Assert("ACTOR or TEST_CASE expected!", t => false);
 
                 actor.body = ParseCodeBlock(body);
 
-                if (!actor.body.containsWait() && warnOnNoWait)
-                    Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+                if (!actor.body.containsWait())
+                    this.errorMessagePolicy.HandleActorWithoutWait(sourceFile, actor);
 
                 end = body.End + 1;
             }
