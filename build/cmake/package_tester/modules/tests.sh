@@ -62,15 +62,13 @@ then
        num_processes="$(fdbcli --exec 'status' | grep "FoundationDB processes" | sed -e 's/.*- //')"
        if [ "${num_processes}" -ne 2 ]
        then
-          ?=2
-          success Number of processes incorrect after config change
+          fail Number of processes incorrect after config change
        fi
 
        differences="$(diff /tmp/fdb.cluster /etc/foundationdb/fdb.cluster)"
        if [ -n "${differences}" ]
        then
-          ?=1
-          success Install changed configuration files
+          fail Install changed configuration files
        fi
        differences="$(diff /tmp/foundationdb.conf /etc/foundationdb/foundationdb.conf)"
        if [ -n "${differences}" ]
