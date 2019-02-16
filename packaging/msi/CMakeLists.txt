@@ -16,7 +16,7 @@ if(WIX_FOUND)
             -DVERSION=${CMAKE_PROJECT_VERSION}
             -DVERSION_NAME=${FDB_VERSION}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_wxs.cmake
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/FDBInstaller.wxs ${CMAKE_CURRENT_SOURCE_DIR}/generate_wsx.cmake fdbserver fdbcli fdbmonitor fdb_c fdbbackup
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/FDBInstaller.wxs ${CMAKE_CURRENT_SOURCE_DIR}/generate_wsx.cmake
     COMMENT "Generate WIX file")
   add_custom_target(wix_file DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wxs)
   add_custom_command(
@@ -27,14 +27,17 @@ if(WIX_FOUND)
     COMMENT "Create WIX Object file"
     )
   add_custom_target(wixobj DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wixobj)
+  add_dependencies(wixobj fdbserver fdbcli fdbmonitor fdb_c fdbbackup python_binding)
+  string(REPLACE "/" "\\" msi_out_file "${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi")
   add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.msi
-    COMMAND ${WIX_LIGHT} FDBInstaller.wixobj -ext WixUIExtension
+    OUTPUT ${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi
+    COMMAND ${WIX_LIGHT} FDBInstaller.wixobj -ext WixUIExtension -out ${msi_out_file}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    DEPENDS wixobj
     COMMENT "Generate MSI installer"
     )
-  add_custom_target(installer ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.msi)
+  add_custom_target(installer DEPENDS ${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi)
+  add_dependencies(installer wixobj)
+  add_dependencies(packages installer)
   #add_dependencies(installer fdbserver fdbcli fdbmonitor fdbbackup)
 else()
   message(WARNING "Could NOT find WIX - will not build installer")
