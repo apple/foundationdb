@@ -24,6 +24,7 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include <iostream>
+#include "flow/actorcompiler.h" // has to be last include
 
 IAsyncFile::~IAsyncFile() = default;
 

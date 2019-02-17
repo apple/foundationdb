@@ -826,23 +826,29 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void logFields(index_sequence<Is...>, uint64_t t, int64_t l, bool& overflow, int64_t& bytes) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).log( std::tuple_element<Is, typename Descriptor<E>::fields>::type::get( static_cast<E&>(*this) ), t, l, overflow, bytes ), Void())...
 		};
+#endif
 	}
 
 	template <size_t... Is>
 	void initFields(index_sequence<Is...>) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).init(), Void())...
 		};
+#endif
 	}
 
 	template <size_t... Is>
 	void nextKeys(index_sequence<Is...>, uint64_t t, int64_t l ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).nextKey(t, l),Void())...
 		};
+#endif
 	}
 
 	virtual void flushData(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
@@ -856,9 +862,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void flushFields(index_sequence<Is...>, MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).flushField( mk, rollTime, batch ),Void())...
 		};
+#endif
 	}
 
 	virtual void rollMetric( uint64_t t ) {
@@ -868,9 +876,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void rollFields(index_sequence<Is...>, uint64_t t ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).rollMetric( t ),Void())...
 		};
+#endif
 	}
 
 	virtual void registerFields( MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys ) {
@@ -880,9 +890,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void registerFields(index_sequence<Is...>, const MetricKeyRef &mk, std::vector<Standalone<StringRef>>& fieldKeys ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).registerField( mk, fieldKeys ),Void())...
 		};
+#endif
 	}
 protected:
     bool it;
