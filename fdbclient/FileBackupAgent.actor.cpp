@@ -309,15 +309,11 @@ public:
 		});
 	}
 
-	static Future<std::string> getProgress_impl(RestoreConfig const &restore, Reference<ReadYourWritesTransaction> const &tr);
-	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) {
-		return getProgress_impl(*this, tr);
-	}
+	ACTOR static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) { return getProgress_impl(*this, tr); }
 
-	static Future<std::string> getFullStatus_impl(RestoreConfig const &restore, Reference<ReadYourWritesTransaction> const &tr);
-	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) {
-		return getFullStatus_impl(*this, tr);
-	}
+	ACTOR static Future<std::string> getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) { return getFullStatus_impl(*this, tr); }
 };
 
 typedef RestoreConfig::RestoreFile RestoreFile;
@@ -1352,12 +1348,14 @@ namespace fileBackup {
 						// The dispatch of this batch can take multiple separate executions if the executor fails
 						// so store a completion key for the dispatch finish() to set when dispatching the batch is done.
 						state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
-						wait(map(dispatchCompletionKey.get(tr, taskBucket), [=](Key const &k) {
-							config.snapshotBatchDispatchDoneKey().set(tr, k);
-							return Void();
-						}));
+					    wait(map(dispatchCompletionKey.get(tr, taskBucket), [=](Key const& k) {
+#ifdef NO_INTELLISENSE
+						    config.snapshotBatchDispatchDoneKey().set(tr, k);
+#endif
+						    return Void();
+					    }));
 
-						wait(tr->commit());
+					    wait(tr->commit());
 					}
 					else {
 						ASSERT(snapshotBatchSize.present());
@@ -3237,7 +3235,9 @@ namespace fileBackup {
 
 					ERestoreState oldState = wait(restore.stateEnum().getD(tr));
 					if(oldState != ERestoreState::QUEUED && oldState != ERestoreState::STARTING) {
+#ifdef NO_INTELLISENSE
 						wait(restore.logError(cx, restore_error(), format("StartFullRestore: Encountered unexpected state(%d)", oldState), this));
+#endif
 						return Void();
 					}
 					restore.stateEnum().set(tr, ERestoreState::STARTING);
@@ -3324,7 +3324,9 @@ namespace fileBackup {
 
 			state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 			if(firstVersion == invalidVersion) {
+#ifdef NO_INTELLISENSE
 				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
+#endif
 				std::string tag = wait(restore.tag().getD(tr));
 				wait(success(abortRestore(tr, StringRef(tag))));
 				return Void();
@@ -3410,7 +3412,7 @@ public:
 				// Break, if one of the following is true
 				//  - no longer runnable
 				//  - in differential mode (restorable) and stopWhenDone is not enabled
-				if( !FileBackupAgent::isRunnable(status) || (!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) ) {
+				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) )) {
 
 					if(pContainer != nullptr) {
 						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
@@ -3603,8 +3605,8 @@ public:
 	// This method will return the final status of the backup
 	ACTOR static Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose) {
 		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);

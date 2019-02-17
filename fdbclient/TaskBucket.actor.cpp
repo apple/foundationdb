@@ -20,6 +20,7 @@
 
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
@@ -135,15 +136,19 @@ public:
 		// Get keyspace for the specified priority level
 		state Subspace space = taskBucket->getAvailableSpace(priority);
 
-		// Get a task key that is <= a random UID task key, if successful then return it
-		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		{
+			// Get a task key that is <= a random UID task key, if successful then return it
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
+			if(space.contains(k))
+				return Optional<Key>(k);
+		}
 
-		// Get a task key that is <= the maximum possible UID, if successful return it.
-		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		{
+			// Get a task key that is <= the maximum possible UID, if successful return it.
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
+			if(space.contains(k))
+				return Optional<Key>(k);
+		}
 
 		return Optional<Key>();
 	}

@@ -1524,8 +1524,8 @@ namespace dbBackup {
 			}
 
 			loop {
+				state Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
 				try {
-					state Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
 					srcTr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 					srcTr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
