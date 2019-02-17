@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 std::map<std::string, Future<Void>> AsyncFileNonDurable::filesBeingDeleted;
 
