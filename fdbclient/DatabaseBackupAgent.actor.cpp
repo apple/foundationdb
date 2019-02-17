@@ -27,6 +27,7 @@
 #include <numeric>
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 const Key DatabaseBackupAgent::keyAddPrefix = LiteralStringRef("add_prefix");
 const Key DatabaseBackupAgent::keyRemovePrefix = LiteralStringRef("remove_prefix");
@@ -1494,8 +1495,8 @@ namespace dbBackup {
 			}
 
 			loop {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				try {
-					state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);

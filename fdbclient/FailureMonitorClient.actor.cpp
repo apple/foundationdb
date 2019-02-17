@@ -21,6 +21,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/ClusterInterface.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	std::set<NetworkAddress> knownAddrs;

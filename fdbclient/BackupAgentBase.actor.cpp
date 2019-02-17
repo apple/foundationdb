@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
 const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");

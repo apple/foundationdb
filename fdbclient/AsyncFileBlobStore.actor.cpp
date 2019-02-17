@@ -21,6 +21,7 @@
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 Future<int64_t> AsyncFileBlobStoreRead::size() {
 	if(!m_size.isValid())

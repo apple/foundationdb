@@ -437,58 +437,64 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	state Arena arena;
 	
 	loop {
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = (x % 2) > 0;
-			const char *s = d[x % 3];
-			// s doesn't actually require an arena
-			stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = (x % 2) > 0;
+				const char *s = d[x % 3];
+				// s doesn't actually require an arena
+				stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
 
-			TraceEvent("Dummy")
-				.detail("A", x)
-				.detail("X", 1.5 * x)
-				.detail("D", s)
-				.detail("J", sin(2.0 * x))
-				.detail("K", sin(3.0 * x))
-				.detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("D", s)
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
+			}
+			wait(delay(w));
 		}
-		wait(delay(w));
 
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = x % 2 > 0;
-			TraceEvent("Dummy")
-				.detail("A", x)
-				.detail("X", 1.5 * x)
-				.detail("B", x*2)
-				.detail("Y", 3.0 * x)
-				.detail("D", d[x % 3])
-				.detail("J", sin(2.0 * x))
-				.detail("K", sin(3.0 * x))
-				.detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = x % 2 > 0;
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("B", x*2)
+					.detail("Y", 3.0 * x)
+					.detail("D", d[x % 3])
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
+			}
+			wait(delay(w));
 		}
-		wait(delay(w));
 
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = x % 2 > 0;
-			TraceEvent("Dummy")
-				.detail("A", x)
-				.detail("X", 1.5 * x)
-				.detail("C", x*3)
-				.detail("Z", 4.5 * x)
-				.detail("D", d[x % 3])
-				.detail("J", sin(2.0 * x))
-				.detail("K", sin(3.0 * x))
-				.detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = x % 2 > 0;
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("C", x*3)
+					.detail("Z", 4.5 * x)
+					.detail("D", d[x % 3])
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
+			}
+			wait(delay(w));
+
+			if(x >= total)
+				return Void();
 		}
-		wait(delay(w));
-
-		if(x >= total)
-			return Void();
 	}
 }
 
