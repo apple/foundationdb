@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"

@@ -3,7 +3,7 @@ set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.h
   Atomic.h
   AutoPublicAddress.cpp
-  BackupAgent.h
+  BackupAgent.actor.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h

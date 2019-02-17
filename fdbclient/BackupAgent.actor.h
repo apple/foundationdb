@@ -1,5 +1,5 @@
 /*
- * BackupAgent.h
+ * BackupAgent.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BACKUP_AGENT_H
-#define FDBCLIENT_BACKUP_AGENT_H
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_G_H)
+	#define FDBCLIENT_BACKUP_AGENT_ACTOR_G_H
+	#include "fdbclient/BackupAgent.actor.h"
+#elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
+	#define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
 #include "flow/flow.h"
 #include "fdbclient/NativeAPI.h"
@@ -31,6 +34,7 @@
 #include <ctime>
 #include <climits>
 #include "fdbclient/BackupContainer.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -431,9 +435,16 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t&
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
-Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVersion> const& results, Reference<FlowLock> const& lock, KeyRangeRef const& range, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
-Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
-Future<Void> applyMutations(Database const& cx, Key const& uid, Key const& addPrefix, Key const& removePrefix, Version const& beginVersion, Version* const& endVersion, RequestStream<CommitTransactionRequest> const& commit, NotifiedVersion* const& committedVersion, Reference<KeyRangeMap<Version>> const& keyVersion);
+ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersion> results, Reference<FlowLock> lock,
+                                 KeyRangeRef range, bool terminator = true, bool systemAccess = false,
+                                 bool lockAware = false);
+ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Future<Void> active,
+                                 Reference<FlowLock> lock, KeyRangeRef range,
+                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy, bool terminator = true,
+                                 bool systemAccess = false, bool lockAware = false);
+ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key removePrefix, Version beginVersion,
+                                  Version* endVersion, RequestStream<CommitTransactionRequest> commit,
+                                  NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
 
 typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
@@ -473,7 +484,8 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 public:
 	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap * const & tagsMap, Reference<ReadYourWritesTransaction> const & tr);
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
+	                                                           Reference<ReadYourWritesTransaction> tr);
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
 		return getAll_impl(this, tr);

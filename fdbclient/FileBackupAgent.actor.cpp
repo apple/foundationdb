@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"

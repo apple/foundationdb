@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include <ctime>
 #include <climits>
 #include "fdbrpc/IAsyncFile.h"

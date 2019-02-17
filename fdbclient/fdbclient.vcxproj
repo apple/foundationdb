@@ -26,7 +26,7 @@
     </ActorCompiler>
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="BackupContainer.h" />
-    <ClInclude Include="BackupAgent.h" />
+    <ClInclude Include="BackupAgent.actor.h" />
     <ClInclude Include="BlobStore.h" />
     <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />

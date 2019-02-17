@@ -29,7 +29,7 @@
 #include "flow/SignalSafeUnwind.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"

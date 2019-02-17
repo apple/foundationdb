@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/workloads/workloads.h"
