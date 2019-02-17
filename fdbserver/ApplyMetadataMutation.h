@@ -24,7 +24,7 @@
 
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogSystem.h"
