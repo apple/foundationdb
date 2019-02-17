@@ -317,7 +317,14 @@ auto tuple_map(F f, const Tuple &t, const Tuples &... ts) -> decltype( tuple_map
 }
 
 template <class T>
-struct Descriptor {};
+struct Descriptor {
+#ifndef NO_INTELLISENSE
+	using fields = std::tuple<>;
+	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
+
+	static StringRef typeName() {{ return LiteralStringRef(""); }}
+#endif
+};
 
 // FieldHeader is a serializable (FIXED SIZE!) and updatable Header type for Metric field levels.
 // Update is via += with either a T or another FieldHeader
