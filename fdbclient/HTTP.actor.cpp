@@ -312,6 +312,7 @@ namespace HTTP {
 
 		state bool earlyResponse = false;
 		state int total_sent = 0;
+		state double send_start;
 
 		event.detail("DebugID", conn->getDebugID());
 		event.detail("RemoteAddress", conn->getPeerAddress());
@@ -348,7 +349,7 @@ namespace HTTP {
 			state Reference<HTTP::Response> r(new HTTP::Response());
 			state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
 
-			state double send_start = timer();
+			send_start = timer();
 
 			loop {
 				wait(conn->onWritable());

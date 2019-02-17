@@ -28,6 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {
 	json_spirit::mValue val;
@@ -461,11 +462,11 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	// This could be read from the JSON but doing so safely is ugly so using a real var.
 	state bool quorum_reachable = false;
 	state int coordinatorsFaultTolerance = 0;
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 
 	try {
 		state int64_t clientTime = time(0);
 
-		state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
