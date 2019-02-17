@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/Platform.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
 	if (filename.length())

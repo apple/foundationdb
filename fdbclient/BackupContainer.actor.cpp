@@ -32,6 +32,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include <algorithm>
 #include <time.h>
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace IBackupFile_impl {
 
@@ -1767,13 +1768,17 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	// Do a series of expirations and verify resulting state
 	state int i = 0;
 	for(; i < listing.snapshots.size(); ++i) {
-		// Ensure we can still restore to the latest version
-		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
-		ASSERT(rest.present());
+		{
+			// Ensure we can still restore to the latest version
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
+			ASSERT(rest.present());
+		}
 
-		// Ensure we can restore to the end version of snapshot i
-		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
-		ASSERT(rest.present());
+		{
+			// Ensure we can restore to the end version of snapshot i
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
+			ASSERT(rest.present());
+		}
 
 		// Test expiring to the end of this snapshot
 		state Version expireVersion = listing.snapshots[i].endVersion;
