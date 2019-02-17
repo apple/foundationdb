@@ -37,6 +37,12 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#ifdef NO_INTELLISENSE
+#define THIS_ADDR (uint64_t)this
+#else
+#define THIS_ADDR 0
+#endif
+
 static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
 
 static std::string versionToString(Optional<Version> version) {
@@ -348,7 +354,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 		.detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 		.detail("BytesWritten", bytesWritten.get())
 		.detail("ApplyLag", lag.get())
-		.detail("TaskInstance", (uint64_t)this);
+		.detail("TaskInstance", THIS_ADDR);
 
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
@@ -2467,7 +2473,7 @@ namespace fileBackup {
 				.detail("FileSize", rangeFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
+				.detail("TaskInstance", THIS_ADDR);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Future<Reference<IBackupContainer>> bc;
@@ -2592,7 +2598,7 @@ namespace fileBackup {
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
 						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2681,7 +2687,7 @@ namespace fileBackup {
 				.detail("FileSize", logFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
+				.detail("TaskInstance", THIS_ADDR);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Reference<IBackupContainer> bc;
@@ -2754,7 +2760,7 @@ namespace fileBackup {
 						.detail("EndIndex", i)
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2853,7 +2859,7 @@ namespace fileBackup {
 					.detail("ApplyLag", applyLag)
 					.detail("BatchSize", batchSize)
 					.detail("Decision", "too_far_behind")
-					.detail("TaskInstance", (uint64_t)this);
+					.detail("TaskInstance", THIS_ADDR);
 
 				wait(taskBucket->finish(tr, task));
 				return Void();
@@ -2895,7 +2901,7 @@ namespace fileBackup {
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "end_of_final_batch")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 				else if(beginVersion < restoreVersion) {
 					// If beginVersion is less than restoreVersion then do one more dispatch task to get there
@@ -2909,7 +2915,7 @@ namespace fileBackup {
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "apply_to_restore_version")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 				else if(applyLag == 0) {
 					// If apply lag is 0 then we are done so create the completion task
@@ -2922,7 +2928,7 @@ namespace fileBackup {
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "restore_complete")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				} else {
 					// Applying of mutations is not yet finished so wait a small amount of time and then re-add this same task.
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
@@ -2933,7 +2939,7 @@ namespace fileBackup {
 						.detail("BeginVersion", beginVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "apply_still_behind")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 
 				// If adding to existing batch then task is joined with a batch future so set done future
@@ -3007,7 +3013,7 @@ namespace fileBackup {
 					.suppressFor(60)
 					.detail("RestoreUID", restore.getUid())
 					.detail("FileName", f.fileName)
-					.detail("TaskInstance", (uint64_t)this);
+					.detail("TaskInstance", THIS_ADDR);
 			}
 
 			// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone future
@@ -3032,7 +3038,7 @@ namespace fileBackup {
 					.detail("ApplyLag", applyLag)
 					.detail("BatchSize", batchSize)
 					.detail("Decision", decision)
-					.detail("TaskInstance", (uint64_t)this)
+					.detail("TaskInstance", THIS_ADDR)
 					.detail("RemainingInBatch", remainingInBatch);
 
 				wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, endVersion, beginFile, beginBlock, batchSize, remainingInBatch, TaskCompletionKey::joinWith((allPartsDone)))));
@@ -3080,7 +3086,7 @@ namespace fileBackup {
 				.detail("Decision", "dispatched_files")
 				.detail("FilesDispatched", i)
 				.detail("BlocksDispatched", blocksDispatched)
-				.detail("TaskInstance", (uint64_t)this)
+				.detail("TaskInstance", THIS_ADDR)
 				.detail("RemainingInBatch", remainingInBatch);
 
 			return Void();
@@ -3301,7 +3307,7 @@ namespace fileBackup {
 						.detail("FileCount", nFiles)
 						.detail("FileBlockCount", nFileBlocks)
 						.detail("TransactionBytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					start = i;
 					tr->reset();
