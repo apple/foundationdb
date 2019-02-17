@@ -25,17 +25,15 @@ public class TuplePerformanceTest {
 
 	public Tuple createTuple(int length) {
 		List<Object> values = new ArrayList<>(length);
-		for(int i = 0; i < length; i++) {
+		for (int i = 0; i < length; i++) {
 			double choice = r.nextDouble();
-			if(choice < 0.1) {
+			if (choice < 0.1) {
 				values.add(null);
-			}
-			else if(choice < 0.2) {
+			} else if (choice < 0.2) {
 				byte[] bytes = new byte[r.nextInt(20)];
 				r.nextBytes(bytes);
 				values.add(bytes);
-			}
-			else if(choice < 0.3) {
+			} else if (choice < 0.3) {
 				char[] chars = new char[r.nextInt(20)];
 				for (int j = 0; j < chars.length; j++) {
 					chars[j] = (char)('a' + r.nextInt(26));
@@ -171,7 +169,7 @@ public class TuplePerformanceTest {
 	}
 
 	public static void main(String[] args) {
-		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000);
+		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000);
 		tester.run();
 	}
 }

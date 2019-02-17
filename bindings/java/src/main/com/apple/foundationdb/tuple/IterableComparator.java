@@ -34,7 +34,7 @@ import java.util.Iterator;
  *    tuple1.compareTo(tuple2)
  *      == new IterableComparator().compare(tuple1, tuple2)
  *      == new IterableComparator().compare(tuple1.getItems(), tuple2.getItems()),
- *      == ByteArrayUtil.compareUnsigned(tuple1.pack(), tuple2.pack())}
+ *      == ByteArrayUtil.compareUnsigned(tuple1.packInternal(), tuple2.packInternal())}
  * </pre>
  *
  * <p>

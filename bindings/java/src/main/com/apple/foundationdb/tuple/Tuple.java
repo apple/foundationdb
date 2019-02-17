@@ -68,10 +68,11 @@ import com.apple.foundationdb.Range;
  * This class is not thread safe.
  */
 public class Tuple implements Comparable<Tuple>, Iterable<Object> {
-	private static IterableComparator comparator = new IterableComparator();
+	private static final IterableComparator comparator = new IterableComparator();
 
 	private List<Object> elements;
 	private int memoizedHash = 0;
+	private byte[] packed = null;
 
 	private Tuple(List<? extends Object> elements, Object newItem) {
 		this(elements);
@@ -80,6 +81,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	private Tuple(List<? extends Object> elements) {
 		this.elements = new ArrayList<>(elements);
+	}
+
+	private enum VersionstampExpectations {
+		UNKNOWN,
+		HAS_INCOMPLETE,
+		HAS_NO_INCOMPLETE
 	}
 
 	/**
@@ -261,7 +268,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a newly created {@code Tuple}
 	 */
 	public Tuple addAll(List<? extends Object> o) {
-		List<Object> merged = new ArrayList<Object>(o.size() + this.elements.size());
+		List<Object> merged = new ArrayList<>(o.size() + this.elements.size());
 		merged.addAll(this.elements);
 		merged.addAll(o);
 		return new Tuple(merged);
@@ -275,7 +282,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a newly created {@code Tuple}
 	 */
 	public Tuple addAll(Tuple other) {
-		List<Object> merged = new ArrayList<Object>(this.size() + other.size());
+		List<Object> merged = new ArrayList<>(this.size() + other.size());
 		merged.addAll(this.elements);
 		merged.addAll(other.peekItems());
 		return new Tuple(merged);
@@ -285,10 +292,10 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * Get an encoded representation of this {@code Tuple}. Each element is encoded to
 	 *  {@code byte}s and concatenated.
 	 *
-	 * @return a serialized representation of this {@code Tuple}.
+	 * @return a packed representation of this {@code Tuple}.
 	 */
 	public byte[] pack() {
-		return pack(null);
+		return packInternal(null, true);
 	}
 
 	/**
@@ -296,11 +303,36 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  {@code byte}s and concatenated, and then the prefix supplied is prepended to
 	 *  the array.
 	 *
-	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
-	 * @return a serialized representation of this {@code Tuple} prepended by the {@code prefix}.
+	 * @param prefix additional byte-array prefix to prepend to packed bytes.
+	 * @return a packed representation of this {@code Tuple} prepended by the {@code prefix}.
 	 */
 	public byte[] pack(byte[] prefix) {
-		return TupleUtil.pack(elements, prefix);
+		return packInternal(prefix, true);
+	}
+
+	byte[] packInternal(byte[] prefix, boolean copy) {
+		boolean hasPrefix = prefix != null && prefix.length > 1;
+		if(packed == null) {
+			byte[] result = TupleUtil.pack(elements, prefix);
+			if(hasPrefix) {
+				packed = Arrays.copyOfRange(result, prefix.length, result.length);
+				return result;
+			}
+			else {
+				packed = result;
+			}
+		}
+		if(hasPrefix) {
+			return ByteArrayUtil.join(prefix, packed);
+		}
+		else {
+			if(copy) {
+				return Arrays.copyOf(packed, packed.length);
+			}
+			else {
+				return packed;
+			}
+		}
 	}
 
 	/**
@@ -309,7 +341,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
 	 *  but it does not add any prefix to the array.
 	 *
-	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @return a packed representation of this {@code Tuple} for use with versionstamp ops.
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
 	public byte[] packWithVersionstamp() {
@@ -322,19 +354,62 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
 	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
 	 *  Each element is encoded to {@code byte}s and concatenated, the prefix
-	 *  is then prepended to the array, and then the index of the serialized incomplete
+	 *  is then prepended to the array, and then the index of the packed incomplete
 	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
 	 *  as the key to
 	 *  {@link com.apple.foundationdb.Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
 	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.foundationdb.MutationType}, and the transaction's
 	 *  version will then be filled in at commit time.
 	 *
-	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
-	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @param prefix additional byte-array prefix to prepend to packed bytes.
+	 * @return a packed representation of this {@code Tuple} for use with versionstamp ops.
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
 		return TupleUtil.packWithVersionstamp(elements, prefix);
+	}
+
+	byte[] packWithVersionstampInternal(byte[] prefix, boolean copy) {
+		boolean hasPrefix = prefix != null && prefix.length > 0;
+		if(packed == null) {
+			byte[] result = TupleUtil.packWithVersionstamp(elements, prefix);
+			if(hasPrefix) {
+				byte[] withoutPrefix = Arrays.copyOfRange(result, prefix.length, result.length);
+				TupleUtil.adjustVersionPosition(packed, -1 * prefix.length);
+				packed = withoutPrefix;
+				return result;
+			}
+			else {
+				packed = result;
+			}
+		}
+		if(hasPrefix) {
+			byte[] withPrefix = ByteArrayUtil.join(prefix, packed);
+			TupleUtil.adjustVersionPosition(withPrefix, prefix.length);
+			return withPrefix;
+		}
+		else {
+			if(copy) {
+				return Arrays.copyOf(packed, packed.length);
+			}
+			else {
+				return packed;
+			}
+		}
+	}
+
+	byte[] packMaybeVersionstamp(byte[] prefix) {
+		if(packed == null) {
+			if(hasIncompleteVersionstamp()) {
+				return packWithVersionstampInternal(prefix, false);
+			}
+			else {
+				return packInternal(prefix, false);
+			}
+		}
+		else {
+			return packed;
+		}
 	}
 
 	/**
@@ -343,7 +418,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return the elements that make up this {@code Tuple}.
 	 */
 	public List<Object> getItems() {
-		return new ArrayList<Object>(elements);
+		return new ArrayList<>(elements);
 	}
 
 	/**
@@ -385,7 +460,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @see #fromItems(Iterable)
 	 */
 	public Tuple() {
-		this.elements = new LinkedList<Object>();
+		this.elements = new LinkedList<>();
 	}
 
 	/**
@@ -413,6 +488,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	public static Tuple fromBytes(byte[] bytes, int offset, int length) {
 		Tuple t = new Tuple();
 		t.elements = TupleUtil.unpack(bytes, offset, length);
+		t.packed = Arrays.copyOfRange(bytes, offset, offset + length);
 		return t;
 	}
 
@@ -623,13 +699,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		Object o = this.elements.get(index);
 		if(o == null) {
 			return null;
-		} else if(o instanceof Tuple) {
+		}
+		else if(o instanceof Tuple) {
 			return ((Tuple)o).getItems();
-		} else if(o instanceof List<?>) {
-			List<Object> ret = new LinkedList<Object>();
-			ret.addAll((List<? extends Object>)o);
-			return ret;
-		} else {
+		}
+		else if(o instanceof List<?>) {
+			return new ArrayList<>((List<?>) o);
+		}
+		else {
 			throw new ClassCastException("Cannot convert item of type " + o.getClass() + " to list");
 		}
 	}
@@ -678,11 +755,10 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @throws IllegalStateException if this {@code Tuple} is empty
 	 */
 	public Tuple popFront() {
-		if(elements.size() == 0)
+		if(elements.isEmpty())
 			throw new IllegalStateException("Tuple contains no elements");
 
-
-		List<Object> items = new ArrayList<Object>(elements.size() - 1);
+		List<Object> items = new ArrayList<>(elements.size() - 1);
 		for(int i = 1; i < this.elements.size(); i++) {
 			items.add(this.elements.get(i));
 		}
@@ -697,11 +773,10 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @throws IllegalStateException if this {@code Tuple} is empty
 	 */
 	public Tuple popBack() {
-		if(elements.size() == 0)
+		if(elements.isEmpty())
 			throw new IllegalStateException("Tuple contains no elements");
 
-
-		List<Object> items = new ArrayList<Object>(elements.size() - 1);
+		List<Object> items = new ArrayList<>(elements.size() - 1);
 		for(int i = 0; i < this.elements.size() - 1; i++) {
 			items.add(this.elements.get(i));
 		}
@@ -718,12 +793,18 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *   Tuple t = Tuple.from("a", "b");
 	 *   Range r = t.range();</pre>
 	 * {@code r} includes all tuples ("a", "b", ...)
+	 * <br>
+	 * This function will throw an error if this {@code Tuple} contains an incomplete
+	 *  {@link Versionstamp}.
 	 *
 	 * @return the range of keys containing all {@code Tuple}s that have this {@code Tuple}
 	 *  as a prefix
 	 */
 	public Range range() {
-		byte[] p = pack();
+		if(hasIncompleteVersionstamp()) {
+			throw new IllegalStateException("Tuple with incomplete versionstamp used for range");
+		}
+		byte[] p = packInternal(null, false);
 		//System.out.println("Packed tuple is: " + ByteArrayUtil.printable(p));
 		return new Range(ByteArrayUtil.join(p, new byte[] {0x0}),
 						 ByteArrayUtil.join(p, new byte[] {(byte)0xff}));
@@ -740,6 +821,16 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 */
 	public boolean hasIncompleteVersionstamp() {
 		return TupleUtil.hasIncompleteVersionstamp(stream());
+	}
+
+	/**
+	 * Get the number of bytes in the packed representation of this {@code Tuple}.
+	 *
+	 * @return
+	 */
+	public int getPackedSize() {
+		byte[] p = packMaybeVersionstamp(null);
+		return p.length;
 	}
 
 	/**
@@ -772,14 +863,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	@Override
 	public int hashCode() {
 		if(memoizedHash == 0) {
-			byte[] packed;
-			if(hasIncompleteVersionstamp()) {
-				packed = packWithVersionstamp(null);
-			}
-			else {
-				packed = pack();
-			}
-			memoizedHash = Arrays.hashCode(packed);
+			memoizedHash = Arrays.hashCode(packMaybeVersionstamp(null));
 		}
 		return memoizedHash;
 	}
@@ -1011,7 +1095,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	private static Tuple createTuple(int items) {
-		List<Object> elements = new ArrayList<Object>(items);
+		List<Object> elements = new ArrayList<>(items);
 		for(int i = 0; i < items; i++) {
 			elements.add(new byte[]{99});
 		}

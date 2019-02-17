@@ -89,6 +89,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/TesterArgs.java
   src/test/com/apple/foundationdb/test/TestResult.java
   src/test/com/apple/foundationdb/test/TupleTest.java
+  src/test/com/apple/foundationdb/test/TuplePerformanceTest.java
   src/test/com/apple/foundationdb/test/VersionstampSmokeTest.java
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
