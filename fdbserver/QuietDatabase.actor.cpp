@@ -21,7 +21,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"

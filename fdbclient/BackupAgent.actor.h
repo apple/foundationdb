@@ -26,7 +26,7 @@
 	#define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
 #include "flow/flow.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "fdbrpc/IAsyncFile.h"

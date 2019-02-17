@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbserver/LogSystem.h"

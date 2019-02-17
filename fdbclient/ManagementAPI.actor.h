@@ -34,7 +34,7 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"

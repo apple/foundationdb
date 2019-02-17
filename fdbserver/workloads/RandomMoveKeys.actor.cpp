@@ -22,7 +22,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/MoveKeys.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"

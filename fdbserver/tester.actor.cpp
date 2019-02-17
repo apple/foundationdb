@@ -23,7 +23,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"

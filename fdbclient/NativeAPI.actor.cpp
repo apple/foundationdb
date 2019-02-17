@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "flow/Platform.h"
 #include "flow/ActorCollection.h"
