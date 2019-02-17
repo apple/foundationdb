@@ -28,7 +28,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"

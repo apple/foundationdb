@@ -32,7 +32,7 @@
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"

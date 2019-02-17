@@ -1,5 +1,5 @@
 /*
- * NativeAPI.h
+ * NativeAPI.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_NATIVEAPI_H
-#define FDBCLIENT_NATIVEAPI_H
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
+	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
+	#include "fdbclient/NativeAPI.actor.g.h"
+#elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
+	#define FDBCLIENT_NATIVEAPI_ACTOR_H
+
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
@@ -30,6 +34,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -314,10 +319,11 @@ private:
 	Future<Void> committing;
 };
 
-Future<Version> waitForCommittedVersion( Database const& cx, Version const& version );
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
 
 std::string unprintable( const std::string& );
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
 
+#include "flow/unactorcompiler.h"
 #endif

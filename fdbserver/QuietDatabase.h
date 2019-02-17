@@ -22,7 +22,7 @@
 #define FDBSERVER_QUIETDATABASE_H
 #pragma once
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"

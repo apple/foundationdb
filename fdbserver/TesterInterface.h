@@ -24,7 +24,7 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 struct WorkloadInterface {
 	RequestStream<ReplyPromise<Void>> setup;

@@ -68,7 +68,7 @@
     <ClInclude Include="MultiVersionAssignmentVars.h" />
     <ClInclude Include="MultiVersionTransaction.h" />
     <ClInclude Include="MutationList.h" />
-    <ClInclude Include="NativeAPI.h" />
+    <ClInclude Include="NativeAPI.actor.h" />
     <ClInclude Include="Notified.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />

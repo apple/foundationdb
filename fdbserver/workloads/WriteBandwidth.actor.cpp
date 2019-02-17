@@ -21,7 +21,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/workloads/workloads.h"

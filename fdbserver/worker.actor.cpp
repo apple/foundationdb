@@ -22,7 +22,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/IKeyValueStore.h"

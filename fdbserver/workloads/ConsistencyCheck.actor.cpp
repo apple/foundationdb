@@ -19,7 +19,7 @@
  */
 
 #include "flow/IRandom.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/IRateControl.h"

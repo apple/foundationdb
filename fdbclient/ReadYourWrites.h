@@ -22,7 +22,7 @@
 #define FDBCLIENT_READYOURWRITES_H
 #pragma once
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RYWIterator.h"
 #include <list>

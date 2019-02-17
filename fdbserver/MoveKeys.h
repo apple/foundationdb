@@ -22,7 +22,7 @@
 #define FDBSERVER_MOVEKEYS_H
 #pragma once
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/MasterInterface.h"
