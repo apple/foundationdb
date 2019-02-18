@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_G_H)
 	#define FDBCLIENT_BACKUP_AGENT_ACTOR_G_H
-	#include "fdbclient/BackupAgent.actor.h"
+	#include "fdbclient/BackupAgent.actor.g.h"
 #elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
 	#define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 

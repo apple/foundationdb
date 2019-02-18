@@ -43,6 +43,12 @@
 #define THIS_ADDR 0
 #endif
 
+#ifdef NO_INTELLISENSE
+#define THIS this
+#else
+#define THIS nullptr
+#endif
+
 static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
 
 static std::string versionToString(Optional<Version> version) {
@@ -1348,14 +1354,15 @@ namespace fileBackup {
 						// The dispatch of this batch can take multiple separate executions if the executor fails
 						// so store a completion key for the dispatch finish() to set when dispatching the batch is done.
 						state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
-					    wait(map(dispatchCompletionKey.get(tr, taskBucket), [=](Key const& k) {
-#ifdef NO_INTELLISENSE
-						    config.snapshotBatchDispatchDoneKey().set(tr, k);
-#endif
-						    return Void();
-					    }));
-
-					    wait(tr->commit());
+						// this is a bad hack - but flow doesn't work well with lambda functions and caputring
+						// state variables...
+						auto cfg = &config;
+						auto tx = &tr;
+						wait(map(dispatchCompletionKey.get(tr, taskBucket), [cfg, tx](Key const& k) {
+							cfg->snapshotBatchDispatchDoneKey().set(*tx, k);
+							return Void();
+						}));
+						wait(tr->commit());
 					}
 					else {
 						ASSERT(snapshotBatchSize.present());
@@ -3235,9 +3242,7 @@ namespace fileBackup {
 
 					ERestoreState oldState = wait(restore.stateEnum().getD(tr));
 					if(oldState != ERestoreState::QUEUED && oldState != ERestoreState::STARTING) {
-#ifdef NO_INTELLISENSE
-						wait(restore.logError(cx, restore_error(), format("StartFullRestore: Encountered unexpected state(%d)", oldState), this));
-#endif
+						wait(restore.logError(cx, restore_error(), format("StartFullRestore: Encountered unexpected state(%d)", oldState), THIS));
 						return Void();
 					}
 					restore.stateEnum().set(tr, ERestoreState::STARTING);
@@ -3324,9 +3329,7 @@ namespace fileBackup {
 
 			state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 			if(firstVersion == invalidVersion) {
-#ifdef NO_INTELLISENSE
-				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
-#endif
+				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 				std::string tag = wait(restore.tag().getD(tr));
 				wait(success(abortRestore(tr, StringRef(tag))));
 				return Void();

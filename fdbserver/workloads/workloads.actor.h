@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_WORKLOADS_H
-#define FDBSERVER_WORKLOADS_H
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKLOADS_ACTOR_G_H)
+#define FDBSERVER_WORKLOADS_ACTOR_G_H
+#include "fdbserver/workloads/workloads.actor.g.h"
+#elif  !defined(FDBSERVER_WORKLOADS_ACTOR_H)
+#define FDBSERVER_WORKLOADS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
