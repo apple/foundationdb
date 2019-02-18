@@ -236,8 +236,20 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					// Notifies all servers that a Master's server epoch ends
 					auto allServers = txnStateStore->readRange(serverTagKeys).get();
 					std::set<Tag> allTags;
-					for (auto &kv : allServers)
-						allTags.insert(decodeServerTagValue(kv.value));
+
+					if(m.param1 == killStorageKey) {
+						int8_t safeLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
+						for (auto &kv : allServers) {
+							Tag t = decodeServerTagValue(kv.value);
+							if(t.locality != safeLocality) {
+								allTags.insert(t);
+							}
+						}
+					} else {
+						for (auto &kv : allServers) {
+							allTags.insert(decodeServerTagValue(kv.value));
+						}
+					}
 
 					if (m.param1 == lastEpochEndKey) {
 						for (auto t : allTags)

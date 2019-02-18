@@ -220,6 +220,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
+	int8_t safeLocality;
 	bool neverCreated;
 
 	MasterData(
@@ -239,6 +240,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  clusterController(clusterController),
 		  dbId(dbId),
 		  forceRecovery(forceRecovery),
+		  safeLocality(tagLocalityInvalid),
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
@@ -661,10 +663,10 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	}
 
 	if(self->forceRecovery) {
-		int8_t usableLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
+		self->safeLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
 		for(auto& kv : rawTags) {
 			Tag tag = decodeServerTagValue( kv.value );
-			if(tag.locality == usableLocality) {
+			if(tag.locality == self->safeLocality) {
 				self->allTags.push_back(tag);
 			}
 		}
@@ -1241,6 +1243,11 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	CommitTransactionRef &tr = recoveryCommitRequest.transaction;
 	int mmApplied = 0;  // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
+		if(self->forceRecovery) {
+			BinaryWriter bw(Unversioned());
+			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toStringRef());
+		}
+
 		// This transaction sets \xff/lastEpochEnd, which the shard servers can use to roll back speculatively
 		//   processed semi-committed transactions from the previous epoch.
 		// It also guarantees the shard servers and tlog servers eventually get versions in the new epoch, which

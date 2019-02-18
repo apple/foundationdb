@@ -154,6 +154,8 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
+extern const KeyRef killStorageKey;
+extern const KeyRef killStoragePrivateKey;
 extern const KeyRef rebootWhenDurableKey;
 extern const KeyRef rebootWhenDurablePrivateKey;
 extern const KeyRef fastLoggingEnabled;

@@ -2355,6 +2355,8 @@ private:
 			}
 
 			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
+		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
+			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
 			if( (m.type == MutationRef::SetValue && !matchesThisServer) || (m.type == MutationRef::ClearRange && matchesThisServer) )
