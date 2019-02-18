@@ -158,6 +158,8 @@ extern const KeyRef killStorageKey;
 extern const KeyRef killStoragePrivateKey;
 extern const KeyRef rebootWhenDurableKey;
 extern const KeyRef rebootWhenDurablePrivateKey;
+extern const KeyRef primaryLocalityKey;
+extern const KeyRef primaryLocalityPrivateKey;
 extern const KeyRef fastLoggingEnabled;
 extern const KeyRef fastLoggingEnabledPrivateKey;
 

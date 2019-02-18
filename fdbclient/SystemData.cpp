@@ -422,6 +422,8 @@ const KeyRef killStorageKey = LiteralStringRef("\xff/globals/killStorage");
 const KeyRef killStoragePrivateKey = LiteralStringRef("\xff\xff/globals/killStorage");
 const KeyRef rebootWhenDurableKey = LiteralStringRef("\xff/globals/rebootWhenDurable");
 const KeyRef rebootWhenDurablePrivateKey = LiteralStringRef("\xff\xff/globals/rebootWhenDurable");
+const KeyRef primaryLocalityKey = LiteralStringRef("\xff/globals/primaryLocality");
+const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/primaryLocality");
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
