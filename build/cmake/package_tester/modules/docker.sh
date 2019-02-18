@@ -114,7 +114,6 @@ then
         counter=1
         while true
         do
-            #if [ -z "${DEB_${}}" ]
             if [ -z "${ini_name[${PKG}_${counter}]+x}" ]
             then
                 # we are done
