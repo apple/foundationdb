@@ -90,7 +90,7 @@ struct TesterInterface {
 };
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>>, LocalityData);
+                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo, LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };

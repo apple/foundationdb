@@ -325,33 +325,37 @@ class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int 
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
-ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile>, LocalityData localities, ProcessClass processClass,
+ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
                         std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
                         std::string metricsConnFile, std::string metricsPrefix);
-ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile>,
+ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles, LocalityData locality);
 
 // These servers are started by workerServer
-ACTOR Future<Void> storageServer(class IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag,
+class IKeyValueStore;
+class ServerCoordinators;
+class IDiskQueue;
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder);
-ACTOR Future<Void> storageServer(class IKeyValueStore* persistentData, StorageServerInterface ssi,
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi,
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
                                  Promise<Void> recovered); // changes pssi->id() to be the recovered ID
-ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, class ServerCoordinators,
-                                LifetimeToken lifetime, bool forceRecovery);
+ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
+                                ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> tLog(class IKeyValueStore* persistentData, class IDiskQueue* persistentQueue,
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
                         Promise<Void> oldLog, Promise<Void> recovered); // changes tli->id() to be the recovered ID
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                       Reference<ClusterConnectionFile>, LocalityData,
+                                       Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
-ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+                            Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
