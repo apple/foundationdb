@@ -1440,16 +1440,18 @@ public:
 
 		KillType	ktResult, ktMin = kt;
 		for (auto& datacenterMachine : datacenterMachines) {
-			killMachine(datacenterMachine.first, kt, true, &ktResult);
-			if (ktResult != kt) {
-				TraceEvent(SevWarn, "KillDCFail")
-					.detailext("Zone", datacenterMachine.first)
-					.detail("KillType", kt)
-					.detail("KillTypeResult", ktResult)
-					.detail("KillTypeOrig", ktOrig);
-				ASSERT(ktResult == None);
+			if(g_random->random01() < 0.99) {
+				killMachine(datacenterMachine.first, kt, true, &ktResult);
+				if (ktResult != kt) {
+					TraceEvent(SevWarn, "KillDCFail")
+						.detailext("Zone", datacenterMachine.first)
+						.detail("KillType", kt)
+						.detail("KillTypeResult", ktResult)
+						.detail("KillTypeOrig", ktOrig);
+					ASSERT(ktResult == None);
+				}
+				ktMin = std::min<KillType>( ktResult, ktMin );
 			}
-			ktMin = std::min<KillType>( ktResult, ktMin );
 		}
 
 		TraceEvent("KillDataCenter")

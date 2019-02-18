@@ -23,6 +23,8 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/workloads/workloads.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.h"
 
@@ -66,46 +68,38 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> killRegion( KillRegionWorkload *self, Database cx ) {
 		ASSERT( g_network->isSimulated() );
-		TraceEvent("ForceRecovery_DisableRemoteBegin");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
-		TraceEvent("ForceRecovery_WaitForPrimary");
-		wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
-		TraceEvent("ForceRecovery_DisableRemoteComplete");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
-		TraceEvent("ForceRecovery_RestoreOriginalComplete");
+		if(g_random->random01() < 0.5) {
+			TraceEvent("ForceRecovery_DisableRemoteBegin");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
+			TraceEvent("ForceRecovery_WaitForPrimary");
+			wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
+			TraceEvent("ForceRecovery_DisableRemoteComplete");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
+		}
+		TraceEvent("ForceRecovery_Wait");
 		wait( delay( g_random->random01() * self->testDuration ) );
 
-		g_simulator.killDataCenter( LiteralStringRef("0"), ISimulator::RebootAndDelete, true );
-		g_simulator.killDataCenter( LiteralStringRef("2"), ISimulator::RebootAndDelete, true );
-		g_simulator.killDataCenter( LiteralStringRef("4"), ISimulator::RebootAndDelete, true );
+		g_simulator.killDataCenter( LiteralStringRef("0"), g_random->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true );
+		g_simulator.killDataCenter( LiteralStringRef("2"), g_random->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true );
+		g_simulator.killDataCenter( LiteralStringRef("4"), g_random->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true );
 
-		state bool first = true;
-		loop {
-			state Transaction tr(cx);
-			loop {
-				try {
-					tr.addWriteConflictRange(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\x00")));
-					choose {
-						when( wait(tr.commit()) ) {
-							TraceEvent("ForceRecovery_Complete");
-							g_simulator.killDataCenter( LiteralStringRef("1"), ISimulator::Reboot );
-							g_simulator.killDataCenter( LiteralStringRef("3"), ISimulator::Reboot );
-							g_simulator.killDataCenter( LiteralStringRef("5"), ISimulator::Reboot );
-							return Void();
-						}
-						when( wait(delay(first ? 30.0 : 300.0)) ) {
-							break;
-						}
-					}
-				} catch( Error &e ) {
-					wait( tr.onError(e) );
-				}
+		TraceEvent("ForceRecovery_Begin");
+
+		wait( forceRecovery(cx->cluster->getConnectionFile(), LiteralStringRef("1")) );
+
+		TraceEvent(SevWarnAlways, "ForceRecovery_UsableRegions");
+
+		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+		if(conf.usableRegions>1) {
+			//only needed if force recovery was unnecessary and we killed the secondary
+			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) );
+			while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+				wait( self->dbInfo->onChange() );
 			}
-			TraceEvent("ForceRecovery_Begin");
-			wait( forceRecovery(cx->cluster->getConnectionFile()) );
-			first = false;
-			TraceEvent("ForceRecovery_Attempted");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1", true ) );
 		}
+		TraceEvent("ForceRecovery_Complete");
+		return Void();
 	}
 };
 
