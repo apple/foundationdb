@@ -2883,7 +2883,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 			TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 		}
-		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
 			break;
 		}
