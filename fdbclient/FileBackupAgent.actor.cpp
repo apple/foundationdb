@@ -3604,6 +3604,7 @@ public:
 
 	// This method will return the final status of the backup
 	ACTOR static Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose) {
+		state ERestoreState status;
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
@@ -3626,7 +3627,8 @@ public:
 					printf("%s\n", details.c_str());
 				}
 
-				state ERestoreState status = wait(restore.stateEnum().getD(tr));
+				state ERestoreState status_ = wait(restore.stateEnum().getD(tr));
+				status = status_;
 				state bool runnable = wait(restore.isRunnable(tr));
 
 				// State won't change from here
