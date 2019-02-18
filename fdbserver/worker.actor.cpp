@@ -171,7 +171,7 @@ ACTOR template<class T> Future<Void> zombie(T workerInterface, Future<Void> work
 }
 
 ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
-	state Standalone<StringRef> payloadBack = std::string( 20480, '.' );
+	state Standalone<StringRef> payloadBack(std::string( 20480, '.' ));
 
 	loop {
 		LoadedPingRequest pong = waitNext( pings );

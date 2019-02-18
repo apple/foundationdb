@@ -3147,14 +3147,17 @@ ACTOR Future<Void> dataDistribution(
 	//ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE );
 
 	//wait(debugCheckCoalescing(cx));
-
+	state Reference<InitialDataDistribution> initData;
+	state MoveKeysLock lock;
 	loop {
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", myId);
-				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, myId ) );
+				MoveKeysLock lock_ = wait( takeMoveKeysLock( cx, myId ) );
+				lock = lock_;
 				TraceEvent("DDInitTookMoveKeysLock", myId);
-				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
+				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
+				initData = initData_;
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", myId)
 					    .detail("B", printable(initData->shards.end()[-2].key))

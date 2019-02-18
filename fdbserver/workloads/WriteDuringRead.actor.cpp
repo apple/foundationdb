@@ -785,10 +785,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 								self->memoryDatabase[ key ] = value;
 							}
 						} catch( Error &e ) {
-							if( e.code() == error_code_used_during_commit )
+							if( e.code() == error_code_used_during_commit ) {
 								ASSERT( doingCommit );
-							else if( e.code() != error_code_transaction_cancelled )
+							} else if( e.code() != error_code_transaction_cancelled ) {
 								throw;
+							}
 						}
 					}
 

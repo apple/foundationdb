@@ -362,10 +362,11 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
 					if (!value.isError() || value.getError().code() == error_code_accessed_unreadable) {
 						//TraceEvent("RYWT_GetRange").detail("Range", printable(range)).detail("IsUnreadable", value.isError());
-						if (snapshot)
+						if (snapshot) {
 							ASSERT(!value.isError());
-						else
+						} else {
 							ASSERT(containsUnreadable(unreadableMap, range, true).present() == value.isError());
+						}
 					}
 					else {
 						//TraceEvent("RYWT_Reset1").error(value.getError(), true);

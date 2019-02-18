@@ -35,6 +35,12 @@
 #include <string.h>
 #include "flow/actorcompiler.h"
 
+#ifdef NO_INTELLISENSE
+#define THIS_PTR this
+#else
+#define THIS_PTR nullptr
+#endif
+
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
 template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
 	arena.dependsOn(s.arena());
@@ -1123,7 +1129,7 @@ private:
 				minVersion = 0;
 
 			// Write page(s), get new page IDs
-			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBoundKey, this);
+			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBoundKey, THIS_PTR);
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 			if(root == self->m_root && pages.size() > 1) {
@@ -1258,7 +1264,7 @@ private:
 					std::vector<BoundaryAndPage> pages = buildPages(false, lowerBoundKey, upperBoundKey, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
 
 					// Write page(s), use version 0 to replace latest version if only writing one page
-					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBoundKey, this);
+					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBoundKey, THIS_PTR);
 
 					// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 					if(root == self->m_root)

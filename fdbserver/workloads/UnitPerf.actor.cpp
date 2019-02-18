@@ -21,6 +21,7 @@
 #include "fdbrpc/ActorFuzz.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<Void> sleepyActor(double interval, int* counter) {
 	loop {

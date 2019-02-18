@@ -449,21 +449,23 @@ ACTOR Future<Void> simulatedMachine(
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId());
 
-			//Kill all open files, which may cause them to write invalid data.
-			auto& machineCache = g_simulator.getMachineById(localities.machineId())->openFiles;
+			{
+				//Kill all open files, which may cause them to write invalid data.
+				auto& machineCache = g_simulator.getMachineById(localities.machineId())->openFiles;
 
-			//Copy the file pointers to a vector because the map may be modified while we are killing files
-			std::vector<AsyncFileNonDurable*> files;
-			for(auto fileItr = machineCache.begin(); fileItr != machineCache.end(); ++fileItr) {
-				ASSERT( fileItr->second.isReady() );
-				files.push_back( (AsyncFileNonDurable*)fileItr->second.get().getPtr() );
+				//Copy the file pointers to a vector because the map may be modified while we are killing files
+				std::vector<AsyncFileNonDurable*> files;
+				for(auto fileItr = machineCache.begin(); fileItr != machineCache.end(); ++fileItr) {
+					ASSERT( fileItr->second.isReady() );
+					files.push_back( (AsyncFileNonDurable*)fileItr->second.get().getPtr() );
+				}
+
+				std::vector<Future<Void>> killFutures;
+				for(auto fileItr = files.begin(); fileItr != files.end(); ++fileItr)
+					killFutures.push_back((*fileItr)->kill());
+
+				wait( waitForAll( killFutures ) );
 			}
-
-			std::vector<Future<Void>> killFutures;
-			for(auto fileItr = files.begin(); fileItr != files.end(); ++fileItr)
-				killFutures.push_back((*fileItr)->kill());
-
-			wait( waitForAll( killFutures ) );
 
 			state std::set<std::string> filenames;
 			state std::string closingStr;

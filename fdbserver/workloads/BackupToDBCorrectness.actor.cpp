@@ -347,7 +347,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state int64_t taskCount = wait( backupAgent->getTaskCount(tr) );
 				state int waitCycles = 0;
 
-				if ((taskCount) && (0)) {
+				if ((taskCount) && false) {
 					TraceEvent("BARW_EndingNonzeroTaskCount", randomID).detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
 					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
