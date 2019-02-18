@@ -7,8 +7,9 @@ then
     source ${source_dir}/modules/util.sh
 
     test_args_usage() {
+        me=`basename "$0"`
+        echo "usage: ${me} [-h] files..."
         cat <<EOF
-usage: pkg_test.sh [-h] files...
        -n TEST: The name of the test to run
 
        Will execute the passed commands
