@@ -157,12 +157,17 @@ struct VersionStampWorkload : TestWorkload {
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
 		state Version readVersion = wait(tr.getReadVersion());
+		state Standalone<RangeResultRef> result;
 		loop{
 			try {
-				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
+				Standalone<RangeResultRef> result_ = wait(tr.getRange(KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
+				result = result_;
 				ASSERT(result.size() <= self->nodeCount);
-				if (self->failIfDataLost) ASSERT(result.size() == self->key_commit.size());
-				else TEST(result.size() > 0);  // Not all data should always be lost.
+				if (self->failIfDataLost) {
+					ASSERT(result.size() == self->key_commit.size());
+				} else {
+					TEST(result.size() > 0);  // Not all data should always be lost.
+				}
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
 				for (auto it : result) {
@@ -191,10 +196,14 @@ struct VersionStampWorkload : TestWorkload {
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
 
-				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
+				Standalone<RangeResultRef> result__ = wait(tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
+				result = result__;
 				ASSERT(result.size() <= self->nodeCount);
-				if (self->failIfDataLost) ASSERT(result.size() == self->versionStampKey_commit.size());
-				else TEST(result.size() > 0);  // Not all data should always be lost.
+				if (self->failIfDataLost) {
+					ASSERT(result.size() == self->versionStampKey_commit.size());
+				} else {
+					TEST(result.size() > 0);  // Not all data should always be lost.
+				}
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
 				for (auto it : result) {
@@ -238,10 +247,11 @@ struct VersionStampWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
 		state double startTime = now();
 		state double lastTime = now();
+		state Database extraDB;
 
 		if (g_simulator.extraDB != NULL) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			state Database extraDB = Database::createDatabase(extraFile, -1);
+			extraDB = Database::createDatabase(extraFile, -1);
 		}
 
 		loop{
@@ -251,7 +261,7 @@ struct VersionStampWorkload : TestWorkload {
 			state bool cx_is_primary = true;
 			state ReadYourWritesTransaction tr(cx);
 			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
-			state Value value = std::string(g_random->randomInt(10, 100), 'x');
+			state Value value(std::string(g_random->randomInt(10, 100), 'x'));
 			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount), oldVSFormat);
 			state StringRef prefix = versionStampKey.substr(0, 20+self->vsKeyPrefix.size());
 			state Key endOfRange = self->endOfRange(prefix);
@@ -268,6 +278,7 @@ struct VersionStampWorkload : TestWorkload {
 
 			loop{
 				state bool error = false;
+				state Error err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
@@ -281,7 +292,7 @@ struct VersionStampWorkload : TestWorkload {
 					committedVersionStamp = committedVersionStamp_;
 				}
 				catch (Error &e) {
-					state Error err = e;
+					err = e;
 					if (err.code() == error_code_database_locked) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;

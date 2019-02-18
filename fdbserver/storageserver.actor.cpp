@@ -3164,46 +3164,48 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 		return Void();
 	}
 
-	auto rs = self->waitMetricsMap.modify( req.keys );
-	for(auto r = rs.begin(); r != rs.end(); ++r)
-		r->value().push_back( change );
-	loop {
-		try {
-			choose {
-				when( StorageMetrics c = waitNext( change.getFuture() ) ) {
-					metrics += c;
+	{
+		auto rs = self->waitMetricsMap.modify( req.keys );
+		for(auto r = rs.begin(); r != rs.end(); ++r)
+			r->value().push_back( change );
+		loop {
+			try {
+				choose {
+					when( StorageMetrics c = waitNext( change.getFuture() ) ) {
+						metrics += c;
 
-					// SOMEDAY: validation! The changes here are possibly partial changes (we recieve multiple messages per
-					//  update to our requested range). This means that the validation would have to occur after all
-					//  the messages for one clear or set have been dispatched.
+						// SOMEDAY: validation! The changes here are possibly partial changes (we recieve multiple messages per
+						//  update to our requested range). This means that the validation would have to occur after all
+						//  the messages for one clear or set have been dispatched.
 
-					/*StorageMetrics m = getMetrics( data, req.keys );
-					bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond || m.iosPerKSecond != metrics.iosPerKSecond );
-					if (b) {
-						printf("keys: '%s' - '%s' @%p\n", printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n", b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
+						/*StorageMetrics m = getMetrics( data, req.keys );
+						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond || m.iosPerKSecond != metrics.iosPerKSecond );
+						  if (b) {
+						  printf("keys: '%s' - '%s' @%p\n", printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
+						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n", b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
 
-					}*/
+						  }*/
+					}
+					when( wait( timeout ) ) {
+						timedout = true;
+					}
 				}
-				when( wait( timeout ) ) {
-					timedout = true;
-				}
+			} catch (Error& e) {
+				if( e.code() == error_code_actor_cancelled ) throw; // This is only cancelled when the main loop had exited...no need in this case to clean up self
+				error = e;
+				break;
 			}
-		} catch (Error& e) {
-			if( e.code() == error_code_actor_cancelled ) throw; // This is only cancelled when the main loop had exited...no need in this case to clean up self
-			error = e;
-			break;
+
+			if ( timedout || !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
+				TEST( !timedout ); // ShardWaitMetrics return case 2 (delayed)
+				TEST( timedout ); // ShardWaitMetrics return on timeout
+				req.reply.send( metrics );
+				break;
+			}
 		}
 
-		if ( timedout || !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
-			TEST( !timedout ); // ShardWaitMetrics return case 2 (delayed)
-			TEST( timedout ); // ShardWaitMetrics return on timeout
-			req.reply.send( metrics );
-			break;
-		}
+		wait( delay(0) ); //prevent iterator invalidation of functions sending changes
 	}
-
-	wait( delay(0) ); //prevent iterator invalidation of functions sending changes
 
 	auto rs = self->waitMetricsMap.modify( req.keys );
 	for(auto i = rs.begin(); i != rs.end(); ++i) {

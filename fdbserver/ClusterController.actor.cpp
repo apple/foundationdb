@@ -1343,18 +1343,22 @@ void checkOutstandingRequests( ClusterControllerData* self ) {
 }
 
 ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID ) {
-	auto watcher = cluster->id_worker.find(processID);
-	ASSERT(watcher != cluster->id_worker.end());
+	{
+		auto watcher = cluster->id_worker.find(processID);
+		ASSERT(watcher != cluster->id_worker.end());
 
-	watcher->second.lastAvailableTime = now();
-	watcher->second.reboots++;
-	wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
+		watcher->second.lastAvailableTime = now();
+		watcher->second.reboots++;
+		wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
+	}
 
-	auto watcher = cluster->id_worker.find(processID);
-	if(watcher != cluster->id_worker.end()) {
-		watcher->second.reboots--;
-		if( watcher->second.reboots < 2 )
-			checkOutstandingRequests( cluster );
+	{
+		auto watcher = cluster->id_worker.find(processID);
+		if(watcher != cluster->id_worker.end()) {
+			watcher->second.reboots--;
+			if( watcher->second.reboots < 2 )
+				checkOutstandingRequests( cluster );
+		}
 	}
 
 	return Void();
@@ -2264,6 +2268,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
+	state InitializeDataDistributorRequest req;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
@@ -2276,7 +2281,6 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
-			state InitializeDataDistributorRequest req;
 			req.reqId = g_random->randomUniqueID();
 			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
 

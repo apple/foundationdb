@@ -1095,19 +1095,21 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	if( sourceBytes - destBytes <= 3 * std::max<int64_t>( SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes ) || metrics.bytes == 0 )
 		return false;
 
-	//verify the shard is still in sabtf
-	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
-	for( int i = 0; i < shards.size(); i++ ) {
-		if( moveShard == shards[i] ) {
-			TraceEvent(priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ? "BgDDMountainChopper" : "BgDDValleyFiller", self->distributorId)
-				.detail("SourceBytes", sourceBytes)
-				.detail("DestBytes", destBytes)
-				.detail("ShardBytes", metrics.bytes)
-				.detail("SourceTeam", sourceTeam->getDesc())
-				.detail("DestTeam", destTeam->getDesc());
+	{
+		//verify the shard is still in sabtf
+		std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
+		for( int i = 0; i < shards.size(); i++ ) {
+			if( moveShard == shards[i] ) {
+				TraceEvent(priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ? "BgDDMountainChopper" : "BgDDValleyFiller", self->distributorId)
+					.detail("SourceBytes", sourceBytes)
+					.detail("DestBytes", destBytes)
+					.detail("ShardBytes", metrics.bytes)
+					.detail("SourceTeam", sourceTeam->getDesc())
+					.detail("DestTeam", destTeam->getDesc());
 
-			self->output.send( RelocateShard( moveShard, priority ) );
-			return true;
+				self->output.send( RelocateShard( moveShard, priority ) );
+				return true;
+			}
 		}
 	}
 

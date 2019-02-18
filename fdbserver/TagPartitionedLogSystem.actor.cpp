@@ -1550,7 +1550,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;
-		Version lastStart = std::numeric_limits<Version>::max();
+		state Version lastStart = std::numeric_limits<Version>::max();
 
 		if(!forRemote) {
 			Version maxStart = 0;
@@ -1658,7 +1658,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		wait( waitForAll(allReplies) );
 
 		int nextReplies = 0;
-		Version lastStart = std::numeric_limits<Version>::max();
+		lastStart = std::numeric_limits<Version>::max();
 		vector<Future<Void>> failed;
 
 		if(!forRemote) {

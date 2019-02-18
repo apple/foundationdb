@@ -140,7 +140,7 @@ struct SidebandWorkload : TestWorkload {
 			state Transaction tr(cx);
 			state uint64_t key = g_random->randomUniqueID().hash();
 			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
-			state Standalone<StringRef> messageKey = format( "Sideband/Message/%llx", key );
+			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {
 				try {
 					Optional<Value> val = wait( tr.get( messageKey ) );
@@ -165,7 +165,7 @@ struct SidebandWorkload : TestWorkload {
 	ACTOR Future<Void> checker( SidebandWorkload *self, Database cx ) {
 		loop {
 			state SidebandMessage message = waitNext( self->interf.updates.getFuture() );
-			state Standalone<StringRef> messageKey = format( "Sideband/Message/%llx", message.key );
+			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
 			state Transaction tr(cx);
 			loop {
 				try {

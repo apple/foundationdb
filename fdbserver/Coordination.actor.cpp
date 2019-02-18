@@ -166,34 +166,40 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
 		g_random->randomUniqueID());
 	state Future<Void> actor = localGenerationReg(reg, &store);
-	state Key the_key = g_random->randomAlphaNumeric( g_random->randomInt(0, 10) );
+	state Key the_key(g_random->randomAlphaNumeric( g_random->randomInt(0, 10)));
 
 	state UniqueGeneration firstGen(0, g_random->randomUniqueID());
 
-	GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, firstGen)));
-	//   If there was no prior write(_,_,0) or a data loss fault, 
-	//     returns (Optional(),0,gen2)
-	ASSERT(!r.value.present());
-	ASSERT(r.gen == UniqueGeneration());
-	ASSERT(r.rgen == firstGen); 
+	{
+		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, firstGen)));
+		//   If there was no prior write(_,_,0) or a data loss fault, 
+		//     returns (Optional(),0,gen2)
+		ASSERT(!r.value.present());
+		ASSERT(r.gen == UniqueGeneration());
+		ASSERT(r.rgen == firstGen); 
+	}
 
-	UniqueGeneration g = wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, LiteralStringRef("Value1")), firstGen)));
-	//   (gen1==gen is considered a "successful" write)
-	ASSERT(g == firstGen);
+	{
+		UniqueGeneration g = wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, LiteralStringRef("Value1")), firstGen)));
+		//   (gen1==gen is considered a "successful" write)
+		ASSERT(g == firstGen);
+	}
 
-	GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
-	// read(key,gen2) returns (value,gen,rgen).
-	//     There was some earlier or concurrent write(key,value,gen).
-	ASSERT(r.value == LiteralStringRef("Value1"));
-	ASSERT(r.gen == firstGen);
-	//     There was some earlier or concurrent read(key,rgen).
-	ASSERT(r.rgen == firstGen);
-	//     If there is a write(key,_,gen1)=>gen1 s.t. gen1 < gen2 OR the write completed before this read started, then gen >= gen1.
-	ASSERT(r.gen >= firstGen);
-	//     If there is a read(key,gen1) that completed before this read started, then rgen >= gen1
-	ASSERT(r.rgen >= firstGen);
+	{
+		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
+		// read(key,gen2) returns (value,gen,rgen).
+		//     There was some earlier or concurrent write(key,value,gen).
+		ASSERT(r.value == LiteralStringRef("Value1"));
+		ASSERT(r.gen == firstGen);
+		//     There was some earlier or concurrent read(key,rgen).
+		ASSERT(r.rgen == firstGen);
+		//     If there is a write(key,_,gen1)=>gen1 s.t. gen1 < gen2 OR the write completed before this read started, then gen >= gen1.
+		ASSERT(r.gen >= firstGen);
+		//     If there is a read(key,gen1) that completed before this read started, then rgen >= gen1
+		ASSERT(r.rgen >= firstGen);
 
-	ASSERT(!actor.isReady());
+		ASSERT(!actor.isReady());
+	}
 	return Void();
 }
 
