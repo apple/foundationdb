@@ -1,5 +1,33 @@
 #!/usr/bin/env bash
 
+# In this file the tests are formulated which
+# should run in the docker container to test
+# whether the RPM and DEB packages work properly.
+#
+# In order to add a test, a user first has to
+# add the name of the test to the `tests` array
+# which is defined in this file.
+#
+# Then, she must define the state this test
+# expects the container to be in. To do that,
+# a value for the test has to be added to the
+# associative array `test_start_state`. Valid
+# values are:
+#
+#  - INSTALLED: In this case, the test will be
+#    started with a freshly installed FDB, but
+#    no other changes were made to the container.
+#  - CLEAN: This simply means that the container
+#    will run a minimal version of the OS (as defined
+#    in the corresponsing Dockerfile)
+#
+# A test is then simply a bash function with the
+# same name as the test. It can use the predefined
+# bash functions `install` and `uninstall` to either
+# install or uninstall FDB on the container. The FDB
+# build directory can be found in `/build`, the
+# source code will be located in `/foundationdb`
+
 declare -A test_start_state
 declare -A test_exit_state
 declare -a tests
