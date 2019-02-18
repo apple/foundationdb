@@ -48,7 +48,7 @@
 #include "fdbserver/pubsub.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"
 #include "fdbrpc/TLSConnection.h"

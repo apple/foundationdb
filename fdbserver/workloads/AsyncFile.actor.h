@@ -27,7 +27,7 @@
 #elif !defined(WORKLOADS_ASYNCFILE_ACTOR_H)
 	#define WORKLOADS_ASYNCFILE_ACTOR_H
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

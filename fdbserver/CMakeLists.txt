@@ -170,7 +170,7 @@ set(FDBSERVER_SRCS
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
   workloads/WorkerErrors.actor.cpp
-  workloads/workloads.h
+  workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 

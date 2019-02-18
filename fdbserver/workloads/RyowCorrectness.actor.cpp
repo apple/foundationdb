@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

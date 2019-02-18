@@ -19,7 +19,7 @@
  */
 
 #include <ctime>
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

@@ -1,5 +1,5 @@
 /*
- * workloads.h
+ * workloads.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -195,14 +195,12 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 };
 
-Future<DistributedTestResults> runWorkload( 
-		Database const& cx, std::vector< TesterInterface > const& testers, 
-		TestSpec const& spec );
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 void logMetrics( vector<PerfMetric> metrics );
 
-Future<Void> poisson( double* const& last, double const& meanInterval );
-Future<Void> uniform( double* const& last, double const& meanInterval );
+ACTOR Future<Void> poisson(double* last, double meanInterval);
+ACTOR Future<Void> uniform(double* last, double meanInterval);
 
 void emplaceIndex( uint8_t *data, int offset, int64_t index );
 Key doubleToTestKey(double p);
@@ -210,7 +208,7 @@ double testKeyToDouble(const KeyRef& p);
 Key doubleToTestKey(double p, const KeyRef& prefix);
 double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 
-Future<Void> databaseWarmer( Database const& cx );
+ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&, std::string phase, int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
 							int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0);
