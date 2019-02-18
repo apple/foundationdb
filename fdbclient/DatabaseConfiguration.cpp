@@ -160,6 +160,7 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 bool DatabaseConfiguration::isValid() const {
 	if( !(initialized &&
 		tLogWriteAntiQuorum >= 0 &&
+		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
 		tLogReplicationFactor >= 1 &&
 		storageTeamSize >= 1 &&
 		getDesiredProxies() >= 1 &&
