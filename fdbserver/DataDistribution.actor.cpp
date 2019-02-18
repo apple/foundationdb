@@ -858,6 +858,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							if(found && teamList[j]->size() > bestSize) {
 								bestOption = teamList[j];
 								bestSize = teamList[j]->size();
+								// The bestOption server team may be unhealthy.
+								// If we move a shard to an unhealthy team, we may create a server team implicitly by
+								// locating the shard to the team
+								// MXDEBUG: This code should be removed, unless we have error in correctness test
+//								if (self->redundantTeamRemover.isReady()) {
+//									self->redundantTeamRemover = teamRemover(self);
+//									self->addActor.send(self->redundantTeamRemover);
+//								}
+//								if (!bestOption.get()->isHealthy()) {
+//									if (self->redundantTeamRemover.isReady()) {
+//										self->redundantTeamRemover = teamRemover(self);
+//										self->addActor.send(self->redundantTeamRemover);
+//									}
+//								}
 							}
 						}
 						break;
@@ -2337,11 +2351,16 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		// Wait on processingUnhealthy as removeBadTeams() does
 		loop {
 			while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+				// Debug only
+				TraceEvent("MXDEBUG_TeamRemove").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get())
+					.detail("ProcessUnhealthy", self->processingUnhealthy->get());
 				wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 			}
 			// After the team trackers wait on the initial failure reaction delay, they yield.
 			// We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority));
+			TraceEvent("MXDEBUG_TeamRemove").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get())
+				.detail("ProcessUnhealthy", self->processingUnhealthy->get());
 			if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
 				break;
 			}
@@ -2350,16 +2369,19 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY) );
 
 
+		TraceEvent("MXDEBUG_TeamRemove").detail("BadTeamRemoverReady", self->badTeamRemover.isReady());
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
+		TraceEvent("MXDEBUG_TeamRemove").detail("BadTeamRemoverReadyNow", self->badTeamRemover.isReady());
 
 
-		state int totalHealthyMachineCount = self->calculateHealthyMachineCount();
+		state int healthyMachineCount = self->calculateHealthyMachineCount();
 		// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all machines will become healthy.
-		if (totalHealthyMachineCount != self->machine_info.size()) {
+		if (healthyMachineCount != self->machine_info.size()) {
 			wait( delay(SERVER_KNOBS->TR_WAIT_FOR_ALL_MACHINES_HEALTHY_DELAY) );
+			TraceEvent("MXDEBUG_TeamRemove").detail("HealthyMachineCount", healthyMachineCount).detail("MachineCount", self->machine_info.size());
 			continue;
 		}
 
@@ -2370,7 +2392,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 //		int currentHealthyMTCount = self->getHealthyMachineTeamCount();
 //		if (currentHealthyMTCount != self->machineTeams.size()) {
 //			TraceEvent(SevError, "InvalidAssumption")
-//			    .detail("TotalHealthyMachineCount", totalHealthyMachineCount)
+//			    .detail("healthyMachineCount", healthyMachineCount)
 //			    .detail("MachineNumber", self->machine_info.size())
 //			    .detail("CurrentHealthyMTCount", currentHealthyMTCount)
 //			    .detail("MachineTeamNumber", self->machineTeams.size());
@@ -2378,8 +2400,13 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 //		}
 
 		// In most cases, all machine teams should be healthy teams at this point.
-		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-		int totalMTCount = totalHealthyMachineCount;
+		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * healthyMachineCount;
+		int totalMTCount = self->machineTeams.size();
+		TraceEvent("MXDEBUG_TeamRemove").detail("DesiredMachineTeamCount", desiredMachineTeams)
+			.detail("MachineTeamCount", totalMTCount)
+			.detail("TotalMachineTeamCount", healthyMachineCount);
+		self->traceAllInfo(true);
+
 
 		if (totalMTCount > desiredMachineTeams) {
 			// Pick the machine team with the least number of server teams and mark it undesired
@@ -2418,13 +2445,15 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 
 			// Remove the machine team
 			bool foundRemovedMachineTeam = self->removeMachineTeam(mt);
-			ASSERT(foundRemovedMachineTeam);
+			// When we remove the last server team on a machine team in removeTeam(), we also remove the machine team
+			// This is needed for removeTeam() functoin. So here the removeMachineTeam() should not find the machine team
+			ASSERT(foundRemovedMachineTeam == false);
 			numMachineTeamRemoved++;
 		} else {
 			if (numMachineTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
 				TraceEvent("TeamRemoverDone")
-				    .detail("HealthyMachineNumber", totalHealthyMachineCount)
+				    .detail("HealthyMachineNumber", healthyMachineCount)
 //				    .detail("CurrentHealthyMachineTeamNumber", currentHealthyMTCount)
 				    .detail("CurrentMachineTeamNumber", self->machineTeams.size())
 				    .detail("DesiredMachineTeam", desiredMachineTeams)
@@ -2466,6 +2495,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
 			int serversLeft = 0;
+			bool checkTeamRemover = false;
 
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
@@ -2499,6 +2529,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 				if (healthy) {
 					self->healthyTeamCount++;
 					self->zeroHealthyTeams->set(false);
+					checkTeamRemover = true;
 				}
 				lastHealthy = healthy;
 
@@ -2532,6 +2563,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 					lastHealthy = healthy;
 					// Update healthy team count when the team healthy changes
 					self->healthyTeamCount += healthy ? 1 : -1;
+					if (healthy) {
+						checkTeamRemover = true;
+					}
 
 					ASSERT( self->healthyTeamCount >= 0 );
 					self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
@@ -2641,6 +2675,13 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 						TraceEvent("TeamHealthNotReady", self->distributorId).detail("HealthyTeamCount", self->healthyTeamCount);
 					}
 				}
+			}
+
+			if (checkTeamRemover) {
+				if (self->redundantTeamRemover.isReady()) {
+					self->redundantTeamRemover = teamRemover(self);
+					self->addActor.send(self->redundantTeamRemover);
+					}
 			}
 
 			// Wait for any of the machines to change status
