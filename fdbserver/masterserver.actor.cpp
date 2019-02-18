@@ -30,7 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include <iterator>
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"

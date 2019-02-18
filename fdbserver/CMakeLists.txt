@@ -88,7 +88,7 @@ set(FDBSERVER_SRCS
   WaitFailure.actor.cpp
   WaitFailure.h
   worker.actor.cpp
-  WorkerInterface.h
+  WorkerInterface.actor.h
   workloads/ApiCorrectness.actor.cpp
   workloads/ApiWorkload.actor.cpp
   workloads/ApiWorkload.h

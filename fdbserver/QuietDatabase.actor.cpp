@@ -24,7 +24,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.actor.h"
