@@ -209,7 +209,7 @@
     <ActorCompiler Include="workloads\AsyncFile.actor.h" />
     <ClInclude Include="workloads\ApiWorkload.h" />
     <ClInclude Include="workloads\MemoryKeyValueStore.h" />
-    <ClInclude Include="workloads\workloads.h" />
+    <ClInclude Include="workloads\workloads.actor.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{8E959DA5-5925-45CE-BFC4-C84EB632A29A}</ProjectGUID>

@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
