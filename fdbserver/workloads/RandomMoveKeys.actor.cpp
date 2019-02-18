@@ -21,7 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbserver/ServerDBInfo.h"

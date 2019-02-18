@@ -45,7 +45,7 @@ set(FDBSERVER_SRCS
   MemoryPager.actor.cpp
   MemoryPager.h
   MoveKeys.actor.cpp
-  MoveKeys.h
+  MoveKeys.actor.h
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer.actor.cpp
