@@ -307,7 +307,7 @@
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
     <ClInclude Include="DataDistribution.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />

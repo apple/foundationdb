@@ -27,7 +27,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

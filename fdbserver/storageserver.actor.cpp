@@ -34,7 +34,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/IKeyValueStore.h"

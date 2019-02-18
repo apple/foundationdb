@@ -173,7 +173,7 @@
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
     <ClInclude Include="MemoryPager.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="NetworkTest.h" />
     <ActorCompiler Include="Orderer.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>

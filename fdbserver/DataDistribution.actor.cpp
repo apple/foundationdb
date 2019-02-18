@@ -22,7 +22,7 @@
 #include "fdbserver/DataDistribution.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include <set>
 #include <sstream>
@@ -3038,7 +3038,7 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 				rd >> m;
 				if (m) return true;
 			}
-			// SOMEDAY: Write a wrapper in MoveKeys.h
+			// SOMEDAY: Write a wrapper in MoveKeys.actor.h
 			Optional<Value> readVal = wait( tr.get( moveKeysLockOwnerKey ) );
 			UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			if( currentOwner != dataDistributionModeLock )

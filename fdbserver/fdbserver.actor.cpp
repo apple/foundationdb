@@ -36,7 +36,7 @@
 #include "fdbserver/RestoreInterface.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistribution.h"
 #include "fdbserver/NetworkTest.h"
