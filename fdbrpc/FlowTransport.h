@@ -88,7 +88,6 @@ public:
 		return !(*this == r);
 	}
 
-	//TODO: (Vishesh) Figure out what to do for vector of addresses this.
 	bool operator < (Endpoint const& r) const {
 		const NetworkAddress& left = getPrimaryAddress();
 		const NetworkAddress& right = r.getPrimaryAddress();

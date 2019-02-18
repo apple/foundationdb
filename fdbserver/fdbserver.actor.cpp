@@ -1472,7 +1472,6 @@ int main(int argc, char* argv[]) {
 			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(1);
 
-			//TODO: (Vishesh) Figure out what the publicAddress field should be.
 			openTraceFile(publicAddresses[0], rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
 #ifndef TLS_DISABLED
