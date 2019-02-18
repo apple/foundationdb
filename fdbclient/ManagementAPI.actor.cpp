@@ -1514,16 +1514,18 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
-ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) {
+ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Key dcId ) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
-	while(!clusterInterface->get().present()) {
-		wait(clusterInterface->onChange());
+	loop {
+		choose {
+			when ( wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().forceRecovery.getReply( ForceRecoveryRequest(dcId) ) ) : Never() ) ) {
+				return Void();
+			}
+			when ( wait( clusterInterface->onChange() )) {}
+		}
 	}
-
-	ErrorOr<Void> _ = wait(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() ));
-	return Void();
 }
 
 ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {

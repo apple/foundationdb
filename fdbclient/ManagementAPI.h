@@ -169,7 +169,7 @@ Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, 
 
 Future<int> setDDMode( Database const& cx, int const& mode );
 
-Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
+Future<Void> forceRecovery( Reference<ClusterConnectionFile> const& clusterFile, Standalone<StringRef> const& dcId );
 
 Future<Void> waitForPrimaryDC( Database const& cx, StringRef const& dcId );
 

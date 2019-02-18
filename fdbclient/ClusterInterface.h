@@ -223,13 +223,15 @@ struct GetClientWorkersRequest {
 };
 
 struct ForceRecoveryRequest {
+	Key dcId;
 	ReplyPromise<Void> reply;
 
 	ForceRecoveryRequest() {}
+	explicit ForceRecoveryRequest(Key dcId) : dcId(dcId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, dcId, reply);
 	}
 };
 

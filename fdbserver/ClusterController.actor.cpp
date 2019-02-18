@@ -90,7 +90,7 @@ public:
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
 		std::map<NetworkAddress, std::string> traceLogGroupMap;
-		Promise<Void> forceMasterFailure;
+		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
 		bool forceRecovery;
@@ -1077,21 +1077,20 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 
 			cluster->masterProcessId = masterWorker.worker.first.locality.processId();
 			cluster->db.unfinishedRecoveries++;
-			ErrorOr<MasterInterface> newMaster = wait( masterWorker.worker.first.master.tryGetReply( rmq ) );
-			if (newMaster.present()) {
-				TraceEvent("CCWDB", cluster->id).detail("Recruited", newMaster.get().id());
+			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.first.master.tryGetReply( rmq );
+			wait( ready(fNewMaster) || db->forceMasterFailure.onTrigger() );
+			if (fNewMaster.isReady() && fNewMaster.get().present()) {
+				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
-					.detail("Address", newMaster.get().address())
+					.detail("Address", fNewMaster.get().get().address())
 					.trackLatest("RecruitedMasterWorker");
 
-				iMaster = newMaster.get();
+				iMaster = fNewMaster.get().get();
 
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
-				db->forceRecovery = false;
-				db->forceMasterFailure = Promise<Void>();
 
 				auto dbInfo = ServerDBInfo();
 				dbInfo.master = iMaster;
@@ -1103,7 +1102,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( dbInfo );
 
-				wait( delay(SERVER_KNOBS->MASTER_SPIN_DELAY) );  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
+				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
 				TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
 
@@ -1111,9 +1110,10 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				loop choose {
 					when (wait( waitFailureClient( iMaster.waitFailure, db->masterRegistrationCount ?
 						SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
-						db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) || db->forceMasterFailure.getFuture() )) { break; }
+						db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) || db->forceMasterFailure.onTrigger() )) { break; }
 					when (wait( db->serverInfo->onChange() )) {}
 				}
+				wait(spinDelay);
 
 				TEST(true); // clusterWatchDatabase() master failed
 				TraceEvent(SevWarn,"DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
@@ -1279,10 +1279,8 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 
 		self->checkRecoveryStalled();
 		if (self->betterMasterExists()) {
-			if (!self->db.forceMasterFailure.isSet()) {
-				self->db.forceMasterFailure.send( Void() );
-				TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
-			}
+			self->db.forceMasterFailure.trigger();
+			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
 		}
 	} catch( Error &e ) {
 		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
@@ -2167,6 +2165,49 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
+ACTOR Future<Void> doEmptyCommit(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.makeSelfConflicting();
+			wait(tr.commit());
+			return Void();
+		} catch( Error &e ) {
+			wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterControllerFullInterface interf ) {
+	while(!self->clusterControllerProcessId.present()) {
+		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+	}
+
+	loop {
+		state ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() );
+		TraceEvent("ForcedRecoveryStart", self->id).detail("ClusterControllerDcId", printable(self->clusterControllerDcId)).detail("DcId", req.dcId.printable());
+		state Future<Void> fCommit = doEmptyCommit(self->cx);
+		wait(fCommit || delay(5.0));
+		if(!fCommit.isReady() || fCommit.isError()) {
+			if(!self->clusterControllerDcId.present() || self->clusterControllerDcId != req.dcId) {
+				vector<Optional<Key>> dcPriority;
+				dcPriority.push_back(req.dcId);
+				dcPriority.push_back(self->clusterControllerDcId);
+				self->desiredDcIds.set(dcPriority);
+			} else {
+				self->db.forceRecovery = true;
+				self->db.forceMasterFailure.trigger();
+			}
+			wait(fCommit);
+		}
+		TraceEvent("ForcedRecoveryFinish", self->id);
+		self->db.forceRecovery = false;
+		req.reply.send(Void());
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -2185,6 +2226,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( updatedChangingDatacenters(&self) );
 	addActor.send( updatedChangedDatacenters(&self) );
 	addActor.send( updateDatacenterVersionDifference(&self) );
+	addActor.send( handleForcedRecoveries(&self, interf) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
@@ -2240,15 +2282,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 				}
 			}
 			req.reply.send(workers);
-		}
-		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
-			if(self.db.masterRegistrationCount == 0 || self.db.serverInfo->get().recoveryState <= RecoveryState::RECRUITING) {
-				if (!self.db.forceMasterFailure.isSet()) {
-					self.db.forceRecovery = true;
-					self.db.forceMasterFailure.send( Void() );
-				}
-			}
-			req.reply.send(Void());
 		}
 		when( wait( coordinationPingDelay ) ) {
 			CoordinationPingMessage message(self.id, step++);

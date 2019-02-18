@@ -523,10 +523,13 @@ void initHelp() {
 		"<type> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
+	helpMap["force_recovery_with_data_loss"] = CommandHelp(
+		"force_recovery_with_data_loss <DCID>",
+		"Force the database to recover into DCID",
+		"A forced recovery will cause the database to lose the most recently committed mutations. The amount of mutations that will be lost depends on how far behind the remote datacenter is. This command will change the region configuration to have a positive priority for the chosen DCID, and a negative priority for all other DCIDs. This command will set usable_regions to 1. If the database has already recovered, this command does nothing.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
-	hiddenCommands.insert("force_recovery_with_data_loss");
 }
 
 void printVersion() {
@@ -2778,11 +2781,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
-					if(tokens.size() != 1) {
+					if(tokens.size() != 2) {
 						printUsage(tokens[0]);
 						is_error = true;
+						continue;
 					}
-					wait( makeInterruptable( forceRecovery( ccf ) ) );
+					wait( makeInterruptable( forceRecovery( ccf, tokens[1] ) ) );
 					continue;
 				}
 
