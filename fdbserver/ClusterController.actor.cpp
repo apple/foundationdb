@@ -936,6 +936,9 @@ public:
 		if (db.serverInfo->get().distributor.present()) {
 			id_used[db.serverInfo->get().distributor.get().locality.processId()]++;
 		}
+		if (db.serverInfo->get().ratekeeper.present()) {
+			id_used[db.serverInfo->get().ratekeeper.get().locality.processId()]++;
+		}
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 
 		if ( oldMasterFit < mworker.fitness )
@@ -1121,6 +1124,9 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			if (cluster->db.serverInfo->get().distributor.present()) {
 				id_used[cluster->db.serverInfo->get().distributor.get().locality.processId()]++;
 			}
+			if (cluster->db.serverInfo->get().ratekeeper.present()) {
+				id_used[cluster->db.serverInfo->get().ratekeeper.get().locality.processId()]++;
+			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.first.locality.processId() == cluster->clusterControllerProcessId )
 				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
@@ -1156,6 +1162,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().distributor;
+				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( dbInfo );
@@ -2361,7 +2368,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 	}
 }
 
-ACTOR Future<Void> waitDDRejoinOrStartDD(ClusterControllerData *self) {
+ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY);
 
 	// wait for a while to see if existing data distributor will join.
@@ -2464,7 +2471,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( updatedChangedDatacenters(&self) );
 	self.addActor.send( updateDatacenterVersionDifference(&self) );
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
-	self.addActor.send( waitDDRejoinOrStartDD(&self) );
+	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 

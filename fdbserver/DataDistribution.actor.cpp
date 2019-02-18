@@ -3447,6 +3447,38 @@ ACTOR Future<Void> pollMoveKeysLock( Database cx, MoveKeysLock lock ) {
 	}
 }
 
+<<<<<<< HEAD
+=======
+struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
+	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<DatabaseConfiguration>> configuration;
+	std::vector<Optional<Key>> primaryDcId;
+	std::vector<Optional<Key>> remoteDcIds;
+	UID ddId;
+	PromiseStream<Future<Void>> addActor;
+
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id)
+		: dbInfo(db), configuration(dbConfig), ddId(id) {}
+
+	void refreshDcIds() {
+		primaryDcId.clear();
+		remoteDcIds.clear();
+
+		const std::vector<RegionInfo>& regions = configuration->get().regions;
+		TraceEvent ev("DataDistributor", ddId);
+		if ( regions.size() > 0 ) {
+			primaryDcId.push_back( regions[0].dcId );
+			ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
+		}
+		if ( regions.size() > 1 ) {
+			remoteDcIds.push_back( regions[1].dcId );
+			ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
+		}
+	}
+};
+
+// TODO: remove lastLimited -- obtain this information of ratekeeper from proxy
+>>>>>>> Fix a segfault bug due to uncopied ratekeeper interface
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	double* lastLimited)
 {
