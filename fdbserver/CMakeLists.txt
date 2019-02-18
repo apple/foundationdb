@@ -80,7 +80,7 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   template_fdb.h
   tester.actor.cpp
-  TesterInterface.h
+  TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp

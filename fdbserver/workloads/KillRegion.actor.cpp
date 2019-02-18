@@ -20,7 +20,7 @@
 
 #include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"

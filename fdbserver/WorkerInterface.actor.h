@@ -30,7 +30,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"

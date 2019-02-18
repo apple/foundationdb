@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/ActorFuzz.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct ActorFuzzWorkload : TestWorkload {

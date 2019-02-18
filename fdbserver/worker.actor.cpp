@@ -27,7 +27,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/TesterInterface.h"  // for poisson()
+#include "fdbserver/TesterInterface.actor.h"  // for poisson()
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"

@@ -312,7 +312,7 @@
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
+    <ClInclude Include="TesterInterface.actor.h" />
     <ClInclude Include="workloads\workloads.actor.h">
       <Filter>workloads</Filter>
     </ClInclude>
