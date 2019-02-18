@@ -29,7 +29,7 @@
 #include "fdbserver/DataDistribution.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ConsistencyCheckWorkload : TestWorkload

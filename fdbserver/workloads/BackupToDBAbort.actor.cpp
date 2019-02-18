@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/workloads/workloads.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

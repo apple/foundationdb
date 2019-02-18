@@ -25,7 +25,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/actorcompiler.h" // has to be last include
 

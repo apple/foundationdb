@@ -31,7 +31,7 @@
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/TLSConnection.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)

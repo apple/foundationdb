@@ -27,7 +27,7 @@
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {

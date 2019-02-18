@@ -22,7 +22,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of upgrading DR from 5.1 to 5.2
