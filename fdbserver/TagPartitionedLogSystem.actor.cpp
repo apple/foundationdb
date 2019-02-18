@@ -714,7 +714,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) {
 		Version end = getEnd();
 		TraceEvent("TLogPeekSpecial", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
-		if(localEnd == invalidVersion || localEnd <= begin) {
+		if(peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
 			return peekAll(dbgid, begin, end, tag, true);
 		}
 
@@ -841,25 +841,29 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Version getKnownCommittedVersion(int8_t loc) {
+		Version result = invalidVersion;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc) {
+			if(it.logSet->locality == loc || it.logSet->locality == tagLocalitySpecial) {
 				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
 				if(versions.present()) {
-					return versions.get().first;
+					result = std::max(result, versions.get().first);
 				}
-				return invalidVersion;
 			}
 		}
-		return invalidVersion;
+		return result;
 	}
 
 	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) {
+		std::vector<Future<Void>> result;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc) {
-				return TagPartitionedLogSystem::getDurableVersionChanged(it);
+			if(it.logSet->locality == loc || it.logSet->locality == tagLocalitySpecial) {
+				result.push_back(TagPartitionedLogSystem::getDurableVersionChanged(it));
 			}
 		}
-		return Never();
+		if(!result.size()) {
+			return Never();
+		}
+		return waitForAny(result);
 	}
 
 	void popLogRouter( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) { //FIXME: do not need to pop all generations of old logs
