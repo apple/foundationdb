@@ -292,7 +292,26 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			       &desiredMachineTeamNumber);
 			sscanf(teamCollectionInfoMessage.getValue("MaxMachineTeams").c_str(), "%lld", &maxMachineTeamNumber);
 
-			if (currentMachineTeamNumber > maxMachineTeamNumber || healthyMachineTeamCount > desiredMachineTeamNumber) {
+			TraceEvent("GetTeamCollectionValid")
+					.detail("Invalid", healthyMachineTeamCount > desiredMachineTeamNumber)
+				    .detail("CurrentTeamNumber", currentTeamNumber)
+				    .detail("DesiredTeamNumber", desiredTeamNumber)
+				    .detail("MaxTeamNumber", maxTeamNumber)
+				    .detail("CurrentHealthyMachineTeamNumber", healthyMachineTeamCount)
+				    .detail("DesiredMachineTeams", desiredMachineTeamNumber)
+				    .detail("CurrentMachineTeamNumber", currentMachineTeamNumber)
+				    .detail("MaxMachineTeams", maxMachineTeamNumber);
+
+			// Team number is always valid when we disable teamRemover. This avoids false positive in simulation test
+			if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
+				TraceEvent("GetTeamCollectionValid")
+					.detail("KnobsTeamRemoverDisabled", SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER);
+				return true;
+			}
+
+			// The if condition should be consistent with the condition in teamRemover() that decides
+			// if redundant teams exist.
+			if (healthyMachineTeamCount > desiredMachineTeamNumber) {
 				TraceEvent("GetTeamCollectionValid")
 				    .detail("CurrentTeamNumber", currentTeamNumber)
 				    .detail("DesiredTeamNumber", desiredTeamNumber)

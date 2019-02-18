@@ -209,7 +209,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					// Check that the number of process (and machine) teams is no larger than
 					// the allowed maximum number of teams
 					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
-					if (!teamCollectionValid && SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER == false) {
+					if (!teamCollectionValid) {
 						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
 						self->testFailure("The number of process or machine teams is larger than the allowed maximum number of teams");
 					}
