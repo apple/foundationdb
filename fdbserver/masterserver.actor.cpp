@@ -1297,6 +1297,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		// The proxy also expects the lastEpochEndKey mutation to be first in the transaction
 		BinaryWriter bw(Unversioned());
 		tr.set(recoveryCommitRequest.arena, lastEpochEndKey, (bw << self->lastEpochEnd).toStringRef());
+
+		if(self->forceRecovery) {
+			tr.set(recoveryCommitRequest.arena, rebootWhenDurableKey, StringRef());
+		}
 	} else {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
