@@ -2628,10 +2628,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
 
-			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
-			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxVersionInMemory", maxVersionsInMemory);
-
 			// Trigger updateStorage if necessary
 			Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
 			if(data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
@@ -2640,6 +2636,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get()-1);
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+
+			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
+			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
+			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed", proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag", data->tag.toString());
 
 			while(!data->recoveryVersionSkips.empty() && proposedOldestVersion > data->recoveryVersionSkips.front().first) {
 				data->recoveryVersionSkips.pop_front();
