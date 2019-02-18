@@ -101,8 +101,7 @@ then
        differences="$(diff /tmp/foundationdb.conf /etc/foundationdb/foundationdb.conf)"
        if [ -n "${differences}" ]
        then
-          ?=1
-          successOr Install changed configuration files
+          fail Install changed configuration files
        fi
 
        uninstall
