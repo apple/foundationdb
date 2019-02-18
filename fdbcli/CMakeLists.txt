@@ -11,4 +11,6 @@ endif()
 add_flow_target(EXECUTABLE NAME fdbcli SRCS ${FDBCLI_SRCS})
 target_link_libraries(fdbcli PRIVATE fdbclient)
 
-install(TARGETS fdbcli DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
+if(NOT OPEN_FOR_IDE)
+  install(TARGETS fdbcli DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
+endif()

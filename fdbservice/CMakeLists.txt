@@ -6,4 +6,6 @@ add_executable(fdbmonitor ${FDBSERVICE_SRCS})
 # as soon as we get rid of the old build system
 target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
 
-install(TARGETS fdbmonitor DESTINATION "${FDB_BIN_DIR}" COMPONENT server)
+if(NOT OPEN_FOR_IDE)
+  install(TARGETS fdbmonitor DESTINATION "${FDB_BIN_DIR}" COMPONENT server)
+endif()

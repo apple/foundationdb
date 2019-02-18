@@ -113,7 +113,11 @@ if (APPLE)
   set(SYSTEM_NAME "osx")
 endif()
 
-add_library(fdb_java SHARED fdbJNI.cpp)
+if(OPEN_FOR_IDE)
+  add_library(fdb_java OBJECT fdbJNI.cpp)
+else()
+  add_library(fdb_java SHARED fdbJNI.cpp)
+endif()
 message(DEBUG ${JNI_INCLUDE_DIRS})
 message(DEBUG ${JNI_LIBRARIES})
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
@@ -137,55 +141,57 @@ add_dependencies(foundationdb-tests fdb_java_options)
 #install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
 #install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
 
-set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
-  "Path of a directory structure with libraries to include in fat jar (a lib directory)")
+if(NOT OPEN_FOR_IDE)
+  set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
+    "Path of a directory structure with libraries to include in fat jar (a lib directory)")
 
-set(jar_destination ${CMAKE_BINARY_DIR}/packages)
-set(unpack_dir ${CMAKE_CURRENT_BINARY_DIR}/fat_jar)
-file(MAKE_DIRECTORY ${jar_destination})
-file(MAKE_DIRECTORY ${unpack_dir})
-message(STATUS "Building fat jar to ${jar_destination}")
-get_property(jar_path TARGET fdb-java PROPERTY JAR_FILE)
-add_custom_command(OUTPUT ${unpack_dir}/META-INF/MANIFEST.MF
-  COMMAND ${Java_JAR_EXECUTABLE} xf ${jar_path}
-  WORKING_DIRECTORY ${unpack_dir}
-  DEPENDS "${jar_path}"
-  COMMENT "Unpack jar-file")
-add_custom_target(unpack_jar DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
-add_dependencies(unpack_jar fdb-java)
-add_custom_command(OUTPUT ${unpack_dir}/LICENSE
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/LICENSE ${unpack_dir}
-  COMMENT "copy license")
-add_custom_target(copy_license DEPENDS ${unpack_dir}/LICENSE)
-add_dependencies(unpack_jar copy_license)
-if(FAT_JAR_BINARIES)
-  add_custom_command(OUTPUT ${unpack_dir}/lib
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${FAT_JAR_BINARIES} ${unpack_dir}
-    COMMENT "copy additional libraries"
-    DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
-  add_custom_target(copy_libs DEPENDS ${unpack_dir}/lib)
-  add_dependencies(unpack_jar copy_libs)
+  set(jar_destination ${CMAKE_BINARY_DIR}/packages)
+  set(unpack_dir ${CMAKE_CURRENT_BINARY_DIR}/fat_jar)
+  file(MAKE_DIRECTORY ${jar_destination})
+  file(MAKE_DIRECTORY ${unpack_dir})
+  message(STATUS "Building fat jar to ${jar_destination}")
+  get_property(jar_path TARGET fdb-java PROPERTY JAR_FILE)
+  add_custom_command(OUTPUT ${unpack_dir}/META-INF/MANIFEST.MF
+    COMMAND ${Java_JAR_EXECUTABLE} xf ${jar_path}
+    WORKING_DIRECTORY ${unpack_dir}
+    DEPENDS "${jar_path}"
+    COMMENT "Unpack jar-file")
+  add_custom_target(unpack_jar DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
+  add_dependencies(unpack_jar fdb-java)
+  add_custom_command(OUTPUT ${unpack_dir}/LICENSE
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/LICENSE ${unpack_dir}
+    COMMENT "copy license")
+  add_custom_target(copy_license DEPENDS ${unpack_dir}/LICENSE)
+  add_dependencies(unpack_jar copy_license)
+  if(FAT_JAR_BINARIES)
+    add_custom_command(OUTPUT ${unpack_dir}/lib
+      COMMAND ${CMAKE_COMMAND} -E copy_directory ${FAT_JAR_BINARIES} ${unpack_dir}
+      COMMENT "copy additional libraries"
+      DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
+    add_custom_target(copy_libs DEPENDS ${unpack_dir}/lib)
+    add_dependencies(unpack_jar copy_libs)
+  endif()
+  if(WIN32)
+    set(lib_destination "windows/amd64")
+  elseif(APPLE)
+    set(lib_destination "osx/x86_64")
+  else()
+    set(lib_destination "linux/amd64")
+  endif()
+  set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+  file(MAKE_DIRECTORY ${lib_destination})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
+    ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
+    COMMENT "Copy library")
+  add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
+  add_dependencies(copy_lib unpack_jar)
+  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
+  add_custom_command(OUTPUT ${target_jar}
+    COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
+    WORKING_DIRECTORY ${unpack_dir}
+    COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
+  add_custom_target(fat-jar DEPENDS ${target_jar})
+  add_dependencies(fat-jar copy_lib)
+  add_dependencies(packages fat-jar)
 endif()
-if(WIN32)
-  set(lib_destination "windows/amd64")
-elseif(APPLE)
-  set(lib_destination "osx/x86_64")
-else()
-  set(lib_destination "linux/amd64")
-endif()
-set(lib_destination "${unpack_dir}/lib/${lib_destination}")
-file(MAKE_DIRECTORY ${lib_destination})
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
-  ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
-  COMMENT "Copy library")
-add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
-add_dependencies(copy_lib unpack_jar)
-set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
-add_custom_command(OUTPUT ${target_jar}
-  COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
-  WORKING_DIRECTORY ${unpack_dir}
-  COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
-add_custom_target(fat-jar DEPENDS ${target_jar})
-add_dependencies(fat-jar copy_lib)
-add_dependencies(packages fat-jar)
