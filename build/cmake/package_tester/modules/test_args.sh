@@ -1,4 +1,4 @@
-#!env bash
+#!/usr/bin/env bash
 
 if [ -z ${test_args_sh_included+x} ]
 then
