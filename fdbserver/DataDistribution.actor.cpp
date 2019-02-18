@@ -2040,6 +2040,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
+		// Check if we need to remove redundant machine teams
+		// A machine team can be created when a new server team is created.
+		// Machine team number may become larger than the desired number due to server team creation.
+		// So we need to remove the machine team with no server team on it
 		if (machineTeamToRemove.isValid()) {
 			removeMachineTeam(machineTeamToRemove);
 		}
@@ -2051,10 +2055,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// Although we do not remove a machine team with no server team on it as long as the machine team number is
 		// no larger than the desired number, we should at least check if the machine team number is too big.
 		// If it does, we should kick off the teamRemover
-		if (redundantTeamRemover.isReady()) {
-			redundantTeamRemover = teamRemover(this); // this is DDTeamCollection*
-			this->addActor.send(redundantTeamRemover);
-		}
+//		if (redundantTeamRemover.isReady()) {
+//			redundantTeamRemover = teamRemover(this); // this is DDTeamCollection*
+//			this->addActor.send(redundantTeamRemover);
+//		}
 
 
 		ASSERT_WE_THINK(foundInMachineTeam);
@@ -2373,8 +2377,9 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 //			self->traceAllInfo(true);
 //		}
 
-		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * self->machine_info.size();
-		int totalMTCount = self->machineTeams.size(); // all machine teams should be healthy teams at this point
+		// In most cases, all machine teams should be healthy teams at this point.
+		int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
+		int totalMTCount = totalHealthyMachineCount;
 
 		if (totalMTCount > desiredMachineTeams) {
 			// Pick the machine team with the least number of server teams and mark it undesired
