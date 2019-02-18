@@ -24,7 +24,7 @@ then
                 status="$(docker ps -a -f id=${docker_id} --format '{{.Status}}' | awk '{print $1;}')"
                 if [ "${status}" = "Exited" ]
                 then
-                    successOr=1
+                    success=1
                     ret_code="$(docker wait ${docker_id})"
                     if [ "${ret_code}" -ne 0 ]
                     then
