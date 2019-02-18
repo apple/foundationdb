@@ -1,4 +1,4 @@
-#!env bash
+#!/usr/bin/env bash
 
 if [ -z ${arguments_sh_included+x} ]
 then
