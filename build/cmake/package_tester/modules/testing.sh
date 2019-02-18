@@ -33,7 +33,7 @@ then
 
     tests_clean() {
         uninstall purge
-        success FoundationDB was not uninstalled correctly
+        successOr FoundationDB was not uninstalled correctly
         # systemd/initd are not running, so we have to kill manually here
         pidof fdbmonitor | xargs kill
         tests_clean_nouninstall
@@ -47,7 +47,7 @@ then
         echo "Setting desired state ${new_state} for ${test_name}"
         desired_state "${new_state}"
         ${test_name}
-        success ${test_name} Failed
+        successOr ${test_name} Failed
         echo  "======================================================================="
         echo  "Test $t successfully finished"
         echo  "======================================================================="

@@ -21,10 +21,10 @@ then
 
     fail() {
         false
-        success ${@:1}
+        successOr ${@:1}
     }
 
-    success() {
+    successOrOr() {
         local __res=$?
         if [ ${__res} -ne 0 ]
         then
