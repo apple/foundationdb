@@ -20,7 +20,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/workloads/workloads.h"

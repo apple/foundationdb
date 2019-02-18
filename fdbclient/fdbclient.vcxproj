@@ -61,7 +61,7 @@
     <ClInclude Include="libb64\cencode.h" />
     <ClInclude Include="libb64\decode.h" />
     <ClInclude Include="libb64\encode.h" />
-    <ClInclude Include="ManagementAPI.h" />
+    <ClInclude Include="ManagementAPI.actor.h" />
     <ClInclude Include="MasterProxyInterface.h" />
     <ClInclude Include="md5\md5.h" />
     <ClInclude Include="MonitorLeader.h" />

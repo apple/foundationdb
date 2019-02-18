@@ -24,7 +24,7 @@
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 struct KillRegionWorkload : TestWorkload {
 	bool enabled;

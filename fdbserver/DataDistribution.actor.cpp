@@ -30,7 +30,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Ratekeeper.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
 #include "flow/Trace.h"

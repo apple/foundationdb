@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.h"
@@ -31,7 +31,7 @@
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-static Future<vector<AddressExclusion>> getExcludedServers( Transaction* const& tr );
+ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;

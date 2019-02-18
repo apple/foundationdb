@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/TesterInterface.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/workloads/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
