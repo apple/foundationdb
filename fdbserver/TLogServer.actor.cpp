@@ -25,7 +25,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"

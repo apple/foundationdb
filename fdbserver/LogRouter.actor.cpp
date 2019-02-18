@@ -20,7 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"

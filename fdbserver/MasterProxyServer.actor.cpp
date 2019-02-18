@@ -22,7 +22,7 @@
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"

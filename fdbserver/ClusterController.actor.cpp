@@ -25,7 +25,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/WaitFailure.h"

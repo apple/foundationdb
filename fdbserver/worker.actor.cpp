@@ -24,7 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/TesterInterface.h"  // for poisson()

@@ -23,7 +23,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"

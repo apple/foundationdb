@@ -32,7 +32,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"

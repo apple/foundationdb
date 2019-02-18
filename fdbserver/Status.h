@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
