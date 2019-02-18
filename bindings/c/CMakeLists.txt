@@ -48,9 +48,14 @@ endif()
 
 # The tests don't build on windows
 if(NOT WIN32)
-  add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+  if(OPEN_FOR_IDE)
+    add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
+    add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
+  else()
+    add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+    add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
+  endif()
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
-  add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
 endif()
 
