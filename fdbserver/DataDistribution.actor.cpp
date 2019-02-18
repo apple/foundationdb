@@ -2418,12 +2418,13 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			// Remove the machine by removing its process team one by one
 			state Reference<TCTeamInfo> team;
 			state int teamIndex = 0;
+			state bool foundTeam = false;
 			for (teamIndex = 0; teamIndex < mt->serverTeams.size(); ++teamIndex) {
 				team = mt->serverTeams[teamIndex];
 				ASSERT(team->machineTeam->machineIDs == mt->machineIDs); // Sanity check
 
 				// The team will be marked as a bad team
-				bool foundTeam = self->removeTeam(team);
+				foundTeam = self->removeTeam(team);
 				ASSERT(foundTeam == true);
 				// removeTeam() has side effect of swapping the last element to the current pos
 				// in the serverTeams vector in the machine team.
@@ -2447,7 +2448,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 			bool foundRemovedMachineTeam = self->removeMachineTeam(mt);
 			// When we remove the last server team on a machine team in removeTeam(), we also remove the machine team
 			// This is needed for removeTeam() functoin. So here the removeMachineTeam() should not find the machine team
-			ASSERT(foundRemovedMachineTeam == false);
+			ASSERT(foundTeam == true || foundRemovedMachineTeam == true);
 			numMachineTeamRemoved++;
 		} else {
 			if (numMachineTeamRemoved > 0) {
