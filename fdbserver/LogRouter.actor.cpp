@@ -103,7 +103,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(req.startVersion-1), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), foundEpochEnd(false) {
+	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), foundEpochEnd(false) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -173,6 +173,13 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is when processing epoch end.
 	// Since one set of log routers is created per generation of transaction logs, the gap caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
+	if(self->version.get() < self->startVersion) {
+		if(ver > self->startVersion) {
+			self->version.set(self->startVersion);
+			wait(self->minPopped.whenAtLeast(self->version.get()));
+		}
+		return Void();
+	}
 	if(!self->foundEpochEnd) {
 		wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 	} else {
