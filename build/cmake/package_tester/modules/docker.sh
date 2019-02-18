@@ -24,7 +24,7 @@ then
                 status="$(docker ps -a -f id=${docker_id} --format '{{.Status}}' | awk '{print $1;}')"
                 if [ "${status}" = "Exited" ]
                 then
-                    success=1
+                    successOr=1
                     ret_code="$(docker wait ${docker_id})"
                     if [ "${ret_code}" -ne 0 ]
                     then
@@ -82,7 +82,7 @@ then
             fi
             docker_logs="${log_dir}/docker_build_${name}"
             docker build . -t ${name} 1> "${docker_logs}.log" 2> "${docker_logs}.err"
-            success "Building Docker image ${name} failed - see ${docker_logs}.log and ${docker_logs}.err"
+            successOr "Building Docker image ${name} failed - see ${docker_logs}.log and ${docker_logs}.err"
             # we start docker in interactive mode, otherwise CTRL-C won't work
             if [ ! -z "${tests_to_run+x}"]
             then
