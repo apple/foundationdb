@@ -1234,7 +1234,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.trackLatest("MasterRecoveryState");
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
-	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, self->forceRecovery);
+	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, &self->forceRecovery);
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;

@@ -117,7 +117,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return dbgid;
 	}
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery) {
 		return epochEnd( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 	}
 
@@ -1254,7 +1254,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality, bool forceRecovery ) {
+	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality, bool* forceRecovery ) {
 		// Stops a co-quorum of tlogs so that no further versions can be committed until the DBCoreState coordination state is changed
 		// Creates a new logSystem representing the (now frozen) epoch
 		// No other important side effects.
@@ -1272,7 +1272,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			throw internal_error();
 		}
 
-		if(forceRecovery) {
+		if(*forceRecovery) {
 			DBCoreState modifiedState = prevState;
 
 			int8_t primaryLocality = -1;
@@ -1345,10 +1345,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 					prevState = modifiedState;
 				} else {
-					forceRecovery = false;
+					*forceRecovery = false;
 				}
+			} else {
+				*forceRecovery = false;
 			}
 			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
+			for(int i = 0; i < prevState.tLogs.size(); i++) {
+				TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("Log", ::describe(prevState.tLogs[i].tLogs)).detail("Loc", prevState.tLogs[i].locality);
+			}
+			for(int i = 0; i < prevState.oldTLogData.size(); i++) {
+				for(int j = 0; j < prevState.oldTLogData[i].tLogs.size(); j++) {
+					TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("J",j).detail("Log", ::describe(prevState.oldTLogData[i].tLogs[j].tLogs)).detail("Loc", prevState.oldTLogData[i].tLogs[j].locality);
+				}
+			}
 		}
 
 		TEST( true );	// Master recovery from pre-existing database
@@ -1455,7 +1465,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		if(forceRecovery) {
+		if(*forceRecovery) {
 			state std::vector<LogLockInfo> allLockResults;
 			ASSERT( lockResults.size() == 1 );
 			allLockResults.push_back(lockResults[0]);
@@ -2290,7 +2300,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	};
 };
 
-Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery) {
 	return TagPartitionedLogSystem::recoverAndEndEpoch( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 }
 
