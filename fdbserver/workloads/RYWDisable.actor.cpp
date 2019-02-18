@@ -20,7 +20,7 @@
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

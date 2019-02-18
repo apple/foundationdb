@@ -23,7 +23,7 @@
 #include <functional>
 #include <sstream>
 
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"

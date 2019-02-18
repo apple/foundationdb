@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"

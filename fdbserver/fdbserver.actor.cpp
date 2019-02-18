@@ -47,7 +47,7 @@
 #include <fstream>
 #include "fdbserver/pubsub.h"
 #include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"

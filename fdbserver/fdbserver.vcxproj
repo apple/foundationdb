@@ -201,7 +201,7 @@
     <ClInclude Include="template_fdb.h" />
     <ClInclude Include="TLogInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
+    <ClInclude Include="TesterInterface.actor.h" />
     <ClInclude Include="WorkerInterface.h" />
     <ActorCompiler Include="workloads\BulkSetup.actor.h">
       <EnableCompile>false</EnableCompile>

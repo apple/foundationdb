@@ -23,7 +23,7 @@
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"

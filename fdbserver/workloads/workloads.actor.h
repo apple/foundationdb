@@ -24,7 +24,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
 
