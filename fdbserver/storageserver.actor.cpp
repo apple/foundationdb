@@ -2710,6 +2710,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		if(newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			durableInProgress.sendError(please_reboot());
 			throw please_reboot();
 		}
 
