@@ -1281,7 +1281,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			int8_t primaryLocality = -1;
 			for(auto& coreSet : modifiedState.tLogs) {
-				if(coreSet.isLocal && coreSet.locality >= 0) {
+				if(coreSet.isLocal && coreSet.locality >= 0 && coreSet.tLogLocalities[0].dcId() != locality.dcId()) {
 					primaryLocality = coreSet.locality;
 					break;
 				}
