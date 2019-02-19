@@ -1093,8 +1093,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	             bool redundantTeam = false) {
 		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
 
-		bool badTeam = !satisfiesPolicy(teamInfo->getServers()) || teamInfo->size() != configuration.storageTeamSize
-						|| redundantTeam;
+		// Move satisfiesPolicy to the end for performance benefit
+		bool badTeam = redundantTeam || teamInfo->size() != configuration.storageTeamSize
+				|| !satisfiesPolicy(teamInfo->getServers());
 
 		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
