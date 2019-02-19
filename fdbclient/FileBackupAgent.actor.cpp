@@ -3630,7 +3630,7 @@ public:
 					printf("%s\n", details.c_str());
 				}
 
-				state ERestoreState status_ = wait(restore.stateEnum().getD(tr));
+			ERestoreState status_ = wait(restore.stateEnum().getD(tr));
 				status = status_;
 				state bool runnable = wait(restore.isRunnable(tr));
 
