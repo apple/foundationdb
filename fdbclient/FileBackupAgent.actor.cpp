@@ -38,7 +38,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #ifdef NO_INTELLISENSE
-#define THIS_ADDR (uint64_t)this
+#define THIS_ADDR (uintptr_t)this
 #else
 #define THIS_ADDR 0
 #endif
