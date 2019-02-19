@@ -1141,7 +1141,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		for (auto server = newTeamServers.begin(); server != newTeamServers.end(); ++server) {
 			ASSERT_WE_THINK((*server)->machine.isValid());
 			machineIDs.push_back((*server)->machine->machineID);
-			TraceEvent("MXDEBUG").detail("MachineID", (*server)->machine->machineID.toString());
+			TraceEvent("MXDEBUG_AddTeam").detail("MachineID", (*server)->machine->machineID.toString());
 		}
 		sort(machineIDs.begin(), machineIDs.end());
 		Reference<TCMachineTeamInfo> machineTeamInfo = findMachineTeam(machineIDs);
@@ -1179,6 +1179,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Assign machine teams to machine
 		for (auto machine : machines) {
+			ASSERT(std::count(machine->machineTeams.begin(), machine->machineTeams.end(), machineTeamInfo) == 0);
 			machine->machineTeams.push_back(machineTeamInfo);
 		}
 
@@ -1556,14 +1557,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(Reference<TCServerInfo> chosenServer) {
 		if (!chosenServer->machine->machineTeams.empty()) {
-			std::vector<Reference<TCMachineTeamInfo>> machineTeams;
+			std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer; //tmpMachineTeams;
 			for (auto& mt : chosenServer->machine->machineTeams) {
 				if (isMachineTeamHealthy(mt)) {
-					machineTeams.push_back(mt);
+					healthyMachineTeamsForChosenServer.push_back(mt);
+				}
+				// MXDEBUG
+				if (std::count(machineTeams.begin(), machineTeams.end(), mt)  == 0) {
+					TraceEvent(SevError, "MXDEBUG_MachineTeamNotExit").detail("ServerID", chosenServer->id).detail("PhantomMachineTeam", mt->getMachineIDsStr());
+					//traceAllInfo(true);
 				}
 			}
-			if (!machineTeams.empty()) {
-				return g_random->randomChoice(machineTeams);
+			if (!healthyMachineTeamsForChosenServer.empty()) {
+				return g_random->randomChoice(healthyMachineTeamsForChosenServer);
 			}
 		}
 
@@ -2054,13 +2060,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
+		// TODO: This may be removed
 		// Check if we need to remove redundant machine teams
 		// A machine team can be created when a new server team is created.
 		// Machine team number may become larger than the desired number due to server team creation.
 		// So we need to remove the machine team with no server team on it
-		if (machineTeamToRemove.isValid()) {
-			removeMachineTeam(machineTeamToRemove);
-		}
+//		if (machineTeamToRemove.isValid()) {
+//			removeMachineTeam(machineTeamToRemove);
+//		}
 
 		// TODO: This redundantTeamRemover may be able to be removed.
 		// Check if we need to remove redundant machine teams
@@ -2145,6 +2152,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 		}
+		removedMachineInfo->machineTeams.clear();
+
 		// Remove global machine team that includes removedMachineInfo
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
@@ -2190,16 +2199,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				break;
 			}
 		}
+		//int count = 0;
 		// Remove machine team on each machine
 		for (auto& machine : targetMT->machines) {
 			for (int i = 0; i < machine->machineTeams.size(); ++i) {
 				if (machine->machineTeams[i]->machineIDs == targetMT->machineIDs) {
 					machine->machineTeams[i--] = machine->machineTeams.back();
 					machine->machineTeams.pop_back();
-					break; // The machineTeams on a machine should never duplicate
+					//count++;
+					//break; // The machineTeams on a machine should never duplicate
 				}
 			}
 		}
+//		if (count != targetMT->machines.size()) {
+//			TraceEvent(SevError, "MXDEBUG_RemoveMachineTeam").detail("RemovedMTNumber", count).detail("MachineNumber", targetMT->machines.size());
+//			traceAllInfo(true);
+//		}
 
 		return foundMachineTeam;
 	}
@@ -2404,7 +2419,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		int totalMTCount = self->machineTeams.size();
 		TraceEvent("MXDEBUG_TeamRemove").detail("DesiredMachineTeamCount", desiredMachineTeams)
 			.detail("MachineTeamCount", totalMTCount)
-			.detail("TotalMachineTeamCount", healthyMachineCount);
+			.detail("HealthyMachineCount", healthyMachineCount);
 		self->traceAllInfo(true);
 
 
@@ -3081,6 +3096,7 @@ ACTOR Future<Void> storageServerTracker(
 								// When server is the last server on the machine,
 								// remove the machine and the related machine team
 								self->removeMachine(self, machine);
+								server->machine = Reference<TCMachineInfo>();
 							} else {
 								// we remove the server from the machine, and
 								// update locality entry for the machine and the global machineLocalityMap
