@@ -107,6 +107,7 @@ function(add_fdb_test)
     -t ${test_type}
     -O ${OLD_FDBSERVER_BINARY}
     --aggregate-traces ${TEST_AGGREGATE_TRACES}
+    --log-format ${TEST_LOG_FORMAT}
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
     --seed ${SEED}

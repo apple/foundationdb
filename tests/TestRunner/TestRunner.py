@@ -273,9 +273,8 @@ def run_simulation_test(basedir, options):
     if options.buggify:
         pargs.append('-b')
         pargs.append('on')
-    # FIXME: include these lines as soon as json support is added
-    #pargs.append('--trace_format')
-    #pargs.append(log_format)
+    pargs.append('--trace_format')
+    pargs.append(options.log_format)
     test_dir = td.get_current_test_dir()
     if options.seed is not None:
         pargs.append('-s')
