@@ -41,4 +41,12 @@ template <class T> T waitNext( const FutureStream<T>& );
 
 #define loop while(true)
 
+#ifdef NO_INTELLISENSE
+#define THIS this
+#define THIS_ADDR uintptr_t(this)
+#else
+#define THIS nullptr
+#define THIS_ADDR uintptr_t(nullptr)
+#endif
+
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
