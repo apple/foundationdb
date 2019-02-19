@@ -70,11 +70,11 @@ struct KillRegionWorkload : TestWorkload {
 		ASSERT( g_network->isSimulated() );
 		if(g_random->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin");
-			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
+			wait( success( changeConfig( cx, g_simulator.disableRemote, true ) ) );
 			TraceEvent("ForceRecovery_WaitForPrimary");
 			wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
 			TraceEvent("ForceRecovery_DisableRemoteComplete");
-			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
+			wait( success( changeConfig( cx, g_simulator.originalRegions, true ) ) );
 		}
 		TraceEvent("ForceRecovery_Wait");
 		wait( delay( g_random->random01() * self->testDuration ) );
@@ -92,11 +92,11 @@ struct KillRegionWorkload : TestWorkload {
 		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 		if(conf.usableRegions>1) {
 			//only needed if force recovery was unnecessary and we killed the secondary
-			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) );
+			wait( success( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) ) );
 			while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 				wait( self->dbInfo->onChange() );
 			}
-			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1", true ) );
+			wait( success( changeConfig( cx, "usable_regions=1", true ) ) );
 		}
 		TraceEvent("ForceRecovery_Complete");
 		return Void();

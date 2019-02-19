@@ -790,7 +790,7 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 		StatusObject regionJSON;
 		regionJSON["regions"] = self->configuration.getRegionJSON();
 		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion()).toString()));
-		self->configuration.applyMutation( regionCommit.mutations.back() );
+		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation 
 		TraceEvent("ForcedRecoveryConfigChange", self->dbgid).detail("Conf", self->configuration.toString());
 	}
 	initialConfChanges->push_back(regionCommit);
