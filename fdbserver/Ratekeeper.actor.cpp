@@ -648,7 +648,6 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state RatekeeperData self;
 	state Future<Void> timeout = Void();
-	state std::vector<Future<Void>> actors;
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
@@ -676,8 +675,8 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
-	loop{
-		choose {
+	try {
+		loop choose {
 			when (wait( timeout )) {
 				updateRate(&self, self.normalLimits);
 				updateRate(&self, self.batchLimits);
@@ -736,4 +735,8 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			}
 		}
 	}
+	catch (Error& err) {
+		TraceEvent("Ratekeeper_Died", rkInterf.id()).error(err, true);
+	}
+	return Void();
 }

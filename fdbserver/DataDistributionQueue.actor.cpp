@@ -1201,10 +1201,10 @@ ACTOR Future<Void> dataDistributionQueue(
 	MoveKeysLock lock,
 	PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	UID distributorId,
-	int teamSize,
-	double* lastLimited)
+	int teamSize)
 {
-	state DDQueueData self( distributorId, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, output, input, getShardMetrics, lastLimited );
+	state double lastLimited = 0;
+	state DDQueueData self( distributorId, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, output, input, getShardMetrics, &lastLimited );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;

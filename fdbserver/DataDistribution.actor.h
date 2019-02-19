@@ -230,8 +230,7 @@ Future<Void> dataDistributionQueue(
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	UID const& distributorId,
-	int const& teamSize,
-	double* const& lastLimited);
+	int const& teamSize);
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

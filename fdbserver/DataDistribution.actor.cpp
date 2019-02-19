@@ -3478,9 +3478,13 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 };
 
 // TODO: remove lastLimited -- obtain this information of ratekeeper from proxy
+<<<<<<< HEAD
 >>>>>>> Fix a segfault bug due to uncopied ratekeeper interface
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	double* lastLimited)
+=======
+ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
+>>>>>>> Remove lastLimited from data distribution
 {
 	state Database cx = openDBOnServer(self->dbInfo, TaskDataDistributionLaunch, true, true);
 	state DatabaseConfiguration configuration = self->configuration->get();
@@ -3671,7 +3675,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, self->primaryDcId, configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
@@ -3730,10 +3734,28 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 	try {
 		TraceEvent("DataDistributor_Running", di.id());
+<<<<<<< HEAD
 		state double lastLimited = 0;
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
 		wait( distributor || collection );
+=======
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+
+		loop choose {
+			when ( wait( self->configuration->onChange() ) ) {
+				TraceEvent("DataDistributor_Restart", di.id())
+				.detail("Configuration", self->configuration->get().toString());
+				self->refreshDcIds();
+				distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+			}
+			when ( wait( collection ) ) {
+				ASSERT(false);
+				throw internal_error();
+			}
+			when ( wait( distributor ) ) {}
+		}
+>>>>>>> Remove lastLimited from data distribution
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
