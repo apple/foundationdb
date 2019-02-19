@@ -2629,7 +2629,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			}
 
 			// Trigger updateStorage if necessary
-			Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
+			Version proposedOldestVersion = std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
 			if(data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
 				proposedOldestVersion = std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
 			}
