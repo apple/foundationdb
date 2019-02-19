@@ -49,7 +49,7 @@ struct MasterProxyInterface {
 	std::string toString() const { return id().shortString(); }
 	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
 	bool operator != (MasterProxyInterface const& r) const { return id() != r.id(); }
-	NetworkAddress address() const { return commit.getEndpoint().address; }
+	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

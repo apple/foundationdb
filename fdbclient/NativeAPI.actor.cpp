@@ -922,7 +922,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(NetworkAddress(), false, useMetrics || networkOptions.traceDirectory.present());
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 

@@ -312,7 +312,7 @@ public:
 			else {
 				std::vector<LocalityEntry> bestSet;
 				std::vector<LocalityData> tLocalities;
-				
+
 				// Try to find the best team of servers to fulfill the policy
 				if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS)) {
 					results.reserve(results.size() + bestSet.size());
@@ -489,7 +489,7 @@ public:
 
 		bool operator < (RoleFitness const& r) const {
 			if (worstFit != r.worstFit) return worstFit < r.worstFit;
-			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.  
+			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.
 			if (role != ProcessClass::TLog && role != ProcessClass::LogRouter && bestFit != r.bestFit) return bestFit < r.bestFit;
 			return count > r.count;
 		}
@@ -697,7 +697,6 @@ public:
 			RecruitFromConfigurationReply result;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			updateKnownIds(&id_used);
-			
 			auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used );
 			for(int i = 0; i < tlogs.size(); i++) {
 				result.tLogs.push_back(tlogs[i].first);
@@ -1100,7 +1099,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 			}
 
-			//We must recruit the master in the same data center as the cluster controller. 
+			//We must recruit the master in the same data center as the cluster controller.
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[cluster->clusterControllerProcessId]++;
@@ -1199,7 +1198,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 	ReplyPromise<ServerDBInfo> reply)
 {
 	state UID issueID;
-	addIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
@@ -1211,7 +1210,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 		}
 	}
 
-	removeIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	removeIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 
 	reply.send( db->serverInfo->get() );
 	return Void();
@@ -1227,13 +1226,13 @@ ACTOR Future<Void> clusterOpenDatabase(
 {
 	// NOTE: The client no longer expects this function to return errors
 	state UID issueID;
-	addIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 
 	if(supportedVersions.size() > 0) {
-		db->clientVersionMap[reply.getEndpoint().address] = supportedVersions;
+		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
 
-	db->traceLogGroupMap[reply.getEndpoint().address] = traceLogGroup.toString();
+	db->traceLogGroupMap[reply.getEndpoint().getPrimaryAddress()] = traceLogGroup.toString();
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1242,9 +1241,9 @@ ACTOR Future<Void> clusterOpenDatabase(
 		}
 	}
 
-	removeIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
-	db->clientVersionMap.erase(reply.getEndpoint().address);
-	db->traceLogGroupMap.erase(reply.getEndpoint().address);
+	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
+	db->traceLogGroupMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1408,7 +1407,7 @@ struct FailureStatusInfo {
 //The failure monitor client relies on the fact that the failure detection server will not declare itself failed
 ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::DBInfo* db, FutureStream< FailureMonitoringRequest > requests ) {
 	state Version currentVersion = 0;
-	state std::map<NetworkAddress, FailureStatusInfo> currentStatus;	// The status at currentVersion
+	state std::map<NetworkAddressList, FailureStatusInfo> currentStatus;	// The status at currentVersion
 	state std::deque<SystemFailureStatus> statusHistory;	// The last change in statusHistory is from currentVersion-1 to currentVersion
 	state Future<Void> periodically = Void();
 	state double lastT = 0;
@@ -1417,22 +1416,21 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
-				auto& address = req.reply.getEndpoint().address;
-				auto& stat = currentStatus[ address ];
+				auto& stat = currentStatus[ req.addresses ];
 				auto& newStat = req.senderStatus.get();
 
-				ASSERT( !newStat.failed || address != g_network->getLocalAddress() );
+				ASSERT( !newStat.failed || req.addresses != g_network->getLocalAddresses() );
 
 				stat.insertRequest(now());
 				if (req.senderStatus != stat.status) {
-					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", address).detail("Status", newStat.failed ? "Failed" : "OK").detail("Why", "Request");
-					statusHistory.push_back( SystemFailureStatus( address, newStat ) );
+					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", describe(req.addresses)).detail("Status", newStat.failed ? "Failed" : "OK").detail("Why", "Request");
+					statusHistory.push_back( SystemFailureStatus( req.addresses, newStat ) );
 					++currentVersion;
 
 					if (req.senderStatus == FailureStatus()){
 						// failureMonitorClient reports explicitly that it is failed
 						ASSERT(false); // This can't happen at the moment; if that changes, make this a TEST instead
-						currentStatus.erase(address);
+						currentStatus.erase(req.addresses);
 					} else {
 						TEST(true);
 						stat.status = newStat;
@@ -1508,11 +1506,11 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
-				if ( it->first != g_network->getLocalAddress() && ( tooManyLogGenerations ?
+				if ( it->first != g_network->getLocalAddresses() && ( tooManyLogGenerations ?
 					( delay > CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY ) :
 					( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
-					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", it->first).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
+					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", describe(it->first)).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
 						.detail("PivotDelay", pivotDelay).detail("UnfinishedRecoveries", db->unfinishedRecoveries).detail("LogGenerations", db->logGenerations);
 					statusHistory.push_back( SystemFailureStatus( it->first, FailureStatus(true) ) );
 					++currentVersion;
@@ -1730,7 +1728,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if ( info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
 		if ( self->gotProcessClasses ) {
 			auto classIter = self->id_class.find(w.locality.processId());
-			
+
 			if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
 				newProcessClass = classIter->second;
 			} else {
@@ -1991,7 +1989,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 							newProcessClass = w.second.initialClass;
 						}
 
-						
+
 						if (newProcessClass != w.second.processClass) {
 							w.second.processClass = newProcessClass;
 							w.second.priorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
@@ -2073,7 +2071,7 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
 				}
-				
+
 				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
 				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				wait(tr.commit());
