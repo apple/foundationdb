@@ -142,10 +142,6 @@ else()
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
 endif()
 
-if(NOT WIN32)
-  add_dependencies(packages package)
-endif()
-
 ################################################################################
 # Configuration for RPM
 ################################################################################
