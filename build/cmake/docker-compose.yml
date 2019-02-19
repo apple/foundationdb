@@ -15,49 +15,49 @@ services:
     #the path where debuginfo sources are places. Crazy, yes,
     #see the manual for CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX.
     volumes:
-      - ../..:/foundationdb/deep/directory/as/debuginfo/doesnt/work/otherwise/src
+      - ../..:/foundationdb/deep/directory/as/debuginfo/doesnt/work/otherwise/foundationdb
       - ${BUILDDIR}:/foundationdb/deep/directory/as/debuginfo/doesnt/work/otherwise/build
     working_dir: /foundationdb/deep/directory/as/debuginfo/doesnt/work/otherwise/build
 
   configure: &configure
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh configure
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh configure
 
   build: &build
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh build
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh build
 
   build-fast: &build-fast
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh build/fast
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh build/fast
 
   rpm: &rpm
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh rpm
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh rpm
 
   deb: &deb
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh deb
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh deb
 
   linux-pkgs:
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh linux-pkgs
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh linux-pkgs
 
   package: &package
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh package
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh package
 
   package-fast: &package-fast
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh package/fast
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh package/fast
 
   test-fast: &test-fast
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh test-fast
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh test-fast
 
   test: &test
     <<: *build-setup
-    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../src/build/cmake/build.sh test
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh test
 
   shell:
     <<: *build-setup
