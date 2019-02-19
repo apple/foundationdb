@@ -1151,10 +1151,6 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_random->randomShuffle(coordinatorAddresses);
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
-	printf("Coordinator Address: %d\n", coordinatorAddresses.size());
-	for (const auto& coord : coordinatorAddresses) {
-		printf("Coordinator: %s\n", coord.toString().c_str());
-	}
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
