@@ -2262,7 +2262,6 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
-<<<<<<< HEAD
 ACTOR Future<Void> doEmptyCommit(Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -2303,7 +2302,9 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 		TraceEvent("ForcedRecoveryFinish", self->id);
 		self->db.forceRecovery = false;
 		req.reply.send(Void());
-=======
+	}
+}
+
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
@@ -2363,7 +2364,6 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
 			self->db.setDistributor( distributorInterf );
 		}
->>>>>>> master
 	}
 }
 
@@ -2371,23 +2371,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
 	state uint64_t step = 0;
-<<<<<<< HEAD
-	state PromiseStream<Future<Void>> addActor;
-	state Future<ErrorOr<Void>> error = errorOr( actorCollection( addActor.getFuture() ) );
-
-	auto pSelf = &self;
-	addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
-	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
-	addActor.send( self.updateWorkerList.init( self.db.db ) );
-	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
-	addActor.send( timeKeeper(&self) );
-	addActor.send( monitorProcessClasses(&self) );
-	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
-	addActor.send( updatedChangingDatacenters(&self) );
-	addActor.send( updatedChangedDatacenters(&self) );
-	addActor.send( updateDatacenterVersionDifference(&self) );
-	addActor.send( handleForcedRecoveries(&self, interf) );
-=======
 	state Future<ErrorOr<Void>> error = errorOr( actorCollection( self.addActor.getFuture() ) );
 
 	self.addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
@@ -2401,7 +2384,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( updatedChangedDatacenters(&self) );
 	self.addActor.send( updateDatacenterVersionDifference(&self) );
 	self.addActor.send( waitDDRejoinOrStartDD(&self, &interf) );
->>>>>>> master
+	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

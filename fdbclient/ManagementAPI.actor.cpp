@@ -1550,12 +1550,6 @@ ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, 
 			when ( wait( clusterInterface->onChange() )) {}
 		}
 	}
-<<<<<<< HEAD
-=======
-
-	wait(success(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() )));
-	return Void();
->>>>>>> master
 }
 
 ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
