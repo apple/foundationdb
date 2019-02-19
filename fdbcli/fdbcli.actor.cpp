@@ -47,7 +47,7 @@
 #include "fdbcli/linenoise/linenoise.h"
 #endif
 
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
 
@@ -672,6 +672,38 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 	return outputString;
 }
 
+int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
+	StatusObjectReader machineMap;
+	int numOfNonExcludedMachines = 0;
+	if (statusObjCluster.get("machines", machineMap)) {
+		for (auto mach : machineMap.obj()) {
+			StatusObjectReader machine(mach.second);
+			if (machine.has("excluded") && !machine.last().get_bool())
+				numOfNonExcludedMachines++;
+		}
+	}
+	return numOfNonExcludedMachines;
+}
+
+std::pair<int, int> getNumOfNonExcludedProcessAndZones(StatusObjectReader statusObjCluster) {
+	StatusObjectReader processesMap;
+	std::set<std::string> zones;
+	int numOfNonExcludedProcesses = 0;
+	if (statusObjCluster.get("processes", processesMap)) {
+		for (auto proc : processesMap.obj()) {
+			StatusObjectReader process(proc.second);
+			if (process.has("excluded") && process.last().get_bool())
+				continue;
+			numOfNonExcludedProcesses++;
+			std::string zoneId;
+			if (process.get("locality.zoneid", zoneId)) {
+				zones.insert(zoneId);
+			}
+		}
+	}
+	return { numOfNonExcludedProcesses, zones.size() };
+}
+
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
 		printf("WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
@@ -754,9 +786,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
-								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
-									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
+									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
+									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
+								}
 							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
 								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
@@ -1651,7 +1685,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	StatusObject configJSON = config.get_obj();
 
 	json_spirit::mValue schema;
-	if(!json_spirit::read_string( JSONSchemas::configurationSchema.toString(), schema )) {
+	if(!json_spirit::read_string( JSONSchemas::clusterConfigurationSchema.toString(), schema )) {
 		ASSERT(false);
 	}
 
@@ -2561,7 +2595,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if( tokencmp(tokens[0], "waitopen")) {
-					Version _ = wait( getTransaction(db,tr,options,intrans)->getReadVersion() );
+					wait(success( getTransaction(db,tr,options,intrans)->getReadVersion() ));
 					continue;
 				}
 
@@ -3173,10 +3207,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						if(tokencmp(tokens[1], "on")) {
-							int _ = wait(setDDMode(db, 1));
+							wait(success(setDDMode(db, 1)));
 							printf("Data distribution is enabled\n");
 						} else if(tokencmp(tokens[1], "off")) {
-							int _ = wait(setDDMode(db, 0));
+							wait(success(setDDMode(db, 0)));
 							printf("Data distribution is disabled\n");
 						} else {
 							printf("Usage: datadistribution <on|off>\n");

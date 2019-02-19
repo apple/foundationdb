@@ -59,7 +59,6 @@ Future<Void> moveKeys(
 	Promise<Void> const& dataMovementComplete,
 	FlowLock* const& startMoveKeysParallelismLock,
 	FlowLock* const& finishMoveKeysParallelismLock,
-	Version const& recoveryVersion,
 	bool const& hasRemote,
 	UID const& relocationIntervalId); // for logging only
 // Eventually moves the given keys to the given destination team

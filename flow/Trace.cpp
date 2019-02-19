@@ -43,18 +43,6 @@
 #undef min
 #endif
 
-namespace {
-	Reference<ITraceLogFormatter> createLogFormatter(const std::string& f) {
-		if (f == "json") {
-			return Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
-		} else if (f == "xml") {
-			return Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
-		} else {
-			UNREACHABLE();
-		}
-	}
-} // namespace
-
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
@@ -576,15 +564,40 @@ TraceEventFields LatestEventCache::getLatestError() {
 
 static TraceLog g_traceLog;
 
-bool selectTraceFormatter(std::string format) {
-	ASSERT(!g_traceLog.isOpen());
+namespace {
+template <bool validate>
+bool traceFormatImpl(std::string& format) {
 	std::transform(format.begin(), format.end(), format.begin(), ::tolower);
-	if (format == "xml" || format == "json") {
-		g_traceLog.formatter = createLogFormatter(format);
+	if (format == "xml") {
+		if (!validate) {
+			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+		}
+		return true;
+	} else if (format == "json") {
+		if (!validate) {
+			g_traceLog.formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
+		}
 		return true;
 	} else {
+		if (!validate) {
+			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
+		}
 		return false;
 	}
+}
+} // namespace
+
+bool selectTraceFormatter(std::string format) {
+	ASSERT(!g_traceLog.isOpen());
+	bool recognized = traceFormatImpl</*validate*/ false>(format);
+	if (!recognized) {
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceFormat").detail("format", format);
+	}
+	return recognized;
+}
+
+bool validateTraceFormat(std::string format) {
+	return traceFormatImpl</*validate*/ true>(format);
 }
 
 ThreadFuture<Void> flushTraceFile() {

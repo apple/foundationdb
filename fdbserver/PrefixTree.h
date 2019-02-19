@@ -32,8 +32,8 @@ static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int c
 	const int wordEnd = cl - sizeof(Word) + 1;
 
 	for(; i < wordEnd; i += sizeof(Word)) {
-		register Word a = *(Word *)ap;
-		register Word b = *(Word *)bp;
+		Word a = *(Word *)ap;
+		Word b = *(Word *)bp;
 		if(a != b) {
 			return i + ctzll(a ^ b) / 8;
 		}
@@ -238,14 +238,14 @@ struct PrefixTree {
 
 			void init(const Node *n) {
 				node = n;
-				register union {
+				union {
 					const uint8_t *p8;
 					const uint16_t *p16;
 				};
 				p8 = (const uint8_t *)&n->flags + 1;
 
-				register int flags = n->flags;
-				register bool large = flags & USE_LARGE_LENGTHS;
+				int flags = n->flags;
+				bool large = flags & USE_LARGE_LENGTHS;
 
 				prefixLen = large ? *p16++ : *p8++;
 
@@ -265,7 +265,7 @@ struct PrefixTree {
 				if(flags & HAS_VALUE)
 					rightPos += (large ? *p16++ : *p8++);
 
-				register int header = 2;    // flags byte, first prefix len byte
+				int header = 2;    // flags byte, first prefix len byte
 				if(large)
 					++header;  // second prefix len byte
 				if(flags & HAS_SPLIT)

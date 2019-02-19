@@ -28,7 +28,7 @@
 #include <string.h>
 #endif
 
-// Otherwise we have to type setupNetwork(), Cluster::createCluster(), etc.
+// Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;
 
 std::map<std::string, FDBMutationType> optionInfo;
@@ -353,7 +353,7 @@ struct PopFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
 		for(StackItem item : items) {
-			Standalone<StringRef> _ = wait(item.value);
+			wait(success(item.value));
 		}
 		return Void();
 	}
@@ -1714,8 +1714,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		startThread(networkThread, fdb);
 
 		// Connect to the default cluster/database, and create a transaction
-		auto cluster = fdb->createCluster(clusterFilename);
-		Reference<DatabaseContext> db = cluster->createDatabase();
+		auto db = fdb->createDatabase(clusterFilename);
 
 		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
 		wait(runTest(data, db, prefix));
@@ -1744,8 +1743,7 @@ ACTOR void _test_versionstamp() {
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
 
-		auto c = fdb->createCluster(std::string());
-		auto db = c->createDatabase();
+		auto db = fdb->createDatabase();
 		state Reference<Transaction> tr(new Transaction(db));
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();

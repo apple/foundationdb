@@ -34,8 +34,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
-
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.

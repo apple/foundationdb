@@ -133,6 +133,11 @@ extern const KeyRef excludedServersVersionKey;  // The value of this key shall b
 const AddressExclusion decodeExcludedServersKey( KeyRef const& key ); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey( AddressExclusion const& );
 
+//    "\xff/conf/confChange" := ""
+//    This is the key representing the version of the configuration, which should be updated for each
+//    new configuration.
+extern const KeyRef configVersionKey;
+
 //    "\xff/workers/[[processID]]" := ""
 //    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
 //    and are currently (recently) available
@@ -215,6 +220,9 @@ extern const KeyRangeRef applyMutationsKeyVersionCountRange;
 extern const KeyRangeRef fdbClientInfoPrefixRange;
 extern const KeyRef fdbClientInfoTxnSampleRate;
 extern const KeyRef fdbClientInfoTxnSizeLimit;
+
+// Request latency measurement key
+extern const KeyRef latencyBandConfigKey;
 
 // Keyspace to maintain wall clock to version map
 extern const KeyRangeRef timeKeeperPrefixRange;

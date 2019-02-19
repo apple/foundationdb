@@ -48,6 +48,9 @@ description is not currently required but encouraged.
     <Option name="trace_log_group" code="33"
             paramType="String" paramDescription="value of the LogGroup attribute"
             description="Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
+    <Option name="trace_format" code="34"
+            paramType="String" paramDescription="Format of trace files"
+            description="Select the format of the log files. xml (the default) and json are supported."/>
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
@@ -254,6 +257,9 @@ description is not currently required but encouraged.
     <Option name="byte_max" code="17"
             paramType="Bytes" paramDescription="value to check against database value"
             description="Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database."/>
+    <Option name="compare_and_clear" code="20"
+            paramType="Bytes" paramDescription="Value to compare with"
+            description="Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared."/>
   </Scope>
 
   <Scope name="ConflictRangeType">

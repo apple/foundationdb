@@ -59,7 +59,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup( KillRegionWorkload *self, Database cx ) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disablePrimary, true ) );
+		wait(success( changeConfig( cx, g_simulator.disablePrimary, true ) ));
 		TraceEvent("ForceRecovery_WaitForRemote");
 		wait( waitForPrimaryDC(cx, LiteralStringRef("1")) );
 		TraceEvent("ForceRecovery_DisablePrimaryComplete");
@@ -68,6 +68,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> killRegion( KillRegionWorkload *self, Database cx ) {
 		ASSERT( g_network->isSimulated() );
+<<<<<<< HEAD
 		if(g_random->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin");
 			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
@@ -77,6 +78,15 @@ struct KillRegionWorkload : TestWorkload {
 			ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
 		}
 		TraceEvent("ForceRecovery_Wait");
+=======
+		TraceEvent("ForceRecovery_DisableRemoteBegin");
+		wait(success( changeConfig( cx, g_simulator.disableRemote, true ) ));
+		TraceEvent("ForceRecovery_WaitForPrimary");
+		wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
+		TraceEvent("ForceRecovery_DisableRemoteComplete");
+		wait(success( changeConfig( cx, g_simulator.originalRegions, true ) ));
+		TraceEvent("ForceRecovery_RestoreOriginalComplete");
+>>>>>>> master
 		wait( delay( g_random->random01() * self->testDuration ) );
 
 		g_simulator.killDataCenter( LiteralStringRef("0"), g_random->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::RebootAndDelete, true );

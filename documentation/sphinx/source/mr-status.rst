@@ -322,6 +322,7 @@ JSON Path                             Name                            Descriptio
 client.messages                       inconsistent_cluster_file       Cluster file is not up to date. It contains the connection string ‘<value>’. The current connection string is ‘<value>’. This must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.
 client.messages                       no_cluster_controller           Unable to locate a cluster controller within 2 seconds. Check that there are server processes running.
 client.messages                       quorum_not_reachable            Unable to reach a quorum of coordinators.
+client.messages                       server_overloaded               Server is under too much load and cannot respond.
 client.messages                       status_incomplete_client        Could not retrieve client status information.
 client.messages                       status_incomplete_cluster       Could not retrieve cluster status information.
 client.messages                       status_incomplete_coordinators  Could not fetch coordinator info.

@@ -1073,7 +1073,6 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert( error_code_no_more_servers );
 		s.insert( error_code_master_recovery_failed );
 		s.insert( error_code_coordinated_state_conflict );
-		s.insert( error_code_movekeys_conflict );
 		s.insert( error_code_master_max_versions_in_flight );
 		s.insert( error_code_worker_removed );
 		s.insert( error_code_new_coordinators_timed_out );
@@ -1197,7 +1196,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 					self->registrationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(excludedServersVersionKey);
+				state Future<Void> watchFuture = tr.watch(configVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
@@ -1401,14 +1400,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StoreType", self->configuration.storageServerStoreType)
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
-
-	// Now that the master is recovered we can start auxiliary services that happen to run here
-	{
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
-		state double lastLimited = 0;
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, remoteRecovered.getFuture() ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
-		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
-	}
 
 	if( self->resolvers.size() > 1 )
 		self->addActor.send( resolutionBalancing(self) );

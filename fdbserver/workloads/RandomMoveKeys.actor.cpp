@@ -70,7 +70,7 @@ struct MoveKeysWorkload : TestWorkload {
 			wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
-			int _ = wait( setDDMode( cx, oldMode ) );
+			wait(success( setDDMode( cx, oldMode ) ));
 			TraceEvent("RMKDoneModeSetting");
 		}
 		return Void();
@@ -133,7 +133,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 		try {
 			state Promise<Void> signal;
-			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, invalidVersion, false, relocateShardInterval.pairID ) );
+			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false, relocateShardInterval.pairID ) );
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {

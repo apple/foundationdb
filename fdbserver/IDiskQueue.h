@@ -41,11 +41,20 @@ public:
 		}
 	};
 
+	//! Find the first and last pages in the disk queue, and initialize invariants.
+	//!
+	//! Most importantly, most invariants only hold after this function returns, and
+	//! some functions assert that the IDiskQueue has been initialized.
+	//!
+	//! \returns True, if DiskQueue is now considered in a recovered state.
+	//!          False, if the caller should call readNext until recovered is true.
+	virtual Future<bool> initializeRecovery() = 0;
 	// Before calling push or commit, the caller *must* perform recovery by calling readNext() until it returns less than the requested number of bytes.
 	// Thereafter it may not be called again.
 	virtual Future<Standalone<StringRef>> readNext( int bytes ) = 0;  // Return the next bytes in the queue (beginning, the first time called, with the first unpopped byte)
 	virtual location getNextReadLocation() = 0;    // Returns a location >= the location of all bytes previously returned by readNext(), and <= the location of all bytes subsequently returned
 
+	virtual Future<Standalone<StringRef>> read( location start, location end ) = 0;
 	virtual location push( StringRef contents ) = 0;  // Appends the given bytes to the byte stream.  Returns a location token representing the *end* of the contents.
 	virtual void pop( location upTo ) = 0;            // Removes all bytes before the given location token from the byte stream.
 	virtual Future<Void> commit() = 0;  // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.
