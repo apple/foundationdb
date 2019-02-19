@@ -283,10 +283,7 @@ def run_simulation_test(basedir, options):
         seed = int(options.seed, 0)
         if options.test_number:
             idx = int(options.test_number)
-            random.seed(seed)
-            for i in range(idx):
-                # Python does not have a limit for integers
-                seed = random.randint(0, 2**32 - 1)
+            seed = ((seed + idx) % (2**32-2)) + 1
         pargs.append("{}".format(seed))
     wd = os.path.join(test_dir,
                       'test_{}'.format(options.name.replace('/', '_')))
