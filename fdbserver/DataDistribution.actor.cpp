@@ -2140,8 +2140,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				if (machine->machineTeams[i]->machineIDs == targetMT->machineIDs) {
 					machine->machineTeams[i--] = machine->machineTeams.back();
 					machine->machineTeams.pop_back();
-					// TODO: Uncomment break;
-					// break; // The machineTeams on a machine should never duplicate
+					break; // The machineTeams on a machine should never duplicate
 				}
 			}
 		}
