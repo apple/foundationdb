@@ -35,12 +35,6 @@
 #include <string.h>
 #include "flow/actorcompiler.h"
 
-#ifdef NO_INTELLISENSE
-#define THIS_PTR this
-#else
-#define THIS_PTR nullptr
-#endif
-
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
 template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
 	arena.dependsOn(s.arena());

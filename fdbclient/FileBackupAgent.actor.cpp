@@ -37,18 +37,6 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-#ifdef NO_INTELLISENSE
-#define THIS_ADDR (uintptr_t)this
-#else
-#define THIS_ADDR 0
-#endif
-
-#ifdef NO_INTELLISENSE
-#define THIS this
-#else
-#define THIS nullptr
-#endif
-
 static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
 
 static std::string versionToString(Optional<Version> version) {

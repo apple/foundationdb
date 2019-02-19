@@ -29,6 +29,9 @@
 #undef when
 #endif
 
+#undef THIS
+#undef THIS_ADDR
+
 #endif
 
 // loop is still defined
