@@ -132,7 +132,6 @@ public:
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
-	double TR_WAIT_FOR_ALL_MACHINES_HEALTHY_DELAY; // wait before checking if all machines are healthy
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;

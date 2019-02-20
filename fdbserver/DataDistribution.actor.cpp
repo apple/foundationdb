@@ -962,12 +962,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			wait( yield() );
 		}
 
-		// NOTE: We may add extra teams in the above logic.
-		// Kick off the teamRemover to run in the future to clean up redundant teams if we end up with too many teams
-		if (self->redundantTeamRemover.isReady()) {
-			self->redundantTeamRemover = teamRemover(self);
-			self->addActor.send(self->redundantTeamRemover);
-		}
 		// Trace and record the current number of teams for correctness test
 		self->traceTeamCollectionInfo();
 
@@ -2109,13 +2103,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
 		// addBestMachineTeams()
 		// rebuildMachineLocalityMap();
-
-		// When the machine number changes, the desiredMachineTeam number changes
-		// Whenever this happens, we need to check if there exists redundant teams
-		if (self->redundantTeamRemover.isReady()) {
-			self->redundantTeamRemover = teamRemover(self);
-			self->addActor.send(self->redundantTeamRemover);
-		}
 	}
 
 	// Invariant: Remove a machine team only when the server teams on it has been removed
@@ -2238,14 +2225,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		//FIXME: add remove support to localitySet so we do not have to recreate it
 		resetLocalitySet();
 
-		// Because machine teams can be created when (initial) server teams are created
-		// We need to double check if machine team number is larger than the desired number
-		// when server teams are removed. If yes, we remove the redundant machine teams
-		if (redundantTeamRemover.isReady()) {
-			redundantTeamRemover = teamRemover(this);
-			addActor.send(redundantTeamRemover);
-		}
-
 		doBuildTeams = true;
 		restartTeamBuilder.trigger();
 
@@ -2286,7 +2265,7 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 	loop {
 		// In case the teamRemover cause problems in production, we can disable it
 		if (SERVER_KNOBS->TR_FLAG_DISABLE_TEAM_REMOVER) {
-			break; // Directly return Void()
+			return Void(); // Directly return Void()
 		}
 
 		// Wait on processingUnhealthy as removeBadTeams() does
@@ -2312,7 +2291,6 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 		// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 		// Eventually, all machines will become healthy.
 		if (healthyMachineCount != self->machine_info.size()) {
-			wait( delay(SERVER_KNOBS->TR_WAIT_FOR_ALL_MACHINES_HEALTHY_DELAY) );
 			continue;
 		}
 
@@ -2387,11 +2365,8 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 				    .detail("NumMachineTeamRemoved", numMachineTeamRemoved);
 				self->traceTeamCollectionInfo();
 			}
-
-			break;
 		}
 	}
-	return Void();
 }
 
 // Track a team and issue RelocateShards when the level of degradation changes
@@ -2422,7 +2397,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
 			int serversLeft = 0;
-			bool checkTeamRemover = false;
 
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
@@ -2456,7 +2430,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 				if (healthy) {
 					self->healthyTeamCount++;
 					self->zeroHealthyTeams->set(false);
-					checkTeamRemover = true;
 				}
 				lastHealthy = healthy;
 
@@ -2490,9 +2463,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 					lastHealthy = healthy;
 					// Update healthy team count when the team healthy changes
 					self->healthyTeamCount += healthy ? 1 : -1;
-					if (healthy) {
-						checkTeamRemover = true;
-					}
 
 					ASSERT( self->healthyTeamCount >= 0 );
 					self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
@@ -2601,13 +2571,6 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 					if(logTeamEvents) {
 						TraceEvent("TeamHealthNotReady", self->distributorId).detail("HealthyTeamCount", self->healthyTeamCount);
 					}
-				}
-			}
-
-			if (checkTeamRemover) {
-				if (self->redundantTeamRemover.isReady()) {
-					self->redundantTeamRemover = teamRemover(self);
-					self->addActor.send(self->redundantTeamRemover);
 				}
 			}
 
@@ -3045,12 +3008,6 @@ ACTOR Future<Void> storageServerTracker(
 								Reference<TCMachineTeamInfo> machineTeam = self->checkAndCreateMachineTeam(serverTeam);
 								ASSERT(machineTeam.isValid());
 								serverTeam->machineTeam = machineTeam;
-								// The machine team number may be above the desired number.
-								// Kick off the teamRemover in the background to clean up later
-								if (self->redundantTeamRemover.isReady()) {
-									self->redundantTeamRemover = teamRemover(self);
-									self->addActor.send(self->redundantTeamRemover);
-								}
 							}
 						}
 
@@ -3074,14 +3031,6 @@ ACTOR Future<Void> storageServerTracker(
 							self->addActor.send(self->badTeamRemover);
 							// The team number changes, so we need to update the team number info
 							self->traceTeamCollectionInfo();
-						}
-						// The removed bad teams may forcely create redundant machine teams;
-						// We should remove redundant machine teams if there are any
-						if (addedNewBadTeam) {
-							if (self->redundantTeamRemover.isReady()) {
-								self->redundantTeamRemover = teamRemover(self);
-								self->addActor.send(self->redundantTeamRemover);
-							}
 						}
 					}
 
