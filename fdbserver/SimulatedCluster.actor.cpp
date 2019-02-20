@@ -822,6 +822,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
+	if (g_random->random01() < 0.5) {
+		set_config("log_spill:=1");
+	} else {
+		set_config("log_spill:=2");
+	}
+
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		//The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
 		StatusObject primaryObj;

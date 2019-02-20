@@ -466,6 +466,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "resolvers":1,
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
+         "log_engine":1,
+         "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
