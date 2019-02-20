@@ -147,6 +147,8 @@ struct InitializeDataDistributorRequest {
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
+	InitializeDataDistributorRequest() {}
+	explicit InitializeDataDistributorRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, reqId, reply);
@@ -157,6 +159,8 @@ struct InitializeRatekeeperRequest {
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 
+	InitializeRatekeeperRequest() {}
+	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);

@@ -2336,11 +2336,11 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	state Optional<Key> dcId = self->clusterControllerDcId;
-	state InitializeDataDistributorRequest req;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
+	state UID reqId;
 	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
@@ -2349,7 +2349,8 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
-			req.reqId = g_random->randomUniqueID();
+			reqId = g_random->randomUniqueID();
+			state InitializeDataDistributorRequest req(reqId);
 			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
 
 			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
@@ -2359,7 +2360,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_DataDistributorRecruitError", req.reqId).error(e);
+			TraceEvent("ClusterController_DataDistributorRecruitError", reqId).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
@@ -2397,6 +2398,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 }
 
 ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
+	state UID reqId;
 	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
@@ -2406,8 +2408,8 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			Optional<Key> dcId = self->clusterControllerDcId;
 			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
-			state InitializeRatekeeperRequest req;
-			req.reqId = g_random->randomUniqueID();
+			reqId = g_random->randomUniqueID();
+			state InitializeRatekeeperRequest req(reqId);
 			TraceEvent("ClusterController_RecruitRatekeeper", req.reqId).detail("Addr", rkWorker.worker.first.address());
 
 			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.first.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
@@ -2417,7 +2419,7 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_RatekeeperRecruitError", req.reqId).error(e);
+			TraceEvent("ClusterController_RatekeeperRecruitError", reqId).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}

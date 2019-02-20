@@ -160,7 +160,6 @@ struct RatekeeperData {
 	Int64MetricHandle actualTpsMetric;
 
 	double lastWarning;
-	double* lastLimited;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
@@ -652,10 +651,6 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
 	state Future<Void> collection = actorCollection( self.addActor.getFuture() );
-
-	// TODOs:
-	double lastLimited = 0;
-	self.lastLimited = &lastLimited;
 
 	TraceEvent("Ratekeeper_Starting", rkInterf.id());
 	self.addActor.send( waitFailureServer(rkInterf.waitFailure.getFuture()) );
