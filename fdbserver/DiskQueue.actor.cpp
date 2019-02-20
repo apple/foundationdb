@@ -1160,9 +1160,8 @@ private:
 				.detail("Context", context)
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 
-		for(int i = 1; i >= 0; i--)
-			// FIXME: Removed `firstPages(i).checkHash() &&`
-			// Only put a page in firstPages() if its checksum is valid
+		for(int i = 1; i >= 0; i--) {
+			ASSERT_WE_THINK( firstPages(i).checkHash() );
 			if ( firstPages(i).seq <= (size_t)loc ) {
 				*file = i;
 				*page = (loc - firstPages(i).seq)/sizeof(Page);
@@ -1178,6 +1177,7 @@ private:
 				ok = true;
 				break;
 			}
+		}
 		if (!ok)
 			TraceEvent(SevError, "DiskQueueLocationError", dbgid)
 				.detail("Page0Valid", firstPages(0).checkHash())
