@@ -117,7 +117,7 @@ function(add_fdb_test)
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
     --seed ${SEED}
-    --test-number ${CURRENT_TEST_INDEX}
+    --test-number ${assigned_id}
     ${BUGGIFY_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
