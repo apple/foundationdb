@@ -577,7 +577,7 @@ ACTOR Future<Void> rateKeeper(
 
 				reply.transactionRate = self.TPSLimit / self.proxy_transactionCountAndTime.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
-				reply.detailedLeaseDuration = 5.0; // knob
+				reply.detailedLeaseDuration = SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
 				reply.healthMetrics.update(self.healthMetrics, false, false);
 				reply.healthMetrics.tpsLimit = self.TPSLimit;
