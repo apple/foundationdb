@@ -1196,7 +1196,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 					self->registrationTrigger.trigger();
 				}
 
-				state Future<Void> watchFuture = tr.watch(configVersionKey);
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
@@ -1299,6 +1299,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 		if(self->forceRecovery) {
 			tr.set(recoveryCommitRequest.arena, rebootWhenDurableKey, StringRef());
+			tr.set(recoveryCommitRequest.arena, moveKeysLockOwnerKey, BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned()));
 		}
 	} else {
 		// Recruit and seed initial shard servers

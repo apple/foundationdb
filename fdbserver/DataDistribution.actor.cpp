@@ -3105,48 +3105,20 @@ ACTOR Future<Void> pollMoveKeysLock( Database cx, MoveKeysLock lock ) {
 
 ACTOR Future<Void> dataDistribution(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
-		UID myId, DatabaseConfiguration configuration,
+		UID myId,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
-		std::vector<Optional<Key>> primaryDcId,
-		std::vector<Optional<Key>> remoteDcIds,
 		double* lastLimited)
 {
 	state Database cx = openDBOnServer(db, TaskDataDistributionLaunch, true, true);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-
-			Standalone<RangeResultRef> replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
-
-			for(auto& kv : replicaKeys) {
-				auto dcId = decodeDatacenterReplicasKey(kv.key);
-				auto replicas = decodeDatacenterReplicasValue(kv.value);
-				if((primaryDcId.size() && primaryDcId[0] == dcId) || (remoteDcIds.size() && remoteDcIds[0] == dcId && configuration.usableRegions > 1)) {
-					if(replicas > configuration.storageTeamSize) {
-						tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
-					}
-				} else {
-					tr.clear(kv.key);
-				}
-			}
-
-			wait(tr.commit());
-			break;
-		}
-		catch(Error &e) {
-			wait(tr.onError(e));
-		}
-	}
-
-
 	//cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*) &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) );
 	//ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE );
 
 	//wait(debugCheckCoalescing(cx));
+	state std::vector<Optional<Key>> primaryDcId;
+	state std::vector<Optional<Key>> remoteDcIds;
+	state DatabaseConfiguration configuration;
 
 	loop {
 		try {
@@ -3154,6 +3126,50 @@ ACTOR Future<Void> dataDistribution(
 				TraceEvent("DDInitTakingMoveKeysLock", myId);
 				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, myId ) );
 				TraceEvent("DDInitTookMoveKeysLock", myId);
+
+				DatabaseConfiguration _configuration = wait( getDatabaseConfiguration(cx) );
+				configuration = _configuration;
+				primaryDcId.clear();
+				remoteDcIds.clear();
+				const std::vector<RegionInfo>& regions = configuration.regions;
+				if ( configuration.regions.size() > 0 ) {
+					primaryDcId.push_back( regions[0].dcId );
+				}
+				if ( configuration.regions.size() > 1 ) {
+					remoteDcIds.push_back( regions[1].dcId );
+				}
+
+				TraceEvent("DDInitGotConfiguration", myId).detail("Conf", configuration.toString());
+
+				state Transaction tr(cx);
+				loop {
+					try {
+						tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+						tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+
+						Standalone<RangeResultRef> replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+
+						for(auto& kv : replicaKeys) {
+							auto dcId = decodeDatacenterReplicasKey(kv.key);
+							auto replicas = decodeDatacenterReplicasValue(kv.value);
+							if((primaryDcId.size() && primaryDcId[0] == dcId) || (remoteDcIds.size() && remoteDcIds[0] == dcId && configuration.usableRegions > 1)) {
+								if(replicas > configuration.storageTeamSize) {
+									tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
+								}
+							} else {
+								tr.clear(kv.key);
+							}
+						}
+
+						wait(tr.commit());
+						break;
+					}
+					catch(Error &e) {
+						wait(tr.onError(e));
+					}
+				}
+
+				TraceEvent("DDInitUpdatedReplicaKeys", myId);
 				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", myId)
@@ -3277,63 +3293,12 @@ ACTOR Future<Void> dataDistribution(
 
 struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
 	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
-	Reference<AsyncVar<DatabaseConfiguration>> configuration;
-	std::vector<Optional<Key>> primaryDcId;
-	std::vector<Optional<Key>> remoteDcIds;
 	UID ddId;
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 	PromiseStream<Future<Void>> addActor;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id)
-		: dbInfo(db), configuration(dbConfig), ddId(id) {}
-
-	void refreshDcIds() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-
-		const std::vector<RegionInfo>& regions = configuration->get().regions;
-		TraceEvent ev("DataDistributor", ddId);
-		if ( regions.size() > 0 ) {
-			primaryDcId.push_back( regions[0].dcId );
-			ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
-		}
-		if ( regions.size() > 1 ) {
-			remoteDcIds.push_back( regions[1].dcId );
-			ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
-		}
-	}
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
 };
-
-ACTOR Future<Void> configurationMonitor( Reference<DataDistributorData> self ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
-	loop {
-		state ReadYourWritesTransaction tr(cx);
-
-		loop {
-			try {
-				TraceEvent("DataDistributor_MonitorConfigurationStart", self->ddId);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
-				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
-
-				DatabaseConfiguration conf;
-				conf.fromKeyValues( (VectorRef<KeyValueRef>) results );
-				if ( conf != self->configuration->get() ) {
-					TraceEvent("DataDistributor_UpdateConfiguration", self->ddId).detail("Config", conf.toString());
-					self->configuration->set( conf );
-				}
-
-				state Future<Void> watchFuture = tr.watch(configVersionKey);
-				wait( tr.commit() );
-				wait( watchFuture );
-				break;
-			} catch (Error& e) {
-				wait( tr.onError(e) );
-			}
-		}
-	}
-}
 
 static std::set<int> const& normalDataDistributorErrors() {
 	static std::set<int> s;
@@ -3360,43 +3325,20 @@ static std::set<int> const& normalRateKeeperErrors() {
 
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state UID lastClusterControllerID(0,0);
-	state Reference<AsyncVar<DatabaseConfiguration>> configuration( new AsyncVar<DatabaseConfiguration>(DatabaseConfiguration()) );
-	state Reference<DataDistributorData> self( new DataDistributorData(db, configuration, di.id()) );
+	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
 	TraceEvent("DataDistributor_Starting", di.id());
 	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
-	self->addActor.send( configurationMonitor( self ) );
-
-	loop choose {
-		when ( wait( self->configuration->onChange() ) ) {
-			self->refreshDcIds();
-			break;
-		}
-		when ( wait(self->dbInfo->onChange()) ) {}
-	}
 
 	try {
 		TraceEvent("DataDistributor_Running", di.id());
 		state PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), self->configuration->get(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), ddStorageServerChanges, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+		self->addActor.send( reportErrorsExcept( rateKeeper( self->dbInfo, ddStorageServerChanges, di.getRateInfo.getFuture(), &lastLimited ), "Ratekeeper", di.id(), &normalRateKeeperErrors() ) );
 
-		loop choose {
-			when ( wait( self->configuration->onChange() ) ) {
-				TraceEvent("DataDistributor_Restart", di.id())
-				.detail("ClusterControllerID", lastClusterControllerID)
-				.detail("Configuration", self->configuration->get().toString());
-				self->refreshDcIds();
-				distributor = reportErrorsExcept( dataDistribution( self->dbInfo, di.id(), self->configuration->get(), ddStorageServerChanges, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-			}
-			when ( wait( collection ) ) {
-				ASSERT(false);
-				throw internal_error();
-			}
-			when ( wait( distributor ) ) {}
-		}
+		wait( distributor || collection );
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
