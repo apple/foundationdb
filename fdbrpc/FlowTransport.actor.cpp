@@ -553,7 +553,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		try {
-			g_currentDeliveryPeerAddress = destination.address;
+			g_currentDeliveryPeerAddress = destination.addresses;
 			if (useFlatbuffers) {
 				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
 				receiver->receive(objReader);

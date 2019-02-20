@@ -177,29 +177,21 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 }
 
 template <class T>
-struct scalar_traits<ReplyPromise<T>> : std::true_type {
-	using endpoint = scalar_traits<Endpoint>;
-
-	constexpr static size_t size = endpoint::size;
-
-	static void save(uint8_t* out, const ReplyPromise<T>& reply) {
-		auto const& ep = reply.getEndpoint();
-		endpoint::save(out, ep);
-		ASSERT(!ep.address.isValid() || ep.address.isPublic()); // No re-serializing non-public addresses
-		                                                        // (the reply connection won't be
-		                                                        // available to any other process)
-	}
-
-	template <class C>
-	static void load(const uint8_t* in, ReplyPromise<T>& reply, C& context) {
-		Endpoint ep;
-		endpoint::load(in, ep, context);
-		FlowTransport::transport().loadedEndpoint(ep);
-		reply = ReplyPromise<T>(ep);
-		networkSender(reply.getFuture(), ep);
+struct serializable_traits<ReplyPromise<T>> : std::true_type {
+	template<class Archiver>
+	static void serialize(Archiver& ar, ReplyPromise<T>& p) {
+		if constexpr (Archiver::isDeserializing) {
+			Endpoint endpoint;
+			serializer(ar, endpoint);
+			p = ReplyPromise<T>(endpoint);
+			networkSender(p.getFuture(), endpoint);
+		} else {
+			const auto& ep = p.getEndpoint();
+			serializer(ar, ep);
+			ASSERT(!ep.getPrimaryAddress().isValid() || ep.getPrimaryAddress().isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
+		}
 	}
 };
-
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) { return p; }
@@ -424,25 +416,19 @@ void load(Ar& ar, RequestStream<T>& value) {
 }
 
 template <class T>
-struct scalar_traits<RequestStream<T>> : std::true_type {
-	using endpointTraits = scalar_traits<Endpoint>;
-
-	static constexpr size_t size = endpointTraits::size;
-
-	static void save(uint8_t* out, const RequestStream<T>& stream) {
-		auto const& ep = stream.getEndpoint();
-		endpointTraits::save(out, ep);
-		UNSTOPPABLE_ASSERT(ep.address.isValid());
-	}
-
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
-	template <class Context>
-	static void load(const uint8_t* in, RequestStream<T>& stream, Context& context) {
-		Endpoint endpoint;
-		endpointTraits::load(in, endpoint, context);
-		FlowTransport::transport().loadedEndpoint(endpoint);
-		stream = RequestStream<T>(endpoint);
+struct serializable_traits<RequestStream<T>> : std::true_type {
+	template <class Archiver>
+	static void serialize(Archiver& ar, RequestStream<T>& stream) {
+		if constexpr (Archiver::isDeserializing) {
+			Endpoint endpoint;
+			serializer(ar, endpoint);
+			FlowTransport::transport().loadedEndpoint(endpoint);
+			stream = RequestStream<T>(endpoint);
+		} else {
+			const auto& ep = stream.getEndpoint();
+			serializer(ar, ep);
+			UNSTOPPABLE_ASSERT(ep.getPrimaryAddress().isValid());  // No serializing PromiseStreams on a client with no public address
+		}
 	}
 };
 

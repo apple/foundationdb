@@ -979,7 +979,7 @@ public:
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder, bool ObjSerializer) {
+	                                const char* coordinationFolder, bool objSerializer) {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())

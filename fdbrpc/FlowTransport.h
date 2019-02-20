@@ -74,40 +74,25 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-			addresses.secondaryAddress = Optional<NetworkAddress>();
-			serializer(ar, addresses.address, token);
-		} else {
+		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, addresses, token);
-			if (ar.isDeserializing) {
+			if constexpr (Ar::isDeserializing) {
 				choosePrimaryAddress();
+			}
+		} else {
+			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+				addresses.resize(1);
+				serializer(ar, addresses[0], token);
+			} else {
+				serializer(ar, addresses, token);
+				if (ar.isDeserializing) {
+					choosePrimaryAddress();
+				}
 			}
 		}
 	}
 };
 #pragma pack(pop)
-
-
-template <>
-struct scalar_traits<Endpoint> : std::true_type {
-	using networkAddress = scalar_traits<NetworkAddress>;
-	using token = scalar_traits<UID>;
-
-	static constexpr size_t size = networkAddress::size + token::size;
-
-	static void save(uint8_t* out, const Endpoint& endpoint) {
-		networkAddress::save(out, endpoint.address);
-		out += networkAddress::size;
-		token::save(out, endpoint.token);
-	}
-
-	template <class C>
-	static void load(const uint8_t* in, Endpoint& endpoint, C& c) {
-		networkAddress::load(in, endpoint.address, c);
-		in += networkAddress::size;
-		token::load(in, endpoint.token, c);
-	}
-};
 
 class ArenaObjectReader;
 class NetworkMessageReceiver {

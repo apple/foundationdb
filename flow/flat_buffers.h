@@ -507,7 +507,7 @@ private:
 };
 
 struct InsertVTableLambda {
-	static constexpr bool isDeserializing = true;
+	static constexpr bool isDeserializing = false;
 	static constexpr bool is_fb_visitor = true;
 	std::set<const VTable*>& vtables;
 	std::set<std::type_index>& known_types;

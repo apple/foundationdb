@@ -165,6 +165,7 @@ struct InitializeMasterProxyRequest {
 };
 
 struct InitializeDataDistributorRequest {
+	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
