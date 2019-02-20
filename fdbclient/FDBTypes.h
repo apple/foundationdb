@@ -516,16 +516,18 @@ private:
 struct TLogSpillType {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum SpillType {
-		DEFAULT = 2,
+		UNSET = 0,
+		DEFAULT = 1,
 		VALUE = 1,
 		REFERENCE = 2,
-		UNSET,
+		END = 3,
 	};
 
 	TLogSpillType() : type(DEFAULT) {}
 	TLogSpillType( SpillType type ) : type(type) {
-		if ((uint32_t)type > UNSET)
+		if ((uint32_t)type >= END) {
 			this->type = UNSET;
+		}
 	}
 	operator SpillType() const { return SpillType(type); }
 
@@ -534,10 +536,12 @@ struct TLogSpillType {
 
 	std::string toString() const {
 		switch( type ) {
-			case VALUE: return "";  // For backwards compatiblity.
+			case VALUE: return "value";
 			case REFERENCE: return "reference";
-			default: return "unknown";
+			case UNSET: return "unset";
+			default: ASSERT(false);
 		}
+		return "";
 	}
 
 private:
