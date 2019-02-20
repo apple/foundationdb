@@ -775,6 +775,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						tLogVersion = TLogVersion::V6_1;
 						break;
 					case TLogSpillType::UNSET:
+					case TLogSpillType::END:
 						ASSERT_WE_THINK(false);
 						tLogVersion = TLogVersion::CURRENT;
 						break;
