@@ -54,7 +54,7 @@ struct TokenBucket {
 		}
 		state double sleepTime = addTokensInterval;
 		loop {
-			if (self->bucketSize > 1.0) {
+			if (self->bucketSize >= 1.0) {
 				--self->bucketSize;
 				return Void();
 			}
