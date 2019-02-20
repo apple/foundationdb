@@ -364,12 +364,84 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<Async
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
 
+struct TLogVersion {
+	enum Version {
+		UNSET = 0,
+		// Everything between BEGIN and END should be densely packed, so that we
+		// can iterate over them easily.
+		BEGIN = 1,
+		// V4_6 is dispatched to via V6_0
+		V6_0 = 1,
+		V6_1 = 2,
+		CURRENT = 2,
+		END = 3,
+	} version;
+
+	TLogVersion() : version(UNSET) {}
+	TLogVersion( Version v ) : version(v) {}
+
+	operator Version() const {
+		return version;
+	}
+
+	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
+		if (s == LiteralStringRef("")) {
+			return TLogVersion::V6_0;
+		} else if (s == LiteralStringRef("V6_0")) {
+			return TLogVersion::V6_0;
+		} else if (s == LiteralStringRef("V6_1")) {
+			return TLogVersion::V6_1;
+		} else {
+			return default_error_or();
+		}
+	}
+
+	std::string prefix() const {
+		switch (version) {
+			case V6_0:
+				// For backwards compatibility, before filenames included a version.
+				// In FDB6.2, change this to V6_0-
+				return "";
+			case V6_1:
+				return "V6_1-";
+			case UNSET:
+			case END:
+				ASSERT(false);
+		}
+		return "";
+	}
+
+	bool operator < ( const TLogVersion& v ) const {
+		return version < v.version;
+	}
+};
+
 namespace oldTLog_4_6 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId);
 }
 namespace oldTLog_6_0 {
-Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered);
+}
+
+inline auto tLogFnForVersion( TLogVersion version ) -> decltype(&tLog) {
+	auto tLogFn = tLog;
+	switch (version) {
+		case TLogVersion::V6_0:
+			tLogFn = oldTLog_6_0::tLog;
+			break;
+		case TLogVersion::V6_1:
+			tLogFn = tLog;
+			break;
+		case TLogVersion::UNSET:
+		case TLogVersion::END:
+			ASSERT(false);
+			break;
+	}
+	return tLogFn;
 }
 
 #include "flow/unactorcompiler.h"
