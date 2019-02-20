@@ -3535,9 +3535,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	loop {
 		try {
 			loop {
-				TraceEvent("DDInitTakingMoveKeysLock", myId);
-				MoveKeysLock lock_ = wait( takeMoveKeysLock( cx, myId ) );
+				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
+				MoveKeysLock lock_ = wait( takeMoveKeysLock( cx, self->ddId ) );
 				lock = lock_;
+<<<<<<< HEAD
 				TraceEvent("DDInitTookMoveKeysLock", myId);
 
 				DatabaseConfiguration configuration_ = wait( getDatabaseConfiguration(cx) );
@@ -3584,6 +3585,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 
 				TraceEvent("DDInitUpdatedReplicaKeys", myId);
 				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
+=======
+				TraceEvent("DDInitTookMoveKeysLock", self->ddId);
+				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, self->ddId, lock, configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>() ) );
+>>>>>>> Fix merge conflicts during rebase.
 				initData = initData_;
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", self->ddId)

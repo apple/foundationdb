@@ -36,7 +36,7 @@ struct RatekeeperInterface {
 
 	void initEndpoints() {}
 	UID id() const { return getRateInfo.getEndpoint().token; }
-	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
+	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
 	bool operator== (const RatekeeperInterface& r) const {
 		return id() == r.id();
 	}
