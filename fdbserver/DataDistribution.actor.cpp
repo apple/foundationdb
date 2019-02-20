@@ -2018,9 +2018,12 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 
 	try {
 		loop {
-			TraceEvent("TeamHealthChangeDetected", self->distributorId)
-			    .detail("Primary", self->primary)
-			    .detail("IsReady", self->initialFailureReactionDelay.isReady());
+			if(logTeamEvents) {
+				TraceEvent("TeamHealthChangeDetected", self->distributorId)
+					.detail("Team", team->getDesc())
+					.detail("Primary", self->primary)
+					.detail("IsReady", self->initialFailureReactionDelay.isReady());
+			}
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
 			bool anyUndesired = false;
@@ -2102,11 +2105,14 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 							.detail("Primary", self->primary);
 					}
 
-					TraceEvent("TeamHealthDifference", self->distributorId)
-						.detail("LastOptimal", lastOptimal)
-						.detail("LastHealthy", lastHealthy)
-						.detail("Optimal", optimal)
-						.detail("OptimalTeamCount", self->optimalTeamCount);
+					if(logTeamEvents) {
+						TraceEvent("TeamHealthDifference", self->distributorId)
+							.detail("Team", team->getDesc())
+							.detail("LastOptimal", lastOptimal)
+							.detail("LastHealthy", lastHealthy)
+							.detail("Optimal", optimal)
+							.detail("OptimalTeamCount", self->optimalTeamCount);
+					}
 				}
 
 				lastServersLeft = serversLeft;
@@ -2207,6 +2213,9 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 			wait( yield() );
 		}
 	} catch(Error& e) {
+		if(logTeamEvents) {
+			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc());
+		}
 		self->priority_teams[team->getPriority()]--;
 		if( team->isHealthy() ) {
 			self->healthyTeamCount--;
@@ -2376,7 +2385,7 @@ ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 		}
-		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
 			break;
 		}

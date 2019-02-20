@@ -87,9 +87,12 @@ struct KillRegionWorkload : TestWorkload {
 
 		wait( forceRecovery(cx->cluster->getConnectionFile(), LiteralStringRef("1")) );
 
-		TraceEvent(SevWarnAlways, "ForceRecovery_UsableRegions");
+		TraceEvent("ForceRecovery_UsableRegions");
 
 		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+
+		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf.toString());
+
 		if(conf.usableRegions>1) {
 			//only needed if force recovery was unnecessary and we killed the secondary
 			wait( success( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) ) );
@@ -98,7 +101,9 @@ struct KillRegionWorkload : TestWorkload {
 			}
 			wait( success( changeConfig( cx, "usable_regions=1", true ) ) );
 		}
+
 		TraceEvent("ForceRecovery_Complete");
+
 		return Void();
 	}
 };
