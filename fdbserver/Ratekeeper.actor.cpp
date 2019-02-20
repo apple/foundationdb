@@ -296,11 +296,11 @@ void updateRate( Ratekeeper* self ) {
 		}
 
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
-		self->healthMetrics.storageQueue[ss.id] = storageQueue;
+		self->healthMetrics.storageStats[ss.id].storageQueue = storageQueue;
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
 		int64_t storageNDV = ss.smoothDesiredOldestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
-		self->healthMetrics.storageNDV[ss.id] = storageNDV;
+		self->healthMetrics.storageStats[ss.id].storageNDV = storageNDV;
 		worstStorageNDVStorageServer = std::max(worstStorageNDVStorageServer, storageNDV);
 
 		int64_t b = storageQueue - targetBytes;
@@ -584,11 +584,10 @@ ACTOR Future<Void> rateKeeper(
 				reply.detailed = req.detailed;
 				if (req.detailed) {
 					for (const auto &s : self.storageQueueInfo) {
-						reply.healthMetrics.cpuUsage[s.key] = s.value.lastReply.cpuUsage;
-						reply.healthMetrics.diskUsage[s.key] = s.value.lastReply.diskUsage;
+						self.healthMetrics.storageStats[s.key].cpuUsage = s.value.lastReply.cpuUsage;
+						self.healthMetrics.storageStats[s.key].diskUsage = s.value.lastReply.diskUsage;
 					}
-					reply.healthMetrics.storageQueue = self.healthMetrics.storageQueue;
-					reply.healthMetrics.storageNDV = self.healthMetrics.storageNDV;
+					reply.healthMetrics.storageStats = self.healthMetrics.storageStats;
 					reply.healthMetrics.tLogQueue = self.healthMetrics.tLogQueue;
 				}
 

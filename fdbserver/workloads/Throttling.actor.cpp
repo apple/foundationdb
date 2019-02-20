@@ -118,33 +118,25 @@ struct ThrottlingWorkload : KVWorkload {
 			    .detail("TpsLimit", healthMetrics.tpsLimit);
 
 			TraceEvent traceStorageQueue("StorageQueue");
-			for (const auto& ss : healthMetrics.storageQueue) {
-				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, ss.second);
-				traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), ss.second);
-			}
-
 			TraceEvent traceStorageNDV("StorageNDV");
-			for (const auto& ss : healthMetrics.storageNDV) {
-				self->detailedWorstStorageNDV = std::max(self->detailedWorstStorageNDV, ss.second);
-				traceStorageNDV.detail(format("Storage/%s", ss.first.toString().c_str()), ss.second);
+			TraceEvent traceCpuUsage("CpuUsage");
+			TraceEvent traceDiskUsage("DiskUsage");
+			for (const auto& ss : healthMetrics.storageStats) {
+				auto storageStats = ss.second;
+				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
+				traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageQueue);
+				self->detailedWorstStorageNDV = std::max(self->detailedWorstStorageNDV, storageStats.storageNDV);
+				traceStorageNDV.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageNDV);
+				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
+				traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.cpuUsage);
+				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
+				traceDiskUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
 
 			TraceEvent traceTLogQueue("TLogQueue");
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog/%s", ss.first.toString().c_str()), ss.second);
-			}
-
-			TraceEvent traceCpuUsage("CpuUsage");
-			for (const auto& ss : healthMetrics.cpuUsage) {
-				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, ss.second);
-				traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), ss.second);
-			}
-
-			TraceEvent traceDiskUsage("DiskUsage");
-			for (const auto& ss : healthMetrics.diskUsage) {
-				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, ss.second);
-				traceDiskUsage.detail(format("Storage/%s", ss.first.toString().c_str()), ss.second);
 			}
 		}
 	}
@@ -180,9 +172,7 @@ struct ThrottlingWorkload : KVWorkload {
 		if (!self->sendDetailedHealthMetrics) {
 			// Clear detailed health metrics that are already populated
 			wait(delay(2 * CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL));
-			cx->healthMetrics.cpuUsage.clear();
-			cx->healthMetrics.storageQueue.clear();
-			cx->healthMetrics.storageNDV.clear();
+			cx->healthMetrics.storageStats.clear();
 			cx->healthMetrics.tLogQueue.clear();
 		}
 		return Void();

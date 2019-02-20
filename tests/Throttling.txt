@@ -6,5 +6,5 @@ actorsPerClient=10
 readsPerTransaction=10
 writesPerTransaction=10
 throttlingMultiplier=0.5
-sendDetailedHealthMetrics=false
+sendDetailedHealthMetrics=true
 maxBurst=10000

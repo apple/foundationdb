@@ -649,15 +649,24 @@ struct ClusterControllerPriorityInfo {
 };
 
 struct HealthMetrics {
+	struct StorageStats {
+		int64_t storageQueue;
+		int64_t storageNDV;
+		double diskUsage;
+		double cpuUsage;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, storageQueue, storageNDV, diskUsage, cpuUsage);
+		}
+	};
+
 	int64_t worstStorageQueue;
 	int64_t worstStorageNDV;
 	int64_t worstTLogQueue;
 	double tpsLimit;
-	std::map<UID, int64_t> storageQueue;
-	std::map<UID, int64_t> storageNDV;
+	std::map<UID, StorageStats> storageStats;
 	std::map<UID, int64_t> tLogQueue;
-	std::map<UID, double> cpuUsage;
-	std::map<UID, double> diskUsage;
 
 	HealthMetrics()
 		: worstStorageQueue(0)
@@ -674,23 +683,17 @@ struct HealthMetrics {
 		tpsLimit = hm.tpsLimit;
 
 		if (!detailedOutput) {
-			storageQueue = std::map<UID, int64_t>();
-			storageNDV = std::map<UID, int64_t>();
-			tLogQueue = std::map<UID, int64_t>();
-			cpuUsage = std::map<UID, double>();
-			diskUsage = std::map<UID, double>();
+			storageStats.clear();
+			tLogQueue.clear();
 		} else if (detailedInput) {
-			storageQueue = hm.storageQueue;
-			storageNDV = hm.storageNDV;
+			storageStats = hm.storageStats;
 			tLogQueue = hm.tLogQueue;
-			cpuUsage = hm.cpuUsage;
-			diskUsage = hm.diskUsage;
 		}
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, worstStorageQueue, worstStorageNDV, worstTLogQueue, tpsLimit, storageQueue, storageNDV, tLogQueue, cpuUsage, diskUsage);
+		serializer(ar, worstStorageQueue, worstStorageNDV, worstTLogQueue, tpsLimit, storageStats, tLogQueue);
 	}
 };
 
