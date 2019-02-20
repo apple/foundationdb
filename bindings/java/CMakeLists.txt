@@ -1,7 +1,3 @@
-include(UseJava)
-find_package(JNI 1.8 REQUIRED)
-find_package(Java 1.8 COMPONENTS Development REQUIRED)
-
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
   src/main/com/apple/foundationdb/async/AsyncIterator.java
@@ -11,6 +7,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/CloseableAsyncIterator.java
   src/main/com/apple/foundationdb/async/package-info.java
   src/main/com/apple/foundationdb/Cluster.java
+  src/main/com/apple/foundationdb/ClusterOptions.java
   src/main/com/apple/foundationdb/Database.java
   src/main/com/apple/foundationdb/directory/Directory.java
   src/main/com/apple/foundationdb/directory/DirectoryAlreadyExistsException.java
@@ -28,8 +25,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
-  src/main/com/apple/foundationdb/FutureCluster.java
-  src/main/com/apple/foundationdb/FutureDatabase.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
@@ -98,11 +93,10 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
-set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/foundationdb)
+set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
 set(GENERATED_JAVA_FILES
-  ${GENERATED_JAVA_DIR}/ClusterOptions.java
   ${GENERATED_JAVA_DIR}/ConflictRangeType.java
   ${GENERATED_JAVA_DIR}/DatabaseOptions.java
   ${GENERATED_JAVA_DIR}/MutationType.java
@@ -111,18 +105,19 @@ set(GENERATED_JAVA_FILES
   ${GENERATED_JAVA_DIR}/TransactionOptions.java
   ${GENERATED_JAVA_DIR}/FDBException.java)
 
-add_custom_command(OUTPUT ${GENERATED_JAVA_FILES}
-  COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options java ${GENERATED_JAVA_DIR}
-  DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
-  COMMENT "Generate Java options")
-add_custom_target(fdb_java_options DEPENDS ${GENERATED_JAVA_DIR}/StreamingMode.java)
+vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
+  OUTPUT ${GENERATED_JAVA_FILES})
 
 set(SYSTEM_NAME "linux")
 if (APPLE)
   set(SYSTEM_NAME "osx")
 endif()
 
-add_library(fdb_java SHARED fdbJNI.cpp)
+if(OPEN_FOR_IDE)
+  add_library(fdb_java OBJECT fdbJNI.cpp)
+else()
+  add_library(fdb_java SHARED fdbJNI.cpp)
+endif()
 message(DEBUG ${JNI_INCLUDE_DIRS})
 message(DEBUG ${JNI_LIBRARIES})
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
@@ -134,11 +129,69 @@ set_target_properties(fdb_java PROPERTIES
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
 set(CMAKE_JNI_TARGET TRUE)
 set(JAR_VERSION "${FDB_MAJOR}.${FDB_MINOR}.${FDB_REVISION}")
-add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES}
-  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib)
+add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION})
 add_dependencies(fdb-java fdb_java_options fdb_java)
 add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
 add_dependencies(foundationdb-tests fdb_java_options)
 
-install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT clients)
-install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT clients)
+# TODO[mpilman]: The java RPM will require some more effort (mostly on debian). However,
+# most people will use the fat-jar, so it is not clear how high this priority is.
+
+#install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
+#install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
+
+if(NOT OPEN_FOR_IDE)
+  set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
+    "Path of a directory structure with libraries to include in fat jar (a lib directory)")
+
+  set(jar_destination ${CMAKE_BINARY_DIR}/packages)
+  set(unpack_dir ${CMAKE_CURRENT_BINARY_DIR}/fat_jar)
+  file(MAKE_DIRECTORY ${jar_destination})
+  file(MAKE_DIRECTORY ${unpack_dir})
+  message(STATUS "Building fat jar to ${jar_destination}")
+  get_property(jar_path TARGET fdb-java PROPERTY JAR_FILE)
+  add_custom_command(OUTPUT ${unpack_dir}/META-INF/MANIFEST.MF
+    COMMAND ${Java_JAR_EXECUTABLE} xf ${jar_path}
+    WORKING_DIRECTORY ${unpack_dir}
+    DEPENDS "${jar_path}"
+    COMMENT "Unpack jar-file")
+  add_custom_target(unpack_jar DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
+  add_dependencies(unpack_jar fdb-java)
+  add_custom_command(OUTPUT ${unpack_dir}/LICENSE
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/LICENSE ${unpack_dir}
+    COMMENT "copy license")
+  add_custom_target(copy_license DEPENDS ${unpack_dir}/LICENSE)
+  add_dependencies(unpack_jar copy_license)
+  if(FAT_JAR_BINARIES)
+    add_custom_command(OUTPUT ${unpack_dir}/lib
+      COMMAND ${CMAKE_COMMAND} -E copy_directory ${FAT_JAR_BINARIES} ${unpack_dir}
+      COMMENT "copy additional libraries"
+      DEPENDS ${unpack_dir}/META-INF/MANIFEST.MF)
+    add_custom_target(copy_libs DEPENDS ${unpack_dir}/lib)
+    add_dependencies(unpack_jar copy_libs)
+  endif()
+  if(WIN32)
+    set(lib_destination "windows/amd64")
+  elseif(APPLE)
+    set(lib_destination "osx/x86_64")
+  else()
+    set(lib_destination "linux/amd64")
+  endif()
+  set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+  file(MAKE_DIRECTORY ${lib_destination})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
+    ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
+    COMMENT "Copy library")
+  add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
+  add_dependencies(copy_lib unpack_jar)
+  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
+  add_custom_command(OUTPUT ${target_jar}
+    COMMAND ${Java_JAR_EXECUTABLE} cf ${target_jar} .
+    WORKING_DIRECTORY ${unpack_dir}
+    COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
+  add_custom_target(fat-jar DEPENDS ${target_jar})
+  add_dependencies(fat-jar copy_lib)
+  add_dependencies(packages fat-jar)
+endif()

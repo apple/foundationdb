@@ -33,7 +33,7 @@ enum {
 	TaskFlushTrace = 10500,
 	TaskWriteSocket = 10000,
 	TaskPollEIO = 9900,
-	TaskDiskIOComplete = 9150, 
+	TaskDiskIOComplete = 9150,
 	TaskLoadBalancedEndpoint = 9000,
 	TaskReadSocket = 9000,
 	TaskCoordinationReply = 8810,
@@ -105,6 +105,8 @@ struct NetworkAddress {
 	}
 };
 
+typedef std::vector<NetworkAddress> NetworkAddressList;
+
 std::string toIPString(uint32_t ip);
 std::string toIPVectorString(std::vector<uint32_t> ips);
 
@@ -144,7 +146,7 @@ public:
 
 	// Closes the underlying connection eventually if it is not already closed.
 	virtual void close() = 0;
-	
+
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
 
@@ -158,7 +160,7 @@ public:
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	// (or may throw an error if the connection dies)
 	// The SendBuffer chain cannot be empty, and the limit must be positive.
-	// Important non-obvious behavior:  The caller is committing to write the contents of the buffer chain up to the limit.  If all of those bytes could 
+	// Important non-obvious behavior:  The caller is committing to write the contents of the buffer chain up to the limit.  If all of those bytes could
 	// not be sent in this call to write() then further calls must be made to write the remainder.  An IConnection implementation can make decisions
 	// based on the entire byte set that the caller was attempting to write even if it is unable to write all of it immediately.
 	// Due to limitations of TLSConnection, callers must also avoid reallocations that reduce the amount of written data in the first buffer in the chain.
@@ -184,10 +186,11 @@ public:
 
 typedef void*	flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
+typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
@@ -197,7 +200,8 @@ public:
 
 	enum enumGlobal {
 		enFailureMonitor = 0, enFlowTransport = 1, enTDMetrics = 2, enNetworkConnections = 3,
-		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10
+		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10,
+		enNetworkAddressesFunc = 11
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -253,6 +257,13 @@ public:
 	{
 		flowGlobalType netAddressFuncPtr = reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressFunc));
 		return (netAddressFuncPtr) ? reinterpret_cast<NetworkAddressFuncPtr>(netAddressFuncPtr)() : NetworkAddress();
+	}
+
+	// Shorthand for transport().getLocalAddresses()
+	static NetworkAddressList getLocalAddresses()
+	{
+		flowGlobalType netAddressesFuncPtr = reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressesFunc));
+		return (netAddressesFuncPtr) ? reinterpret_cast<NetworkAddressesFuncPtr>(netAddressesFuncPtr)() : NetworkAddressList();
 	}
 
 	NetworkMetrics networkMetrics;

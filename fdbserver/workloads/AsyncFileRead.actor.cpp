@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -260,14 +260,14 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 			begin = now();
 			if (self->ioLog)
 				self->ioLog->logIOIssue(writeFlag, begin);
-			int _ = wait( uncancellable
+			wait(success( uncancellable
 					(
 						holdWhile
 						(
 							self->fileHandle,
 							holdWhile(self->readBuffers[bufferIndex], r)
 						)
-					) );
+					) ));
 			if (self->ioLog)
 				self->ioLog->logIOCompletion(writeFlag, begin, now());
 			self->bytesRead += self->readSize;

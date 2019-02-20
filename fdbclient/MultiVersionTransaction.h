@@ -55,12 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	FDBFuture* (*createCluster)(const char *clusterFilePath);
-
-	//Cluster
-	FDBFuture* (*clusterCreateDatabase)(FDBCluster *cluster, uint8_t *dbName, int dbNameLength);
-	fdb_error_t (*clusterSetOption)(FDBCluster *cluster, FDBClusterOptions::Option option, uint8_t const *value, int valueLength);
-	void (*clusterDestroy)(FDBCluster *cluster);
+	fdb_error_t* (*createDatabase)(const char *clusterFilePath, FDBDatabase **db);
 
 	//Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase *database, FDBTransaction **tr);
@@ -98,7 +93,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 												uint8_t const *endKeyName, int endKeyNameLength, FDBConflictRangeTypes::Option);
 
 	//Future
-	fdb_error_t (*futureGetCluster)(FDBFuture *f, FDBCluster **outCluster);
 	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
 	fdb_error_t (*futureGetVersion)(FDBFuture *f, int64_t *outVersion);
 	fdb_error_t (*futureGetError)(FDBFuture *f);
@@ -109,6 +103,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureSetCallback)(FDBFuture *f, FDBCallback callback, void *callback_parameter);
 	void (*futureCancel)(FDBFuture *f);
 	void (*futureDestroy)(FDBFuture *f);
+
+	//Legacy Support
+	FDBFuture* (*createCluster)(const char *clusterFilePath);
+	FDBFuture* (*clusterCreateDatabase)(FDBCluster *cluster, uint8_t *dbName, int dbNameLength);
+	void (*clusterDestroy)(FDBCluster *cluster);
+	fdb_error_t (*futureGetCluster)(FDBFuture *f, FDBCluster **outCluster);
 };
 
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
@@ -159,8 +159,11 @@ private:
 
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
-	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db) {}
+	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
+	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
 	~DLDatabase() { api->databaseDestroy(db); }
+
+	ThreadFuture<Void> onReady();
 
 	Reference<ITransaction> createTransaction();
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
@@ -170,7 +173,8 @@ public:
 
 private:
 	const Reference<FdbCApi> api;
-	FdbCApi::FDBDatabase* const db;
+	FdbCApi::FDBDatabase* db; // Always set if API version >= 610, otherwise guaranteed to be set when onReady future is set
+	ThreadFuture<Void> ready;
 };
 
 class DLApi : public IClientApi {
@@ -185,7 +189,8 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase609(const char *clusterFilePath); // legacy database creation
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
@@ -327,7 +332,6 @@ private:
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
 
-		ThreadFuture<Reference<IDatabase>> dbFuture;
 		ThreadFuture<Void> changed;
 
 		bool cancelled;
@@ -355,7 +359,7 @@ public:
 	void stopNetwork();
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char *clusterFilePath);
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();

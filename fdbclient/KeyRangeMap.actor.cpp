@@ -19,10 +19,11 @@
  */
 
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 void KeyRangeActorMap::getRangesAffectedByInsertion( const KeyRangeRef& keys, vector< KeyRange >& affectedRanges ) {
 	auto s = map.rangeContaining( keys.begin );

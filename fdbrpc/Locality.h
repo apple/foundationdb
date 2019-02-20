@@ -26,9 +26,9 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, CoordinatorClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -48,6 +48,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
+		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else _class = InvalidClass;
 	}
@@ -64,6 +65,7 @@ public:
 		else if (classStr=="log") _class = LogClass;
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
+		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else _class = InvalidClass;
 
@@ -95,6 +97,7 @@ public:
 			case LogClass: return "log";
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
+			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			default: return "invalid";
 		}

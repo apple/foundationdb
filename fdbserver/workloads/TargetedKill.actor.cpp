@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -65,8 +65,8 @@ struct TargetedKillWorkload : TestWorkload {
 
 		int killed = 0;
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.master.getEndpoint().address == address ||
-				( self->killAllMachineProcesses && workers[i].first.master.getEndpoint().address.ip == address.ip && workers[i].second != ProcessClass::TesterClass ) ) {
+			if( workers[i].first.master.getEndpoint().getPrimaryAddress() == address ||
+				( self->killAllMachineProcesses && workers[i].first.master.getEndpoint().getPrimaryAddress().ip == address.ip && workers[i].second != ProcessClass::TesterClass ) ) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].first.id());
 				workers[i].first.clientInterface.reboot.send( RebootRequest() );
 			}
@@ -94,7 +94,7 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%proxies->size();
 			}
@@ -105,7 +105,7 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%tlogs.size();
 			}
@@ -115,13 +115,13 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address)
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%storageServers.size();
 			}
 		}
 		else if( self->machineToKill == "clustercontroller" || self->machineToKill == "cc" ) {
-			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().address;
+			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
 		}
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);

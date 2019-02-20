@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -61,15 +61,15 @@ struct ChangeConfigWorkload : TestWorkload {
 
 			wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
-				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode, true));
+				wait(success(changeConfig(extraDB, self->configMode, true)));
 				TraceEvent("WaitForReplicasExtra");
 				wait( waitForFullReplication( extraDB ) );
 				TraceEvent("WaitForReplicasExtraEnd");
 			} if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
-					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, autoQuorumChange()));
+					wait(success(changeQuorum(extraDB, autoQuorumChange())));
 				else
-					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, specifiedQuorumChange(NetworkAddress::parseList(self->networkAddresses))));
+					wait(success(changeQuorum(extraDB, specifiedQuorumChange(NetworkAddress::parseList(self->networkAddresses)))));
 			}
 			wait(delay(5*g_random->random01()));
 		}
@@ -86,16 +86,16 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if( self->configMode.size() ) {
-			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode, true ) );
+			wait(success( changeConfig( cx, self->configMode, true ) ));
 			TraceEvent("WaitForReplicas");
 			wait( waitForFullReplication( cx ) );
 			TraceEvent("WaitForReplicasEnd");
 		}
 		if( self->networkAddresses.size() ) {
 			if (self->networkAddresses == "auto")
-				CoordinatorsResult::Type _ = wait( changeQuorum( cx, autoQuorumChange() ) );
+				wait(success( changeQuorum( cx, autoQuorumChange() ) ));
 			else
-				CoordinatorsResult::Type _ = wait( changeQuorum( cx, specifiedQuorumChange(NetworkAddress::parseList( self->networkAddresses )) ) );
+				wait(success( changeQuorum( cx, specifiedQuorumChange(NetworkAddress::parseList( self->networkAddresses )) ) ));
 		}
 
 		if(!extraConfigureBefore) {

@@ -21,6 +21,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/ClusterInterface.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	std::set<NetworkAddress> knownAddrs;
@@ -31,8 +32,8 @@ struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
 	}
 };
 
-ACTOR Future<Void> failureMonitorClientLoop( 
-	SimpleFailureMonitor* monitor, 
+ACTOR Future<Void> failureMonitorClientLoop(
+	SimpleFailureMonitor* monitor,
 	ClusterInterface controller,
 	Reference<FailureMonitorClientState> fmState,
 	bool trackMyStatus)
@@ -44,10 +45,12 @@ ACTOR Future<Void> failureMonitorClientLoop(
 	state double before = now();
 	state double waitfor = 0;
 
-	monitor->setStatus(controller.failureMonitoring.getEndpoint().address, FailureStatus(false));
-	fmState->knownAddrs.insert( controller.failureMonitoring.getEndpoint().address );
+	for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
+		monitor->setStatus(addr, FailureStatus(false));
+		fmState->knownAddrs.insert(addr);
+	}
 
-	//The cluster controller's address (controller.failureMonitoring.getEndpoint().address) is treated specially because we can declare that it is down independently
+	//The cluster controller's addresses (controller.failureMonitoring.getEndpoint().addresses) are treated specially because we can declare that it is down independently
 	//of the response from the cluster controller. It still needs to be in knownAddrs in case the cluster controller changes, so the next cluster controller resets its state
 
 	try {
@@ -59,10 +62,16 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					requestTimeout = Never();
 					if (reply.allOthersFailed) {
 						// Reset all systems *not* mentioned in the reply to the default (failed) state
-						fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().address );
+						for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
+							fmState->knownAddrs.erase( addr );
+						}
+
 						std::set<NetworkAddress> changedAddresses;
-						for(int c=0; c<reply.changes.size(); c++)
-							changedAddresses.insert( reply.changes[c].address );
+						for(int c=0; c<reply.changes.size(); c++) {
+							for(auto& addr : reply.changes[c].addresses) {
+								changedAddresses.insert( addr );
+							}
+						}
 						for(auto it : fmState->knownAddrs)
 							if (!changedAddresses.count( it ))
 								monitor->setStatus( it, FailureStatus() );
@@ -73,8 +82,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 
 					if( monitor->getState( controller.failureMonitoring.getEndpoint() ).isFailed() )
 						TraceEvent("FailureMonitoringServerUp").detail("OldServer",controller.id());
-					monitor->setStatus( controller.failureMonitoring.getEndpoint().address, FailureStatus(false) );
-					fmState->knownAddrs.insert( controller.failureMonitoring.getEndpoint().address );
+
+					for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
+						monitor->setStatus( addr, FailureStatus(false) );
+						fmState->knownAddrs.insert( addr );
+					}
 
 					//if (version != reply.failureInformationVersion)
 					//	printf("Client '%s': update from %lld to %lld (%d changes, aof=%d)\n", g_network->getLocalAddress().toString().c_str(), version, reply.failureInformationVersion, reply.changes.size(), reply.allOthersFailed);
@@ -83,12 +95,14 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					fmState->serverFailedTimeout = reply.considerServerFailedTimeoutMS * .001;
 					for(int c=0; c<reply.changes.size(); c++) {
 						//printf("Client '%s': status of '%s' is now '%s'\n", g_network->getLocalAddress().toString().c_str(), reply.changes[c].address.toString().c_str(), reply.changes[c].status.failed ? "Failed" : "OK");
-						monitor->setStatus( reply.changes[c].address, reply.changes[c].status );
-						if (reply.changes[c].status != FailureStatus())
-							fmState->knownAddrs.insert( reply.changes[c].address );
-						else
-							fmState->knownAddrs.erase( reply.changes[c].address );
-						ASSERT( reply.changes[c].address != controller.failureMonitoring.getEndpoint().address || !reply.changes[c].status.failed );
+						for(auto& addr : reply.changes[c].addresses) {
+							monitor->setStatus( addr, reply.changes[c].status );
+							if (reply.changes[c].status != FailureStatus())
+								fmState->knownAddrs.insert( addr );
+							else
+								fmState->knownAddrs.erase( addr );
+							ASSERT( addr != controller.failureMonitoring.getEndpoint().getPrimaryAddress() || !reply.changes[c].status.failed );
+						}
 					}
 					before = now();
 					waitfor = reply.clientRequestIntervalMS * .001;
@@ -98,8 +112,10 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					g_network->setCurrentTask(TaskDefaultDelay);
 					requestTimeout = Never();
 					TraceEvent(SevWarn, "FailureMonitoringServerDown").detail("OldServerID",controller.id());
-					monitor->setStatus( controller.failureMonitoring.getEndpoint().address, FailureStatus(true) );
-					fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().address );
+					for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
+						monitor->setStatus( addr, FailureStatus(true) );
+						fmState->knownAddrs.erase( addr );
+					}
 				}
 				when( wait( nextRequest ) ) {
 					g_network->setCurrentTask(TaskDefaultDelay);
@@ -115,6 +131,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 
 					FailureMonitoringRequest req;
 					req.failureInformationVersion = version;
+					req.addresses = g_network->getLocalAddresses();
 					if (trackMyStatus)
 						req.senderStatus = FailureStatus(false);
 					request = controller.failureMonitoring.getReply( req, TaskFailureMonitor );
@@ -133,7 +150,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
-	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState()); 
+	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
 
 	loop {
 		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();

@@ -20,16 +20,19 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/MoveKeys.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LeaderElection.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
+#include "fdbserver/LatencyBandConfig.h"
 #include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
@@ -105,7 +108,20 @@ public:
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
+		}
 
+		void setDistributor(const DataDistributorInterface& distributorInterf) {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			newInfo.distributor = distributorInterf;
+			serverInfo->set( newInfo );
+		}
+
+		void clearDistributor() {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			newInfo.distributor = Optional<DataDistributorInterface>();
+			serverInfo->set( newInfo );
 		}
 	};
 
@@ -296,7 +312,7 @@ public:
 			else {
 				std::vector<LocalityEntry> bestSet;
 				std::vector<LocalityData> tLocalities;
-				
+
 				// Try to find the best team of servers to fulfill the policy
 				if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS)) {
 					results.reserve(results.size() + bestSet.size());
@@ -473,7 +489,7 @@ public:
 
 		bool operator < (RoleFitness const& r) const {
 			if (worstFit != r.worstFit) return worstFit < r.worstFit;
-			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.  
+			// FIXME: TLog recruitment process does not guarantee the best fit is not worsened.
 			if (role != ProcessClass::TLog && role != ProcessClass::LogRouter && bestFit != r.bestFit) return bestFit < r.bestFit;
 			return count > r.count;
 		}
@@ -502,12 +518,19 @@ public:
 		return result;
 	}
 
+	void updateKnownIds(std::map< Optional<Standalone<StringRef>>, int>* id_used) {
+		(*id_used)[masterProcessId]++;
+		(*id_used)[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.present()) {
+			(*id_used)[db.serverInfo->get().distributor.get().locality.processId()]++;
+		}
+	}
+
 	RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration( RecruitRemoteFromConfigurationRequest const& req ) {
 		RecruitRemoteFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
-		id_used[masterProcessId]++;
-		id_used[clusterControllerProcessId]++;
+		updateKnownIds(&id_used);
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
@@ -545,8 +568,7 @@ public:
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfiguration( RecruitFromConfigurationRequest const& req, Optional<Key> dcId ) {
 		RecruitFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
-		id_used[masterProcessId]++;
-		id_used[clusterControllerProcessId]++;
+		updateKnownIds(&id_used);
 
 		ASSERT(dcId.present());
 
@@ -674,9 +696,7 @@ public:
 		} else {
 			RecruitFromConfigurationReply result;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
-			id_used[masterProcessId]++;
-			id_used[clusterControllerProcessId]++;
-			
+			updateKnownIds(&id_used);
 			auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used );
 			for(int i = 0; i < tlogs.size(); i++) {
 				result.tLogs.push_back(tlogs[i].first);
@@ -898,6 +918,9 @@ public:
 
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[clusterControllerProcessId]++;
+		if (db.serverInfo->get().distributor.present()) {
+			id_used[db.serverInfo->get().distributor.get().locality.processId()]++;
+		}
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 
 		if ( oldMasterFit < mworker.fitness )
@@ -991,8 +1014,31 @@ public:
 		return false;
 	}
 
+	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
+		std::map<Optional<Standalone<StringRef>>, int> idUsed;
+		updateKnownIds(&idUsed);
+
+		auto dbInfo = db.serverInfo->get();
+		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (const auto& tlog: tlogset.tLogs) {
+				if (tlog.present()) {
+					idUsed[tlog.interf().locality.processId()]++;
+				}
+			}
+		}
+		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
+			ASSERT(interf.locality.processId().present());
+			idUsed[interf.locality.processId()]++;
+		}
+		for (const ResolverInterface& interf: dbInfo.resolvers) {
+			ASSERT(interf.locality.processId().present());
+			idUsed[interf.locality.processId()]++;
+		}
+		return idUsed;
+	}
+
 	std::map< Optional<Standalone<StringRef>>, WorkerInfo > id_worker;
-	std::map<  Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
+	std::map< Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
@@ -1016,6 +1062,7 @@ public:
 	Optional<double> remoteStartTime;
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
+	PromiseStream<Future<Void>> addActor;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
@@ -1035,14 +1082,6 @@ public:
 	}
 };
 
-template <class K, class T>
-vector<T> values( std::map<K,T> const& map ) {
-	vector<T> t;
-	for(auto i = map.begin(); i!=map.end(); ++i)
-		t.push_back(i->second);
-	return t;
-}
-
 ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, ClusterControllerData::DBInfo* db )
 {
 	state MasterInterface iMaster;
@@ -1060,10 +1099,13 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 			}
 
-			//We must recruit the master in the same data center as the cluster controller. 
+			//We must recruit the master in the same data center as the cluster controller.
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[cluster->clusterControllerProcessId]++;
+			if (cluster->db.serverInfo->get().distributor.present()) {
+				id_used[cluster->db.serverInfo->get().distributor.get().locality.processId()]++;
+			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.first.locality.processId() == cluster->clusterControllerProcessId )
 				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
@@ -1099,6 +1141,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
+				dbInfo.distributor = db->serverInfo->get().distributor;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( dbInfo );
@@ -1155,7 +1198,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 	ReplyPromise<ServerDBInfo> reply)
 {
 	state UID issueID;
-	addIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
@@ -1167,7 +1210,7 @@ ACTOR Future<Void> clusterGetServerInfo(
 		}
 	}
 
-	removeIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
+	removeIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 
 	reply.send( db->serverInfo->get() );
 	return Void();
@@ -1183,13 +1226,13 @@ ACTOR Future<Void> clusterOpenDatabase(
 {
 	// NOTE: The client no longer expects this function to return errors
 	state UID issueID;
-	addIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
+	addIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 
 	if(supportedVersions.size() > 0) {
-		db->clientVersionMap[reply.getEndpoint().address] = supportedVersions;
+		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
 
-	db->traceLogGroupMap[reply.getEndpoint().address] = traceLogGroup.toString();
+	db->traceLogGroupMap[reply.getEndpoint().getPrimaryAddress()] = traceLogGroup.toString();
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1198,9 +1241,9 @@ ACTOR Future<Void> clusterOpenDatabase(
 		}
 	}
 
-	removeIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
-	db->clientVersionMap.erase(reply.getEndpoint().address);
-	db->traceLogGroupMap.erase(reply.getEndpoint().address);
+	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
+	db->traceLogGroupMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1300,18 +1343,22 @@ void checkOutstandingRequests( ClusterControllerData* self ) {
 }
 
 ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID ) {
-	auto watcher = cluster->id_worker.find(processID);
-	ASSERT(watcher != cluster->id_worker.end());
+	{
+		auto watcher = cluster->id_worker.find(processID);
+		ASSERT(watcher != cluster->id_worker.end());
 
-	watcher->second.lastAvailableTime = now();
-	watcher->second.reboots++;
-	wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
+		watcher->second.lastAvailableTime = now();
+		watcher->second.reboots++;
+		wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
+	}
 
-	auto watcher = cluster->id_worker.find(processID);
-	if(watcher != cluster->id_worker.end()) {
-		watcher->second.reboots--;
-		if( watcher->second.reboots < 2 )
-			checkOutstandingRequests( cluster );
+	{
+		auto watcher = cluster->id_worker.find(processID);
+		if(watcher != cluster->id_worker.end()) {
+			watcher->second.reboots--;
+			if( watcher->second.reboots < 2 )
+				checkOutstandingRequests( cluster );
+		}
 	}
 
 	return Void();
@@ -1364,7 +1411,7 @@ struct FailureStatusInfo {
 //The failure monitor client relies on the fact that the failure detection server will not declare itself failed
 ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::DBInfo* db, FutureStream< FailureMonitoringRequest > requests ) {
 	state Version currentVersion = 0;
-	state std::map<NetworkAddress, FailureStatusInfo> currentStatus;	// The status at currentVersion
+	state std::map<NetworkAddressList, FailureStatusInfo> currentStatus;	// The status at currentVersion
 	state std::deque<SystemFailureStatus> statusHistory;	// The last change in statusHistory is from currentVersion-1 to currentVersion
 	state Future<Void> periodically = Void();
 	state double lastT = 0;
@@ -1373,22 +1420,21 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
-				auto& address = req.reply.getEndpoint().address;
-				auto& stat = currentStatus[ address ];
+				auto& stat = currentStatus[ req.addresses ];
 				auto& newStat = req.senderStatus.get();
 
-				ASSERT( !newStat.failed || address != g_network->getLocalAddress() );
+				ASSERT( !newStat.failed || req.addresses != g_network->getLocalAddresses() );
 
 				stat.insertRequest(now());
 				if (req.senderStatus != stat.status) {
-					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", address).detail("Status", newStat.failed ? "Failed" : "OK").detail("Why", "Request");
-					statusHistory.push_back( SystemFailureStatus( address, newStat ) );
+					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", describe(req.addresses)).detail("Status", newStat.failed ? "Failed" : "OK").detail("Why", "Request");
+					statusHistory.push_back( SystemFailureStatus( req.addresses, newStat ) );
 					++currentVersion;
 
 					if (req.senderStatus == FailureStatus()){
 						// failureMonitorClient reports explicitly that it is failed
 						ASSERT(false); // This can't happen at the moment; if that changes, make this a TEST instead
-						currentStatus.erase(address);
+						currentStatus.erase(req.addresses);
 					} else {
 						TEST(true);
 						stat.status = newStat;
@@ -1464,11 +1510,11 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData::
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
-				if ( it->first != g_network->getLocalAddress() && ( tooManyLogGenerations ?
+				if ( it->first != g_network->getLocalAddresses() && ( tooManyLogGenerations ?
 					( delay > CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY ) :
 					( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
-					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", it->first).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
+					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", describe(it->first)).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
 						.detail("PivotDelay", pivotDelay).detail("UnfinishedRecoveries", db->unfinishedRecoveries).detail("LogGenerations", db->logGenerations);
 					statusHistory.push_back( SystemFailureStatus( it->first, FailureStatus(true) ) );
 					++currentVersion;
@@ -1686,7 +1732,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if ( info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
 		if ( self->gotProcessClasses ) {
 			auto classIter = self->id_class.find(w.locality.processId());
-			
+
 			if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
 				newProcessClass = classIter->second;
 			} else {
@@ -1705,6 +1751,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 	}
 
+	if ( req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() ) {
+		const DataDistributorInterface& di = req.distributorInterf.get();
+		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
+		self->db.setDistributor( di );
+	}
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo );
 		checkOutstandingRequests( self );
@@ -1829,8 +1880,19 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 
 			// Get all requests that are ready right *now*, before GetStatus() begins.
 			// All of these requests will be responded to with the next GetStatus() result.
-			while (requests.isReady())
-				requests_batch.push_back(requests.pop());
+			// If requests are batched, do not respond to more than MAX_STATUS_REQUESTS_PER_SECOND
+			// requests per second
+			while (requests.isReady()) {
+				auto req = requests.pop();
+				if (SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS > 0.0 &&
+					requests_batch.size() + 1 >
+						SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS * SERVER_KNOBS->MAX_STATUS_REQUESTS_PER_SECOND) {
+					TraceEvent(SevWarnAlways, "TooManyStatusRequests").suppressFor(1.0).detail("BatchSize", requests_batch.size());
+					req.reply.sendError(server_overloaded());
+				} else {
+					requests_batch.push_back(req);
+				}
+			}
 
 			// Get status but trap errors to send back to client.
 			vector<std::pair<WorkerInterface, ProcessClass>> workers;
@@ -1931,7 +1993,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 							newProcessClass = w.second.initialClass;
 						}
 
-						
+
 						if (newProcessClass != w.second.processClass) {
 							w.second.processClass = newProcessClass;
 							w.second.priorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
@@ -1958,6 +2020,43 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
+	loop {
+		state ReadYourWritesTransaction tr(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
+				Optional<LatencyBandConfig> config;
+				if(configVal.present()) {
+					config = LatencyBandConfig::parse(configVal.get());
+				}
+
+				ServerDBInfo serverInfo = db->serverInfo->get();
+				if(config != serverInfo.latencyBandConfig) {
+					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
+					serverInfo.id = g_random->randomUniqueID();
+					serverInfo.latencyBandConfig = config;
+					db->serverInfo->set(serverInfo);
+				}
+
+				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
+
+				wait(tr.commit());
+				wait(configChangeFuture);
+
+				break;
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));		
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
@@ -1976,7 +2075,7 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
 				}
-				
+
 				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
 				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				wait(tr.commit());
@@ -2167,24 +2266,85 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	}
 }
 
+ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
+	state Optional<Key> dcId = self->clusterControllerDcId;
+	state InitializeDataDistributorRequest req;
+	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
+		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+	}
+
+	loop {
+		try {
+			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
+				wait( self->db.serverInfo->onChange() );
+			}
+
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			req.reqId = g_random->randomUniqueID();
+			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
+
+			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
+			if (distributor.present()) {
+				TraceEvent("ClusterController_DataDistributorRecruited", req.reqId).detail("Addr", data_distributor.worker.first.address());
+				return distributor.get();
+			}
+		}
+		catch (Error& e) {
+			TraceEvent("ClusterController_DataDistributorRecruitError", req.reqId).error(e);
+			if ( e.code() != error_code_no_more_servers ) {
+				throw;
+			}
+		}
+		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+	}
+}
+
+ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterControllerFullInterface *clusterInterface ) {
+	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY);
+
+	// wait for a while to see if existing data distributor will join.
+	loop choose {
+		when ( wait(initialDelay) ) { break; }
+		when ( wait(self->db.serverInfo->onChange()) ) {  // Rejoins via worker registration
+			if ( self->db.serverInfo->get().distributor.present() ) {
+				TraceEvent("ClusterController_InfoChange", self->id)
+				.detail("DataDistributorID", self->db.serverInfo->get().distributor.get().id());
+				break;
+			}
+		}
+	}
+
+	loop {
+		if ( self->db.serverInfo->get().distributor.present() ) {
+			wait( waitFailureClient( self->db.serverInfo->get().distributor.get().waitFailure, SERVER_KNOBS->DD_FAILURE_TIME ) );
+			TraceEvent("ClusterController", self->id)
+			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.get().id());
+			self->db.clearDistributor();
+		} else {
+			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
+			self->db.setDistributor( distributorInterf );
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
 	state uint64_t step = 0;
-	state PromiseStream<Future<Void>> addActor;
-	state Future<ErrorOr<Void>> error = errorOr( actorCollection( addActor.getFuture() ) );
+	state Future<ErrorOr<Void>> error = errorOr( actorCollection( self.addActor.getFuture() ) );
 
-	auto pSelf = &self;
-	addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
-	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
-	addActor.send( self.updateWorkerList.init( self.db.db ) );
-	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
-	addActor.send( timeKeeper(&self) );
-	addActor.send( monitorProcessClasses(&self) );
-	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
-	addActor.send( updatedChangingDatacenters(&self) );
-	addActor.send( updatedChangedDatacenters(&self) );
-	addActor.send( updateDatacenterVersionDifference(&self) );
+	self.addActor.send( failureDetectionServer( self.id, &self.db, interf.clientInterface.failureMonitoring.getFuture() ) );
+	self.addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
+	self.addActor.send( self.updateWorkerList.init( self.db.db ) );
+	self.addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	self.addActor.send( timeKeeper(&self) );
+	self.addActor.send( monitorProcessClasses(&self) );
+	self.addActor.send( monitorClientTxnInfoConfigs(&self.db) );
+	self.addActor.send( updatedChangingDatacenters(&self) );
+	self.addActor.send( updatedChangedDatacenters(&self) );
+	self.addActor.send( updateDatacenterVersionDifference(&self) );
+	self.addActor.send( waitDDRejoinOrStartDD(&self, &interf) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
@@ -2200,13 +2360,13 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
+			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
-			addActor.send( clusterRecruitFromConfiguration( &self, req ) );
+			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );
 		}
 		when( RecruitRemoteFromConfigurationRequest req = waitNext( interf.recruitRemoteFromConfiguration.getFuture() ) ) {
-			addActor.send( clusterRecruitRemoteFromConfiguration( &self, req ) );
+			self.addActor.send( clusterRecruitRemoteFromConfiguration( &self, req ) );
 		}
 		when( RecruitStorageRequest req = waitNext( interf.recruitStorage.getFuture() ) ) {
 			clusterRecruitStorage( &self, req );
@@ -2261,7 +2421,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			clusterRegisterMaster( &self, req );
 		}
 		when( GetServerDBInfoRequest req = waitNext( interf.getServerDBInfo.getFuture() ) ) {
-			addActor.send( clusterGetServerInfo( &self.db, req.knownServerInfoID, req.issues.toString(), req.incompatiblePeers, req.reply ) );
+			self.addActor.send( clusterGetServerInfo( &self.db, req.knownServerInfoID, req.issues.toString(), req.incompatiblePeers, req.reply ) );
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.

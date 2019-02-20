@@ -31,7 +31,7 @@ template<typename T> struct FutureStream;
 #define state
 #define UNCANCELLABLE
 #define choose if(1)
-#define when(x) for(x;;)
+#define when(...) for(__VA_ARGS__;;)
 template <class T> T wait( const Future<T>& );
 void wait(const Never&);
 template <class T> T waitNext( const FutureStream<T>& );
@@ -40,5 +40,13 @@ template <class T> T waitNext( const FutureStream<T>& );
 #endif
 
 #define loop while(true)
+
+#ifdef NO_INTELLISENSE
+#define THIS this
+#define THIS_ADDR uintptr_t(this)
+#else
+#define THIS nullptr
+#define THIS_ADDR uintptr_t(nullptr)
+#endif
 
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list

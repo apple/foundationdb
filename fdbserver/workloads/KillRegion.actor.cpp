@@ -19,12 +19,12 @@
  */
 
 #include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 struct KillRegionWorkload : TestWorkload {
 	bool enabled;
@@ -57,7 +57,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup( KillRegionWorkload *self, Database cx ) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disablePrimary, true ) );
+		wait(success( changeConfig( cx, g_simulator.disablePrimary, true ) ));
 		TraceEvent("ForceRecovery_WaitForRemote");
 		wait( waitForPrimaryDC(cx, LiteralStringRef("1")) );
 		TraceEvent("ForceRecovery_DisablePrimaryComplete");
@@ -67,11 +67,11 @@ struct KillRegionWorkload : TestWorkload {
 	ACTOR static Future<Void> killRegion( KillRegionWorkload *self, Database cx ) {
 		ASSERT( g_network->isSimulated() );
 		TraceEvent("ForceRecovery_DisableRemoteBegin");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.disableRemote, true ) );
+		wait(success( changeConfig( cx, g_simulator.disableRemote, true ) ));
 		TraceEvent("ForceRecovery_WaitForPrimary");
 		wait( waitForPrimaryDC(cx, LiteralStringRef("0")) );
 		TraceEvent("ForceRecovery_DisableRemoteComplete");
-		ConfigurationResult::Type _ = wait( changeConfig( cx, g_simulator.originalRegions, true ) );
+		wait(success( changeConfig( cx, g_simulator.originalRegions, true ) ));
 		TraceEvent("ForceRecovery_RestoreOriginalComplete");
 		wait( delay( g_random->random01() * self->testDuration ) );
 

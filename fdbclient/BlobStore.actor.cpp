@@ -28,6 +28,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
 #include "rapidxml/rapidxml.hpp"
+#include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
 
@@ -505,6 +506,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
+		state Reference<HTTP::Response> r;
 
 		try {
 			// Start connecting
@@ -534,7 +536,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
 			if(r->headers["Connection"] != "close")
@@ -1036,7 +1039,7 @@ Future<std::string> BlobStoreEndpoint::uploadPart(std::string const &bucket, std
 }
 
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, BlobStoreEndpoint::MultiPartSetT parts) {
-	state UnsentPacketQueue part_list();  // NonCopyable state var so must be declared at top of actor
+	state UnsentPacketQueue part_list;  // NonCopyable state var so must be declared at top of actor
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";

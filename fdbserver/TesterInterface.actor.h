@@ -1,5 +1,5 @@
 /*
- * TesterInterface.h
+ * TesterInterface.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,19 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TESTERINTERFACE_H
-#define FDBSERVER_TESTERINTERFACE_H
 #pragma once
+
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
+	#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
+	#include "fdbserver/TesterInterface.actor.g.h"
+#elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
+	#define FDBSERVER_TESTERINTERFACE_ACTOR_H
+
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 struct WorkloadInterface {
 	RequestStream<ReplyPromise<Void>> setup;
@@ -83,14 +89,15 @@ struct TesterInterface {
 	}
 };
 
-Future<Void> testerServerCore( TesterInterface const& interf, Reference<ClusterConnectionFile> const& ccf, Reference<AsyncVar<struct ServerDBInfo>> const&, LocalityData const& );
+ACTOR Future<Void> testerServerCore(TesterInterface interf, Reference<ClusterConnectionFile> ccf,
+                                    Reference<AsyncVar<struct ServerDBInfo>> serverDBInfo, LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 
-Future<Void> runTests(Reference<ClusterConnectionFile> const& connFile, test_type_t const& whatToRun,
-                      test_location_t const& whereToRun, int const& minTestersExpected,
-                      std::string const& fileName = std::string(), StringRef const& startingConfiguration = StringRef(),
-                      LocalityData const& locality = LocalityData());
+ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun,
+                            test_location_t whereToRun, int minTestersExpected, std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(), LocalityData locality = LocalityData());
 
+#include "flow/unactorcompiler.h"
 #endif

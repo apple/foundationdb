@@ -19,8 +19,8 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -153,19 +153,19 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
 
 		TraceEvent("AS_Wait1");
-		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
+		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready1");
 		wait( delay(g_random->random01()*self->switch1delay) );
 		TraceEvent("AS_Switch1");
 		wait( backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait2");
-		int _ = wait( restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) );
+		wait(success( restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready2");
 		wait( delay(g_random->random01()*self->switch2delay) );
 		TraceEvent("AS_Switch2");
 		wait( restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait3");
-		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
+		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready3");
 		wait( delay(g_random->random01()*self->stopDelay) );
 		TraceEvent("AS_Abort");

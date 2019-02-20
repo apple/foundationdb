@@ -32,6 +32,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include <algorithm>
 #include <time.h>
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace IBackupFile_impl {
 
@@ -345,7 +346,7 @@ public:
 		state Reference<IAsyncFile> f = wait(bc->readFile(snapshot.fileName));
 		int64_t size = wait(f->size());
 		state Standalone<StringRef> buf = makeString(size);
-		int _ = wait(f->read(mutateString(buf), buf.size(), 0));
+		wait(success(f->read(mutateString(buf), buf.size(), 0)));
 		json_spirit::mValue json;
 		json_spirit::read_string(buf.toString(), json);
 		JSONDoc doc(json);
@@ -606,13 +607,13 @@ public:
 		state Optional<Version> metaUnreliableEnd;
 
 		std::vector<Future<Void>> metaReads;
-		metaReads.push_back(store(bc->expiredEndVersion().get(), metaExpiredEnd));
-		metaReads.push_back(store(bc->unreliableEndVersion().get(), metaUnreliableEnd));
+		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
+		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if(!deepScan) {
-			metaReads.push_back(store(bc->logBeginVersion().get(), metaLogBegin));
-			metaReads.push_back(store(bc->logEndVersion().get(), metaLogEnd));
+			metaReads.push_back(store(metaLogBegin, bc->logBeginVersion().get()));
+			metaReads.push_back(store(metaLogEnd, bc->logEndVersion().get()));
 		}
 
 		wait(waitForAll(metaReads));
@@ -682,7 +683,7 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		wait(store(bc->listLogFiles(scanBegin, scanEnd), logs) && store(bc->listKeyspaceSnapshots(), desc.snapshots));
+		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd)) && store(desc.snapshots, bc->listKeyspaceSnapshots()));
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -842,7 +843,7 @@ public:
 			progress->step = "Listing files";
 		}
 		// Get log files or range files that contain any data at or before expireEndVersion
-		wait(store(bc->listLogFiles(scanBegin, expireEndVersion - 1), logs) && store(bc->listRangeFiles(scanBegin, expireEndVersion - 1), ranges));
+		wait(store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1)) && store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
 
 		// The new logBeginVersion will be taken from the last log file, if there is one
 		state Optional<Version> newLogBeginVersion;
@@ -1575,7 +1576,7 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 			if (results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
-				wait( store( versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1), results) );
+				wait( store( results, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1) ) );
 
 				if(results.size() != 1) {
 					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
@@ -1615,7 +1616,7 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 			if(mid == min) {
 				// There aren't any records having a version < v, so just look for any record having a time < now
 				// and base a result on it
-				wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
+				wait(store(results, versionMap.getRange(tr, 0, (int64_t)now(), 1)));
 
 				if (results.size() != 1) {
 					// There aren't any timekeeper records to base a result on so return nothing
@@ -1767,13 +1768,17 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	// Do a series of expirations and verify resulting state
 	state int i = 0;
 	for(; i < listing.snapshots.size(); ++i) {
-		// Ensure we can still restore to the latest version
-		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
-		ASSERT(rest.present());
+		{
+			// Ensure we can still restore to the latest version
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
+			ASSERT(rest.present());
+		}
 
-		// Ensure we can restore to the end version of snapshot i
-		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
-		ASSERT(rest.present());
+		{
+			// Ensure we can restore to the end version of snapshot i
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
+			ASSERT(rest.present());
+		}
 
 		// Test expiring to the end of this snapshot
 		state Version expireVersion = listing.snapshots[i].endVersion;

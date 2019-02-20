@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "flow/Platform.h"
 #include "flow/ActorCollection.h"
@@ -35,6 +35,9 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#if defined(CMAKE_BUILD) || !defined(WIN32)
+#include "versions.h"
+#endif
 #include "fdbrpc/TLSConnection.h"
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
@@ -50,16 +53,15 @@
 #undef max
 #else
 #include <time.h>
-#include "versions.h"
 #endif
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 extern IRandom* trace_random;
 extern const char* getHGVersion();
 
-using std::min;
-using std::max;
 using std::make_pair;
+using std::max;
+using std::min;
 
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
@@ -254,7 +256,7 @@ ACTOR static Future<Standalone<StringRef> > getSampleVersionStamp(Transaction *t
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
+			wait(success(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793"))));
 			state Future<Standalone<StringRef> > vstamp = tr->getVersionstamp();
 			tr->makeSelfConflicting();
 			wait(tr->commit());
@@ -485,6 +487,8 @@ DatabaseContext::DatabaseContext(
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
+
+DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
 	try {
@@ -741,6 +745,7 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 			initTraceEventMetrics();
 
 			auto publicIP = determinePublicIPAutomatically( connFile->getConnectionString() );
+			selectTraceFormatter(networkOptions.traceFormat);
 			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
 
 			TraceEvent("ClientStart")
@@ -792,6 +797,14 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TRACE_LOG_GROUP:
 			if(value.present())
 				networkOptions.traceLogGroup = value.get().toString();
+			break;
+		case FDBNetworkOptions::TRACE_FORMAT:
+			validateOptionValue(value, true);
+			networkOptions.traceFormat = value.get().toString();
+			if (!validateTraceFormat(networkOptions.traceFormat)) {
+				fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
+				throw invalid_option_value();
+			}
 			break;
 		case FDBNetworkOptions::KNOB: {
 			validateOptionValue(value, true);
@@ -909,7 +922,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(NetworkAddress(), false, useMetrics || networkOptions.traceDirectory.present());
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 
@@ -1039,7 +1052,8 @@ Future<Standalone<RangeResultRef>> getRange(
 	bool const& reverse,
 	TransactionInfo const& info);
 
-Future<Optional<Value>> getValue( Future<Version> const& version, Key const& key, Database const& cx, TransactionInfo const& info, Reference<TransactionLogInfo> const& trLogInfo ) ;
+ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
+                                       Reference<TransactionLogInfo> trLogInfo);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface( Database cx, TransactionInfo info, UID id, Future<Version> ver = latestVersion ) {
 	Optional<Value> val = wait( getValue(ver, serverListKeyFor(id), cx, info, Reference<TransactionLogInfo>()) );
@@ -1191,7 +1205,7 @@ ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys
 				try {
 					tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 					tr.setOption( FDBTransactionOptions::CAUSAL_READ_RISKY );
-					Version _ = wait( tr.getReadVersion() );
+					wait(success( tr.getReadVersion() ));
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
@@ -1340,7 +1354,9 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	}
 }
 
-Future<Void> readVersionBatcher( DatabaseContext* const& cx, FutureStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > const& versionStream, uint32_t const& flags );
+ACTOR Future<Void> readVersionBatcher(
+    DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
+    uint32_t flags);
 
 ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Value> value, Database cx, int readVersionFlags, TransactionInfo info )
 {
@@ -1855,8 +1871,9 @@ Transaction::Transaction( Database const& cx )
 	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-	if(cx->lockAware)
+	if(cx->lockAware) {
 		options.lockAware = true;
+	}
 }
 
 Transaction::~Transaction() {
@@ -3049,11 +3066,14 @@ Future< Standalone<VectorRef<KeyRef>> > Transaction::splitStorageMetrics( KeyRan
 void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
-	double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-	if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation))
-		return Reference<TransactionLogInfo>(new TransactionLogInfo());
-	else
-		return Reference<TransactionLogInfo>();
+	if(!cx->isError()) {
+		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
+		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+			return Reference<TransactionLogInfo>(new TransactionLogInfo());
+		}
+	}
+
+	return Reference<TransactionLogInfo>();
 }
 
 void enableClientInfoLogging() {
