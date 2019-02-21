@@ -1605,7 +1605,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				++num;
 			}
 		}
-		if (ret == false) {
+		if (num != mt->serverTeams.size()) {
+			ret = false;
 			TraceEvent(SevError, "ServerTeamNumberOnMachineIncorrect")
 			    .detail("MachineTeam", mt->getMachineIDsStr())
 			    .detail("ServerTeamsSize", mt->serverTeams.size())
@@ -1615,18 +1616,21 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Find the machine team with the least number of server teams
-	int getMachineTeamWithLeastProcessTeams(Reference<TCMachineTeamInfo>& ret) {
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithLeastProcessTeams() {
+		Reference<TCMachineTeamInfo> retMT;
 		int minNumProcessTeams = std::numeric_limits<int>::max();
 
 		for (auto& mt : machineTeams) {
-			ASSERT(isServerTeamNumberCorrect(mt));
+			if (EXPENSIVE_VALIDATION) {
+				ASSERT(isServerTeamNumberCorrect(mt));
+			}
 			if (mt->serverTeams.size() < minNumProcessTeams) {
 				minNumProcessTeams = mt->serverTeams.size();
-				ret = mt;
+				retMT = mt;
 			}
 		}
 
-		return minNumProcessTeams;
+		return std::pair<Reference<TCMachineTeamInfo>, int>(retMT, minNumProcessTeams);
 	}
 
 	int getHealthyMachineTeamCount() {
@@ -1881,15 +1885,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 
 			if (teamsToBuild > 0) {
-				std::set<UID> desiredServerSet;
-				for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
-					if (!self->server_status.get(i->first).isUnhealthy()) {
-						desiredServerSet.insert(i->second->id);
-					}
-				}
-
-				vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
-
 				state vector<std::vector<UID>> builtTeams;
 
 				// addTeamsBestOf() will not add more teams than needed.
@@ -2314,8 +2309,9 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 
 		if (totalMTCount > desiredMachineTeams) {
 			// Pick the machine team with the least number of server teams and mark it undesired
-			state Reference<TCMachineTeamInfo> mt;
-			state int minNumProcessTeams = self->getMachineTeamWithLeastProcessTeams(mt);
+			state std::pair<Reference<TCMachineTeamInfo>, int> foundMTInfo = self->getMachineTeamWithLeastProcessTeams();
+			state Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
+			state int minNumProcessTeams = foundMTInfo.second;
 			ASSERT(mt.isValid());
 
 			// Pick one process team, and mark it as a bad team
