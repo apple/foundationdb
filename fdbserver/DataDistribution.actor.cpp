@@ -2379,17 +2379,22 @@ ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection* self,
 	return type;
 }
 
-ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
-	wait(self->initialFailureReactionDelay);
+ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self) {
 	loop {
 		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+			TraceEvent("WaitUntilHealthyStalled", self->distributorId).detail("Primary", self->primary).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 		}
 		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
-			break;
+			return Void();
 		}
 	}
+}
+
+ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
+	wait(self->initialFailureReactionDelay);
+	wait(waitUntilHealthy(self));
 	wait(self->addSubsetComplete.getFuture());
 	TraceEvent("DDRemovingBadTeams", self->distributorId).detail("Primary", self->primary);
 	for(auto it : self->badTeams) {
@@ -2873,16 +2878,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	}
 
 	wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
-	loop {
-		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
-			TraceEvent("DDUpdatingStalled", self->distributorId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
-			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
-		}
-		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
-		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
-			break;
-		}
-	}
+	wait(waitUntilHealthy(self));
 	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);
 	loop {
