@@ -1233,6 +1233,11 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
 			}
+			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_removing_redundant_teams";
+				stateSectionObj["description"] = "Removing redundant machine teams";
+			}
 			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_repartitioning";

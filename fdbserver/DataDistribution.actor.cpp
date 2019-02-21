@@ -535,7 +535,7 @@ Future<Void> storageServerTracker(
 	Promise<Void> const& errorOut,
 	Version const& addedVersion);
 
-Future<Void> teamTracker( struct DDTeamCollection* const& self, Reference<TCTeamInfo> const& team, bool const& badTeam );
+Future<Void> teamTracker(struct DDTeamCollection* const& self, Reference<TCTeamInfo> const& team, bool const& badTeam, bool const& redundantTeam);
 
 struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	enum { REQUESTING_WORKER = 0, GETTING_WORKER = 1, GETTING_STORAGE = 2 };
@@ -1091,7 +1091,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		bool badTeam = redundantTeam || teamInfo->size() != configuration.storageTeamSize
 				|| !satisfiesPolicy(teamInfo->getServers());
 
-		teamInfo->tracker = teamTracker(this, teamInfo, badTeam);
+		teamInfo->tracker = teamTracker(this, teamInfo, badTeam, redundantTeam);
 		// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 		if (badTeam) {
 			badTeams.push_back(teamInfo);
@@ -2366,7 +2366,8 @@ ACTOR Future<Void> teamRemover(DDTeamCollection* self) {
 }
 
 // Track a team and issue RelocateShards when the level of degradation changes
-ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam ) {
+// A badTeam can be unhealthy or just a redundantTeam removed by teamRemover()
+ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
 	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
 	state bool logTeamEvents = g_network->isSimulated() || !badTeam;
@@ -2488,11 +2489,19 @@ ACTOR Future<Void> teamTracker( DDTeamCollection* self, Reference<TCTeamInfo> te
 						team->setPriority( PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
 						team->setPriority( PRIORITY_TEAM_2_LEFT );
-					else
-						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+					else if ( redundantTeam )  {
+						team->setPriority( PRIORITY_TEAM_REDUNDANT );
+					} else {
+							team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+					}
 				}
-				else if ( badTeam || anyWrongConfiguration )
-					team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+				else if ( badTeam || anyWrongConfiguration ) {
+					if ( redundantTeam ) {
+						team->setPriority( PRIORITY_TEAM_REDUNDANT );
+					} else {
+						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
+					}
+				}
 				else if( anyUndesired )
 					team->setPriority( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
 				else
