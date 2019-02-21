@@ -1059,11 +1059,15 @@ struct EnsureTable {
 	EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if constexpr (detail::expect_serialize_member<T>) {
-			if constexpr (serializable_traits<T>::value) {
-				serializable_traits<T>::serialize(ar, t.get());
+		if constexpr (is_fb_function<Archive>) {
+			if constexpr (detail::expect_serialize_member<T>) {
+				if constexpr (serializable_traits<T>::value) {
+					serializable_traits<T>::serialize(ar, t.get());
+				} else {
+					t.get().serialize(ar);
+				}
 			} else {
-				t.get().serialize(ar);
+				serializer(ar, t.get());
 			}
 		} else {
 			serializer(ar, t.get());
