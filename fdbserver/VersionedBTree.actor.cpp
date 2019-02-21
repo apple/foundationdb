@@ -31,72 +31,274 @@
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/PrefixTree.h"
+#include "fdbserver/DeltaTree.h"
 #include <string.h>
 #include "flow/actorcompiler.h"
 
-// Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
-template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
-	arena.dependsOn(s.arena());
-	return s;
-}
+#define STR(x) LiteralStringRef(x)
+struct RedwoodRecordRef {
 
-struct BTreePage {
-	enum EPageFlags { IS_LEAF = 1};
-
-#pragma pack(push,4)
-	uint8_t flags;
-	uint16_t count;
-	uint32_t kvBytes;
-	uint8_t extensionPageCount;
-	LogicalPageID extensionPages[0];
+#pragma pack(push,1)
+	struct ValuePart {
+		int32_t total;
+		int32_t start;
+	};
 #pragma pack(pop)
 
-	PrefixTree & tree() {
-		return *(PrefixTree *)(extensionPages + extensionPageCount);
+	RedwoodRecordRef(KeyRef key = KeyRef(), Version ver = std::numeric_limits<Version>::max(), Optional<ValueRef> value = {}, Optional<ValuePart> part = {})
+		: key(key), version(ver), value(value), valuePart(part)
+	{
+		ASSERT(!part.present() || value.present());
 	}
 
-	const PrefixTree & tree() const {
-		return *(const PrefixTree *)(extensionPages + extensionPageCount);
+	RedwoodRecordRef(Arena &arena, const RedwoodRecordRef &toCopy) {
+		*this = toCopy;
+		key = KeyRef(arena, key);
+		if(value.present()) {
+			value = ValueRef(arena, toCopy.value.get());
+		}
+	}
+
+	KeyRef key;
+	Version version;
+	Optional<ValueRef> value;
+	Optional<ValuePart> valuePart;
+
+	int expectedSize() const {
+		return key.expectedSize() + value.expectedSize() + sizeof(version) + sizeof(valuePart);
+	}
+
+	bool isMultiPart() const {
+		return valuePart.present();
+	}
+
+	// Generate a kv shard from a complete kv
+	RedwoodRecordRef split(int start, int len) {
+		ASSERT(!isMultiPart() && value.present());
+		return RedwoodRecordRef(key, version, value.get().substr(start, len), ValuePart({value.get().size(), start}));
+	}
+
+#pragma pack(push,1)
+	struct Delta {
+		// TODO:  Make this actually a delta
+		enum EFlags {HAS_VALUE = 1, HAS_VALUE_PART = 4};
+
+		uint8_t flags;
+		uint16_t keySize;
+		Version version;
+		uint8_t bytes[];
+
+		RedwoodRecordRef apply(const RedwoodRecordRef &prev, const RedwoodRecordRef &next, Arena arena) {
+			RedwoodRecordRef r;
+			const uint8_t *rptr = bytes;
+			r.key = StringRef(rptr, keySize);
+			rptr += keySize;
+			r.version = version;
+			if(flags & HAS_VALUE) {
+				uint16_t valueSize = *(uint16_t *)rptr;
+				rptr += 2;
+				r.value = StringRef(rptr, valueSize);
+				rptr += valueSize;
+				if(flags & HAS_VALUE_PART) {
+					r.valuePart = *(ValuePart *)rptr;
+				}
+			}
+			return r;
+		}
+
+		int size() const {
+			int s = sizeof(Delta) + keySize;
+			if(flags & HAS_VALUE) {
+				s += 2;
+				s += *(uint16_t *)(bytes + keySize);
+				if(flags & HAS_VALUE_PART) {
+					s += sizeof(ValuePart);
+				}
+			}
+			return s;
+		}
+
+		std::string toString() const {
+			return format("DELTA{ %s | %s }",
+				StringRef((const uint8_t *)this, sizeof(Delta)).toHexString().c_str(),
+				StringRef(bytes, size() - sizeof(Delta)).toHexString().c_str()
+			);
+		}
+	};
+#pragma pack(pop)
+
+	int compare(const RedwoodRecordRef &rhs) const {
+		//printf("compare %s to %s\n", toString().c_str(), rhs.toString().c_str());
+		int cmp = key.compare(rhs.key);
+		if(cmp == 0) {
+			cmp = version - rhs.version;
+			if(cmp == 0) {
+				// Absent value is greater than present (for reasons)
+				cmp = (value.present() ? 0 : 1) - (rhs.value.present() ? 0 : 1);
+				if(cmp == 0) {
+					// Chunked is greater than whole
+					cmp = (valuePart.present() ? 1 : 0) - (rhs.valuePart.present() ? 1 : 0);
+					if(cmp == 0 && valuePart.present()) {
+						// Larger total size is greater
+						cmp = valuePart.get().total - rhs.valuePart.get().total;
+						if(cmp == 0) {
+							// Order by start
+							cmp = valuePart.get().start - rhs.valuePart.get().start;
+						}
+					}
+				}
+			}
+		}
+		return cmp;
+	}
+
+	bool operator==(const RedwoodRecordRef &rhs) const {
+		return compare(rhs) == 0;
+	}
+
+	bool operator<(const RedwoodRecordRef &rhs) const {
+		return compare(rhs) < 0;
+	}
+
+	bool operator>(const RedwoodRecordRef &rhs) const {
+		return compare(rhs) > 0;
+	}
+
+	bool operator<=(const RedwoodRecordRef &rhs) const {
+		return compare(rhs) <= 0;
+	}
+
+	bool operator>=(const RedwoodRecordRef &rhs) const {
+		return compare(rhs) >= 0;
+	}
+
+	int deltaSize(const RedwoodRecordRef &base) const {
+		int s = sizeof(Delta) + key.size();
+		if(value.present()) {
+			s += 2;
+			s += value.get().size();
+			if(valuePart.present()) {
+				s += sizeof(ValuePart);
+			}
+		}
+		return s;
+	}
+
+	void writeDelta(Delta &d, const RedwoodRecordRef &prev, const RedwoodRecordRef &next) const {
+		d.flags = value.present() ? Delta::EFlags::HAS_VALUE : 0;
+		if(valuePart.present())
+			d.flags |= Delta::EFlags::HAS_VALUE_PART;
+		d.keySize = key.size();
+		d.version = version;
+		uint8_t *wptr = d.bytes;
+		memcpy(wptr, key.begin(), key.size());
+		wptr += key.size();
+		if(value.present()) {
+			*(uint16_t *)wptr = value.get().size();
+			wptr += 2;
+			memcpy(wptr, value.get().begin(), value.get().size());
+			wptr += value.get().size();
+			if(valuePart.present()) {
+				*(ValuePart *)wptr = valuePart.get();
+			}
+		}
+	}
+
+	static std::string kvformat(StringRef s, int hexLimit = -1) {
+		bool hex = false;
+
+		for(auto c : s) {
+			if(!isprint(c)) {
+				hex = true;
+				break;
+			}
+		}
+
+		return hex ? s.toHexString(hexLimit) : s.toString();
+	}
+
+	std::string toString(int hexLimit = 15) const {
+		std::string r;
+		r += format("'%s' @%lld ", kvformat(key, hexLimit).c_str(), version);
+		if(valuePart.present()) {
+			r += format("[%d/%d] ", valuePart.get().start, valuePart.get().total);
+		}
+		if(value.present()) {
+			r += format("-> '%s'", kvformat(value.get(), hexLimit).c_str());
+		}
+		else {
+			r += "-> <cleared>";
+		}
+		return r;
+	}
+};
+
+struct BTreePage {
+
+	enum EPageFlags { IS_LEAF = 1};
+
+	typedef DeltaTree<RedwoodRecordRef> BinaryTree;
+
+#pragma pack(push,1)
+	struct {
+		uint8_t flags;
+		uint16_t count;
+		uint32_t kvBytes;
+		uint8_t extensionPageCount;
+		LogicalPageID extensionPages[0];
+	};
+#pragma pack(pop)
+
+	int size() const {
+		const BinaryTree *t = &tree();
+		return (uint8_t *)t - (uint8_t *)this + t->size();
+	}
+
+	bool isLeaf() const {
+		return flags & IS_LEAF;
+	}
+
+	BinaryTree & tree() {
+		return *(BinaryTree *)(extensionPages + extensionPageCount);
+	}
+
+	const BinaryTree & tree() const {
+		return *(const BinaryTree *)(extensionPages + extensionPageCount);
 	}
 
 	static inline int GetHeaderSize(int extensionPages = 0) {
 		return sizeof(BTreePage) + extensionPages + sizeof(LogicalPageID);
 	}
 
-	std::string toString(bool write, LogicalPageID id, Version ver, StringRef lowerBoundKey, StringRef upperBoundKey) const {
+	std::string toString(bool write, LogicalPageID id, Version ver, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) const {
 		std::string r;
-		r += format("BTreePage op=%s id=%d ver=%lld ptr=%p flags=0x%X count=%d kvBytes=%d\nlowerBoundKey='%s'\nupperBoundKey='%s'",
-					write ? "write" : "read", id, ver, this, (int)flags, (int)count, (int)kvBytes,
-					lowerBoundKey.toHexString(20).c_str(), upperBoundKey.toHexString(20).c_str());
+		r += format("BTreePage op=%s id=%d ver=%lld ptr=%p flags=0x%X count=%d kvBytes=%d extPages=%d\n  lowerBound: %s\n  upperBound: %s\n",
+					write ? "write" : "read", id, ver, this, (int)flags, (int)count, (int)kvBytes, (int)extensionPageCount,
+					lowerBound->toString().c_str(), upperBound->toString().c_str());
 		try {
 			if(count > 0) {
-				PrefixTree::Cursor c = tree().getCursor(lowerBoundKey, upperBoundKey);
+				// This doesn't use the cached reader for the page but it is only for debugging purposes
+				BinaryTree::Reader reader(&tree(), lowerBound, upperBound);
+				BinaryTree::Cursor c = reader.getCursor();
+
 				c.moveFirst();
 				ASSERT(c.valid());
 
 				do {
-					r += "\n  ";
-					Tuple t;
-					try {
-						t = Tuple::unpack(c.getKeyRef());
-						for(int i = 0; i < t.size(); ++i) {
-							if(i != 0)
-								r += ",";
-							if(t.getType(i) == Tuple::ElementType::BYTES)
-								r += format("'%s'", t.getString(i).printable().c_str());
-							if(t.getType(i) == Tuple::ElementType::INT)
-								r += format("%lld", t.getInt(i, true));
-						}
-					} catch(Error &e) {
+					r += "  ";
+					if(!(flags & IS_LEAF)) {
+						RedwoodRecordRef rec = c.get();
+						ASSERT(rec.value.present() && rec.value.get().size() == sizeof(uint32_t));
+						uint32_t id = *(const uint32_t *)rec.value.get().begin();
+						std::string val = format("[Page id=%u]", id);
+						rec.value = val;
+						r += rec.toString();
 					}
-					r += format("['%s']", c.getKeyRef().toHexString(20).c_str());
+					else {
+						r += c.get().toString();
+					}
 
-					r += " -> ";
-					if(flags && IS_LEAF)
-						r += format("'%s'", c.getValueRef().toHexString(20).c_str());
-					else
-						r += format("Page id=%u", *(const uint32_t *)c.getValueRef().begin());
+					r += "\n";
 
 				} while(c.moveNext());
 			}
@@ -111,26 +313,35 @@ struct BTreePage {
 };
 
 static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize) {
+	VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 	BTreePage *btpage = (BTreePage *)page->begin();
 	btpage->flags = newFlags;
 	btpage->kvBytes = 0;
 	btpage->count = 0;
 	btpage->extensionPageCount = 0;
-	btpage->tree().build(nullptr, nullptr, StringRef(), StringRef());
+	btpage->tree().build(nullptr, nullptr, nullptr, nullptr);
+}
+
+BTreePage::BinaryTree::Reader * getReader(Reference<const IPage> page) {
+	return (BTreePage::BinaryTree::Reader *)page->userData;
 }
 
 struct BoundaryAndPage {
-	Key lowerBound;
+	Standalone<RedwoodRecordRef> lowerBound;
 	// Only firstPage or multiPage will be in use at once
 	Reference<IPage> firstPage;
 	std::vector<Reference<IPage>> extPages;
 };
 
 // Returns a std::vector of pairs of lower boundary key indices within kvPairs and encoded pages.
+// TODO:  Refactor this as an accumulator you add sorted keys to which makes pages.
 template<typename Allocator>
-static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef lowerBound, StringRef upperBound,  std::vector<PrefixTree::EntryRef> entries, uint8_t newFlags, Allocator const &newBlockFn, int usableBlockSize) {
+static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, const RedwoodRecordRef &lowerBound, const RedwoodRecordRef &upperBound,  std::vector<RedwoodRecordRef> entries, uint8_t newFlags, Allocator const &newBlockFn, int usableBlockSize) {
+	// TODO:  Figure out how to do minimal boundaries with RedwoodRecordRef
+	minimalBoundaries = false;
+
 	// This is how much space for the binary tree exists in the page, after the header
-	int pageSize = usableBlockSize - (BTreePage::GetHeaderSize() + PrefixTree::GetHeaderSize());
+	int pageSize = usableBlockSize - BTreePage::GetHeaderSize();
 
 	// Each new block adds (usableBlockSize - sizeof(LogicalPageID)) more net usable space *for the binary tree* to pageSize.
 	int netTreeBlockSize = usableBlockSize - sizeof(LogicalPageID);
@@ -138,16 +349,15 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 	int blockCount = 1;
 	std::vector<BoundaryAndPage> pages;
 
-	// TODO:  Move all of this abstraction breaking stuff into PrefixTree in the form of a helper function or class.
-	int kvBytes = 0;      // User key/value bytes in page
-	int compressedBytes = 0;   // Conservative estimate of size of compressed page.  TODO: Make this exactly right if possible
+	int kvBytes = 0;
+	int compressedBytes = BTreePage::BinaryTree::GetTreeOverhead();
 
 	int start = 0;
 	int i = 0;
 	const int iEnd = entries.size();
 	// Lower bound of the page being added to
-	Key pageLowerBound = lowerBound;
-	Key pageUpperBound;
+	RedwoodRecordRef pageLowerBound = lowerBound;
+	RedwoodRecordRef pageUpperBound;
 
 	while(i <= iEnd) {
 		bool end = i == iEnd;
@@ -158,17 +368,17 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 			pageUpperBound = upperBound;
 		}
 		else {
-			// Common prefix with previous record
-			const PrefixTree::EntryRef &entry = entries[i];
-			int prefixLen = commonPrefixLength(entry.key, (i == start) ? pageLowerBound : entries[i - 1].key);
+			// Get delta from previous record
+			const RedwoodRecordRef &entry = entries[i];
+			int deltaSize = entry.deltaSize((i == start) ? pageLowerBound : entries[i - 1]);
 			int keySize = entry.key.size();
-			int valueSize = entry.value.size();
+			int valueSize = entry.value.present() ? entry.value.get().size() : 0;
 
-			int spaceNeeded = valueSize + keySize - prefixLen + PrefixTree::Node::getMaxOverhead(i, entry.key.size(), entry.value.size());
+			int spaceNeeded = sizeof(BTreePage::BinaryTree::Node) + deltaSize;
 
-			debug_printf("Trying to add record %d of %lu (i=%d) klen %d  vlen %d  prefixLen %d  spaceNeeded %d  usedSoFar %d/%d '%s'\n",
-				i + 1, entries.size(), i, keySize, valueSize, prefixLen,
-				spaceNeeded, compressedBytes, pageSize, entry.key.toHexString(15).c_str());
+			debug_printf("Trying to add record %3d of %3lu (i=%3d) klen %4d  vlen %3d  deltaSize %4d  spaceNeeded %4d  compressed %4d / page %4d bytes  %s\n",
+				i + 1, entries.size(), i, keySize, valueSize, deltaSize,
+				spaceNeeded, compressedBytes, pageSize, entry.toString().c_str());
 
 			int spaceAvailable = pageSize - compressedBytes;
 
@@ -186,7 +396,7 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 					// Figure out how many additional whole or partial blocks are needed
 					int newBlocks = 1 + (spaceNeeded - spaceAvailable - 1) / netTreeBlockSize;
 					int newPageSize = pageSize + (newBlocks * netTreeBlockSize);
-					if(newPageSize <= PrefixTree::MaximumTreeSize()) {
+					if(newPageSize <= BTreePage::BinaryTree::MaximumTreeSize()) {
 						blockCount += newBlocks;
 						pageSize = newPageSize;
 						fits = true;
@@ -196,13 +406,13 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 					// Flush page
 					if(minimalBoundaries) {
 						// Note that prefixLen is guaranteed to be < entry.key.size() because entries are in increasing order and cannot repeat.
-						int len = prefixLen + 1;
-						if(entry.key[prefixLen] == 0)
-							len = std::min(len + 1, entry.key.size());
-						pageUpperBound = entry.key.substr(0, len);
+// 						int len = prefixLen + 1;
+// 						if(entry.key[prefixLen] == 0)
+// 							len = std::min(len + 1, entry.key.size());
+// 						pageUpperBound = entry.key.substr(0, len);
 					}
 					else {
-						pageUpperBound = entry.key;
+						pageUpperBound = entry;
 					}
 				}
 			}
@@ -221,29 +431,35 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 		if(flush) {
 			end = i == iEnd;  // i could have been moved above
 			int count = i - start;
-			debug_printf("Flushing page start=%d i=%d\nlower='%s'\nupper='%s'\n", start, i, pageLowerBound.toHexString(20).c_str(), pageUpperBound.toHexString(20).c_str());
-			ASSERT(pageLowerBound <= pageUpperBound);
+			debug_printf("Flushing page start=%d i=%d\nlower: %s\nupper: %s\n", start, i, pageLowerBound.toString().c_str(), pageUpperBound.toString().c_str());
+#if REDWOOD_DEBUG
 			for(int j = start; j < i; ++j) {
-				debug_printf(" %d: %s -> %s\n", j, entries[j].key.toHexString(15).c_str(), entries[j].value.toHexString(15).c_str());
+				debug_printf(" %3d: %s\n", j, entries[j].toString().c_str());
+				if(j > start) {
+					ASSERT(entries[j] > entries[j - 1]);
+				}
 			}
+#endif
+			ASSERT(pageLowerBound <= pageUpperBound);
 
 			union {
 				BTreePage *btPage;
 				uint8_t *btPageMem;
 			};
 
+			int allocatedSize;
 			if(blockCount == 1) {
 				Reference<IPage> page = newBlockFn();
+				VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 				btPageMem = page->mutate();
-				pages.push_back({std::move(pageLowerBound), std::move(page)});
+				allocatedSize = page->size();
+				pages.push_back({pageLowerBound, page});
 			}
 			else {
 				ASSERT(blockCount > 1);
-				btPageMem = new uint8_t[usableBlockSize * blockCount];
-#if VALGRIND
-				// Prevent valgrind errors caused by writing random unneeded bytes to disk.
-				memset(btPageMem, 0, usableBlockSize * blockCount);
-#endif
+				allocatedSize = usableBlockSize * blockCount;
+				btPageMem = new uint8_t[allocatedSize];
+				VALGRIND_MAKE_MEM_DEFINED(btPageMem, allocatedSize);
 			}
 
 			btPage->flags = newFlags;
@@ -251,7 +467,7 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 			btPage->count = i - start;
 			btPage->extensionPageCount = blockCount - 1;
 
-			int written = btPage->tree().build(&entries[start], &entries[i], pageLowerBound, pageUpperBound);
+			int written = btPage->tree().build(&entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
 			if(written > pageSize) {
 				fprintf(stderr, "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
 				ASSERT(false);
@@ -259,6 +475,8 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 
 			if(blockCount != 1) {
 				Reference<IPage> page = newBlockFn();
+				VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
+
 				const uint8_t *rptr = btPageMem;
 				memcpy(page->mutate(), rptr, usableBlockSize);
 				rptr += usableBlockSize;
@@ -266,6 +484,8 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 				std::vector<Reference<IPage>> extPages;
 				for(int b = 1; b < blockCount; ++b) {
 					Reference<IPage> extPage = newBlockFn();
+					VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
+
 					//debug_printf("block %d write offset %d\n", b, firstBlockSize + (b - 1) * usableBlockSize);
 					memcpy(extPage->mutate(), rptr, usableBlockSize);
 					rptr += usableBlockSize;
@@ -280,7 +500,7 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 				break;
 			start = i;
 			kvBytes = 0;
-			compressedBytes = 0;
+			compressedBytes = BTreePage::BinaryTree::GetTreeOverhead();
 			pageLowerBound = pageUpperBound;
 		}
 	}
@@ -289,163 +509,14 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 	return pages;
 }
 
-// Internal key/value records represent either a cleared key at a version or a shard of a value of a key at a version.
-// When constructing and packing these it is assumed that the key and value memory is being held elsewhere.
-struct KeyVersionValueRef {
-	KeyVersionValueRef() : version(invalidVersion) {}
-	// Cleared key at version
-	KeyVersionValueRef(KeyRef key, Version ver, Optional<ValueRef> val = {}) 
-		: key(key), version(ver), value(val), valueIndex(0)
-	{
-		if(value.present())
-			valueTotalSize = value.get().size();
-	}
-
-	KeyVersionValueRef(Arena &a, const KeyVersionValueRef &toCopy) {
-		key = KeyRef(a, toCopy.key);
-		version = toCopy.version;
-		if(toCopy.value.present()) {
-			value = ValueRef(a, toCopy.value.get());
-		}
-		valueTotalSize = toCopy.valueTotalSize;
-		valueIndex = toCopy.valueIndex;
-	}
-
-	static inline Key searchKey(StringRef key, Version ver) {
-		Tuple t;
-		t.append(key);
-		t.append(ver);
-		Standalone<VectorRef<uint8_t>> packed = t.getData();
-		packed.append(packed.arena(), (const uint8_t *)"\xff", 1);
-		return Key(KeyRef(packed.begin(), packed.size()), packed.arena());
-	}
-
-	KeyRef key;
-	Version version;
-	int64_t valueTotalSize;      // Total size of value, including all other KVV parts if multipart
-	int64_t valueIndex;          // Index within reconstituted value of this part
-	Optional<ValueRef> value;
-
-	// Result undefined if value is not present
-	bool isMultiPart() const { return value.get().size() != valueTotalSize; }
-	bool valid() const { return version != invalidVersion; }
-
-	// Generate a kv shard from a complete kv
-	KeyVersionValueRef split(int start, int len) {
-		ASSERT(value.present());
-		KeyVersionValueRef r(key, version);
-		r.value = value.get().substr(start, len);
-		r.valueIndex = start;
-		r.valueTotalSize = valueTotalSize;
-		return r;
-	}
-
-	// Encode the record for writing to a btree page.
-	// If copyValue is false, the value is not copied into the returned arena.
-	//
-	// Encoded forms:
-	//  userKey, version                             - the value is present and complete (which includes an empty value)
-	//  userKey, version, valueSize=0                - the key was deleted as of this version
-	//  userKey, version, valueSize>=0, valuePart    - the value is present and spans multiple records
-	inline PrefixTree::Entry pack(bool copyValue = true) const {
-		Tuple t;
-		t.append(key);
-		t.append(version);
-
-		if(!value.present()) {
-			t.append(0);
-		}
-		else {
-			if(isMultiPart()) {
-				t.append(valueTotalSize);
-				t.append(valueIndex);
-			}
-		}
-
-		Key k = t.getDataAsStandalone();
-		ValueRef v;
-		if(value.present()) {
-			v = copyValue ? StringRef(k.arena(), value.get()) : value.get();
-		}
-
-		return PrefixTree::Entry({k, v}, k.arena());
-	}
-
-	// Supports partial/incomplete encoded sequences.
-	// Unpack an encoded key/value pair.
-	// Both key and value will be in the returned arena unless copyValue is false in which case
-	// the value will not be copied to the arena.
-	static Standalone<KeyVersionValueRef> unpack(KeyValueRef kv, bool copyValue = true) {
-		//debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString(15).c_str(), kv.value.toHexString(15).c_str());
-		Standalone<KeyVersionValueRef> result;
-		if(kv.key.size() != 0) {
-#if REDWOOD_DEBUG
-			try { Tuple t = Tuple::unpack(kv.key); } catch(Error &e) { debug_printf("UNPACK FAIL %s %s\n", kv.key.toHexString(20).c_str(), platform::get_backtrace().c_str()); }
-#endif
-			Tuple k = Tuple::unpack(kv.key);
-			int s = k.size();
-			switch(s) {
-				case 4:
-					// Value shard
-					result.valueTotalSize = k.getInt(2);
-					result.valueIndex = k.getInt(3, true);
-					result.value = kv.value;
-					break;
-				case 3:
-					// Deleted or Complete value
-					result.valueIndex = 0;
-					result.valueTotalSize = k.getInt(2, true);
-					// If not a clear, set the value, otherwise it remains non-present
-					if(result.valueTotalSize != 0)
-						result.value = kv.value;
-					break;
-				default:
-					result.valueIndex = 0;
-					result.valueTotalSize = kv.value.size();
-					result.value = kv.value;
-					break;
-			};
-			if(s > 0) {
-				Key sk = k.getString(0);
-				result.arena().dependsOn(sk.arena());
-				result.key = sk;
-				if(s > 1) {
-					result.version = k.getInt(1, true);
-				}
-			}
-		}
-		if(copyValue && result.value.present()) {
-			result.value = StringRef(result.arena(), result.value.get());
-		}
-		return result;
-	}
-
-	static Standalone<KeyVersionValueRef> unpack(KeyRef k) {
-		return unpack(KeyValueRef(k, StringRef()));
-	}
-
-	std::string toString() const {
-		std::string r;
-		r += format("'%s' @%lld -> ", key.toHexString(15).c_str(), version);
-		r += value.present() ? format("'%s' %d/%d", value.get().toHexString(15).c_str(), valueIndex, valueTotalSize).c_str() : "<cleared>";
-		return r;
-	}
-};
-
-typedef Standalone<KeyVersionValueRef> KeyVersionValue;
-
 #define NOT_IMPLEMENTED { UNSTOPPABLE_ASSERT(false); }
 
 class VersionedBTree : public IVersionedStore {
 public:
 	// The first possible internal record possible in the tree
-	static KeyVersionValueRef beginKVV;
+	static RedwoodRecordRef dbBegin;
 	// A record which is greater than the last possible record in the tree
-	static KeyVersionValueRef endKVV;
-
-	// The encoded key form of the above two things.
-	static Key beginKey;
-	static Key endKey;
+	static RedwoodRecordRef dbEnd;
 
 	struct Counts {
 		Counts() {
@@ -576,7 +647,7 @@ public:
 			++latest;
 			Reference<IPage> page = self->m_pager->newPageBuffer();
 			writeEmptyPage(page, BTreePage::IS_LEAF, self->m_usablePageSizeOverride);
-			self->writePage(self->m_root, page, latest, StringRef(), StringRef());
+			self->writePage(self->m_root, page, latest, &dbBegin, &dbEnd);
 			self->m_pager->setLatestVersion(latest);
 			wait(self->m_pager->commit());
 		}
@@ -604,7 +675,7 @@ public:
 		// TODO: Use the buffer to return uncommitted data
 		// For now, only committed versions can be read.
 		ASSERT(v <= m_lastCommittedVersion);
-		return Reference<IStoreCursor>(new Cursor(v, m_pager, m_root, m_usablePageSizeOverride));
+		return Reference<IStoreCursor>(new Cursor(m_pager->getReadSnapshot(v), m_root, m_usablePageSizeOverride));
 	}
 
 	// Must be nondecreasing
@@ -617,8 +688,8 @@ public:
 			m_pBuffer = &m_mutationBuffers[v];
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
 			// because now all existing keys are within some range in the mutation map.
-			(*m_pBuffer)[beginKVV.key];
-			(*m_pBuffer)[endKVV.key];
+			(*m_pBuffer)[dbBegin.key];
+			(*m_pBuffer)[dbEnd.key];
 		}
 		else {
 			// It's OK to set the write version to the same version repeatedly so long as m_pBuffer is not null
@@ -634,14 +705,14 @@ public:
 	}
 
 private:
-	void writePage(LogicalPageID id, Reference<IPage> page, Version ver, StringRef pageLowerBound, StringRef pageUpperBound) {
+	void writePage(LogicalPageID id, Reference<IPage> page, Version ver, const RedwoodRecordRef *pageLowerBound, const RedwoodRecordRef *pageUpperBound) {
 		debug_printf("writePage(): %s\n", ((const BTreePage *)page->begin())->toString(true, id, ver, pageLowerBound, pageUpperBound).c_str());
 		m_pager->writePage(id, page, ver);
 	}
 
 	LogicalPageID m_root;
 
-	typedef std::pair<Key, LogicalPageID> KeyPagePairT;
+	typedef std::pair<Standalone<RedwoodRecordRef>, LogicalPageID> KeyPagePairT;
 	typedef std::pair<Version, std::vector<KeyPagePairT>> VersionedKeyToPageSetT;
 	typedef std::vector<VersionedKeyToPageSetT> VersionedChildrenT;
 
@@ -663,15 +734,14 @@ private:
 
 		inline bool equalToSet(ValueRef val) { return isSet() && value == val; }
 
-		// The returned packed key will be added to arena, the value will just point to the SingleKeyMutation's memory
-		inline KeyVersionValueRef toKVV(KeyRef userKey, Version version) const {
+		inline RedwoodRecordRef toRecord(KeyRef userKey, Version version) const {
 			// No point in serializing an atomic op, it needs to be coalesced to a real value.
 			ASSERT(!isAtomicOp());
 
 			if(isClear())
-				return KeyVersionValueRef(userKey, version);
+				return RedwoodRecordRef(userKey, version);
 
-			return KeyVersionValueRef(userKey, version, value);
+			return RedwoodRecordRef(userKey, version, value);
 		}
 
 		std::string toString() const {
@@ -812,20 +882,23 @@ private:
 		//debug_printf("buildNewRoot start %lu\n", pages.size());
 		// While there are multiple child pages for this version we must write new tree levels.
 		while(pages.size() > 1) {
-			std::vector<PrefixTree::EntryRef> childEntries;
-			for(int i=0; i<pages.size(); i++)
-				childEntries.emplace_back(pages[i].lowerBound, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t)));
+			std::vector<RedwoodRecordRef> childEntries;
+			for(int i=0; i<pages.size(); i++) {
+				RedwoodRecordRef entry = pages[i].lowerBound;
+				entry.value = StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t));
+				childEntries.push_back(entry);
+			}
 
 			int oldPages = pages.size();
-			pages = buildPages(false, beginKey, endKey, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_usablePageSizeOverride);
+			pages = buildPages(false, dbBegin, dbEnd, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_usablePageSizeOverride);
 
 			debug_printf("Writing a new root level at version %lld with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
 
-			logicalPageIDs = writePages(pages, version, m_root, pPage, endKey, nullptr);
+			logicalPageIDs = writePages(pages, version, m_root, pPage, &dbEnd, nullptr);
 		}
 	}
 
-	std::vector<LogicalPageID> writePages(std::vector<BoundaryAndPage> pages, Version version, LogicalPageID originalID, const BTreePage *originalPage, StringRef upperBound, void *actor_debug) {
+	std::vector<LogicalPageID> writePages(std::vector<BoundaryAndPage> pages, Version version, LogicalPageID originalID, const BTreePage *originalPage, const RedwoodRecordRef *upperBound, void *actor_debug) {
 		debug_printf("%p: writePages(): %u @%lld -> %lu replacement pages\n", actor_debug, originalID, version, pages.size());
 
 		ASSERT(version != 0 || pages.size() == 1);
@@ -869,7 +942,7 @@ private:
 			}
 			else {
 				debug_printf("%p: writePages(): Writing normal page op=write id=%u @%lld\n", actor_debug, id, version);
-				writePage(id, pages[i].firstPage, version, pages[i].lowerBound, (i == pages.size() - 1) ? upperBound : pages[i + 1].lowerBound);
+				writePage(id, pages[i].firstPage, version, &pages[i].lowerBound, (i == pages.size() - 1) ? upperBound : &pages[i + 1].lowerBound);
 				++counts.blockWrites;
 			}
 		}
@@ -926,60 +999,70 @@ private:
 		int m_size;
 	};
 
-	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize) {
+	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
 		debug_printf("readPage() op=read id=%u @%lld\n", id, snapshot->getVersion());
-		Reference<const IPage> raw = wait(snapshot->getPhysicalPage(id));
 
-		const BTreePage *pTreePage = (const BTreePage *)raw->begin();
+		state Reference<const IPage> result = wait(snapshot->getPhysicalPage(id));
+		state const BTreePage *pTreePage = (const BTreePage *)result->begin();
+
 		if(pTreePage->extensionPageCount == 0) {
 			debug_printf("readPage() Found normal page for op=read id=%u @%lld\n", id, snapshot->getVersion());
-			return raw;
+		}
+		else {
+			std::vector<Future<Reference<const IPage>>> pageGets;
+			pageGets.push_back(std::move(result));
+
+			for(int i = 0; i < pTreePage->extensionPageCount; ++i) {
+				debug_printf("readPage() Reading extension page op=read id=%u @%lld ext=%d/%d\n", pTreePage->extensionPages[i], snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
+				pageGets.push_back(snapshot->getPhysicalPage(pTreePage->extensionPages[i]));
+			}
+
+			std::vector<Reference<const IPage>> pages = wait(getAll(pageGets));
+			result = Reference<const IPage>(new SuperPage(pages, usablePageSize));
+			pTreePage = (const BTreePage *)result->begin();
 		}
 
-		std::vector<Future<Reference<const IPage>>> pageGets;
-		pageGets.push_back(std::move(raw));
-
-		for(int i = 0; i < pTreePage->extensionPageCount; ++i) {
-			debug_printf("readPage() Reading extension page op=read id=%u @%lld ext=%d/%d\n", pTreePage->extensionPages[i], snapshot->getVersion(), i + 1, (int)pTreePage->extensionPageCount);
-			pageGets.push_back(snapshot->getPhysicalPage(pTreePage->extensionPages[i]));
+		if(result->userData == nullptr) {
+			result->userData = new BTreePage::BinaryTree::Reader(&pTreePage->tree(), lowerBound, upperBound);
+			result->userDataDestructor = [](void *ptr) { delete (BTreePage::BinaryTree::Reader *)ptr; };
 		}
 
-		std::vector<Reference<const IPage>> pages = wait(getAll(pageGets));
+		debug_printf("readPage() %s\n", pTreePage->toString(false, id, snapshot->getVersion(), lowerBound, upperBound).c_str());
 
-		return Reference<const IPage>(new SuperPage(pages, usablePageSize));
+		// Nothing should attempt to read bytes in the page outside the BTreePage structure
+		VALGRIND_MAKE_MEM_UNDEFINED(result->begin() + pTreePage->size(), result->size() - pTreePage->size());
+
+		return result;
 	}
 
 	// Returns list of (version, list of (lower_bound, list of children) )
-	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
-		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBoundKey.toHexString(20).c_str(), upperBoundKey.toHexString(20).c_str());
-
-		// Decode the (likely truncate) upper and lower bound keys for this subtree.
-		state KeyVersionValue lowerBoundKVV = KeyVersionValue::unpack(lowerBoundKey);
-		state KeyVersionValue upperBoundKVV = KeyVersionValue::unpack(upperBoundKey);
+	// TODO:  Probably should pass prev/next records by pointer in many places
+	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
+		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBound->toString().c_str(), upperBound->toString().c_str());
 
 		// Find the slice of the mutation buffer that is relevant to this subtree
-		// TODO:  Rather than two lower_bound searches, perhaps just compare each mutation to the upperBound key
-		state MutationBufferT::const_iterator iMutationBoundary = mutationBuffer->lower_bound(lowerBoundKVV.key);
-		state MutationBufferT::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBoundKVV.key);
+		// TODO:  Rather than two lower_bound searches, perhaps just compare each mutation to the upperBound key while iterating
+		state MutationBufferT::const_iterator iMutationBoundary = mutationBuffer->lower_bound(lowerBound->key);
+		state MutationBufferT::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBound->key);
 
 		// If the lower bound key and the upper bound key are the same then there can't be any changes to
 		// this subtree since changes would happen after the upper bound key as the mutated versions would
 		// necessarily be higher.
-		if(lowerBoundKVV.key == upperBoundKVV.key) {
+		if(lowerBound->key == upperBound->key) {
 			debug_printf("%p no changes, lower and upper bound keys are the same.\n", this);
-			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
+			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 		}
 
 		// If the mutation buffer key found is greater than the lower bound key then go to the previous mutation
 		// buffer key because it may cover deletion of some keys at the start of this subtree.
-		if(iMutationBoundary != mutationBuffer->begin() && iMutationBoundary->first > lowerBoundKVV.key) {
+		if(iMutationBoundary != mutationBuffer->begin() && iMutationBoundary->first > lowerBound->key) {
 			--iMutationBoundary;
 		}
 		else {
 			// If the there are no mutations, we're done
 			if(iMutationBoundary == iMutationBoundaryEnd) {
 				debug_printf("%p no changes, mutation buffer start/end are the same\n", this);
-				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
+				return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 			}
 		}
 
@@ -992,20 +1075,20 @@ private:
 		++iMutationBoundaryNext;
 		if(iMutationBoundaryNext == iMutationBoundaryEnd && iMutationBoundary->second.noChanges()) {
 			debug_printf("%p no changes because sole mutation range was empty\n", this);
-			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
+			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 		}
 
-		state Reference<const IPage> rawPage = wait(readPage(snapshot, root, self->m_usablePageSizeOverride));
+		state Reference<const IPage> rawPage = wait(readPage(snapshot, root, self->m_usablePageSizeOverride, lowerBound, upperBound));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
-		debug_printf("%p commitSubtree(): %s\n", this, page->toString(false, root, snapshot->getVersion(), lowerBoundKey, upperBoundKey).c_str());
+		debug_printf("%p commitSubtree(): %s\n", this, page->toString(false, root, snapshot->getVersion(), lowerBound, upperBound).c_str());
 
-		PrefixTree::Cursor existingCursor = page->tree().getCursor(lowerBoundKey, upperBoundKey);
-		bool existingCursorValid = existingCursor.moveFirst();
+		BTreePage::BinaryTree::Cursor cursor = getReader(rawPage)->getCursor();
+		cursor.moveFirst();
 
 		// Leaf Page
 		if(page->flags & BTreePage::IS_LEAF) {
 			VersionedChildrenT results;
-			std::vector<PrefixTree::EntryRef> merged;
+			std::vector<RedwoodRecordRef> merged;
 			Arena mergedArena;
 
 			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", this);
@@ -1014,12 +1097,6 @@ private:
 			// It's a given that the mutation map is not empty so it's safe to do this
 			Key mutationRangeStart = iMutationBoundary->first;
 
-			// There will be multiple loops advancing existing cursor, existing KVV will track its current value
-			KeyVersionValue existing;
-
-			if(existingCursorValid) {
-				existing = KeyVersionValue::unpack(existingCursor.getKVRef());
-			}
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = invalidVersion;
 
@@ -1031,26 +1108,22 @@ private:
 
 				// If the mutation boundary key is less than the lower bound key then skip startKeyMutations for
 				// this bounary, we're only processing this mutation range here to apply any clears to existing data.
-				if(iMutationBoundary->first < lowerBoundKVV.key)
+				if(iMutationBoundary->first < lowerBound->key)
 					iMutations = iMutationBoundary->second.startKeyMutations.end();
 				// If the mutation boundary key is the same as the page lowerBound key then start reading single
-				// key mutations at the first version greater than the lowerBoundKey version.
-				else if(iMutationBoundary->first == lowerBoundKVV.key)
-					iMutations = iMutationBoundary->second.startKeyMutations.upper_bound(lowerBoundKVV.version);
+				// key mutations at the first version greater than the lowerBound key's version.
+				else if(iMutationBoundary->first == lowerBound->key)
+					iMutations = iMutationBoundary->second.startKeyMutations.upper_bound(lowerBound->version);
 				else
 					iMutations = iMutationBoundary->second.startKeyMutations.begin();
 
 				SingleKeyMutationsByVersion::const_iterator iMutationsEnd = iMutationBoundary->second.startKeyMutations.end();
 
 				// Output old versions of the mutation boundary key
-				while(existingCursorValid && existing.key == iMutationBoundary->first) {
-					// Don't copy the value because this page will stay in memory until after we've built new version(s) of it
-					merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
-					debug_printf("%p: Added %s [existing, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
-
-					existingCursorValid = existingCursor.moveNext();
-					if(existingCursorValid)
-						existing = KeyVersionValue::unpack(existingCursor.getKVRef());
+				while(cursor.valid() && cursor.get().key == iMutationBoundary->first) {
+					merged.push_back(cursor.get());
+					debug_printf("%p: Added %s [existing, boundary start]\n", this, merged.back().toString().c_str());
+					cursor.moveNext();
 				}
 
 				// TODO:  If a mutation set is equal to the previous existing value of the key, maybe don't write it.
@@ -1061,23 +1134,22 @@ private:
 					if(m.isClear() || m.value.size() <= maxPartSize) {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
-						// Don't copy the value because this page will stay in memory until after we've built new version(s) of it
-						merged.push_back(dependsOn(mergedArena, iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack(false)));
-						debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
+						merged.push_back(iMutations->second.toRecord(iMutationBoundary->first, iMutations->first));
+						debug_printf("%p: Added non-split %s [mutation, boundary start]\n", this, merged.back().toString().c_str());
 					}
 					else {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
 						int bytesLeft = m.value.size();
 						int start = 0;
-						KeyVersionValueRef whole(iMutationBoundary->first, iMutations->first, m.value);
+						RedwoodRecordRef whole(iMutationBoundary->first, iMutations->first, m.value);
 						while(bytesLeft > 0) {
 							int partSize = std::min(bytesLeft, maxPartSize);
 							// Don't copy the value chunk because this page will stay in memory until after we've built new version(s) of it
-							merged.push_back(dependsOn(mergedArena, whole.split(start, partSize).pack(false)));
+							merged.push_back(whole.split(start, partSize));
 							bytesLeft -= partSize;
 							start += partSize;
-							debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
+							debug_printf("%p: Added split %s [mutation, boundary start]\n", this, merged.back().toString().c_str());
 						}
 					}
 					++iMutations;
@@ -1091,40 +1163,32 @@ private:
 				debug_printf("%p Mutation range end: '%s'\n", this, printable(iMutationBoundary->first).c_str());
 
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
-				while(existingCursorValid && existing.key < iMutationBoundary->first) {
-					merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
-					debug_printf("%p: Added %s [existing, middle]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
+				while(cursor.valid() && cursor.get().key < iMutationBoundary->first) {
+					merged.push_back(cursor.get());
+					debug_printf("%p: Added %s [existing, middle]\n", this, merged.back().toString().c_str());
 
-					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next key is different
-					// than this one.  Note that the next key might be the in our right sibling, we can use the page upperBound to get that.
-					existingCursorValid = existingCursor.moveNext();
-					KeyVersionValue nextEntry;
-					if(existingCursorValid)
-						nextEntry = KeyVersionValue::unpack(existingCursor.getKVRef());
-					else
-						nextEntry = upperBoundKVV;
+					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next cursor
+					// key is different than the current one.  If the last cursor key in the page is different from the
+					// first key in the right sibling page then the page's upper bound will reflect that.
+					auto nextCursor = cursor;
+					nextCursor.moveNext();
 
-					if(clearRangeVersion.present() && existing.key != nextEntry.key) {
+					if(clearRangeVersion.present() && cursor.get().key != nextCursor.getOrUpperBound().key) {
 						Version clearVersion = clearRangeVersion.get();
 						if(clearVersion < minVersion || minVersion == invalidVersion)
 							minVersion = clearVersion;
-						merged.push_back(dependsOn(mergedArena, KeyVersionValueRef(existing.key, clearVersion).pack(false)));
-						debug_printf("%p: Added %s [existing, middle clear]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
+						merged.push_back(RedwoodRecordRef(cursor.get().key, clearVersion));
+						debug_printf("%p: Added %s [existing, middle clear]\n", this, merged.back().toString().c_str());
 					}
-
-					if(existingCursorValid)
-						existing = nextEntry;
+					cursor = nextCursor;
 				}
 			}
 
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
-			while(existingCursorValid) {
-				merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
-				debug_printf("%p: Added %s [existing, tail]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
-
-				existingCursorValid = existingCursor.moveNext();
-				if(existingCursorValid)
-					existing = KeyVersionValue::unpack(existingCursor.getKVRef());
+			while(cursor.valid()) {
+				merged.push_back(cursor.get());
+				debug_printf("%p: Added %s [existing, tail]\n", this, merged.back().toString().c_str());
+				cursor.moveNext();
 			}
 
 			debug_printf("%p Done merging mutations into existing leaf contents\n", this);
@@ -1133,26 +1197,26 @@ private:
 			// not which turns out to not match any existing data in the leaf.
 			if(minVersion == invalidVersion) {
 				debug_printf("%p No changes were made during mutation merge\n", this);
-				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
+				return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 			}
 
 			// TODO: Make version and key splits based on contents of merged list, if keeping history
 
 			IPager *pager = self->m_pager;
-			std::vector<BoundaryAndPage> pages = buildPages(true, lowerBoundKey, upperBoundKey, merged, BTreePage::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
+			std::vector<BoundaryAndPage> pages = buildPages(true, *lowerBound, *upperBound, merged, BTreePage::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
 
 			// If there isn't still just a single page of data then this page became too large and was split.
 			// The new split pages will be valid as of minVersion, but the old page remains valid at the old version
 			// (TODO: unless history isn't being kept at all)
 			if(pages.size() != 1) {
-				results.push_back( {0, {{lowerBoundKey, root}}} );
+				results.push_back( {0, {{*lowerBound, root}}} );
 			}
 
 			if(pages.size() == 1)
 				minVersion = 0;
 
 			// Write page(s), get new page IDs
-			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBoundKey, this);
+			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBound, this);
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 			if(root == self->m_root && pages.size() > 1) {
@@ -1166,9 +1230,9 @@ private:
 			// TODO: This can probably be skipped for root
 			for(int i=0; i<pages.size(); i++) {
 				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
-				Key lowerBound = (i == 0) ? lowerBoundKey : pages[i].lowerBound;
-				debug_printf("%p Adding page to results: %s => %d\n", this, lowerBound.toHexString(20).c_str(), newPageIDs[i]);
-				results.back().second.push_back( {lowerBound, newPageIDs[i]} );
+				const RedwoodRecordRef &lower = (i == 0) ? *lowerBound : pages[i].lowerBound;
+				debug_printf("%p Adding page to results: %s => %d\n", this, lower.toString().c_str(), newPageIDs[i]);
+				results.back().second.push_back( {lower, newPageIDs[i]} );
 			}
 
 			debug_printf("%p DONE.\n", this);
@@ -1182,27 +1246,30 @@ private:
 
 			// TODO:  Make this much more efficient with a skip-merge through the two sorted sets (mutations, existing cursor)
 			bool first = true;
-			while(existingCursorValid) {
-				// The lower bound for the first child is lowerBoundKey
-				Key childLowerBound = first ? lowerBoundKey : existingCursor.getKey();
+			while(cursor.valid()) {
+				// The lower bound for the first child is the lowerBound arg
+				const RedwoodRecordRef &childLowerBound = first ? *lowerBound : cursor.get();
 				if(first)
 					first = false;
 
-				uint32_t pageID = *(uint32_t*)existingCursor.getValueRef().begin();
+				uint32_t pageID = *(uint32_t*)cursor.get().value.get().begin();
 				ASSERT(pageID != 0);
 
-				existingCursorValid = existingCursor.moveNext();
-				Key childUpperBound = existingCursorValid ? existingCursor.getKey() : upperBoundKey;
+				const RedwoodRecordRef &childUpperBound = cursor.moveNext() ? cursor.get() : *upperBound;
 
-				debug_printf("lower          '%s'\n", childLowerBound.toHexString(20).c_str());
-				debug_printf("upper          '%s'\n", childUpperBound.toHexString(20).c_str());
+				debug_printf("lower          '%s'\n", childLowerBound.toString().c_str());
+				debug_printf("upper          '%s'\n", childUpperBound.toString().c_str());
 				ASSERT(childLowerBound <= childUpperBound);
 
-				futureChildren.push_back(self->commitSubtree(self, mutationBuffer, snapshot, pageID, childLowerBound, childUpperBound));
+				futureChildren.push_back(self->commitSubtree(self, mutationBuffer, snapshot, pageID, &childLowerBound, &childUpperBound));
 				childPageIDs.push_back(pageID);
 			}
 
-			wait(waitForAll(futureChildren));
+			//wait(waitForAll(futureChildren));
+			state int k;
+			for(k = 0; k < futureChildren.size(); ++k) {
+				wait(success(futureChildren[k]));
+			}
 
 			bool modified = false;
 			for(int i = 0; i < futureChildren.size(); ++i) {
@@ -1216,7 +1283,7 @@ private:
 
 			if(!modified) {
 				debug_printf("%p not modified.\n", this);
-				return VersionedChildrenT({{0, {{lowerBoundKey, root}}}});
+				return VersionedChildrenT({{0, {{*lowerBound, root}}}});
 			}
 
 			Version version = 0;
@@ -1225,7 +1292,7 @@ private:
 			loop { // over version splits of this page
 				Version nextVersion = std::numeric_limits<Version>::max();
 
-				std::vector<PrefixTree::EntryRef> childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
+				std::vector<RedwoodRecordRef> childEntries;
 
 				// For each Future<VersionedChildrenT>
 				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", this, root, version);
@@ -1241,7 +1308,7 @@ private:
 					for(auto &versionedPageSet : children) {
 						debug_printf("%p    version: Page id=%lld\n", this, versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
-							debug_printf("%p      '%s' -> Page id=%u\n", this, printable(boundaryPage.first).c_str(), boundaryPage.second);
+							debug_printf("%p      '%s' -> Page id=%u\n", this, boundaryPage.first.toString().c_str(), boundaryPage.second);
 						}
 					}
 
@@ -1272,8 +1339,10 @@ private:
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("%p  Adding child page '%s'\n", this, printable(childPage.first).c_str());
-						childEntries.emplace_back(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t)));
+						debug_printf("%p  Adding child page %s\n", this, childPage.first.toString().c_str());
+						RedwoodRecordRef entry = childPage.first;
+						entry.value = StringRef((unsigned char *)&childPage.second, sizeof(uint32_t));
+						childEntries.push_back(entry);
 					}
 				}
 
@@ -1284,10 +1353,10 @@ private:
 					// cause unnecessary path copying
 
 					IPager *pager = self->m_pager;
-					std::vector<BoundaryAndPage> pages = buildPages(false, lowerBoundKey, upperBoundKey, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
+					std::vector<BoundaryAndPage> pages = buildPages(false, *lowerBound, *upperBound, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
 
 					// Write page(s), use version 0 to replace latest version if only writing one page
-					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBoundKey, this);
+					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBound, this);
 
 					// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 					if(root == self->m_root)
@@ -1307,7 +1376,7 @@ private:
 				}
 				else {
 					debug_printf("%p Version 0 has no changes\n", this);
-					result.push_back({0, {{lowerBoundKey, root}}});
+					result.push_back({0, {{*lowerBound, root}}});
 				}
 
 				if (nextVersion == std::numeric_limits<Version>::max())
@@ -1346,7 +1415,7 @@ private:
 
 		self->printMutationBuffer(mutations);
 
-		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey, endKey));
+		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, &dbBegin, &dbEnd));
 
 		self->m_pager->setLatestVersion(writeVersion);
 		debug_printf("%s: Committing pager %lld\n", self->m_name.c_str(), writeVersion);
@@ -1365,239 +1434,278 @@ private:
 		return Void();
 	}
 
-	// InternalCursor is for seeking to and iterating over the internal / low level records in the Btree.
-	// This records are versioned and they can represent deletions or partial values so they must be
-	// post processed to obtain keys returnable to the user.
-	class InternalCursor {
+	// InternalCursor is for seeking to and iterating over the 'internal' records (not user-visible) in the Btree.
+	// These records are versioned and they can represent deletedness or partial values.
+	struct InternalCursor {
+	private:
+		// Each InternalCursor's position is represented by a reference counted PageCursor, which links
+		// to its parent PageCursor, up to a PageCursor representing a cursor on the root page.
+		// PageCursors can be shared by many InternalCursors, making InternalCursor copying low overhead
+		struct PageCursor : ReferenceCounted<PageCursor>, FastAllocated<PageCursor> {
+			Reference<PageCursor> parent;
+			LogicalPageID pageID;       // Only needed for debugging purposes
+			Reference<const IPage> page;
+			BTreePage::BinaryTree::Cursor cursor;
+
+			PageCursor(LogicalPageID id, Reference<const IPage> page, Reference<PageCursor> parent = {})
+				: pageID(id), page(page), parent(parent), cursor(getReader().getCursor())
+			{
+			}
+
+			PageCursor(const PageCursor &toCopy) : parent(toCopy.parent), pageID(toCopy.pageID), page(toCopy.page), cursor(toCopy.cursor) {
+			}
+
+			// Convenience method for copying a PageCursor
+			Reference<PageCursor> copy() const {
+				return Reference<PageCursor>(new PageCursor(*this));
+			}
+
+			// Multiple InternalCursors can share a Page 
+			BTreePage::BinaryTree::Reader & getReader() const {
+				return *(BTreePage::BinaryTree::Reader *)page->userData;
+			}
+
+			bool isLeaf() const {
+				const BTreePage *p = ((const BTreePage *)page->begin());
+				return p->isLeaf();
+			}
+
+			Future<Reference<PageCursor>> getChild(Reference<IPagerSnapshot> pager, int usablePageSizeOverride) {
+				ASSERT(!isLeaf());
+				BTreePage::BinaryTree::Cursor next = cursor;
+				next.moveNext();
+				const RedwoodRecordRef &rec = cursor.get();
+				LogicalPageID id = *(LogicalPageID *)rec.value.get().begin();
+				Future<Reference<const IPage>> child = readPage(pager, id, usablePageSizeOverride, &rec, &next.getOrUpperBound());
+				return map(child, [=](Reference<const IPage> page) {
+					return Reference<PageCursor>(new PageCursor(id, page, Reference<PageCursor>::addRef(this)));
+				});
+			}
+
+			std::string toString() const {
+				return format("Page %lu, %s", pageID, cursor.valid() ? cursor.get().toString().c_str() : "<invalid>");
+			}
+		};
+
+		LogicalPageID rootPageID;
+		int usablePageSizeOverride;
+		Reference<IPagerSnapshot> pager;
+		Reference<PageCursor> pageCursor;
+
 	public:
-		InternalCursor() {}
-		InternalCursor(Reference<IPagerSnapshot> pages, LogicalPageID root, int usablePageSizeOverride) : m_pages(pages), m_root(root), outOfBound(0), m_usablePageSizeOverride(usablePageSizeOverride) {
-			m_path.reserve(6);
+		InternalCursor() {
 		}
 
-		bool valid() const {
-			return (outOfBound == 0) && kvv.valid();
+		InternalCursor(Reference<IPagerSnapshot> pager, LogicalPageID root, int usablePageSizeOverride)
+			: pager(pager), rootPageID(root), usablePageSizeOverride(usablePageSizeOverride) {
 		}
 
-		Future<Void> seekLessThanOrEqual(KeyRef key) {
-			return seekLessThanOrEqual_impl(this, key);
-		}
-
-		Future<Void> move(bool fwd) {
-			return move_impl(this, fwd);
-		}
-
-		Standalone<KeyVersionValueRef> kvv;  // The decoded current internal record in the tree
-
-		std::string toString(const char *wrapPrefix = "") const {
+		std::string toString() const {
 			std::string r;
-			r += format("InternalCursor(%p) ver=%lld oob=%d valid=%d", this, m_pages->getVersion(), outOfBound, valid());
-			r += format("\n%s  KVV: %s", wrapPrefix, kvv.toString().c_str());
-			for(const PageEntryLocation &p : m_path) {
-				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString(20).c_str(), p.cursor.getValueRef().toHexString(20).c_str()) : "invalid";
-				r += format("\n%s  Page id=%d (%d records, %d bytes)  Cursor %s", wrapPrefix, p.pageNumber, p.btPage->count, p.btPage->kvBytes, cur.c_str());
+			Reference<PageCursor> c = pageCursor;
+			while(c) {
+				r = format("[%s] ", c->toString().c_str()) + r;
+				c = c->parent;
 			}
 			return r;
 		}
 
-	private:
-		Reference<IPagerSnapshot> m_pages;
-		LogicalPageID m_root;
-		int m_usablePageSizeOverride;
+		// Returns true if cursor position is a valid leaf page record
+		bool valid() const {
+			return pageCursor && pageCursor->isLeaf() && pageCursor->cursor.valid();
+		}
 
-		struct PageEntryLocation {
-			PageEntryLocation() {}
-			PageEntryLocation(Key lowerBound, Key upperBound, Reference<const IPage> page, LogicalPageID id)
-				: pageLowerBound(lowerBound), pageUpperBound(upperBound), page(page), pageNumber(id), btPage((BTreePage *)page->begin()), cursor(btPage->tree().getCursor(pageLowerBound, pageUpperBound))
-			{
+		// Returns true if cursor position is valid() and has a present record value
+		bool present() {
+			return valid() && pageCursor->cursor.get().value.present();
+		}
+
+		// Returns true if cursor position is present() and has an effective version <= v
+		bool presentAtVersion(Version v) {
+			return present() && pageCursor->cursor.get().version <= v;
+		}
+
+		// Returns true if cursor position is present() and has an effective version <= v
+		bool validAtVersion(Version v) {
+			return valid() && pageCursor->cursor.get().version <= v;
+		}
+
+		const RedwoodRecordRef & get() const {
+			return pageCursor->cursor.get();
+		}
+
+		// Ensure that pageCursor is not shared with other cursors so we can modify it
+		void ensureUnshared() {
+			if(!pageCursor->isSoleOwner()) {
+				pageCursor = pageCursor->copy();
 			}
+		}
 
-			Key getNextOrUpperBound() {
-				if(cursor.moveNext()) {
-					Key r = cursor.getKey();
-					cursor.movePrev();
-					return r;
+		Future<Void> moveToRoot() {
+			// If pageCursor exists follow parent links to the root
+			if(pageCursor) {
+				while(pageCursor->parent) {
+					pageCursor = pageCursor->parent;
 				}
-				return pageUpperBound;
+				return Void();
 			}
 
-			Key pageLowerBound;
-			Key pageUpperBound;
-			Reference<const IPage> page;
-			BTreePage *btPage;
-			PrefixTree::Cursor cursor;
-			// For easier debugging
-			LogicalPageID pageNumber;
-		};
-
-		typedef std::vector<PageEntryLocation> TraversalPathT;
-		TraversalPathT m_path;
-		int outOfBound;
-
-		ACTOR static Future<Void> pushPage(InternalCursor *self, Key lowerBound, Key upperBound, LogicalPageID id) {
-			Reference<const IPage> rawPage = wait(readPage(self->m_pages, id, self->m_usablePageSizeOverride));
-			debug_printf("InternalCursor::pushPage() %s\n", ((const BTreePage *)rawPage->begin())->toString(false, id, self->m_pages->getVersion(), lowerBound, upperBound).c_str());
-			self->m_path.emplace_back(lowerBound, upperBound, rawPage, id);
-			return Void();
+			// Otherwise read the root page
+			Future<Reference<const IPage>> root = readPage(pager, rootPageID, usablePageSizeOverride, &dbBegin, &dbEnd);
+			return map(root, [=](Reference<const IPage> p) {
+				pageCursor = Reference<PageCursor>(new PageCursor(rootPageID, p));
+				return Void();
+			});
 		}
 
-		ACTOR static Future<Void> reset(InternalCursor *self) {
-			if(self->m_path.empty()) {
-				wait(pushPage(self, beginKey, endKey, self->m_root));
-			}
-			else {
-				self->m_path.resize(1);
-			}
-			self->outOfBound = 0;
-			return Void();
-		}
+		ACTOR Future<bool> seekLessThanOrEqual_impl(InternalCursor *self, RedwoodRecordRef query) {
+			Future<Void> f = self->moveToRoot();
 
-		ACTOR static Future<Void> seekLessThanOrEqual_impl(InternalCursor *self, KeyRef key) {
-			state TraversalPathT &path = self->m_path;
-			wait(reset(self));
+			// f will almost always be ready
+			if(!f.isReady()) {
+				wait(f);
+			}
 
-			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
+			self->ensureUnshared();
 
 			loop {
-				state PageEntryLocation *p = &path.back();
-
-				if(p->btPage->count == 0) {
-					ASSERT(path.size() == 1);  // This must be the root page.
-					self->outOfBound = -1;
-					self->kvv.version = invalidVersion;
-					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
-					return Void();
-				}
-
-				state bool foundLTE = p->cursor.seekLessThanOrEqual(key);
-				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", key.toHexString(20).c_str(), foundLTE, self->toString("  ").c_str());
-				
-				if(p->btPage->flags & BTreePage::IS_LEAF) {
-					// It is possible for the current leaf key to be between the page's lower bound (in the parent page) and the 
-					// first record in the leaf page, which means we must move backwards 1 step in the database to find the
-					// record < key, if such a record exists.
-					if(!foundLTE) {
-						wait(self->move(false));
+				if(self->pageCursor->cursor.seekLessThanOrEqual(query)) {
+					// If we found a record <= query at a leaf page then return success
+					if(self->pageCursor->isLeaf()) {
+						return true;
 					}
-					else {
-						// Found the target record
-						self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
-					}
-					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", key.toHexString(20).c_str(), self->toString("  ").c_str());
-					return Void();
+
+					// Otherwise move to next child page
+					Reference<PageCursor> child = wait(self->pageCursor->getChild(self->pager, self->usablePageSizeOverride));
+					self->pageCursor = child;
 				}
 				else {
-					// We don't have to check foundLTE here because if it's false then cursor will be at the first record in the page.
-					// TODO:  It would, however, be more efficient to check foundLTE and if false move to the previous sibling page.
-					// But the page should NOT be empty so let's assert that the cursor is valid.
-					ASSERT(p->cursor.valid());
-
-					state LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
-					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to Page id=%d.  %s\n", 
-						key.toHexString(20).c_str(), newPage, self->toString("  ").c_str());
-					wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
+					// No records <= query on this page, so move to immediate previous record at leaf level
+					bool success = wait(self->move(false));
+					return success;
 				}
 			}
 		}
 
-		// Move one 'internal' key/value/version/valueindex/value record.
-		// Iterating with this function will "see" all parts of all values and clears at all versions (that is, within the cursor's version of btree pages)
-		ACTOR static Future<Void> move_impl(InternalCursor *self, bool fwd) {
-			state TraversalPathT &path = self->m_path;
-			state const char *dir = fwd ? "forward" : "backward";
+		Future<bool> seekLTE(RedwoodRecordRef query) {
+			return seekLessThanOrEqual_impl(this, query);
+		}
 
-			debug_printf("InternalCursor::move(%s) start  %s\n", dir, self->toString("  ").c_str());
+		ACTOR Future<bool> move_impl(InternalCursor *self, bool forward) {
+			// Try to move pageCursor, if it fails to go parent, repeat until it works or root cursor can't be moved
+			while(1) {
+				self->ensureUnshared();
+				bool success = self->pageCursor->cursor.valid() && (forward ? self->pageCursor->cursor.moveNext() : self->pageCursor->cursor.movePrev());
 
-			// If cursor was out of bound, adjust out of boundness by 1 in the correct direction
-			if(self->outOfBound != 0) {
-				self->outOfBound += fwd ? 1 : -1;
-				// If we appear to be inbounds, see if we're off the other end of the db or if the page cursor is valid.
-				if(self->outOfBound == 0) {
-					if(!path.empty() && path.back().cursor.valid()) {
-						self->kvv = KeyVersionValue::unpack(path.back().cursor.getKVRef());
-					}
-					else {
-						self->outOfBound = fwd ? 1 : -1;
-					}
-				}
-				debug_printf("InternalCursor::move(%s) was out of bound, exiting  %s\n", dir, self->toString("  ").c_str());
-				return Void();
-			}
-
-			int i = path.size();
-			// Find the closest path part to the end where the index can be moved in the correct direction.
-			while(--i >= 0) {
-				PrefixTree::Cursor &c = path[i].cursor;
-				bool success = fwd ? c.moveNext() : c.movePrev();
-				if(success) {
-					debug_printf("InternalCursor::move(%s) Move successful on path index %d\n", dir, i);
-					path.resize(i + 1);
+				// Stop if successful or there's no parent to move to
+				if(success || !self->pageCursor->parent) {
 					break;
-				} else {
-					debug_printf("InternalCursor::move(%s) Move failed on path index %d\n", dir, i);
+				}
+
+				// Move to parent
+				self->pageCursor = self->pageCursor->parent;
+			}
+
+			// If pageCursor not valid we've reached an end of the tree
+			if(!self->pageCursor->cursor.valid()) {
+				return false;
+			}
+
+			// While not on a leaf page, move down to get to one.
+			while(!self->pageCursor->isLeaf()) {
+				Reference<PageCursor> child = wait(self->pageCursor->getChild(self->pager, self->usablePageSizeOverride));
+				bool success = forward ? child->cursor.moveFirst() : child->cursor.moveLast();
+				self->pageCursor = child;
+			}
+
+			return true;
+		}
+
+		Future<bool> move(bool forward) {
+			return move_impl(this, forward);
+		}
+
+		Future<bool> moveNext() {
+			return move_impl(this, true);
+		}
+		Future<bool> movePrev() {
+			return move_impl(this, false);
+		}
+
+		// Move to the first or last record of the database.
+		ACTOR Future<bool> move_end(InternalCursor *self, bool begin) {
+			Future<Void> f = self->moveToRoot();
+
+			// f will almost always be ready
+			if(!f.isReady()) {
+				wait(f);
+			}
+
+			self->ensureUnshared();
+
+			loop {
+				// Move to first or last record in the page
+				bool success = begin ? self->pageCursor->cursor.moveFirst() : self->pageCursor->cursor.moveLast();
+
+				// If it worked, return true if we've reached a leaf page otherwise go to the next child
+				if(success) {
+					if(self->pageCursor->isLeaf()) {
+						return true;
+					}
+					Reference<PageCursor> child = wait(self->pageCursor->getChild(self->pager, self->usablePageSizeOverride));
+					self->pageCursor = child;
+				}
+				else {
+					return false;
 				}
 			}
-
-			// If no path part could be moved without going out of range then the
-			// new cursor position is either before the first record or after the last.
-			// Leave the path steps in place and set outOfBound to 1 or -1 based on fwd.
-			// This makes the cursor not valid() but a move in the opposite direction
-			// will make it valid again, pointing to the previous target record.
-			if(i < 0) {
-				self->outOfBound = fwd ? 1 : -1;
-				debug_printf("InternalCursor::move(%s) Passed an end of the database  %s\n", dir, self->toString("  ").c_str());
-				return Void();
-			}
-
-			// We were able to advance the cursor on one of the pages in the page traversal path, so now traverse down to leaf level
-			state PageEntryLocation *p = &(path.back());
-
-			debug_printf("InternalCursor::move(%s): Descending if needed to find a leaf\n", dir);
-
-			// Now we must traverse downward if needed until we are at a leaf level.
-			// Each movement down will start on the far left or far right depending on fwd
-			while(!(p->btPage->flags & BTreePage::IS_LEAF)) {
-				// Get the page that the path's last entry points to
-				LogicalPageID childPageID = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
-
-				wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), childPageID));
-				p = &(path.back());
-				// No page traversed to in this manner should be empty.
-				ASSERT(p->btPage->count != 0);
-				// Go to the first or last entry in the page depending on traversal direction
-				if(fwd)
-					p->cursor.moveFirst();
-				else
-					p->cursor.moveLast();
-
-				debug_printf("InternalCursor::move(%s) Descended one level  %s\n", dir, self->toString("  ").c_str());
-			}
-
-			// Found the target record, unpack it
-			ASSERT(p->cursor.valid());
-			self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
-
-			debug_printf("InternalCursor::move(%s) Exiting  %s\n", dir, self->toString("  ").c_str());
-			return Void();
 		}
+
+		Future<bool> moveFirst() {
+			return move_end(this, true);
+		}
+		Future<bool> moveLast() {
+			return move_end(this, false);
+		}
+
 	};
 
 	// Cursor is for reading and interating over user visible KV pairs at a specific version
-	// Keys and values returned are only valid until one of the move methods is called (find*, next, prev)
-	// TODO: Make an option to copy all returned strings into an arena?
-	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor>, public NonCopyable {
+	// KeyValueRefs returned become invalid once the cursor is moved
+	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor>, public FastAllocated<Cursor>, NonCopyable  {
 	public:
-		Cursor(Version version, IPager *pager, LogicalPageID root, int usablePageSizeOverride)
-		  : m_version(version), m_pagerSnapshot(pager->getReadSnapshot(version)), m_icursor(m_pagerSnapshot, root, usablePageSizeOverride) {
+		Cursor(Reference<IPagerSnapshot> pageSource, LogicalPageID root, int usablePageSizeOverride)
+			: m_version(pageSource->getVersion()),
+			m_cur1(pageSource, root, usablePageSizeOverride),
+			m_cur2(m_cur1)
+		{
 		}
-		virtual ~Cursor() {}
 
-		virtual Future<Void> findEqual(KeyRef key) { return find_impl(Reference<Cursor>::addRef(this), key, true, 0); }
-		virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) { return find_impl(Reference<Cursor>::addRef(this), key, needValue, 1); }
-		virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) { return find_impl(Reference<Cursor>::addRef(this), key, needValue, -1); }
+		void addref() { ReferenceCounted<Cursor>::addref(); }
+		void delref() { ReferenceCounted<Cursor>::delref(); }
 
-		virtual Future<Void> next(bool needValue) { return next_impl(Reference<Cursor>::addRef(this), needValue); }
-		virtual Future<Void> prev(bool needValue) { return prev_impl(Reference<Cursor>::addRef(this), needValue); }
+	private:
+		Version m_version;
+		// If kv is valid
+		//   - kv.key references memory held by cur1
+		//   - If cur1 points to a non split KV pair
+		//       - kv.value references memory held by cur1
+		//       - cur2 points to the next internal record after cur1
+		//     Else
+		//       - kv.value references memory in arena
+		//       - cur2 points to the first internal record of the split KV pair
+		InternalCursor m_cur1;
+		InternalCursor m_cur2;
+		Arena m_arena;
+		Optional<KeyValueRef> m_kv;
+
+	public:
+		virtual Future<Void> findEqual(KeyRef key) { return find_impl(this, key, true, 0); }
+		virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) { return find_impl(this, key, needValue, 1); }
+		virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) { return find_impl(this, key, needValue, -1); }
+
+		virtual Future<Void> next(bool needValue) { return move(this, true, needValue); }
+		virtual Future<Void> prev(bool needValue) { return move(this, false, needValue); }
 
 		virtual bool isValid() {
 			return m_kv.present();
@@ -1606,6 +1714,7 @@ private:
 		virtual KeyRef getKey() {
 			return m_kv.get().key;
 		}
+
 		//virtual StringRef getCompressedKey() = 0;
 		virtual ValueRef getValue() {
 			return m_kv.get().value;
@@ -1616,63 +1725,79 @@ private:
 		virtual void invalidateReturnedStrings() {
 		}
 
-		void addref() { ReferenceCounted<Cursor>::addref(); }
-		void delref() { ReferenceCounted<Cursor>::delref(); }
-
-		std::string toString(const char *wrapPrefix = "") const {
+		std::string toString() const {
 			std::string r;
-			r += format("Cursor(%p) ver: %lld key: %s value: %s", this, m_version,
-				(m_kv.present() ? m_kv.get().key.printable().c_str() : "<np>"),
-				(m_kv.present() ? m_kv.get().value.printable().c_str() : ""));
-			r += format("\n%s  InternalCursor: %s", wrapPrefix, m_icursor.toString(format("%s    ", wrapPrefix).c_str()).c_str());
+			r += format("Cursor(%p) ver: %lld ", this, m_version);
+			r += format("  KV: '%s' -> '%s'\n",
+				m_kv.present() ? m_kv.get().key.printable().c_str() : "<np>",
+				m_kv.present() ? m_kv.get().value.printable().c_str() : "");
+			r += format("  Cur1: %s\n", m_cur1.toString().c_str());
+			r += format("  Cur2: %s\n", m_cur2.toString().c_str());
 			return r;
 		}
 
 	private:
-		Version m_version;
-		Reference<IPagerSnapshot> m_pagerSnapshot;
-		InternalCursor m_icursor;
-		Optional<KeyValueRef> m_kv; // The current user-level key/value in the tree
-		Arena m_arena;
-
 		// find key in tree closest to or equal to key (at this cursor's version)
 		// for less than or equal use cmp < 0
 		// for greater than or equal use cmp > 0
 		// for equal use cmp == 0
-		ACTOR static Future<Void> find_impl(Reference<Cursor> self, KeyRef key, bool needValue, int cmp) {
-			state InternalCursor &icur = self->m_icursor;
-
+		ACTOR static Future<Void> find_impl(Cursor *self, KeyRef key, bool needValue, int cmp) {
 			// Search for the last key at or before (key, version, \xff)
-			state Key target = KeyVersionValueRef::searchKey(key, self->m_version);
-			self->m_kv = Optional<KeyValueRef>();
+			state RedwoodRecordRef query(key, self->m_version);
+			self->m_kv.reset();
 
-			wait(icur.seekLessThanOrEqual(target));
-			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toHexString(15).c_str(), icur.toString().c_str());
+			wait(success(self->m_cur1.seekLTE(query)));
+			debug_printf("find%sE(%s): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), query.toString().c_str(), self->toString().c_str());
 
-			// If we found the target key, return it as it is valid for any cmp option
-			if(icur.valid() && icur.kvv.value.present() && icur.kvv.key == key) {
-				debug_printf("Reading full kv pair starting from: %s\n", icur.kvv.toString().c_str());
+			// If we found the target key with a present value then return it as it is valid for any cmp type
+			if(self->m_cur1.present() && self->m_cur1.get().key == key) {
+				debug_printf("Target key found, reading full KV pair.  Cursor: %s\n", self->toString().c_str());
 				wait(self->readFullKVPair(self));
 				return Void();
 			}
 
-			// FindEqual, so if we're still here we didn't find it.
+			// Mode is ==, so if we're still here we didn't find it.
 			if(cmp == 0) {
 				return Void();
 			}
 
-			// FindEqualOrGreaterThan, so if we're here we have to go to the next present record at the target version.
+			// Mode is >=, so if we're here we have to go to the next present record at the target version
+			// because the seek done above was <= query
 			if(cmp > 0) {
-				// icur is at a record < key, possibly before the start of the tree so move forward at least once.
-				loop {
-					wait(icur.move(true));
-					if(!icur.valid() || icur.kvv.key > key)
-						break;
+				// icur is at a record < query or invalid.
+
+				// If cursor is invalid, try to go to start of tree
+				if(!self->m_cur1.valid()) {
+					bool valid = wait(self->m_cur1.moveFirst());
+					if(!valid) {
+						self->m_kv.reset();
+						return Void();
+					}
 				}
+				else {
+					loop {
+						bool valid = wait(self->m_cur1.move(true));
+						if(!valid) {
+							self->m_kv.reset();
+							return Void();
+						}
+
+						if(self->m_cur1.get().key > key) {
+							break;
+						}
+					}
+				}
+
 				// Get the next present key at the target version.  Handles invalid cursor too.
 				wait(self->next(needValue));
 			}
 			else if(cmp < 0) {
+				// Mode is <=, which is the same as the seekLTE(query)
+				if(!self->m_cur1.valid()) {
+					self->m_kv.reset();
+					return Void();
+				}
+
 				// Move to previous present kv pair at the target version
 				wait(self->prev(needValue));
 			}
@@ -1680,136 +1805,117 @@ private:
 			return Void();
 		}
 
-		ACTOR static Future<Void> next_impl(Reference<Cursor> self, bool needValue) {
-			// TODO: use needValue
-			state InternalCursor &i = self->m_icursor;
+		// TODO: use needValue
+		ACTOR static Future<Void> move(Cursor *self, bool fwd, bool needValue) {
+			debug_printf("Cursor::move(%d): Cursor = %s\n", fwd, self->toString().c_str());
+			ASSERT(self->m_cur1.valid());
 
-			debug_printf("Cursor::next(): cursor %s\n", i.toString().c_str());
-
-			// Make sure we are one record past the last user key
+			// If kv is present then the key/version at cur1 was already returned so move to a new key
+			// Move cur1 until failure or a new key is found, keeping prior record visited in cur2
 			if(self->m_kv.present()) {
-				while(i.valid() && i.kvv.key <= self->m_kv.get().key) {
-					debug_printf("Cursor::next(): Advancing internal cursor to get passed previous returned user key.  cursor %s\n", i.toString().c_str());
-					wait(i.move(true));
+				ASSERT(self->m_cur1.valid());
+				loop {
+					self->m_cur2 = self->m_cur1;
+					bool valid = wait(self->m_cur1.move(fwd));
+					if(!valid || self->m_cur1.get().key != self->m_cur2.get().key) {
+						break;
+					}
 				}
 			}
 
-			state Version v = self->m_pagerSnapshot->getVersion();
-			state InternalCursor iLast;
-			while(1) {
-				iLast = i;
-				if(!i.valid())
-					break;
-				wait(i.move(true));
-				// If the previous cursor position was a set at a version at or before v and the new cursor position
-				// is not valid or a newer version of the same key or a different key, then get the full record
-				// for the previous cursor position
-				if(iLast.kvv.version <= v
-					&& iLast.kvv.value.present()
-					&& (
-						!i.valid()
-						|| i.kvv.key != iLast.kvv.key
-						|| i.kvv.version > v
-					)
+			// Given two consecutive cursors c1 and c2, c1 represents a returnable record if
+			//    c1.presentAtVersion(v) || (!c2.validAtVersion() || c2.get().key != c1.get().key())
+			// Note the distinction between 'present' and 'valid'.  Present means the value for the key
+			// exists at the version (but could be the empty string) while valid just means the internal
+			// record is in effect at that version but it could indicate that the key was cleared and
+			// no longer exists from the user's perspective at that version
+			//
+			// If moving forward, cur2 must be the record after cur1 so we can determine if
+			// cur1 is to be returned below.
+			// If moving backward, cur2 is already the record after cur1
+			if(fwd && self->m_cur1.valid()) {
+				self->m_cur2 = self->m_cur1;
+				wait(success(self->m_cur2.move(true)));
+			}
+
+			while(self->m_cur1.valid()) {
+
+				if(self->m_cur1.presentAtVersion(self->m_version) &&
+					(!self->m_cur2.validAtVersion(self->m_version) ||
+					self->m_cur2.get().key != self->m_cur1.get().key)
 				) {
-					// Assume that next is the most likely next move, so save the one-too-far cursor position.
-					std::swap(i, iLast);
-					// readFullKVPair will have to go backwards to read the value
 					wait(readFullKVPair(self));
-					std::swap(i, iLast);
 					return Void();
 				}
-			}
 
-			self->m_kv = Optional<KeyValueRef>();
-			return Void();
-		}
-
-		ACTOR static Future<Void> prev_impl(Reference<Cursor> self, bool needValue) {
-			// TODO:  use needValue
-			state InternalCursor &i = self->m_icursor;
-
-			debug_printf("Cursor::prev(): cursor %s\n", i.toString().c_str());
-
-			// Make sure we are one record before the last user key
-			if(self->m_kv.present()) {
-				while(i.valid() && i.kvv.key >= self->m_kv.get().key) {
-					wait(i.move(false));
-				}
-			}
-
-			state Version v = self->m_pagerSnapshot->getVersion();
-			while(i.valid()) {
-				// Once we reach a present value at or before v, return or skip it.
-				if(i.kvv.version <= v) {
-					// If it's present, return it
-					if(i.kvv.value.present()) {
-						wait(readFullKVPair(self));
-						return Void();
-					}
-					// Value wasn't present as of the latest version <= v, so move backward to a new key
-					state Key clearedKey = i.kvv.key;
-					while(1) {
-						wait(i.move(false));
-						if(!i.valid() || i.kvv.key != clearedKey)
-							break;
-					}
+				if(fwd) {
+					// Moving forward, move cur2 forward and keep cur1 pointing to the prior (predecessor) record
+					self->m_cur1 = self->m_cur2;
+					wait(success(self->m_cur2.move(true)));
 				}
 				else {
-					wait(i.move(false));
+					// Moving backward, move cur1 backward and keep cur2 pointing to the prior (successor) record
+					self->m_cur2 = self->m_cur1;
+					wait(success(self->m_cur1.move(false)));
 				}
+
 			}
 
-			self->m_kv = Optional<KeyValueRef>();
+			self->m_kv.reset();
 			return Void();
 		}
 
-		// Read all of the current value, if it is split across multiple kv pairs, and set m_kv.
-		// m_current must be at either the first or the last value part.
-		ACTOR static Future<Void> readFullKVPair(Reference<Cursor> self) {
-			state KeyVersionValue &kvv = self->m_icursor.kvv;
-			state KeyValueRef &kv = (self->m_kv = KeyValueRef()).get();
+		// Read all of the current key-value record starting at cur1 into kv
+		ACTOR static Future<Void> readFullKVPair(Cursor *self) {
+			self->m_arena = Arena();
+			const RedwoodRecordRef &rec = self->m_cur1.get();
+	
+			debug_printf("readFullKVPair:  Starting at %s\n", self->toString().c_str());
 
-			ASSERT(kvv.value.present());
-			// Set the key and cursor arena to the arena containing that key
-			self->m_arena = kvv.arena();
-			kv.key = kvv.key;
+			// Unsplit value, cur1 will hold the key and value memory
+			if(!rec.isMultiPart()) {
+				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString().c_str());
 
-			// Unsplit value
-			if(!kvv.isMultiPart()) {
-				kv.value = kvv.value.get();
-				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString("  ").c_str());
+				self->m_kv = KeyValueRef(rec.key, rec.value.get());
+				return Void();
 			}
-			else {
-				// Figure out if we should go forward or backward to find all the parts
-				state bool fwd = kvv.valueIndex == 0;
-				ASSERT(fwd || kvv.valueIndex + kvv.value.get().size() == kvv.valueTotalSize);
-				debug_printf("readFullKVPair:  Split, fwd %d totalsize %lld  %s\n", fwd, kvv.valueTotalSize, self->toString("  ").c_str());
-				// Allocate space for the entire value in the same arena as the key
-				state int bytesLeft = kvv.valueTotalSize;
-				kv.value = makeString(bytesLeft, self->m_arena);
-				while(1) {
-					debug_printf("readFullKVPair:  Adding chunk start %lld len %d total %lld dir %d\n", kvv.valueIndex, kvv.value.get().size(), kvv.valueTotalSize, fwd);
-					int partSize = kvv.value.get().size();
-					memcpy(mutateString(kv.value) + kvv.valueIndex, kvv.value.get().begin(), partSize);
-					bytesLeft -= partSize;
-					if(bytesLeft == 0)
-						break;
-					ASSERT(bytesLeft > 0);
-					wait(self->m_icursor.move(fwd));
-					ASSERT(self->m_icursor.valid());
+
+			// Split value, need to coalesce split value parts into a buffer in arena,
+			// after which cur1 will point to the first part and kv.key will reference its key
+			const RedwoodRecordRef::ValuePart &part = rec.valuePart.get();
+			ASSERT(part.start + rec.value.get().size() == part.total);
+
+			debug_printf("readFullKVPair:  Split, totalsize %d  %s\n", part.total, self->toString().c_str());
+
+			// Allocate space for the entire value in the same arena as the key
+			state int bytesLeft = part.total;
+			state StringRef dst = makeString(bytesLeft, self->m_arena);
+
+			loop {
+				const RedwoodRecordRef &rec = self->m_cur1.get();
+				const RedwoodRecordRef::ValuePart &part = rec.valuePart.get();
+
+				debug_printf("readFullKVPair:  Adding chunk %s\n", rec.toString().c_str());
+
+				int partSize = rec.value.get().size();
+				memcpy(mutateString(dst) + part.start, rec.value.get().begin(), partSize);
+				bytesLeft -= partSize;
+				if(bytesLeft == 0) {
+					self->m_kv = KeyValueRef(rec.key, dst);
+					return Void();
 				}
+				ASSERT(bytesLeft > 0);
+				// Move backward
+				bool success = wait(self->m_cur1.move(false));
+				ASSERT(success);
 			}
-
-			return Void();
 		}
 	};
+
 };
 
-KeyVersionValueRef VersionedBTree::beginKVV(StringRef(), 0, StringRef());
-KeyVersionValueRef VersionedBTree::endKVV(LiteralStringRef("\xff\xff\xff\xff"), std::numeric_limits<int>::max(), StringRef());
-Key VersionedBTree::beginKey(beginKVV.pack().key);
-Key VersionedBTree::endKey(endKVV.pack().key);
+RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
+RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff"), std::numeric_limits<Version>::max());
 
 ACTOR template<class T>
 Future<T> catchError(Promise<Void> error, Future<T> f) {
@@ -1993,9 +2099,7 @@ IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) 
 }
 
 int randomSize(int max) {
-	int exp = g_random->randomInt(0, 6);
-	int limit = (pow(10.0, exp) / 1e5 * max) + 1;
-	int n = g_random->randomInt(0, max);
+	int n = pow(g_random->random01(), 3) * max;
 	return n;
 }
 
@@ -2157,7 +2261,8 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
 			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
-			wait(cur->findEqual(key));
+			state Arena arena;
+			wait(cur->findEqual(KeyRef(arena, key)));
 
 			if(val.present()) {
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
@@ -2217,7 +2322,8 @@ ACTOR Future<Void> randomReader(VersionedBTree *btree) {
 			cur = btree->readAtVersion(v);
 		}
 
-		wait(cur->findFirstEqualOrGreater(randomKV(10, 0).key, true, 0));
+		state KeyValue kv = randomKV(10, 0);
+		wait(cur->findFirstEqualOrGreater(kv.key, true, 0));
 		state int c = g_random->randomInt(0, 100);
 		while(cur->isValid() && c-- > 0) {
 			wait(success(cur->next(true)));
@@ -2225,6 +2331,278 @@ ACTOR Future<Void> randomReader(VersionedBTree *btree) {
 		}
 	}
 }
+
+struct SplitStringRef {
+	StringRef a;
+	StringRef b;
+
+	SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {
+	}
+
+	SplitStringRef getSplitPrefix(int len) const {
+		if(len <= a.size()) {
+			return SplitStringRef(a.substr(0, len));
+		}
+		len -= a.size();
+		ASSERT(b.size() <= len);
+		return SplitStringRef(a, b.substr(0, len));
+	}
+
+	StringRef getContiguousPrefix(int len, Arena &arena) const {
+		if(len <= a.size()) {
+			return a.substr(0, len);
+		}
+		StringRef c = makeString(len, arena);
+		memcpy(mutateString(c), a.begin(), a.size());
+		len -= a.size();
+		memcpy(mutateString(c) + a.size(), b.begin(), len);
+		return c;
+	}
+
+	int compare(const SplitStringRef &rhs) const {
+		// TODO: Rewrite this..
+		Arena a;
+		StringRef self = getContiguousPrefix(size(), a);
+		StringRef other = rhs.getContiguousPrefix(rhs.size(), a);
+		return self.compare(other);
+	}
+
+	int compare(const StringRef &rhs) const {
+		// TODO: Rewrite this..
+		Arena a;
+		StringRef self = getContiguousPrefix(size(), a);
+		return self.compare(rhs);
+	}
+
+	int size() const {
+		return a.size() + b.size();
+	}
+
+	std::string toString() const {
+		return format("%s%s", a.toString().c_str(), b.toString().c_str());
+	}
+
+	std::string toHexString() const {
+		return format("%s%s", a.toHexString().c_str(), b.toHexString().c_str());
+	}
+};
+
+struct IntIntPair {
+	IntIntPair() {}
+	IntIntPair(int k, int v) : k(k), v(v) {}
+
+	IntIntPair(Arena &arena, const IntIntPair &toCopy) {
+		*this = toCopy;
+	}
+
+	struct Delta {
+		int dk;
+		int dv;
+
+		IntIntPair apply(const IntIntPair &prev, const IntIntPair &next, Arena arena) {
+			return {prev.k + dk, prev.v + dv};
+		}
+
+		int size() const {
+			return sizeof(Delta);
+		}
+
+		std::string toString() const {
+			return format("DELTA{dk=%d(0x%x) dv=%d(0x%x)}", dk, dk, dv, dv);
+		}
+	};
+
+	int compare(const IntIntPair &rhs) const {
+		//printf("compare %s to %s\n", toString().c_str(), rhs.toString().c_str());
+		return k - rhs.k;
+	}
+
+	bool operator==(const IntIntPair &rhs) const {
+		return k == rhs.k;
+	}
+
+	int deltaSize(const IntIntPair &base) const {
+		return sizeof(Delta);
+	}
+
+	void writeDelta(Delta &d, const IntIntPair &prev, const IntIntPair &next) const {
+		// Always borrow from prev
+		d.dk = k - prev.k;
+		d.dv = v - prev.v;
+	}
+
+	int k;
+	int v;
+
+	std::string toString() const {
+		return format("{k=%d(0x%x) v=%d(0x%x)}", k, k, v, v);
+	}
+};
+
+TEST_CASE("!/redwood/mutableDeltaTreeCorrectnessRedwoodRecord") {
+	const int N = 200;
+
+	RedwoodRecordRef prev;
+	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+
+	Arena arena;
+	std::vector<RedwoodRecordRef> items;
+	for(int i = 0; i < N; ++i) {
+		std::string k = g_random->randomAlphaNumeric(30);
+		std::string v = g_random->randomAlphaNumeric(30);
+		RedwoodRecordRef rec;
+		rec.key = StringRef(arena, k);
+		rec.version = g_random->coinflip() ? g_random->randomInt64(0, std::numeric_limits<Version>::max()) : invalidVersion;
+		if(g_random->coinflip()) {
+			rec.value = StringRef(arena, v);
+			if(g_random->coinflip()) {
+				RedwoodRecordRef::ValuePart part;
+				part.start = g_random->randomInt(0, 5000);
+				part.total = part.start + v.size() + g_random->randomInt(0, 5000);
+				rec.valuePart = part;
+			}
+		}
+		items.push_back(rec);
+		//printf("i=%d %s\n", i, items.back().toString().c_str());
+	}
+	std::sort(items.begin(), items.end());
+
+	DeltaTree<RedwoodRecordRef> *tree = (DeltaTree<RedwoodRecordRef> *) new uint8_t[N * 100];
+
+	tree->build(&items[0], &items[items.size()], &prev, &next);
+
+	printf("Count=%d  Size=%d  InitialDepth=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialDepth);
+	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
+
+	DeltaTree<RedwoodRecordRef>::Reader r(tree, &prev, &next);
+	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();
+	DeltaTree<RedwoodRecordRef>::Cursor rev = r.getCursor();
+
+	ASSERT(fwd.moveFirst());
+	ASSERT(rev.moveLast());
+	int i = 0;
+	while(1) {
+		if(fwd.get() != items[i]) {
+			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
+			printf("Delta: %s\n", fwd.node->raw->delta->toString().c_str());
+			ASSERT(false);
+		}
+		if(rev.get() != items[items.size() - 1 - i]) {
+			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
+			printf("Delta: %s\n", rev.node->raw->delta->toString().c_str());
+			ASSERT(false);
+		}
+		++i;
+		ASSERT(fwd.moveNext() == rev.movePrev());
+		ASSERT(fwd.valid() == rev.valid());
+		if(!fwd.valid()) {
+			break;
+		}
+	}
+	ASSERT(i == items.size());
+
+	double start = timer();
+	DeltaTree<RedwoodRecordRef>::Cursor c = r.getCursor();
+
+	for(int i = 0; i < 20000000; ++i) {
+		const RedwoodRecordRef &query = items[g_random->randomInt(0, items.size())];
+		if(!c.seekLessThanOrEqual(query)) {
+			printf("Not found!  query=%s\n", query.toString().c_str());
+			ASSERT(false);
+		}
+		if(c.get() != query) {
+			printf("Found incorrect node!  query=%s  found=%s\n", query.toString().c_str(), c.get().toString().c_str());
+			ASSERT(false);
+		}
+	}
+	double elapsed = timer() - start;
+	printf("Elapsed %f\n", elapsed);
+
+	return Void();
+}
+
+TEST_CASE("!/redwood/mutableDeltaTreeCorrectnessIntInt") {
+	const int N = 200;
+	IntIntPair prev = {0, 0};
+	IntIntPair next = {1000, 0};
+
+	std::vector<IntIntPair> items;
+	for(int i = 0; i < N; ++i) {
+		items.push_back({i*10, i*1000});
+		//printf("i=%d %s\n", i, items.back().toString().c_str());
+	}
+
+	DeltaTree<IntIntPair> *tree = (DeltaTree<IntIntPair> *) new uint8_t[10000];
+
+	tree->build(&items[0], &items[items.size()], &prev, &next);
+
+	printf("Count=%d  Size=%d  InitialDepth=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialDepth);
+	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
+
+	DeltaTree<IntIntPair>::Reader r(tree, &prev, &next);
+	DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
+	DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
+
+	ASSERT(fwd.moveFirst());
+	ASSERT(rev.moveLast());
+	int i = 0;
+	while(1) {
+		if(fwd.get() != items[i]) {
+			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
+			ASSERT(false);
+		}
+		if(rev.get() != items[items.size() - 1 - i]) {
+			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
+			ASSERT(false);
+		}
+		++i;
+		ASSERT(fwd.moveNext() == rev.movePrev());
+		ASSERT(fwd.valid() == rev.valid());
+		if(!fwd.valid()) {
+			break;
+		}
+	}
+	ASSERT(i == items.size());
+
+	DeltaTree<IntIntPair>::Cursor c = r.getCursor();
+
+	double start = timer();
+	for(int i = 0; i < 20000000; ++i) {
+		IntIntPair p({g_random->randomInt(0, items.size() * 10), 0});
+		if(!c.seekLessThanOrEqual(p)) {
+			printf("Not found!  query=%s\n", p.toString().c_str());
+			ASSERT(false);
+		}
+		if(c.get().k != (p.k - (p.k % 10))) {
+			printf("Found incorrect node!  query=%s  found=%s\n", p.toString().c_str(), c.get().toString().c_str());
+			ASSERT(false);
+		}
+	}
+	double elapsed = timer() - start;
+	printf("Elapsed %f\n", elapsed);
+
+	return Void();
+}
+
+struct SimpleCounter {
+	SimpleCounter() : x(0), xt(0), t(timer()), start(t) {}
+	void operator+=(int n) { x += n; }
+	void operator++() { x++; }
+	int64_t get() { return x; }
+	double rate() {
+		double t2 = timer();
+		int r = (x - xt) / (t2 - t);
+		xt = x;
+		t = t2;
+		return r;
+	}
+	double avgRate() { return x / (timer() - start); }
+	int64_t x;
+	double t;
+	double start;
+	int64_t xt;
+	std::string toString() { return format("%lld/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
+};
 
 TEST_CASE("!/redwood/correctness") {
 	state bool useDisk = true;  // MemoryPager is not being maintained currently.
@@ -2245,14 +2623,13 @@ TEST_CASE("!/redwood/correctness") {
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	wait(btree->init());
 
-	state int mutationBytesTarget = g_random->randomInt(100, 20e6);
-
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
 	// TODO:  Handle arbitrarily large keys
-	state int maxKeySize = std::min(pageSize * 8, 30000);
-	ASSERT(maxKeySize > 0);
-	state int maxValueSize = std::min(pageSize * 25, 100000);
+	state int maxKeySize = g_random->randomInt(4, pageSize * 2);
+	state int maxValueSize = g_random->randomInt(0, pageSize * 2);
+
+	state int mutationBytesTarget = g_random->randomInt(100, (maxKeySize + maxValueSize) * 2000);
 
 	printf("Using page size %d, max key size %d, max value size %d, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, mutationBytesTarget);
 
@@ -2263,12 +2640,15 @@ TEST_CASE("!/redwood/correctness") {
 	printf("Starting from version: %lld\n", lastVer);
 
 	state Version version = lastVer + 1;
-	state int mutationBytes = 0;
-
 	btree->setWriteVersion(version);
 
-	state int64_t keyBytesInserted = 0;
-	state int64_t ValueBytesInserted = 0;
+	state SimpleCounter mutationBytes;
+	state SimpleCounter keyBytesInserted;
+	state SimpleCounter valueBytesInserted;
+	state SimpleCounter sets;
+	state SimpleCounter rangeClears;
+	state SimpleCounter keyBytesCleared;
+	state SimpleCounter valueBytesCleared;
 	state int errorCount;
 
 	state PromiseStream<Version> committedVersions;
@@ -2277,7 +2657,7 @@ TEST_CASE("!/redwood/correctness") {
 
 	state Future<Void> commit = Void();
 
-	while(mutationBytes < mutationBytesTarget) {
+	while(mutationBytes.get() < mutationBytesTarget) {
 		// Sometimes advance the version
 		if(g_random->random01() < 0.10) {
 			++version;
@@ -2307,6 +2687,7 @@ TEST_CASE("!/redwood/correctness") {
 				std::swap(end, start);
 			}
 
+			++rangeClears;
 			KeyRangeRef range(start, end);
 			debug_printf("      Clear '%s' to '%s' @%lld\n", start.toString().c_str(), end.toString().c_str(), version);
 			auto e = written.lower_bound(std::make_pair(start.toString(), 0));
@@ -2319,13 +2700,17 @@ TEST_CASE("!/redwood/correctness") {
 					// If e key is different from last and last was present then insert clear for last's key at version
 					if(last != eEnd && ((e == eEnd || e->first.first != last->first.first) && last->second.present())) {
 						debug_printf("         Clearing key '%s' @%lld\n", last->first.first.c_str(), version);
+
+						keyBytesCleared += last->first.first.size();
+						valueBytesCleared += last->second.get().size();
 						mutationBytes += (last->first.first.size() + last->second.get().size());
+
 						// If the last set was at version then just make it not present
 						if(last->first.second == version) {
-							last->second = Optional<std::string>();
+							last->second.reset();
 						}
 						else {
-							written[std::make_pair(last->first.first, version)] = Optional<std::string>();
+							written[std::make_pair(last->first.first, version)].reset();
 						}
 					}
 					last = e;
@@ -2343,17 +2728,21 @@ TEST_CASE("!/redwood/correctness") {
 				if(i != keys.end())
 					kv.key = StringRef(kv.arena(), *i);
 			}
-			keyBytesInserted += kv.key.size();
-			ValueBytesInserted += kv.value.size();
-			mutationBytes += (kv.key.size() + kv.value.size());
+
 			debug_printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+
+			++sets;
+			keyBytesInserted += kv.key.size();
+			valueBytesInserted += kv.value.size();
+			mutationBytes += (kv.key.size() + kv.value.size());
+
 			btree->set(kv);
 			written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			keys.insert(kv.key);
 		}
 
-		// Sometimes (and at end) commit then check all results
-		if(mutationBytes >= std::min(mutationBytesTarget, (int)20e6) || g_random->random01() < .002) {
+		// Sometimes (and at end) commit
+		if(mutationBytes.get() >= mutationBytesTarget || g_random->random01() < .002) {
 			// Wait for btree commit and send the new version to committedVersions.
 			// Avoid capture of version as a member of *this
 			Version v = version;
@@ -2363,7 +2752,15 @@ TEST_CASE("!/redwood/correctness") {
 				return Void();
 			});
 
-			printf("Cumulative: %d total mutation bytes, %lu key changes, %lld key bytes, %lld value bytes\n", mutationBytes, written.size(), keyBytesInserted, ValueBytesInserted);
+			printf("Committing.  Stats: sets %s  clears %s  setKey %s  setVal %s  clearKey %s  clearVal %s  mutations %s\n",
+				   sets.toString().c_str(),
+				   rangeClears.toString().c_str(),
+				   keyBytesInserted.toString().c_str(),
+				   valueBytesInserted.toString().c_str(),
+				   keyBytesCleared.toString().c_str(),
+				   valueBytesCleared.toString().c_str(),
+				   mutationBytes.toString().c_str()
+			);
 
 			// Recover from disk at random
 			if(useDisk && g_random->random01() < .1) {
@@ -2404,7 +2801,6 @@ TEST_CASE("!/redwood/correctness") {
 			++version;
 			btree->setWriteVersion(version);
 		}
-
 	}
 
 	debug_printf("Waiting for outstanding commit\n");
@@ -2431,7 +2827,7 @@ TEST_CASE("!/redwood/performance/set") {
 
 	state int nodeCount = 10000000;
 	state int maxChangesPerVersion = 1000;
-	state int versions = 5000;
+	state int versions = 15000;
 	int maxKeySize = 50;
 	int maxValueSize = 100;
 

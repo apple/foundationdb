@@ -142,11 +142,15 @@ public:
 		if (valid) ((T*)&value)->~T();
 	}
 
-	Optional & operator=(Optional const& o) {
+	void reset() {
 		if (valid) {
 			valid = false;
 			((T*)&value)->~T();
 		}
+	}
+
+	Optional & operator=(Optional const& o) {
+		reset();
 		if (o.valid) {
 			new (&value) T(o.get());
 			valid = true;

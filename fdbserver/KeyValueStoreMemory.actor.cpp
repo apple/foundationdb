@@ -407,7 +407,7 @@ private:
 
 		bool ok = count < 1e6;
 		if( !ok ) {
-			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
+			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommitQueue", id)
 				.detail("Bytes", total)
 				.detail("Log", log)
 				.detail("Ops", count)

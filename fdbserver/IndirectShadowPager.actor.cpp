@@ -41,15 +41,19 @@ bool checksum(IAsyncFile *file, uint8_t *page, int pageSize, LogicalPageID logic
 	pageSize -= IndirectShadowPage::PAGE_OVERHEAD_BYTES;
 	SumType sum;
 	SumType *pSumInPage = (SumType *)(page + pageSize);
-
 	// Write sum directly to page or to sum variable based on mode
 	SumType *sumOut = write ? pSumInPage : &sum;
 	sumOut->part1 = physical;
-	sumOut->part2 = logical; 
+	sumOut->part2 = logical;
 	hashlittle2(page, pageSize, &sumOut->part1, &sumOut->part2);
+	VALGRIND_MAKE_MEM_DEFINED(sumOut, sizeof(SumType));
 
 	debug_printf("checksum %s%s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n",
-		write ? "write" : "read", (!write && sum != *pSumInPage) ? " MISMATCH" : "", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, "" /*StringRef((uint8_t *)page, pageSize).toHexString().c_str()*/);
+		write ? "write" : "read",
+		(!write && sum != *pSumInPage) ? " MISMATCH" : "",
+		logical, physical, pageSize,
+		write ? "NA" : pSumInPage->toString().c_str(),
+		sumOut->toString().c_str(), page, "");
 
 	// Verify if not in write mode
 	if(!write && sum != *pSumInPage) {
@@ -75,10 +79,6 @@ inline void checksumWrite(IAsyncFile *file, uint8_t *page, int pageSize, Logical
 
 IndirectShadowPage::IndirectShadowPage() : fastAllocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
-#if VALGRIND
-	// Prevent valgrind errors caused by writing random unneeded bytes to disk.
-	memset(data, 0, size());
-#endif
 }
 
 IndirectShadowPage::~IndirectShadowPage() {
