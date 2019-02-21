@@ -655,6 +655,15 @@ struct HealthMetrics {
 		double diskUsage;
 		double cpuUsage;
 
+		bool operator==(StorageStats const &r) const {
+			return (
+				(storageQueue == r.storageQueue) &&
+				(storageNDV == r.storageNDV) &&
+				(diskUsage == r.diskUsage) &&
+				(cpuUsage == r.cpuUsage)
+			);
+		}
+
 		template <class Ar>
 		void serialize(Ar& ar) {
 			serializer(ar, storageQueue, storageNDV, diskUsage, cpuUsage);
@@ -689,6 +698,16 @@ struct HealthMetrics {
 			storageStats = hm.storageStats;
 			tLogQueue = hm.tLogQueue;
 		}
+	}
+
+	bool operator==(HealthMetrics const& r) const {
+		return (
+			worstStorageQueue == r.worstStorageQueue &&
+			worstStorageNDV == r.worstStorageNDV &&
+			worstTLogQueue == r.worstTLogQueue &&
+			storageStats == r.storageStats &&
+			tLogQueue == r.tLogQueue
+		);
 	}
 
 	template <class Ar>

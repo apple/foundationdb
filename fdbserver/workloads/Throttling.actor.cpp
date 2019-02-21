@@ -84,12 +84,14 @@ struct ThrottlingWorkload : KVWorkload {
 	double detailedWorstCpuUsage;
 	double detailedWorstDiskUsage;
 	bool sendDetailedHealthMetrics;
+	double maxAllowedStaleness;
 	TokenBucket tokenBucket;
+	bool healthMetricsStoppedUpdating;
 
 	ThrottlingWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), transactionsCommitted(0), worstStorageQueue(0), worstStorageNDV(0), worstTLogQueue(0),
 	    detailedWorstStorageQueue(0), detailedWorstStorageNDV(0), detailedWorstTLogQueue(0), detailedWorstCpuUsage(0.0),
-	    detailedWorstDiskUsage(0.0) {
+	    detailedWorstDiskUsage(0.0), healthMetricsStoppedUpdating(false) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
 		healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
 		actorsPerClient = getOption(options, LiteralStringRef("actorsPerClient"), 10);
@@ -97,14 +99,25 @@ struct ThrottlingWorkload : KVWorkload {
 		readsPerTransaction = getOption(options, LiteralStringRef("readsPerTransaction"), 10);
 		throttlingMultiplier = getOption(options, LiteralStringRef("throttlingMultiplier"), 0.5);
 		sendDetailedHealthMetrics = getOption(options, LiteralStringRef("sendDetailedHealthMetrics"), true);
+		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 10.0);
 		int maxBurst = getOption(options, LiteralStringRef("maxBurst"), 1000);
 		tokenBucket.maxBurst = maxBurst;
 	}
 
 	ACTOR static Future<Void> healthMetricsChecker(Database cx, ThrottlingWorkload* self) {
+		state int repeated = 0;
+		state HealthMetrics healthMetrics;
+
 		loop {
 			wait(delay(self->healthMetricsCheckInterval));
-			HealthMetrics healthMetrics = cx->healthMetrics;
+			if (healthMetrics == cx->healthMetrics)
+			{
+				if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
+					self->healthMetricsStoppedUpdating = true;
+			}
+			else
+				repeated = 0;
+			healthMetrics = cx->healthMetrics;
 
 			self->tokenBucket.transactionRate = healthMetrics.tpsLimit * self->throttlingMultiplier / self->clientCount;
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
@@ -194,18 +207,39 @@ struct ThrottlingWorkload : KVWorkload {
 	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 	virtual Future<bool> check(Database const& cx) {
-		if (worstStorageQueue == 0 || worstStorageNDV == 0 || worstTLogQueue == 0 || transactionsCommitted == 0)
+		if (healthMetricsStoppedUpdating) {
+			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
 			return false;
+		}
+		if (transactionsCommitted == 0) {
+			TraceEvent(SevError, "NoTransactionsCommitted");
+			return false;
+		}
+		bool correctHealthMetricsState = true;
+		if (worstStorageQueue == 0 || worstStorageNDV == 0 || worstTLogQueue == 0 || transactionsCommitted == 0)
+			correctHealthMetricsState = false;
 		if (sendDetailedHealthMetrics) {
 			if (detailedWorstStorageQueue == 0 || detailedWorstStorageNDV == 0 || detailedWorstTLogQueue == 0 ||
 			    detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
-				return false;
+				correctHealthMetricsState = false;
 		} else {
 			if (detailedWorstStorageQueue != 0 || detailedWorstStorageNDV != 0 || detailedWorstTLogQueue != 0 ||
-			    detailedWorstCpuUsage != 0.0 || detailedWorstCpuUsage != 0.0)
-				return false;
+			    detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
+				correctHealthMetricsState = false;
 		}
-		return true;
+		if (!correctHealthMetricsState) {
+			TraceEvent(SevError, "IncorrectHealthMetricsState")
+				.detail("WorstStorageQueue", worstStorageQueue)
+				.detail("WorstStorageNDV", worstStorageNDV)
+				.detail("WorstTLogQueue", worstTLogQueue)
+				.detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
+				.detail("DetailedWorstStorageNDV", detailedWorstStorageNDV)
+				.detail("DetailedWorstTLogQueue", detailedWorstTLogQueue)
+				.detail("DetailedWorstCpuUsage", detailedWorstCpuUsage)
+				.detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
+				.detail("SendingDetailedHealthMetrics", sendDetailedHealthMetrics);
+		}
+		return correctHealthMetricsState;
 	}
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
