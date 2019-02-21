@@ -2169,6 +2169,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("TeamServerIDs", teams[t]->getServerIDsStr());
 				// removeTeam also needs to remove the team from the machine team info.
 				removeTeam(teams[t]);
+				t--;
 				removedCount++;
 			}
 		}
