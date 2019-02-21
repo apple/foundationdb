@@ -35,26 +35,66 @@ enum class RestoreRole {Invalid = 0, Master = 1, Loader, Applier};
 extern std::vector<std::string> RestoreRoleStr;
 BINARY_SERIALIZABLE( RestoreRole );
 
-struct RestoreInterface {
-	RequestStream< struct TestRequest > test;
-	RequestStream< struct RestoreRequest > request;
 
-	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
-	UID id() const { return test.getEndpoint().token; }
-	//MX: Q: is request's endPoint().token different from test's?
-	NetworkAddress address() const { return test.getEndpoint().address; }
+// Timeout threshold in seconds for restore commands
+extern int FastRestore_Failure_Timeout;
 
-	void initEndpoints() {
-		test.getEndpoint( TaskClusterController );
-	}
+
+// RestoreCommandEnum is also used as the phase ID for CMDUID
+enum class RestoreCommandEnum {Init = -1,
+		Set_Role = 0, Set_Role_Done,
+		Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done,
+								Assign_Loader_Range_File = 4, Assign_Loader_Log_File = 5, Assign_Loader_File_Done = 6,
+								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8,
+								Apply_Mutation_To_DB = 9, Apply_Mutation_To_DB_Skip = 10,
+								Loader_Notify_Appler_To_Apply_Mutation = 11,
+								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13,
+								Sample_Range_File = 14, Sample_Log_File = 15, Sample_File_Done = 16,
+								Loader_Send_Sample_Mutation_To_Applier = 17, Loader_Send_Sample_Mutation_To_Applier_Done = 18,
+								Calculate_Applier_KeyRange = 19, Get_Applier_KeyRange=20, Get_Applier_KeyRange_Done = 21};
+BINARY_SERIALIZABLE(RestoreCommandEnum);
+
+// Restore command's UID. uint64_t part[2];
+// part[0] is the phase id, part[1] is the command index in the phase.
+// TODO: Add another field to indicate version-batch round
+class CMDUID {
+public:
+	uint64_t part[2];
+	CMDUID() { part[0] = part[1] = 0; }
+	CMDUID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
+	CMDUID(const CMDUID &cmduid) { part[0] = cmduid.part[0]; part[1] = cmduid.part[1]; }
+
+	void initPhase(RestoreCommandEnum phase);
+
+	void nextPhase(); // Set to the next phase.
+
+	void nextCmd(); // Increase the command index at the same phase
+
+	RestoreCommandEnum getPhase();
+
+	uint64_t getIndex();
+
+	std::string toString() const;
+
+	bool operator == ( const CMDUID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
+	bool operator != ( const CMDUID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
+	bool operator < ( const CMDUID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+
+	uint64_t hash() const { return first(); }
+	uint64_t first() const { return part[0]; }
+	uint64_t second() const { return part[1]; }
+
+	//
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		//ar & test & request;
-		serializer(ar, test, request);
+	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
+		serializer(ar, part[0], part[1]);
 	}
 };
+
+template <class Ar> void load( Ar& ar, CMDUID& uid ) { uid.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>(uid).serialize_unversioned(ar); }
+
 
 // NOTE: is cmd's Endpoint token the same with the request's token for the same node?
 struct RestoreCommandInterface {
@@ -78,26 +118,18 @@ struct RestoreCommandInterface {
 	}
 };
 
-
-enum class RestoreCommandEnum {Set_Role = 0, Set_Role_Done, Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done,
-								Assign_Loader_Range_File = 4, Assign_Loader_Log_File = 5, Assign_Loader_File_Done = 6,
-								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8,
-								Apply_Mutation_To_DB = 9, Apply_Mutation_To_DB_Skip = 10,
-								Loader_Notify_Appler_To_Apply_Mutation = 11,
-								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13,
-								Sample_Range_File = 14, Sample_Log_File = 15, Sample_File_Done = 16,
-								Loader_Send_Sample_Mutation_To_Applier = 17, Loader_Send_Sample_Mutation_To_Applier_Done = 18,
-								Calculate_Applier_KeyRange = 19, Get_Applier_KeyRange=20, Get_Applier_KeyRange_Done = 21};
-BINARY_SERIALIZABLE(RestoreCommandEnum);
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
-	int64_t cmdIndex; //monotonically increase index (for loading commands)
+	CMDUID cmdId; // monotonically increase index for commands.
 	UID id; // Node id that will receive the command
+	int nodeIndex; // The index of the node in the global node status
 	UID masterApplier;
 	RestoreRole role; // role of the command;
+
+
 	KeyRange keyRange;
 	uint64_t commitVersion;
-	MutationRef mutation;
+	MutationRef mutation; //TODO: change to a vector
 	KeyRef applierKeyRangeLB;
 	UID applierID;
 	int keyRangeIndex;
@@ -135,21 +167,21 @@ struct RestoreCommand {
 	ReplyPromise< struct RestoreCommandReply > reply;
 
 	RestoreCommand() : id(UID()), role(RestoreRole::Invalid) {}
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id): cmd(cmd), id(id) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex): cmd(cmd), id(id), cmdIndex(cmdIndex) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role) : cmd(cmd), id(id), role(role) {}
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, RestoreRole role, UID masterApplier) : cmd(cmd), id(id), role(role), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRange keyRange): cmd(cmd), id(id), keyRange(keyRange) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, LoadingParam loadingParam): cmd(cmd), id(id), cmdIndex(cmdIndex), loadingParam(loadingParam) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, int64_t cmdIndex, int keyRangeIndex): cmd(cmd), id(id), cmdIndex(cmdIndex), keyRangeIndex(keyRangeIndex) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id): cmd(cmd), cmdId(cmdId), id(id) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role) : cmd(cmd), cmdId(cmdId), id(id), role(role) {}
+	// Set_Role
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role, int nodeIndex, UID masterApplier) : cmd(cmd), cmdId(cmdId), id(id), role(role), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, KeyRange keyRange): cmd(cmd), cmdId(cmdId), id(id), keyRange(keyRange) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, LoadingParam loadingParam): cmd(cmd), cmdId(cmdId), id(id), loadingParam(loadingParam) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, int keyRangeIndex): cmd(cmd), cmdId(cmdId), id(id), keyRangeIndex(keyRangeIndex) {};
 	// For loader send mutation to applier
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), id(id), commitVersion(commitVersion), mutation(mutation) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), cmdId(cmdId), id(id), commitVersion(commitVersion), mutation(mutation) {};
 	// Notify loader about applier key ranges
-	explicit RestoreCommand(RestoreCommandEnum cmd, UID id, KeyRef applierKeyRangeLB, UID applierID): cmd(cmd), id(id), applierKeyRangeLB(applierKeyRangeLB), applierID(applierID) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, KeyRef applierKeyRangeLB, UID applierID): cmd(cmd), cmdId(cmdId), id(id), applierKeyRangeLB(applierKeyRangeLB), applierID(applierID) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar , cmd  , cmdIndex , id , masterApplier , role , keyRange ,  commitVersion , mutation , applierKeyRangeLB ,  applierID , keyRangeIndex , loadingParam , reply);
+		serializer(ar , cmd  , cmdId , nodeIndex, id , masterApplier , role , keyRange ,  commitVersion , mutation , applierKeyRangeLB ,  applierID , keyRangeIndex , loadingParam , reply);
 		//ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
 	}
 };
@@ -157,46 +189,20 @@ typedef RestoreCommand::LoadingParam LoadingParam;
 
 struct RestoreCommandReply {
 	UID id; // placeholder, which reply the worker's node id back to master
-	int64_t cmdIndex;
+	CMDUID cmdId;
 	int num; // num is the number of key ranges calculated for appliers
 	Standalone<KeyRef> lowerBound;
 
-	RestoreCommandReply() : id(UID()) {}
-	explicit RestoreCommandReply(UID id) : id(id) {}
-	explicit RestoreCommandReply(UID id, int64_t cmdIndex) : id(id), cmdIndex(cmdIndex) {}
-	explicit RestoreCommandReply(UID id, int64_t cmdIndex, int num) : id(id), cmdIndex(cmdIndex), num(num) {}
-	explicit RestoreCommandReply(UID id, int64_t cmdIndex, KeyRef lowerBound) : id(id), cmdIndex(cmdIndex), lowerBound(lowerBound) {}
+	RestoreCommandReply() : id(UID()), cmdId(CMDUID()) {}
+	//explicit RestoreCommandReply(UID id) : id(id) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdId) : id(id), cmdId(cmdId) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdId, int num) : id(id), cmdId(cmdId), num(num) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdId, KeyRef lowerBound) : id(id), cmdId(cmdId), lowerBound(lowerBound) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id , cmdIndex , num , lowerBound);
+		serializer(ar, id , cmdId , num , lowerBound);
 		//ar & id & cmdIndex & num & lowerBound;
-	}
-};
-
-
-struct TestRequest {
-	int testData;
-	ReplyPromise< struct TestReply > reply;
-
-	TestRequest() : testData(0) {}
-	explicit TestRequest(int testData) : testData(testData) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, testData, reply);
-	}
-};
-
-struct TestReply {
-	int replyData;
-
-	TestReply() : replyData(0) {}
-	explicit TestReply(int replyData) : replyData(replyData) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, replyData);
 	}
 };
 
@@ -232,12 +238,6 @@ struct RestoreRequest {
 													addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
 													randomUid(randomUid) {}
 
-
-//	RestoreRequest(Arena& to, const RestoreRequest& from) : index(index), tagName(tagName), url(url), waitForComplete(waitForComplete),
-//								targetVersion(targetVersion), verbose(verbose), range(range),
-//								addPrefix(addPrefix), removePrefix(removePrefix), lockDB(lockDB),
-//								randomUid(randomUid) {}
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index , tagName , url ,  waitForComplete , targetVersion , verbose , range , addPrefix , removePrefix , lockDB , randomUid ,
@@ -254,29 +254,6 @@ struct RestoreRequest {
 	}
 };
 
-/*
-// To pass struct RestoreRequest as a reference without affecting the serialization functions
-struct RestoreRequestConfig : RestoreRequest, public ReferenceCounted<RestoreRequestConfig>{
-//	explicit RestoreRequestConfig(RestoreRequest req) : index(req.index), tagName(req.tagName), url(req.url), waitForComplete(req.waitForComplete),
-//		targetVersion(req.targetVersion), verbose(req.verbose), range(req.range),
-//		addPrefix(req.addPrefix), removePrefix(req.removePrefix), lockDB(req.lockDB),
-//		randomUid(req.randomUid) {}
-	explicit RestoreRequestConfig(RestoreRequest req) {
-		index = req.index;
-		tagName = req.tagName;
-		url = req.url;
-		waitForComplete = req.waitForComplete;
-		targetVersion = req.targetVersion;
-		verbose = req.verbose;
-		range = req.range;
-		addPrefix = req.addPrefix;
-		removePrefix = req.removePrefix;
-		lockDB = req.lockDB;
-		randomUid = req.randomUid;
-	}
-
-};
-*/
 
 struct RestoreReply {
 	int replyData;
@@ -299,7 +276,6 @@ struct RestoreReply {
 std::string getRoleStr(RestoreRole role);
 
 
-
 struct RestoreNodeStatus {
 	// ConfigureKeyRange is to determine how to split the key range and apply the splitted key ranges to appliers
 	// NotifyKeyRange is to notify the Loaders and Appliers about the key range each applier is responsible for
@@ -311,6 +287,7 @@ struct RestoreNodeStatus {
 	enum class ApplierState {Invalid = -1, Ready, Aggregating, ApplyToDB, Done};
 
 	UID nodeID;
+	int nodeIndex; // The continuous number to indicate which worker it is. It is an alias for nodeID
 	RestoreRole role;
 	MasterState masterState;
 	LoaderState loaderState;
@@ -319,6 +296,9 @@ struct RestoreNodeStatus {
 	double lastStart; // The most recent start time. now() - lastStart = execution time
 	double totalExecTime; // The total execution time.
 	double lastSuspend; // The most recent time when the process stops exeuction
+
+	double processedDataSize; // The size of all data processed so far
+
 
 	RestoreNodeStatus() : nodeID(UID()), role(RestoreRole::Invalid),
 		masterState(MasterState::Invalid), loaderState(LoaderState::Invalid), applierState(ApplierState::Invalid),

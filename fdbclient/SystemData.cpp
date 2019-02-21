@@ -615,18 +615,6 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 }
 
 // Encode restore agent value
-const Value restoreWorkerValue( RestoreInterface const& server ) {
-	BinaryWriter wr(IncludeVersion());
-	wr << server;
-	return wr.toStringRef();
-}
-
-RestoreInterface decodeRestoreWorkerValue( ValueRef const& value ) {
-	RestoreInterface s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
-}
 
 const Value restoreCommandInterfaceValue( RestoreCommandInterface const& cmdInterf ) {
 	BinaryWriter wr(IncludeVersion());
