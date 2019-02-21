@@ -38,7 +38,7 @@ configure() {
     local __res=0
     for _ in 1
     do
-        cmake ../src
+        cmake ../foundationdb
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -120,7 +120,7 @@ rpm() {
     local __res=0
     for _ in 1
     do
-        cmake -DINSTALL_LAYOUT=RPM ../src
+        cmake -DINSTALL_LAYOUT=RPM ../foundationdb
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -146,7 +146,7 @@ deb() {
     local __res=0
     for _ in 1
     do
-        cmake -DINSTALL_LAYOUT=DEB ../src
+        cmake -DINSTALL_LAYOUT=DEB ../foundationdb
         __res=$?
         if [ ${__res} -ne 0 ]
         then
