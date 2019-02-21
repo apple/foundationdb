@@ -8,4 +8,6 @@ endif()
 # as soon as we get rid of the old build system
 target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
 
-install(TARGETS fdbmonitor DESTINATION "${FDB_LIB_DIR}/foundationdb" COMPONENT server)
+if(NOT OPEN_FOR_IDE)
+  install(TARGETS fdbmonitor DESTINATION "${FDBMONITOR_INSTALL_LOCATION}" COMPONENT server)
+endif()

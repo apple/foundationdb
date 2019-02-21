@@ -19,9 +19,9 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -289,7 +289,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		// Try doing a restore without clearing the keys
 		if (rowCount > 0) {
 			try {
-				Version _ = wait(backupAgent->restore(cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked));
+				wait(success(backupAgent->restore(cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID);
 				ASSERT(false);
 			}
@@ -482,7 +482,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state int64_t taskCount = wait( backupAgent.getTaskCount(tr) );
 					state int waitCycles = 0;
 
-					if ((taskCount) && (0)) {
+					if ((taskCount) && false) {
 						TraceEvent("BARW_EndingNonzeroTaskCount", randomID).detail("BackupTag", printable(self->backupTag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 						printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
 						wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));

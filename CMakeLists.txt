@@ -17,11 +17,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 cmake_minimum_required(VERSION 3.12)
-project(fdb
+project(foundationdb
   VERSION 6.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Java)
+  LANGUAGES ASM C CXX)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
@@ -39,22 +39,25 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
+set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+
 ################################################################################
 # Packages used for bindings
 ################################################################################
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-find_package(PythonInterp 3.4 REQUIRED)
-set(Python_ADDITIONAL_VERSIONS 3.4 3.5 3.5)
-find_package(PythonLibs 3.4 REQUIRED)
-
-
 ################################################################################
 # Compiler configuration
 ################################################################################
 
 include(ConfigureCompiler)
+
+################################################################################
+# Compiler configuration
+################################################################################
+
+include(FDBComponents)
 
 ################################################################################
 # Get repository information
@@ -102,9 +105,14 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CU
 # Flow
 ################################################################################
 
+# Flow and other tools are written in C# - so we need that dependency
+include(EnableCsharp)
+
 # First thing we need is the actor compiler - and to compile and run the
 # actor compiler, we need mono
 include(CompileActorCompiler)
+
+include(CompileCoverageTool)
 
 # with the actor compiler, we can now make the flow commands available
 include(FlowCommands)
@@ -114,50 +122,6 @@ include(FlowCommands)
 ################################################################################
 
 include(CompileVexillographer)
-
-# This macro can be used to install symlinks, which turns out to be
-# non-trivial due to CMake version differences and limitations on how
-# files can be installed when building binary packages.
-#
-# The rule for binary packaging is that files (including symlinks) must
-# be installed with the standard CMake install() macro.
-#
-# The rule for non-binary packaging is that CMake 2.6 cannot install()
-# symlinks, but can create the symlink at install-time via scripting.
-# Though, we assume that CMake 2.6 isn't going to be used to generate
-# packages because versions later than 2.8.3 are superior for that purpose.
-#
-#   _filepath: the absolute path to the file to symlink
-#   _sympath: absolute path of the installed symlink
-
-macro(InstallSymlink _filepath _sympath)
-    get_filename_component(_symname ${_sympath} NAME)
-    get_filename_component(_installdir ${_sympath} PATH)
-
-    if (BINARY_PACKAGING_MODE)
-        execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
-                        ${_filepath}
-                        ${CMAKE_CURRENT_BINARY_DIR}/${_symname})
-        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${_symname}
-          DESTINATION ${_installdir}
-		  COMPONENT clients)
-    else ()
-        # scripting the symlink installation at install time should work
-        # for CMake 2.6.x and 2.8.x
-        install(CODE "
-            if (\"\$ENV{DESTDIR}\" STREQUAL \"\")
-                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-                                ${_filepath}
-                                ${_installdir}/${_symname})
-            else ()
-                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-                                ${_filepath}
-                                \$ENV{DESTDIR}/${_installdir}/${_symname})
-            endif ()
-        "
-		  COMPONENT clients)
-    endif ()
-endmacro(InstallSymlink)
 
 ################################################################################
 # Generate config file
@@ -194,17 +158,31 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
+if(WITH_TLS)
+  add_subdirectory(FDBLibTLS)
+endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
-add_subdirectory(fdbmonitor)
+if(NOT WIN32)
+  add_subdirectory(fdbmonitor)
+else()
+  add_subdirectory(fdbservice)
+endif()
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
+if(WITH_DOCUMENTATION)
+  add_subdirectory(documentation)
+endif()
 
-include(CPack)
+if(WIN32)
+  add_subdirectory(packaging/msi)
+else()
+  include(CPack)
+endif()
 
 ################################################################################
 # process compile commands for IDE
@@ -220,3 +198,11 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS)
 	)
   add_custom_target(procossed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()
+
+################################################################################
+# Inform user which components we are going to build
+################################################################################
+
+print_components()
+
+message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")

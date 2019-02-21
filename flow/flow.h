@@ -636,6 +636,11 @@ public:
 		sav->sendError(error);
 	}
 
+#ifndef NO_INTELLISENSE
+	template<class U>
+	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
+#endif
+
 	~Future() {
 		//if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
 		if (sav) sav->delFutureRef();

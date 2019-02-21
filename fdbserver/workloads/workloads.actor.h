@@ -1,5 +1,5 @@
 /*
- * workloads.h
+ * workloads.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,16 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_WORKLOADS_H
-#define FDBSERVER_WORKLOADS_H
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKLOADS_ACTOR_G_H)
+#define FDBSERVER_WORKLOADS_ACTOR_G_H
+#include "fdbserver/workloads/workloads.actor.g.h"
+#elif  !defined(FDBSERVER_WORKLOADS_ACTOR_H)
+#define FDBSERVER_WORKLOADS_ACTOR_H
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
 
@@ -195,14 +198,12 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 };
 
-Future<DistributedTestResults> runWorkload( 
-		Database const& cx, std::vector< TesterInterface > const& testers, 
-		TestSpec const& spec );
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 void logMetrics( vector<PerfMetric> metrics );
 
-Future<Void> poisson( double* const& last, double const& meanInterval );
-Future<Void> uniform( double* const& last, double const& meanInterval );
+ACTOR Future<Void> poisson(double* last, double meanInterval);
+ACTOR Future<Void> uniform(double* last, double meanInterval);
 
 void emplaceIndex( uint8_t *data, int offset, int64_t index );
 Key doubleToTestKey(double p);
@@ -210,7 +211,7 @@ double testKeyToDouble(const KeyRef& p);
 Key doubleToTestKey(double p, const KeyRef& prefix);
 double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 
-Future<Void> databaseWarmer( Database const& cx );
+ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const&, std::string phase, int64_t dataInFlightGate = 2e6, int64_t maxTLogQueueGate = 5e6,
 							int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0);

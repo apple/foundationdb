@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -49,11 +49,12 @@ public:
 		const char* coordinationFolder;
 		const char* dataFolder;
 		MachineInfo* machine;
+		NetworkAddressList addresses;
 		NetworkAddress address;
 		LocalityData	locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
-		Reference<IListener> listener;
+		std::map<NetworkAddress, Reference<IListener>> listenerMap;
 		bool failed;
 		bool excluded;
 		bool cleared;
@@ -66,12 +67,15 @@ public:
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
 
-		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddress address,
+		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
+			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses[0]), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), cleared(false) {}
+				fault_injection_r(0), machine(0), cleared(false) {
+
+			ASSERT(addresses.size() >= 1);
+		}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -94,16 +98,25 @@ public:
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
+				case ProcessClass::DataDistributorClass: return false;
 				default: return false;
 			}
+		}
+
+		const Reference<IListener> getListener(const NetworkAddress& addr) {
+			auto listener = listenerMap.find(addr);
+			ASSERT( listener != listenerMap.end());
+			return listener->second;
 		}
 
 		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
+			const NetworkAddress& address = addresses[0];
 			return format("name: %s address: %d.%d.%d.%d:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared); }
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared);
+		}
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -115,41 +128,23 @@ public:
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
-		Optional<Standalone<StringRef>>	zoneId;
+		Optional<Standalone<StringRef>>	machineId;
 
 		MachineInfo() : machineProcess(0) {}
 	};
 
-	template <class Func>
-	ProcessInfo* asNewProcess( const char* name, uint32_t ip, uint16_t port, LocalityData locality, ProcessClass startingClass,
-							   Func func, const char* dataFolder, const char* coordinationFolder ) {
-		ProcessInfo* m = newProcess(name, ip, port, locality, startingClass, dataFolder, coordinationFolder);
-//		ProcessInfo* m = newProcess(name, ip, port, zoneId, machineId, dcId, startingClass, dataFolder, coordinationFolder);
-		std::swap(m, currentProcess);
-		try {
-			func();
-		} catch (Error& e) {
-			TraceEvent(SevError, "NewMachineError").error(e);
-			killProcess(currentProcess, KillInstantly);
-		} catch (...) {
-			TraceEvent(SevError, "NewMachineError").error(unknown_error());
-			killProcess(currentProcess, KillInstantly);
-		}
-		std::swap(m, currentProcess);
-		return m;
-	}
-
-	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.address); }
+	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
+	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
@@ -266,14 +261,15 @@ public:
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
-	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& zoneId) = 0;
+	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) = 0;
 	virtual void run() {}
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
-	virtual void destroyMachine(Optional<Standalone<StringRef>> const& zoneId ) = 0;
+	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId ) = 0;
 
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
+	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	class ClusterConnectionString* extraDB;

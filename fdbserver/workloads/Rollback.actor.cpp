@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
@@ -56,7 +56,7 @@ struct RollbackWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
-		auto system = self->dbInfo->get();
+		state ServerDBInfo system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
 		
 		if( tlogs.empty() || system.client.proxies.empty() ) {
@@ -90,7 +90,7 @@ struct RollbackWorkload : TestWorkload {
 
 		// While the clogged machines are still clogged...
 		wait( delay( self->clogDuration/3 ) );
-		auto system = self->dbInfo->get();
+		system = self->dbInfo->get();
 
 		// Kill the proxy and the unclogged tlog
 		if (self->enableFailures) {

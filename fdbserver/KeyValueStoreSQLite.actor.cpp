@@ -2006,7 +2006,7 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	ASSERT(store != nullptr);
 
 	// Wait for integry check to finish
-	Optional<Value> _ = wait(store->readValue(StringRef()));
+	wait(success(store->readValue(StringRef())));
 
 	if(store->getError().isError())
 		wait(store->getError());

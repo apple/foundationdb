@@ -19,10 +19,10 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of upgrading DR from 5.1 to 5.2
@@ -126,7 +126,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		int _ = wait( backupAgent->waitBackup(self->extraDB, tag, false) );
+		wait(success( backupAgent->waitBackup(self->extraDB, tag, false) ));
 
 		return Void();
 	}
@@ -156,7 +156,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				state int64_t taskCount = wait( backupAgent->getTaskCount(tr) );
 				state int waitCycles = 0;
 
-				if ((taskCount) && (0)) {
+				if ((taskCount) && false) {
 					TraceEvent("DRU_EndingNonzeroTaskCount").detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
 					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
@@ -445,7 +445,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					throw;
 			}
 
-			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
+			wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
 			wait(restoreAgent.unlockBackup(cx, self->restoreTag));
 			wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 

@@ -127,13 +127,13 @@
     Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database.
 
 .. |atomic-set-versionstamped-key-1| replace::
-    Transforms ``key`` using a versionstamp for the transaction. This key must be at least 12 bytes long. The final 2 bytes will be interpreted as a 16-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to ``param``.
+    Transforms ``key`` using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to ``param``.
 
 .. |atomic-set-versionstamped-key-2| replace::
     This operation is not compatible with |read-your-writes-disable-option| and will generate an error if used with it.
 
 .. |atomic-set-versionstamped-value| replace::
-    Transforms ``param`` using a versionstamp for the transaction. This parameter must be at least 10 bytes long, and the first 10 bytes will be overwritten with the versionstamp. Sets ``key`` in the database to the transformed parameter.
+    Transforms ``param`` using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets ``key`` in the database to the transformed parameter.
 
 .. |atomic-versionstamps-1| replace::
     A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.
@@ -145,7 +145,7 @@
     At this time, versionstamped keys are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.
 
 .. |atomic-versionstamps-tuple-warning-value| replace::
-    At this time, versionstamped values are not compatible with the Tuple layer.
+    At this time, versionstamped values are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
 .. |api-version| replace:: 610
 
@@ -231,6 +231,9 @@
 
 .. |option-trace-roll-size-blurb| replace::
     Sets the maximum size in bytes of a single trace output file for this FoundationDB client.
+
+.. |option-trace-format-blurb| replace::
+    Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.
 
 .. |network-options-warning| replace::
 

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -236,7 +236,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "single", true ) );
+		wait(success( changeConfig( cx, "single", true ) ));
 		return Void();
 	}
 
@@ -329,7 +329,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (g_random->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
-				ConfigurationResult::Type _ = wait( changeConfig( cx, config, false ) );
+				wait(success( changeConfig( cx, config, false ) ));
 
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			}
@@ -338,11 +338,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				auto ch = autoQuorumChange();
 				if (g_random->randomInt(0,2))
 					ch = nameQuorumChange( format("NewName%d", g_random->randomInt(0,100)), ch );
-				CoordinatorsResult::Type _ = wait( changeQuorum( cx, ch ) );
+				wait(success( changeQuorum( cx, ch ) ));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			}
 			else if ( randomChoice == 5) {
-				ConfigurationResult::Type _ = wait( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) );
+				wait(success( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) ));
 			}
 			else {
 				ASSERT(false);

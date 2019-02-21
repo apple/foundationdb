@@ -22,6 +22,7 @@
 #define FLOW_TRANSPORT_H
 #pragma once
 
+#include <algorithm>
 #include "flow/network.h"
 
 #pragma pack(push, 4)
@@ -30,25 +31,87 @@ public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
 	typedef UID Token;
-	NetworkAddress address;
+	NetworkAddressList addresses;
 	Token token;
 
-	Endpoint() : address(0,0) {}
-	Endpoint( NetworkAddress const& address, Token token ) : address(address), token(token) {}
+	Endpoint() : addresses({NetworkAddress()}) {}
+	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
+		ASSERT(addresses.size() > 0);
+		choosePrimaryAddress();
+	}
+
+	void choosePrimaryAddress() {
+		if(addresses.size() < 2) {
+			return;
+		}
+
+		if (g_network->getLocalAddresses().size() == 0) {
+			// At client, we always prefer non-TLS ports during TLS transition.
+			for (int i = 1; addresses[0].isTLS() && i < addresses.size(); i++) {
+				if (!addresses[i].isTLS()) {
+					std::swap(addresses[0], addresses[i]);
+				}
+			}
+			return;
+		}
+
+		for(int i = 0; i < addresses.size(); i++) {
+			bool compatible = false;
+			for(auto& addr : g_network->getLocalAddresses()) {
+				if(addr.isTLS() == addresses[i].isTLS()) {
+					compatible = true;
+					break;
+				}
+			}
+			if(compatible) {
+				if(i > 0) {
+					std::swap(addresses[0], addresses[i]);
+				}
+				break;
+			}
+		}
+	}
+
 	bool isValid() const { return token.isValid(); }
 	bool isLocal() const;
 
-	bool operator == (Endpoint const& r) const { return address == r.address && token == r.token; }
-	bool operator != (Endpoint const& r) const { return address != r.address || token != r.token; }
-	bool operator < (Endpoint const& r) const { if (address != r.address) return address < r.address; else return token < r.token; }
+	// Return the primary network address, which is the first network address among
+	// all addresses this endpoint listens to.
+	const NetworkAddress& getPrimaryAddress() const {
+		return addresses[0];
+	}
+
+	bool operator == (Endpoint const& r) const {
+		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
+	}
+	bool operator != (Endpoint const& r) const {
+		return !(*this == r);
+	}
+
+	bool operator < (Endpoint const& r) const {
+		const NetworkAddress& left = getPrimaryAddress();
+		const NetworkAddress& right = r.getPrimaryAddress();
+		if (left != right)
+			return left < right;
+		else
+			return token < r.token;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+			addresses.resize(1);
+			serializer(ar, addresses[0], token);
+		} else {
+			serializer(ar, addresses, token);
+			if (ar.isDeserializing) {
+				choosePrimaryAddress();
+			}
+		}
 	}
 };
 #pragma pack(pop)
-BINARY_SERIALIZABLE( Endpoint );
+
 
 
 class NetworkMessageReceiver {
@@ -77,8 +140,11 @@ public:
 	// Starts a server listening on the given listenAddress, and sets publicAddress to be the public
 	// address of this server.  Returns only errors.
 
-	NetworkAddress getLocalAddress();
-	// Returns the NetworkAddress that would be assigned by addEndpoint (the public address)
+	NetworkAddress getLocalAddress() const;
+	// Returns first local NetworkAddress.
+
+	NetworkAddressList getLocalAddresses() const;
+	// Returns all local NetworkAddress.
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
@@ -117,6 +183,7 @@ public:
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
+	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	template <class Ar>
 	void loadEndpoint(Ar& ar, Endpoint& e) {
@@ -130,8 +197,9 @@ private:
 	void loadedEndpoint(Endpoint&);
 };
 
-inline bool Endpoint::isLocal() const { 
-	return address == FlowTransport::transport().getLocalAddress(); 
+inline bool Endpoint::isLocal() const {
+	auto localAddrs = FlowTransport::transport().getLocalAddresses();
+	return std::find(localAddrs.begin(), localAddrs.end(), addresses[0]) != localAddrs.end();
 }
 
 #endif

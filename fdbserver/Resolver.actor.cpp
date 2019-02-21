@@ -19,10 +19,10 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -75,7 +75,7 @@ ACTOR Future<Void> resolveBatch(
 	state Optional<UID> debugID;
 
 	// The first request (prevVersion < 0) comes from the master
-	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().address : NetworkAddress();
+	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo &proxyInfo = self->proxyInfoMap[proxyAddress];
 
 	if(req.debugID.present()) {

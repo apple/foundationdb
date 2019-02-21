@@ -353,7 +353,7 @@ struct PopFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
 		for(StackItem item : items) {
-			Standalone<StringRef> _ = wait(item.value);
+			wait(success(item.value));
 		}
 		return Void();
 	}
@@ -1693,7 +1693,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1736,7 +1736,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
 		API *fdb = FDB::API::selectAPIVersion(610);
 

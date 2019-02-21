@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/TLogInterface.h"
 
 typedef uint64_t DBRecoveryCount;
@@ -32,51 +33,21 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	LocalityData locality;
 	RequestStream< ReplyPromise<Void> > waitFailure;
-	RequestStream< struct GetRateInfoRequest > getRateInfo;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
 
-	NetworkAddress address() const { return changeCoordinators.getEndpoint().address; }
+	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, locality, waitFailure, getRateInfo, tlogRejoin, changeCoordinators, getCommitVersion);
+		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
 		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
-	}
-};
-
-struct GetRateInfoRequest {
-	UID requesterID;
-	int64_t totalReleasedTransactions;
-	ReplyPromise<struct GetRateInfoReply> reply;
-	bool detailed;
-
-	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions, bool detailed )
-		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), detailed(detailed) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply, detailed);
-	}
-};
-
-struct GetRateInfoReply {
-	double transactionRate;
-	double leaseDuration;
-	double detailedLeaseDuration;
-	HealthMetrics healthMetrics;
-	bool detailed;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration, detailedLeaseDuration, healthMetrics, detailed);
 	}
 };
 

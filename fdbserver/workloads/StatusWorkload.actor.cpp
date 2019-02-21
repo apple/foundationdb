@@ -18,19 +18,22 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern bool noUnseed;
 
 struct StatusWorkload : TestWorkload {
 	double testDuration, requestsPerSecond;
+	bool enableLatencyBands;
+
+	Future<Void> latencyBandActor;
 
 	PerfIntCounter requests, replies, errors, totalSize;
 	Optional<StatusObject> parsedSchema;
@@ -41,6 +44,7 @@ struct StatusWorkload : TestWorkload {
 	{
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		requestsPerSecond = getOption(options, LiteralStringRef("requestsPerSecond"), 0.5);
+		enableLatencyBands = getOption(options, LiteralStringRef("enableLatencyBands"), g_random->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), JSONSchemas::statusSchema);
 		if (statusSchemaStr.size()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
@@ -55,6 +59,10 @@ struct StatusWorkload : TestWorkload {
 
 	virtual std::string description() { return "StatusWorkload"; }
 	virtual Future<Void> setup(Database const& cx) {
+		if(enableLatencyBands) {
+			latencyBandActor = configureLatencyBands(this, cx);
+		}
+
 		return Void();
 	}
 	virtual Future<Void> start(Database const& cx) {
@@ -103,6 +111,56 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
+	static std::string generateBands() {
+		int numBands = g_random->randomInt(0, 10);
+		std::vector<double> bands;
+
+		while(bands.size() < numBands) {
+			bands.push_back(g_random->random01() * pow(10, g_random->randomInt(-5, 1)));
+		}
+
+		std::string result = "\"bands\":[";
+		for(int i = 0; i < bands.size(); ++i) {
+			if(i > 0) {
+				result += ",";
+			}
+
+			result += format("%f", bands[i]);
+		}
+
+		return result + "]";
+	}
+
+	ACTOR Future<Void> configureLatencyBands(StatusWorkload *self, Database cx) {
+		loop {
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					std::string config = "{"
+						"\"get_read_version\":{" + generateBands() + "},"
+						"\"read\":{" + generateBands() + format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},", g_random->randomInt(0, 10000), g_random->randomInt(0, 1000000)) + ""
+						"\"commit\":{" + generateBands() + format(", \"max_commit_bytes\":%d", g_random->randomInt(0, 1000000)) + "}"
+						"}";
+
+					tr.set(latencyBandConfigKey, ValueRef(config));
+					wait(tr.commit());
+			
+					if(g_random->random01() < 0.3) {
+						return Void();
+					}
+
+					wait(delay(g_random->random01() * 120));
+				}
+				catch(Error &e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
+
 	ACTOR Future<Void> fetcher(Reference<ClusterConnectionFile> connFile, StatusWorkload *self) {
 		state double lastTime = now();
 
@@ -131,7 +189,6 @@ struct StatusWorkload : TestWorkload {
 			}
 		}
 	}
-
 };
 
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory("Status");

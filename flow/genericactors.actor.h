@@ -294,12 +294,12 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 }
 
 template<class T>
-Future<Void> store(Future<T> what, T &out) {
+Future<Void> store(T &out, Future<T> what) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });
 }
 
 template<class T>
-Future<Void> storeOrThrow(Future<Optional<T>> what, T &out, Error e = key_not_found()) {
+Future<Void> storeOrThrow(T &out, Future<Optional<T>> what, Error e = key_not_found()) {
 	return map(what, [&out,e](Optional<T> const &o) {
 		if(!o.present())
 			throw e;
@@ -771,6 +771,18 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 ACTOR template <class T> 
 Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 	wait( delay( time ) );
+	var->set( val );
+	return Void();
+}
+
+ACTOR template <class T>
+Future<Void> setWhenDoneOrError( Future<Void> condition, Reference<AsyncVar<T>> var, T val ) {
+	try {
+		wait( condition );
+	}
+	catch ( Error& e ) {
+		if (e.code() == error_code_actor_cancelled) throw;
+	}
 	var->set( val );
 	return Void();
 }

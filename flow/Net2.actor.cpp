@@ -55,7 +55,7 @@ using namespace boost::asio::ip;
 //
 //                                                       xyzdev
 //                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061020001LL;
+const uint64_t currentProtocolVersion        = 0x0FDB00B061030001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -123,7 +123,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics);
+	Net2(bool useThreadPool, bool useMetrics);
 	void run();
 	void initMetrics();
 
@@ -479,7 +479,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
+Net2::Net2(bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
@@ -997,9 +997,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(localAddress, useThreadPool, useMetrics);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
@@ -1099,7 +1099,7 @@ void net2_test() {
 	finished2.block();
 
 
-	g_network = newNet2(NetworkAddress::parse("127.0.0.1:12345"));  // for promise serialization below
+	g_network = newNet2();  // for promise serialization below
 
 	Endpoint destination;
 

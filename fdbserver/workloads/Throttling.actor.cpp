@@ -21,7 +21,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 
 struct TokenBucket {
 	static constexpr const double addTokensInterval = 0.1;

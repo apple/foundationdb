@@ -547,6 +547,14 @@ inline static Standalone<StringRef> makeString( int length ) {
 	return returnString;
 }
 
+inline static Standalone<StringRef> makeAlignedString( int alignment, int length ) {
+	Standalone<StringRef> returnString;
+	uint8_t *outData = new (returnString.arena()) uint8_t[alignment + length];
+	outData = (uint8_t*)((((uintptr_t)outData + (alignment - 1)) / alignment) * alignment);
+	((StringRef&)returnString) = StringRef(outData, length);
+	return returnString;
+}
+
 inline static StringRef makeString( int length, Arena& arena ) {
 	uint8_t *outData = new (arena) uint8_t[length];
 	return StringRef(outData, length);
