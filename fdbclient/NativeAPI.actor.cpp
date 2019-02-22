@@ -499,22 +499,36 @@ ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 		{
 			when(wait(timer))
 			{
-				state GetHealthMetricsReply rep =
-					wait(loadBalance(cx->getMasterProxies(),
-							 &MasterProxyInterface::getHealthMetrics,
-							 GetHealthMetricsRequest()));
-				cx->healthMetrics.update(rep.healthMetrics, false, true);
+				loop {
+					choose {
+						when(wait(cx->onMasterProxiesChanged())) {}
+						when(state GetHealthMetricsReply rep =
+							 wait(loadBalance(cx->getMasterProxies(),
+											  &MasterProxyInterface::getHealthMetrics,
+											  GetHealthMetricsRequest()))) {
+							cx->healthMetrics.update(rep.healthMetrics, false, true);
+							break;
+						}
+					}
+				}
 			}
 			when(wait(detailedTimer))
 			{
 				ASSERT(sendDetailedHealthMetrics);
-				state GetDetailedHealthMetricsReply detailedRep = wait(
-					loadBalance(cx->getMasterProxies(),
-						&MasterProxyInterface::getDetailedHealthMetrics,
-						GetDetailedHealthMetricsRequest()));
-				cx->healthMetrics.update(detailedRep.getHealthMetrics(), true, true);
-				detailedTimer = delay(
-					CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL);
+				loop {
+					choose {
+						when(wait(cx->onMasterProxiesChanged())) {}
+						when(state GetDetailedHealthMetricsReply detailedRep =
+							wait(loadBalance(cx->getMasterProxies(),
+											 &MasterProxyInterface::getDetailedHealthMetrics,
+											 GetDetailedHealthMetricsRequest()))) {
+							cx->healthMetrics.update(detailedRep.getHealthMetrics(), true, true);
+							detailedTimer = delay(
+								CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL);
+							break;
+						}
+					}
+				}
 			}
 		}
 	}
