@@ -206,6 +206,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 						self->testFailure("Non-zero data distribution queue/in-flight size");
 					}
 
+					// Check that the number of process (and machine) teams is no larger than
+					// the allowed maximum number of teams
+					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
+					if (!teamCollectionValid) {
+						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
+						self->testFailure("The number of process or machine teams is larger than the allowed maximum number of teams");
+					}
+
 					//Check that nothing is in the TLog queues
 					int64_t maxTLogQueueSize = wait(getMaxTLogQueueSize(cx, self->dbInfo));
 					if(maxTLogQueueSize > 1e5)  // FIXME: Should be zero?

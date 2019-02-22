@@ -2726,6 +2726,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		if(newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
+			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
+			// Otherwise, in the race situation when storage server receives both reboot and
+			// brokenPromise of durableInProgress, the worker of the storage server will die.
+			// We will eventually end up with no worker for storage server role.
+			// The data distributor's buildTeam() will get stuck in building a team
+			durableInProgress.sendError(please_reboot());
 			throw please_reboot();
 		}
 

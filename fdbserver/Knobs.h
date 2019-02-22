@@ -89,6 +89,7 @@ public:
 	double BG_DD_DECREASE_RATE;
 	double BG_DD_SATURATION_DELAY;
 	double INFLIGHT_PENALTY_HEALTHY;
+	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
 
@@ -128,6 +129,11 @@ public:
 	int64_t DD_LOCATION_CACHE_SIZE;
 	double MOVEKEYS_LOCK_POLLING_DELAY;
 	double DEBOUNCE_RECRUITING_DELAY;
+
+	// TeamRemover to remove redundant teams
+	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
+	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
+
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 

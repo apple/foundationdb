@@ -302,6 +302,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "name":{
                "$enum":[
                   "unreachable_master_worker",
+                  "unreachable_dataDistributor_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -496,6 +497,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "initializing",
                   "missing_data",
                   "healing",
+                  "removing_redundant_teams",
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
@@ -528,6 +530,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                           "initializing",
                           "missing_data",
                           "healing",
+                          "removing_redundant_teams",
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
