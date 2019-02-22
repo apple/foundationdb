@@ -86,7 +86,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BG_DD_DECREASE_RATE,                                  1.02 );
 	init( BG_DD_SATURATION_DELAY,                                1.0 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
-	init( INFLIGHT_PENALTY_REDUNDANT,                            9.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
 

@@ -2490,11 +2490,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( PRIORITY_TEAM_1_LEFT );
 					else if( serversLeft == 2 )
 						team->setPriority( PRIORITY_TEAM_2_LEFT );
-					else if ( redundantTeam )  {
-						team->setPriority( PRIORITY_TEAM_REDUNDANT );
-					} else {
-							team->setPriority( PRIORITY_TEAM_UNHEALTHY );
-					}
+					else
+						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
 				}
 				else if ( badTeam || anyWrongConfiguration ) {
 					if ( redundantTeam ) {
