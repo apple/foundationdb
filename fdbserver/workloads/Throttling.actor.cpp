@@ -48,10 +48,6 @@ struct TokenBucket {
 	}
 
 	ACTOR static Future<Void> startTransaction(TokenBucket* self) {
-		if (self->bucketSize > 1.0) {
-			--self->bucketSize;
-			return Void();
-		}
 		state double sleepTime = addTokensInterval;
 		loop {
 			if (self->bucketSize >= 1.0) {
