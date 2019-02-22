@@ -1776,6 +1776,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = self->recruitmentID;
+			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
 			req.spillType = configuration.tLogSpillType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
@@ -1953,6 +1954,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
+			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
 			req.spillType = configuration.tLogSpillType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
@@ -1997,6 +1999,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
 				InitializeTLogRequest &req = sreqs[i];
 				req.recruitmentID = logSystem->recruitmentID;
+				req.logVersion = configuration.tLogVersion;
 				req.storeType = configuration.tLogDataStoreType;
 				req.spillType = configuration.tLogSpillType;
 				req.recoverFrom = oldLogSystem->getLogSystemConfig();

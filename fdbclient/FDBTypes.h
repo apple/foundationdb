@@ -513,6 +513,41 @@ private:
 	uint32_t type;
 };
 
+struct TLogVersion {
+	enum Version {
+		UNSET = 0,
+		// Everything between BEGIN and END should be densely packed, so that we
+		// can iterate over them easily.
+		// V1 = 1,  // 4.6 is dispatched to via 6.0
+		V2 = 2, // 6.0
+		V3 = 3, // 6.1
+		MIN_SUPPORTED = V2,
+		MAX_SUPPORTED = V3,
+		MIN_RECRUITABLE = V2,
+		DEFAULT = V2,
+	} version;
+
+	TLogVersion() : version(UNSET) {}
+	TLogVersion( Version v ) : version(v) {}
+
+	operator Version() const {
+		return version;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		uint32_t v = (uint32_t)version;
+		serializer(ar, v);
+		version = (Version)v;
+	}
+
+	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
+		if (s == LiteralStringRef("2")) return V2;
+		if (s == LiteralStringRef("3")) return V3;
+		return default_error_or();
+	}
+};
+
 struct TLogSpillType {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum SpillType {
@@ -542,6 +577,12 @@ struct TLogSpillType {
 			default: ASSERT(false);
 		}
 		return "";
+	}
+
+	static ErrorOr<TLogSpillType> FromStringRef( StringRef s ) {
+		if ( s == LiteralStringRef("1") ) return VALUE;
+		if ( s == LiteralStringRef("2") ) return REFERENCE;
+		return default_error_or();
 	}
 
 private:

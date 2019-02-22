@@ -27,7 +27,7 @@
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };
-static const char* logTypes[] = { "log_engine:=1", "log_engine:=2", "log_spill:=1", "log_spill:=2" };
+static const char* logTypes[] = { "log_engine:=1", "log_engine:=2", "log_spill:=1", "log_spill:=2", "log_version:=2", "log_version:=3" };
 static const char* redundancies[] = { "single", "double", "triple" };
 
 std::string generateRegions() {
@@ -346,7 +346,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				wait(success( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) ));
 			}
 			else if ( randomChoice == 6 ) {
-				ConfigurationResult::Type _ = wait( changeConfig( cx, logTypes[g_random->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], true ) );
+				// Some configurations will be invalid, and that's fine.
+				wait(success( changeConfig( cx, logTypes[g_random->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
 			}
 			else {
 				ASSERT(false);

@@ -30,6 +30,7 @@ void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
 	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
+	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
@@ -166,8 +167,12 @@ bool DatabaseConfiguration::isValid() const {
 		getDesiredProxies() >= 1 &&
 		getDesiredLogs() >= 1 &&
 		getDesiredResolvers() >= 1 &&
+		tLogVersion != TLogVersion::UNSET &&
+		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
 		tLogDataStoreType != KeyValueStoreType::END &&
 		tLogSpillType != TLogSpillType::UNSET &&
+		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
 		storageServerStoreType != KeyValueStoreType::END &&
 		autoMasterProxyCount >= 1 &&
 		autoResolverCount >= 1 &&
@@ -243,6 +248,10 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["log_anti_quorum"] = tLogWriteAntiQuorum;
 			if(!noPolicies) result["storage_replication_policy"] = storagePolicy->info();
 			if(!noPolicies)  result["log_replication_policy"] = tLogPolicy->info();
+		}
+
+		if ( tLogVersion != TLogVersion::DEFAULT ) {
+			result["log_version"] = (int)tLogVersion;
 		}
 
 		if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
@@ -372,6 +381,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
+	else if (ck == LiteralStringRef("log_version")) { parse((&type), value); tLogVersion = (TLogVersion::Version)type; }
 	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
 		// TODO:  Remove this once Redwood works as a log engine
 		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)

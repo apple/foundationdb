@@ -823,9 +823,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	}
 
 	if (g_random->random01() < 0.5) {
-		set_config("log_spill:=1");
+		if (g_random->random01() < 0.5) {
+			set_config("log_version:=2");  // 6.0
+		} else {
+			set_config("log_version:=3");  // 6.1
+		}
+		set_config("log_spill:=1");  // VALUE
 	} else {
-		set_config("log_spill:=2");
+		set_config("log_version:=3");  // 6.1
+		set_config("log_spill:=2");  // REFERENCE
 	}
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {

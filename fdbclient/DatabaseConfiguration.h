@@ -161,6 +161,7 @@ struct DatabaseConfiguration {
 	int32_t autoDesiredTLogCount;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
+	TLogVersion tLogVersion;
 	KeyValueStoreType tLogDataStoreType;
 	TLogSpillType tLogSpillType;
 
