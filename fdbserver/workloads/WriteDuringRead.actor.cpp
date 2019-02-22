@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/Atomic.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -785,10 +785,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 								self->memoryDatabase[ key ] = value;
 							}
 						} catch( Error &e ) {
-							if( e.code() == error_code_used_during_commit )
+							if( e.code() == error_code_used_during_commit ) {
 								ASSERT( doingCommit );
-							else if( e.code() != error_code_transaction_cancelled )
+							} else if( e.code() != error_code_transaction_cancelled ) {
 								throw;
+							}
 						}
 					}
 

@@ -36,7 +36,7 @@ struct ClientWorkerInterface {
 	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
 	UID id() const { return reboot.getEndpoint().token; }
-	NetworkAddress address() const { return reboot.getEndpoint().address; }
+	NetworkAddress address() const { return reboot.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/KeyBackedTypes.h"
 
@@ -303,15 +303,11 @@ public:
 		});
 	}
 
-	static Future<std::string> getProgress_impl(RestoreConfig const &restore, Reference<ReadYourWritesTransaction> const &tr);
-	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) {
-		return getProgress_impl(*this, tr);
-	}
+	ACTOR static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) { return getProgress_impl(*this, tr); }
 
-	static Future<std::string> getFullStatus_impl(RestoreConfig const &restore, Reference<ReadYourWritesTransaction> const &tr);
-	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) {
-		return getFullStatus_impl(*this, tr);
-	}
+	ACTOR static Future<std::string> getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) { return getFullStatus_impl(*this, tr); }
 };
 
 typedef RestoreConfig::RestoreFile RestoreFile;
@@ -348,7 +344,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 		.detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 		.detail("BytesWritten", bytesWritten.get())
 		.detail("ApplyLag", lag.get())
-		.detail("TaskInstance", (uint64_t)this);
+		.detail("TaskInstance", THIS_ADDR);
 
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
@@ -1346,11 +1342,14 @@ namespace fileBackup {
 						// The dispatch of this batch can take multiple separate executions if the executor fails
 						// so store a completion key for the dispatch finish() to set when dispatching the batch is done.
 						state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
-						wait(map(dispatchCompletionKey.get(tr, taskBucket), [=](Key const &k) {
-							config.snapshotBatchDispatchDoneKey().set(tr, k);
+						// this is a bad hack - but flow doesn't work well with lambda functions and caputring
+						// state variables...
+						auto cfg = &config;
+						auto tx = &tr;
+						wait(map(dispatchCompletionKey.get(tr, taskBucket), [cfg, tx](Key const& k) {
+							cfg->snapshotBatchDispatchDoneKey().set(*tx, k);
 							return Void();
 						}));
-
 						wait(tr->commit());
 					}
 					else {
@@ -2467,7 +2466,7 @@ namespace fileBackup {
 				.detail("FileSize", rangeFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
+				.detail("TaskInstance", THIS_ADDR);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Future<Reference<IBackupContainer>> bc;
@@ -2592,7 +2591,7 @@ namespace fileBackup {
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
 						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2681,7 +2680,7 @@ namespace fileBackup {
 				.detail("FileSize", logFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
+				.detail("TaskInstance", THIS_ADDR);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Reference<IBackupContainer> bc;
@@ -2754,7 +2753,7 @@ namespace fileBackup {
 						.detail("EndIndex", i)
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2853,7 +2852,7 @@ namespace fileBackup {
 					.detail("ApplyLag", applyLag)
 					.detail("BatchSize", batchSize)
 					.detail("Decision", "too_far_behind")
-					.detail("TaskInstance", (uint64_t)this);
+					.detail("TaskInstance", THIS_ADDR);
 
 				wait(taskBucket->finish(tr, task));
 				return Void();
@@ -2895,7 +2894,7 @@ namespace fileBackup {
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "end_of_final_batch")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 				else if(beginVersion < restoreVersion) {
 					// If beginVersion is less than restoreVersion then do one more dispatch task to get there
@@ -2909,7 +2908,7 @@ namespace fileBackup {
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "apply_to_restore_version")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 				else if(applyLag == 0) {
 					// If apply lag is 0 then we are done so create the completion task
@@ -2922,7 +2921,7 @@ namespace fileBackup {
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "restore_complete")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				} else {
 					// Applying of mutations is not yet finished so wait a small amount of time and then re-add this same task.
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
@@ -2933,7 +2932,7 @@ namespace fileBackup {
 						.detail("BeginVersion", beginVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "apply_still_behind")
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 				}
 
 				// If adding to existing batch then task is joined with a batch future so set done future
@@ -3007,7 +3006,7 @@ namespace fileBackup {
 					.suppressFor(60)
 					.detail("RestoreUID", restore.getUid())
 					.detail("FileName", f.fileName)
-					.detail("TaskInstance", (uint64_t)this);
+					.detail("TaskInstance", THIS_ADDR);
 			}
 
 			// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone future
@@ -3032,7 +3031,7 @@ namespace fileBackup {
 					.detail("ApplyLag", applyLag)
 					.detail("BatchSize", batchSize)
 					.detail("Decision", decision)
-					.detail("TaskInstance", (uint64_t)this)
+					.detail("TaskInstance", THIS_ADDR)
 					.detail("RemainingInBatch", remainingInBatch);
 
 				wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, endVersion, beginFile, beginBlock, batchSize, remainingInBatch, TaskCompletionKey::joinWith((allPartsDone)))));
@@ -3080,7 +3079,7 @@ namespace fileBackup {
 				.detail("Decision", "dispatched_files")
 				.detail("FilesDispatched", i)
 				.detail("BlocksDispatched", blocksDispatched)
-				.detail("TaskInstance", (uint64_t)this)
+				.detail("TaskInstance", THIS_ADDR)
 				.detail("RemainingInBatch", remainingInBatch);
 
 			return Void();
@@ -3231,7 +3230,7 @@ namespace fileBackup {
 
 					ERestoreState oldState = wait(restore.stateEnum().getD(tr));
 					if(oldState != ERestoreState::QUEUED && oldState != ERestoreState::STARTING) {
-						wait(restore.logError(cx, restore_error(), format("StartFullRestore: Encountered unexpected state(%d)", oldState), this));
+						wait(restore.logError(cx, restore_error(), format("StartFullRestore: Encountered unexpected state(%d)", oldState), THIS));
 						return Void();
 					}
 					restore.stateEnum().set(tr, ERestoreState::STARTING);
@@ -3301,7 +3300,7 @@ namespace fileBackup {
 						.detail("FileCount", nFiles)
 						.detail("FileBlockCount", nFileBlocks)
 						.detail("TransactionBytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", THIS_ADDR);
 
 					start = i;
 					tr->reset();
@@ -3318,7 +3317,7 @@ namespace fileBackup {
 
 			state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 			if(firstVersion == invalidVersion) {
-				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
+				wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 				std::string tag = wait(restore.tag().getD(tr));
 				wait(success(abortRestore(tr, StringRef(tag))));
 				return Void();
@@ -3404,7 +3403,7 @@ public:
 				// Break, if one of the following is true
 				//  - no longer runnable
 				//  - in differential mode (restorable) and stopWhenDone is not enabled
-				if( !FileBackupAgent::isRunnable(status) || (!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) ) {
+				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) )) {
 
 					if(pContainer != nullptr) {
 						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
@@ -3596,9 +3595,10 @@ public:
 
 	// This method will return the final status of the backup
 	ACTOR static Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose) {
+		state ERestoreState status;
 		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3618,7 +3618,8 @@ public:
 					printf("%s\n", details.c_str());
 				}
 
-				state ERestoreState status = wait(restore.stateEnum().getD(tr));
+			ERestoreState status_ = wait(restore.stateEnum().getD(tr));
+				status = status_;
 				state bool runnable = wait(restore.isRunnable(tr));
 
 				// State won't change from here

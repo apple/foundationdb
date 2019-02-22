@@ -19,10 +19,10 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -150,7 +150,7 @@ struct PingWorkload : TestWorkload {
 		loop {
 			wait( poisson( &lastTime, self->actorCount / self->operationsPerSecond ) );
 			auto& peer = g_random->randomChoice(peers);
-			state NetworkAddress addr = peer.getEndpoint().address;
+			state NetworkAddress addr = peer.getEndpoint().getPrimaryAddress();
 			state double before = now();
 
 			LoadedPingRequest req;
@@ -251,7 +251,7 @@ struct PingWorkload : TestWorkload {
 				req.payload = self->payloadOut;
 				req.loadReply = true;
 				replies.push_back( success( peers[i].getReply( req ) ) );
-				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().address, pingId ) );
+				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().getPrimaryAddress(), pingId ) );
 				// peers[i].payloadPing.send( req );
 				// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 			}

@@ -26,7 +26,10 @@
     </ActorCompiler>
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="BackupContainer.h" />
-    <ClInclude Include="BackupAgent.h" />
+    <ActorCompiler Include="BackupAgent.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="BlobStore.h" />
     <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />
@@ -61,14 +64,20 @@
     <ClInclude Include="libb64\cencode.h" />
     <ClInclude Include="libb64\decode.h" />
     <ClInclude Include="libb64\encode.h" />
-    <ClInclude Include="ManagementAPI.h" />
+    <ActorCompiler Include="ManagementAPI.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="MasterProxyInterface.h" />
     <ClInclude Include="md5\md5.h" />
     <ClInclude Include="MonitorLeader.h" />
     <ClInclude Include="MultiVersionAssignmentVars.h" />
     <ClInclude Include="MultiVersionTransaction.h" />
     <ClInclude Include="MutationList.h" />
-    <ClInclude Include="NativeAPI.h" />
+    <ActorCompiler Include="NativeAPI.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="Notified.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />

@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	double testDuration;

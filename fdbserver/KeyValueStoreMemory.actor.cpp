@@ -453,23 +453,25 @@ private:
 
 		try {
 			loop {
-				Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
-				if (data.size() != sizeof(OpHeader)) {
-					if (data.size()) {
-						TEST(true);  // zero fill partial header in KeyValueStoreMemory
-						memset(&h, 0, sizeof(OpHeader));
-						memcpy(&h, data.begin(), data.size());
-						zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+				{
+					Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
+					if (data.size() != sizeof(OpHeader)) {
+						if (data.size()) {
+							TEST(true);  // zero fill partial header in KeyValueStoreMemory
+							memset(&h, 0, sizeof(OpHeader));
+							memcpy(&h, data.begin(), data.size());
+							zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+						}
+						TraceEvent("KVSMemRecoveryComplete", self->id)
+							.detail("Reason", "Non-header sized data read")
+							.detail("DataSize", data.size())
+							.detail("ZeroFillSize", zeroFillSize)
+							.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+							.detail("NextReadLoc", self->log->getNextReadLocation());
+						break;
 					}
-					TraceEvent("KVSMemRecoveryComplete", self->id)
-						.detail("Reason", "Non-header sized data read")
-						.detail("DataSize", data.size())
-						.detail("ZeroFillSize", zeroFillSize)
-						.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
-						.detail("NextReadLoc", self->log->getNextReadLocation());
-					break;
+					h = *(OpHeader*)data.begin();
 				}
-				h = *(OpHeader*)data.begin();
 				Standalone<StringRef> data = wait( self->log->readNext( h.len1 + h.len2+1 ) );
 				if (data.size() != h.len1 + h.len2 + 1) {
 					zeroFillSize = h.len1 + h.len2 + 1 - data.size();

@@ -22,6 +22,7 @@
 #include "fdbclient/md5/md5.h"
 #include "fdbclient/libb64/encode.h"
 #include <cctype>
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace HTTP {
 
@@ -234,28 +235,32 @@ namespace HTTP {
 			pos = 0;
 
 			loop {
-				// Read the line that contains the chunk length as text in hex
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-				state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), NULL, 16);
+				{
+					// Read the line that contains the chunk length as text in hex
+					size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
+					state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), NULL, 16);
 
-				// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the content buffer
-				r->content.erase(pos, lineLen + 2);
+					// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the content buffer
+					r->content.erase(pos, lineLen + 2);
 
-				// If chunkLen is 0 then this marks the end of the content chunks.
-				if(chunkLen == 0)
-					break;
+					// If chunkLen is 0 then this marks the end of the content chunks.
+					if(chunkLen == 0)
+						break;
 
-				// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
-				wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
-				pos += chunkLen;
+					// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
+					wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
+					pos += chunkLen;
+				}
 
-				// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-				if(lineLen != 0)
-					throw http_bad_response();
+				{
+					// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
+					size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
+					if(lineLen != 0)
+						throw http_bad_response();
 
-				// Instead of advancing pos, erase the empty line from the content buffer
-				r->content.erase(pos, 2);
+					// Instead of advancing pos, erase the empty line from the content buffer
+					r->content.erase(pos, 2);
+				}
 			}
 
 			// The content buffer now contains the de-chunked, contiguous content at position 0 to pos.  Save this length.
@@ -307,6 +312,7 @@ namespace HTTP {
 
 		state bool earlyResponse = false;
 		state int total_sent = 0;
+		state double send_start;
 
 		event.detail("DebugID", conn->getDebugID());
 		event.detail("RemoteAddress", conn->getPeerAddress());
@@ -343,7 +349,7 @@ namespace HTTP {
 			state Reference<HTTP::Response> r(new HTTP::Response());
 			state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
 
-			state double send_start = timer();
+			send_start = timer();
 
 			loop {
 				wait(conn->onWritable());

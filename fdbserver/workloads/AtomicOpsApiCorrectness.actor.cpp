@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
@@ -118,23 +118,27 @@ public:
 				wait(delay(1));
 			}
 		}
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != intValue) {
+				TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 
-		// Do operation on RYW Layer
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->clear(key); tr->atomicOp(key, val, opType); return tr->get(key); }));
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->clear(key); tr->atomicOp(key, val, opType); return tr->get(key); }));
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != intValue) {
+				TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 		return Void();
 	}
@@ -156,23 +160,27 @@ public:
 				wait(delay(1));
 			}
 		}
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != 0) {
+				TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 
-		// Do operation on RYW Layer
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->clear(key); tr->atomicOp(key, val, opType); return tr->get(key); }));
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->clear(key); tr->atomicOp(key, val, opType); return tr->get(key); }));
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != 0) {
+				TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 		return Void();
 	}
@@ -204,21 +212,25 @@ public:
 				wait(delay(1));
 			}
 		}
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
-		ASSERT(outputVal.present());
-		Value output = outputVal.get();
-		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
-			self->testFailed = true;
+		{
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+			ASSERT(outputVal.present());
+			Value output = outputVal.get();
+			if (output != opFunc(existingVal, otherVal)) {
+				TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+				self->testFailed = true;
+			}
 		}
 
-		// Do operation on RYW Layer
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->set(key, existingVal); tr->atomicOp(key, otherVal, opType); return tr->get(key); }));
-		ASSERT(outputVal.present());
-		Value output = outputVal.get();
-		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
-			self->testFailed = true;
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->set(key, existingVal); tr->atomicOp(key, otherVal, opType); return tr->get(key); }));
+			ASSERT(outputVal.present());
+			Value output = outputVal.get();
+			if (output != opFunc(existingVal, otherVal)) {
+				TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+				self->testFailed = true;
+			}
 		}
 		return Void();
 	}
@@ -247,25 +259,29 @@ public:
 				wait(delay(1));
 			}
 		}
-		// Compare result
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			// Compare result
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != opFunc(intValue1, intValue2)) {
+				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 
-		// Do operation at RYW layer
-		Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->set(key, val1); tr->atomicOp(key, val2, opType); return tr->get(key); }));
-		// Compare result
-		uint64_t output = 0;
-		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
-			self->testFailed = true;
+		{
+			// Do operation at RYW layer
+			Optional<Value> outputVal = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { tr->set(key, val1); tr->atomicOp(key, val2, opType); return tr->get(key); }));
+			// Compare result
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != opFunc(intValue1, intValue2)) {
+				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+				self->testFailed = true;
+			}
 		}
 
 		return Void();
@@ -312,55 +328,61 @@ public:
 			}
 		}
 
-		// Compare result
-		Optional<Value> outputVal = wait(runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
-		state Optional<uint64_t> expectedOutput = opFunc(intValue1, intValue2);
+		state Optional<uint64_t> expectedOutput;
+		{
+			// Compare result
+			Optional<Value> outputVal = wait(runRYWTransaction(
+												 cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
+			Optional<uint64_t> expectedOutput_ = opFunc(intValue1, intValue2);
+			expectedOutput = expectedOutput_;
 
-		ASSERT(outputVal.present() == expectedOutput.present());
-		if (outputVal.present()) {
-			uint64_t output = 0;
-			ASSERT(outputVal.get().size() == sizeof(uint64_t));
-			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-			if (output != expectedOutput.get()) {
-				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
-				    .detail("OpOn", "StorageServer")
-				    .detail("InValue1", intValue1)
-				    .detail("InValue2", intValue2)
-				    .detail("AtomicOp", opType)
-				    .detail("ExpectedOutput", expectedOutput.get())
-				    .detail("ActualOutput", output);
-				self->testFailed = true;
+			ASSERT(outputVal.present() == expectedOutput.present());
+			if (outputVal.present()) {
+				uint64_t output = 0;
+				ASSERT(outputVal.get().size() == sizeof(uint64_t));
+				memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+				if (output != expectedOutput.get()) {
+					TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+						.detail("OpOn", "StorageServer")
+						.detail("InValue1", intValue1)
+						.detail("InValue2", intValue2)
+						.detail("AtomicOp", opType)
+						.detail("ExpectedOutput", expectedOutput.get())
+						.detail("ActualOutput", output);
+					self->testFailed = true;
+				}
 			}
 		}
 
-		// Do operation at RYW layer
-		Optional<Value> outputVal =
-		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			    if (keySet) {
-				    tr->set(key, val1);
-			    } else {
-				    tr->clear(key);
-			    }
-			    tr->atomicOp(key, val2, opType);
-			    return tr->get(key);
-		    }));
+		{
+			// Do operation at RYW layer
+			Optional<Value> outputVal =
+				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+							if (keySet) {
+								tr->set(key, val1);
+							} else {
+								tr->clear(key);
+							}
+							tr->atomicOp(key, val2, opType);
+							return tr->get(key);
+						}));
 
-		// Compare result
-		ASSERT(outputVal.present() == expectedOutput.present());
-		if (outputVal.present()) {
-			uint64_t output = 0;
-			ASSERT(outputVal.get().size() == sizeof(uint64_t));
-			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-			if (output != expectedOutput.get()) {
-				TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
-				    .detail("OpOn", "RYWLayer")
-				    .detail("InValue1", intValue1)
-				    .detail("InValue2", intValue2)
-				    .detail("AtomicOp", opType)
-				    .detail("ExpectedOutput", expectedOutput.get())
-				    .detail("ActualOutput", output);
-				self->testFailed = true;
+			// Compare result
+			ASSERT(outputVal.present() == expectedOutput.present());
+			if (outputVal.present()) {
+				uint64_t output = 0;
+				ASSERT(outputVal.get().size() == sizeof(uint64_t));
+				memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+				if (output != expectedOutput.get()) {
+					TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+						.detail("OpOn", "RYWLayer")
+						.detail("InValue1", intValue1)
+						.detail("InValue2", intValue2)
+						.detail("AtomicOp", opType)
+						.detail("ExpectedOutput", expectedOutput.get())
+						.detail("ActualOutput", output);
+					self->testFailed = true;
+				}
 			}
 		}
 

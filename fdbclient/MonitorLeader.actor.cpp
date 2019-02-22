@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/Platform.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
 	if (filename.length())
@@ -74,7 +75,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 	setConn = true;
 }
 
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() {
+ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
 	return cs;
 }
 
@@ -299,7 +300,7 @@ ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
 UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
-	: getLeader( Endpoint(remote, WLTOKEN_CLIENTLEADERREG_GETLEADER) )
+	: getLeader( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_GETLEADER) )
 {
 }
 
@@ -312,7 +313,7 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
+		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
 
 		if (li != *info) {
 			*info = li;

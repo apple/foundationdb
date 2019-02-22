@@ -22,12 +22,12 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/TesterInterface.h"  // for poisson()
+#include "fdbserver/TesterInterface.actor.h"  // for poisson()
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
@@ -171,7 +171,7 @@ ACTOR template<class T> Future<Void> zombie(T workerInterface, Future<Void> work
 }
 
 ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
-	state Standalone<StringRef> payloadBack = std::string( 20480, '.' );
+	state Standalone<StringRef> payloadBack(std::string( 20480, '.' ));
 
 	loop {
 		LoadedPingRequest pong = waitNext( pings );
@@ -521,7 +521,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 			}
 			when( wait( ccInterface->onChange() ) ) {
 				if(ccInterface->get().present())
-					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().address);
+					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
 			}
 		}
 	}

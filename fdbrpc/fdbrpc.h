@@ -30,9 +30,6 @@
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
-	Endpoint endpoint;
-	bool m_isLocalEndpoint;
-
 	FlowReceiver() : m_isLocalEndpoint(false) {}
 	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
 		FlowTransport::transport().addPeerReference(endpoint, this);
@@ -64,6 +61,10 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		endpoint.token = token;
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
+
+protected:
+	Endpoint endpoint;
+	bool m_isLocalEndpoint;
 };
 
 template <class T>
@@ -151,7 +152,7 @@ template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
-	ASSERT(!ep.address.isValid() || ep.address.isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
+	ASSERT(!ep.getPrimaryAddress().isValid() || ep.getPrimaryAddress().isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
 }
 
 template <class Ar, class T>
@@ -357,7 +358,7 @@ template <class Ar, class T>
 void save(Ar& ar, const RequestStream<T>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
-	UNSTOPPABLE_ASSERT(ep.address.isValid());  // No serializing PromiseStreams on a client with no public address
+	UNSTOPPABLE_ASSERT(ep.getPrimaryAddress().isValid());  // No serializing PromiseStreams on a client with no public address
 }
 
 template <class Ar, class T>

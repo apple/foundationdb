@@ -20,7 +20,7 @@
 
 #include "fdbserver/LatencyBandConfig.h"
 
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Schemas.h"
 
 bool operator==(LatencyBandConfig::RequestConfig const& lhs, LatencyBandConfig::RequestConfig const& rhs) { 

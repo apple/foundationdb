@@ -3,7 +3,7 @@ set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.h
   Atomic.h
   AutoPublicAddress.cpp
-  BackupAgent.h
+  BackupAgent.actor.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
@@ -34,7 +34,7 @@ set(FDBCLIENT_SRCS
   Knobs.cpp
   Knobs.h
   ManagementAPI.actor.cpp
-  ManagementAPI.h
+  ManagementAPI.actor.h
   MasterProxyInterface.h
   MetricLogger.actor.cpp
   MetricLogger.h
@@ -45,7 +45,7 @@ set(FDBCLIENT_SRCS
   MultiVersionTransaction.h
   MutationList.h
   NativeAPI.actor.cpp
-  NativeAPI.h
+  NativeAPI.actor.h
   Notified.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h

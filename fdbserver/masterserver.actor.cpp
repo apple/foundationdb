@@ -22,7 +22,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "flow/Trace.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
@@ -30,7 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include <iterator>
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"

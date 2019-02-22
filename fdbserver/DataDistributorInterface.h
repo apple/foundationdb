@@ -34,7 +34,7 @@ struct DataDistributorInterface {
 
 	void initEndpoints() {}
 	UID id() const { return getRateInfo.getEndpoint().token; }
-	NetworkAddress address() const { return getRateInfo.getEndpoint().address; }
+	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
 	bool operator== (const DataDistributorInterface& r) const {
 		return id() == r.id();
 	}

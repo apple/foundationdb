@@ -45,7 +45,7 @@ set(FDBSERVER_SRCS
   MemoryPager.actor.cpp
   MemoryPager.h
   MoveKeys.actor.cpp
-  MoveKeys.h
+  MoveKeys.actor.h
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer.actor.cpp
@@ -80,7 +80,7 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   template_fdb.h
   tester.actor.cpp
-  TesterInterface.h
+  TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp
@@ -88,7 +88,7 @@ set(FDBSERVER_SRCS
   WaitFailure.actor.cpp
   WaitFailure.h
   worker.actor.cpp
-  WorkerInterface.h
+  WorkerInterface.actor.h
   workloads/ApiCorrectness.actor.cpp
   workloads/ApiWorkload.actor.cpp
   workloads/ApiWorkload.h
@@ -170,7 +170,7 @@ set(FDBSERVER_SRCS
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
   workloads/WorkerErrors.actor.cpp
-  workloads/workloads.h
+  workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 
@@ -182,5 +182,6 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient)
 
-install(TARGETS fdbserver DESTINATION ${FDB_SBIN_DIR} COMPONENT server)
-
+if(NOT OPEN_FOR_IDE)
+  install(TARGETS fdbserver DESTINATION ${FDB_SBIN_DIR} COMPONENT server)
+endif()

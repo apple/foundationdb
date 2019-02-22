@@ -173,7 +173,10 @@
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
     <ClInclude Include="MemoryPager.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ActorCompiler Include="MoveKeys.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="NetworkTest.h" />
     <ActorCompiler Include="Orderer.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
@@ -201,15 +204,21 @@
     <ClInclude Include="template_fdb.h" />
     <ClInclude Include="TLogInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
-    <ClInclude Include="WorkerInterface.h" />
+    <ActorCompiler Include="TesterInterface.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="WorkerInterface.actor.h" />
     <ActorCompiler Include="workloads\BulkSetup.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="workloads\AsyncFile.actor.h" />
     <ClInclude Include="workloads\ApiWorkload.h" />
     <ClInclude Include="workloads\MemoryKeyValueStore.h" />
-    <ClInclude Include="workloads\workloads.h" />
+    <ActorCompiler Include="workloads\workloads.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{8E959DA5-5925-45CE-BFC4-C84EB632A29A}</ProjectGUID>

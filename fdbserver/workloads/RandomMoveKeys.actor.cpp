@@ -20,10 +20,10 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbserver/MoveKeys.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

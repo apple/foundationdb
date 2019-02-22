@@ -19,9 +19,9 @@
  */
 
 #include "flow/IRandom.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
@@ -29,7 +29,7 @@
 #include "fdbserver/DataDistribution.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ConsistencyCheckWorkload : TestWorkload
@@ -204,6 +204,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 					{
 						TraceEvent("ConsistencyCheck_NonZeroDataDistributionQueue").detail("QueueSize", inDataDistributionQueue);
 						self->testFailure("Non-zero data distribution queue/in-flight size");
+					}
+
+					// Check that the number of process (and machine) teams is no larger than
+					// the allowed maximum number of teams
+					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
+					if (!teamCollectionValid) {
+						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
+						self->testFailure("The number of process or machine teams is larger than the allowed maximum number of teams");
 					}
 
 					//Check that nothing is in the TLog queues

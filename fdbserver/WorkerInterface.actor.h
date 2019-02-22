@@ -1,5 +1,5 @@
 /*
- * WorkerInterface.h
+ * WorkerInterface.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,24 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_WORKERINTERFACE_H
-#define FDBSERVER_WORKERINTERFACE_H
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
+	#define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
+	#include "fdbserver/WorkerInterface.actor.g.h"
+#elif !defined(FDBSERVER_WORKERINTERFACE_ACTOR_H)
+	#define FDBSERVER_WORKERINTERFACE_ACTOR_H
 
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
+#include "flow/actorcompiler.h"
 
 #define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
@@ -57,7 +61,7 @@ struct WorkerInterface {
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
-	NetworkAddress address() const { return tLog.getEndpoint().address; }
+	NetworkAddress address() const { return tLog.getEndpoint().getPrimaryAddress(); }
 
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
@@ -318,38 +322,51 @@ void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error
 struct ServerDBInfo;
 
 class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int taskID = TaskDefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
-Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& a, Reference<AsyncVar<Optional<struct ClusterInterface>>> const& b );
+ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
+                                           Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
-Future<Void> fdbd( Reference<ClusterConnectionFile> const&, LocalityData const& localities, ProcessClass const& processClass, std::string const& dataFolder, std::string const& coordFolder, int64_t const& memoryLimit, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, Future<Void> const& recoveredDiskFiles, LocalityData const& locality );
+ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf, LocalityData localities, ProcessClass processClass,
+                        std::string dataFolder, std::string coordFolder, int64_t memoryLimit,
+                        std::string metricsConnFile, std::string metricsPrefix);
+ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
+                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                     Future<Void> recoveredDiskFiles, LocalityData locality);
 
 // These servers are started by workerServer
-Future<Void> storageServer(
-				class IKeyValueStore* const& persistentData,
-				StorageServerInterface const& ssi,
-				Tag const& seedTag,
-				ReplyPromise<InitializeStorageReply> const& recruitReply,
-				Reference<AsyncVar<ServerDBInfo>> const& db,
-				std::string const& folder );
-Future<Void> storageServer(
-				class IKeyValueStore* const& persistentData,
-				StorageServerInterface const& ssi,
-				Reference<AsyncVar<ServerDBInfo>> const& db,
-				std::string const& folder,
-				Promise<Void> const& recovered);  // changes pssi->id() to be the recovered ID
-Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
-Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
-Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
-Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& ccInterface, Reference<ClusterConnectionFile> const&, LocalityData const&, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
-Future<Void> resolver( ResolverInterface const& proxy, InitializeResolverRequest const&, Reference<AsyncVar<ServerDBInfo>> const& db );
-Future<Void> logRouter( TLogInterface const& interf, InitializeLogRouterRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db );
-Future<Void> dataDistributor( DataDistributorInterface const& ddi, Reference<AsyncVar<ServerDBInfo>> const& db );
+class IKeyValueStore;
+class ServerCoordinators;
+class IDiskQueue;
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag,
+                                 ReplyPromise<InitializeStorageReply> recruitReply,
+                                 Reference<AsyncVar<ServerDBInfo>> db, std::string folder);
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerInterface ssi,
+                                 Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
+                                 Promise<Void> recovered); // changes pssi->id() to be the recovered ID
+ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
+                                ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
+ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
+                                     Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered); // changes tli->id() to be the recovered ID
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       Reference<ClusterConnectionFile> ccf, LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo);
+ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+                            Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
+                             Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
 
 namespace oldTLog {
-	Future<Void> tLog( IKeyValueStore* const& persistentData, IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, UID const& tlogId );
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId);
 }
 
+#include "flow/unactorcompiler.h"
 #endif

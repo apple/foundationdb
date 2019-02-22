@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
-#include "fdbserver/MoveKeys.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
 
 struct RelocateShard {
@@ -46,6 +46,7 @@ enum {
 	PRIORITY_MERGE_SHARD     = 240,
 	PRIORITY_SPLIT_SHARD     = 250,
 
+	PRIORITY_TEAM_REDUNDANT  = 700,
 	PRIORITY_TEAM_UNHEALTHY  = 800,
 	PRIORITY_TEAM_2_LEFT     = 809,
 
@@ -241,3 +242,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
 //Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize( double dbSizeEstimate );
+
+class DDTeamCollection;
+Future<Void> teamRemover(DDTeamCollection* const& self);
+Future<Void> teamRemoverPeriodic(DDTeamCollection* const& self);

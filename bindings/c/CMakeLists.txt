@@ -30,7 +30,11 @@ vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DI
 
 include(GenerateExportHeader)
 
-add_library(fdb_c SHARED ${FDB_C_SRCS} ${asm_file})
+if(OPEN_FOR_IDE)
+  add_library(fdb_c OBJECT ${FDB_C_SRCS} ${asm_file})
+else()
+  add_library(fdb_c SHARED ${FDB_C_SRCS} ${asm_file})
+endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC fdbclient)
 target_include_directories(fdb_c PUBLIC
@@ -44,22 +48,29 @@ endif()
 
 # The tests don't build on windows
 if(NOT WIN32)
-  add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+  if(OPEN_FOR_IDE)
+    add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
+    add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
+  else()
+    add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
+    add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
+  endif()
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
-  add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
 endif()
 
-# TODO: re-enable once the old vcxproj-based build system is removed.
-#generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
-#  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
-install(TARGETS fdb_c
-  EXPORT fdbc
-  DESTINATION ${FDB_LIB_DIR}
-  COMPONENT clients)
-install(
-  FILES foundationdb/fdb_c.h
-        ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
-        ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-  DESTINATION ${FDB_INCLUDE_INSTALL_DIR}/foundationdb COMPONENT clients)
-#install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
+if(NOT OPEN_FOR_IDE)
+  # TODO: re-enable once the old vcxproj-based build system is removed.
+  #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
+  #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
+  install(TARGETS fdb_c
+    EXPORT fdbc
+    DESTINATION ${FDB_LIB_DIR}
+    COMPONENT clients)
+  install(
+    FILES foundationdb/fdb_c.h
+    ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
+    ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+    DESTINATION ${FDB_INCLUDE_INSTALL_DIR}/foundationdb COMPONENT clients)
+  #install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
+endif()

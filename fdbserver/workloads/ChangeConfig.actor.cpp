@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
