@@ -195,8 +195,8 @@ struct LogSystemConfig {
 		std::map<int8_t, int> allLocalities;
 		for( auto& tLogSet : tLogs ) {
 			for( auto& tLog : tLogSet.tLogs ) {
-				if( tLog.present() && tLogSet.locality >= 0 ) {
-					if( tLog.interf().locality.dcId() == dcId ) {
+				if( tLogSet.locality >= 0 ) {
+					if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
 						matchingLocalities[tLogSet.locality]++;
 					} else {
 						allLocalities[tLogSet.locality]++;
@@ -208,8 +208,8 @@ struct LogSystemConfig {
 		for(auto& oldLog : oldTLogs) {
 			for( auto& tLogSet : oldLog.tLogs ) {
 				for( auto& tLog : tLogSet.tLogs ) {
-					if( tLog.present() && tLogSet.locality >= 0 ) {
-						if( tLog.interf().locality.dcId() == dcId ) {
+					if( tLogSet.locality >= 0 ) {
+						if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
 							matchingLocalities[tLogSet.locality]++;
 						} else {
 							allLocalities[tLogSet.locality]++;
@@ -249,7 +249,7 @@ struct LogSystemConfig {
 		if(bestLoc != tagLocalityInvalid) {
 			return std::make_pair(bestLoc, secondLoc);
 		}
-		return std::make_pair(secondLocalityCount, thirdLocalityCount);
+		return std::make_pair(secondLoc, thirdLoc);
 	}
 
 	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
