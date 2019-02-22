@@ -596,21 +596,21 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	return confChanges;
 }
 
-ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<std::pair<int8_t,Version>>> locality) {
+ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSystem> oldLogSystem, Reference<AsyncVar<PeekSpecialInfo>> locality) {
 	loop {
-		int8_t loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
-		Version ver = locality->get().second;
-		if(ver == invalidVersion || loc != locality->get().first) {
-			ver = oldLogSystem->getKnownCommittedVersion(loc);
+		std::pair<int8_t,int8_t> loc = oldLogSystem->getLogSystemConfig().getLocalityForDcId(dcId);
+		Version ver = locality->get().knownCommittedVersion;
+		if(ver == invalidVersion) {
+			ver = oldLogSystem->getKnownCommittedVersion();
 		}
-		locality->set( std::make_pair(loc,ver) );
-		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality", loc).detail("Version", ver);
-		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange(loc) );
+		locality->set( PeekSpecialInfo(loc.first,loc.second,ver) );
+		TraceEvent("UpdatedLocalityForDcId").detail("DcId", printable(dcId)).detail("Locality0", loc.first).detail("Locality1", loc.second).detail("Version", ver);
+		wait( oldLogSystem->onLogSystemConfigChange() || oldLogSystem->onKnownCommittedVersionChange() );
 	}
 }
 
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
-	state Reference<AsyncVar<std::pair<int8_t,Version>>> myLocality = Reference<AsyncVar<std::pair<int8_t,Version>>>( new AsyncVar<std::pair<int8_t,Version>>(std::make_pair(tagLocalityInvalid, invalidVersion) ) );
+	state Reference<AsyncVar<PeekSpecialInfo>> myLocality = Reference<AsyncVar<PeekSpecialInfo>>( new AsyncVar<PeekSpecialInfo>(PeekSpecialInfo(tagLocalityInvalid,tagLocalityInvalid,invalidVersion) ) );
 	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
 	// Peek the txnStateTag in oldLogSystem and recover self->txnStateStore
 
@@ -1273,6 +1273,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
+		.detail("PrimaryLocality", self->primaryLocality)
+		.detail("DcId", printable(self->myInterface.locality.dcId()))
 		.trackLatest("MasterRecoveryState");
 
 	// Recovery transaction

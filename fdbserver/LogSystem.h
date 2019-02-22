@@ -627,9 +627,9 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) = 0;
 		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
 
-	virtual Version getKnownCommittedVersion(int8_t loc) = 0;
+	virtual Version getKnownCommittedVersion() = 0;
 
-	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) = 0;
+	virtual Future<Void> onKnownCommittedVersionChange() = 0;
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)

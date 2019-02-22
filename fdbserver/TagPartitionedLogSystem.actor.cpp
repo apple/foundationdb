@@ -840,25 +840,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 	}
 
-	virtual Version getKnownCommittedVersion(int8_t loc) {
+	virtual Version getKnownCommittedVersion() {
 		Version result = invalidVersion;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc || it.logSet->locality == tagLocalitySpecial) {
-				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
-				if(versions.present()) {
-					result = std::max(result, versions.get().first);
-				}
+			auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+			if(versions.present()) {
+				result = std::max(result, versions.get().first);
 			}
 		}
 		return result;
 	}
 
-	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) {
+	virtual Future<Void> onKnownCommittedVersionChange() {
 		std::vector<Future<Void>> result;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc || it.logSet->locality == tagLocalitySpecial) {
-				result.push_back(TagPartitionedLogSystem::getDurableVersionChanged(it));
-			}
+			result.push_back(TagPartitionedLogSystem::getDurableVersionChanged(it));
 		}
 		if(!result.size()) {
 			return Never();
