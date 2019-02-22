@@ -791,7 +791,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
 		//FIXME: log replicas must be more than storage replicas because otherwise better master exists will not recognize it needs to change dcs
 		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
-		int anti_quorum = g_random->randomInt(0, replication_factor);
+		int anti_quorum = g_random->randomInt(0, (replication_factor/2) + 1); //The anti quorum cannot be more than half of the replication factor, or the log system will continue to accept commits when a recovery is impossible
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 		                  "replica_datacenters:=1 min_replica_datacenters:=1",

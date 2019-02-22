@@ -25,6 +25,18 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IDiskQueue.h"
 
+struct PeekSpecialInfo {
+	int8_t primaryLocality;
+	int8_t secondaryLocality;
+	Version knownCommittedVersion;
+
+	bool operator == (const PeekSpecialInfo& r) const {
+		return primaryLocality == r.primaryLocality && secondaryLocality == r.secondaryLocality && knownCommittedVersion == r.knownCommittedVersion;
+	}
+
+	PeekSpecialInfo(int8_t primaryLocality, int8_t secondaryLocality, Version knownCommittedVersion) : primaryLocality(primaryLocality), secondaryLocality(secondaryLocality), knownCommittedVersion(knownCommittedVersion) {}
+};
+
 class LogSystemDiskQueueAdapter : public IDiskQueue {
 public:
 	// This adapter is designed to let KeyValueStoreMemory use ILogSystem
@@ -40,10 +52,10 @@ public:
 
 	// It does, however, peek the specified tag directly at recovery time.
 
-	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality, bool recover=true ) : logSystem(logSystem), tag(tag), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0) {
+	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<PeekSpecialInfo>> peekLocality, bool recover=true ) : logSystem(logSystem), tag(tag), peekLocality(peekLocality), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0), peekTypeSwitches(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = logSystem->peekSpecial( UID(), 1, tag, peekLocality ? peekLocality->get().first : tagLocalityInvalid, peekLocality ? peekLocality->get().second : invalidVersion );
+			cursor = logSystem->peekSpecial( UID(), 1, tag, peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid, peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion );
 		}
 	}
 
@@ -78,7 +90,7 @@ public:
 	virtual int getCommitOverhead() { return 0; } //SOMEDAY: could this be more accurate?
 
 private:
-	Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality;
+	Reference<AsyncVar<PeekSpecialInfo>> peekLocality;
 	Future<Void> localityChanged;
 	Reference<ILogSystem::IPeekCursor> cursor;
 	int peekTypeSwitches;
@@ -100,6 +112,6 @@ private:
 	friend class LogSystemDiskQueueAdapterImpl;
 };
 
-LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<std::pair<int8_t,Version>>> peekLocality );
+LogSystemDiskQueueAdapter* openDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, Reference<AsyncVar<PeekSpecialInfo>> peekLocality );
 
 #endif

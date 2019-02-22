@@ -377,6 +377,7 @@ public:
 	NotifiedVersion oldestVersion;           // See also storageVersion()
 	NotifiedVersion durableVersion; 	     // At least this version will be readable from storage after a power failure
 	Version rebootAfterDurableVersion;
+	int8_t primaryLocality;
 
 	Deque<std::pair<Version,Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage server
@@ -502,7 +503,7 @@ public:
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
-			versionLag(0),
+			versionLag(0), primaryLocality(tagLocalityInvalid),
 			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
@@ -2316,6 +2317,23 @@ struct OrderByVersion {
 	}
 };
 
+#define PERSIST_PREFIX "\xff\xff"
+
+// Immutable
+static const KeyValueRef persistFormat( LiteralStringRef( PERSIST_PREFIX "Format" ), LiteralStringRef("FoundationDB/StorageServer/1/4") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/StorageServer/1/2"), LiteralStringRef("FoundationDB/StorageServer/1/5") );
+static const KeyRef persistID = LiteralStringRef( PERSIST_PREFIX "ID" );
+
+// (Potentially) change with the durable version or when fetchKeys completes
+static const KeyRef persistVersion = LiteralStringRef( PERSIST_PREFIX "Version" );
+static const KeyRangeRef persistShardAssignedKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "ShardAssigned/" ), LiteralStringRef( PERSIST_PREFIX "ShardAssigned0" ) );
+static const KeyRangeRef persistShardAvailableKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "ShardAvailable/" ), LiteralStringRef( PERSIST_PREFIX "ShardAvailable0" ) );
+static const KeyRangeRef persistByteSampleKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "BS/" ), LiteralStringRef( PERSIST_PREFIX "BS0" ) );
+static const KeyRangeRef persistByteSampleSampleKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/" ), LiteralStringRef( PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0" ) );
+static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
+static const KeyRef persistPrimaryLocality = LiteralStringRef( PERSIST_PREFIX "PrimaryLocality" );
+// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
 class StorageUpdater {
 public:
 	StorageUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), restoredVersion(invalidVersion), processedStartKey(false) {}
@@ -2397,6 +2415,8 @@ private:
 			}
 
 			data->recoveryVersionSkips.push_back(std::make_pair(rollbackVersion, currentVersion - rollbackVersion));
+		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
+			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
 			if( (m.type == MutationRef::SetValue && !matchesThisServer) || (m.type == MutationRef::ClearRange && matchesThisServer) )
@@ -2404,6 +2424,10 @@ private:
 		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
 			data->rebootAfterDurableVersion = currentVersion;
 			TraceEvent("RebootWhenDurableSet", data->thisServerID).detail("DurableVersion", data->durableVersion.get()).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+		} else if (m.type == MutationRef::SetValue && m.param1 == primaryLocalityPrivateKey) {
+			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
+			auto& mLV = data->addVersionToMutationLog( data->data().getLatestVersion() );
+			data->addMutationToMutationLog( mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2) );
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
@@ -2647,15 +2671,18 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
 
-			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
-			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxVersionInMemory", maxVersionsInMemory);
-
 			// Trigger updateStorage if necessary
-			Version proposedOldestVersion = std::max(data->version.get(), data->lastTLogVersion) - maxVersionsInMemory;
+			Version proposedOldestVersion = std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
+			if(data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
+				proposedOldestVersion = std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
+			}
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get()-1);
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+
+			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
+			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
+			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed", proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag", data->tag.toString());
 
 			while(!data->recoveryVersionSkips.empty() && proposedOldestVersion > data->recoveryVersionSkips.front().first) {
 				data->recoveryVersionSkips.pop_front();
@@ -2765,22 +2792,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 ////////////////////////////////// StorageServerDisk ///////////////////////////////////////
 #pragma region StorageServerDisk
-
-#define PERSIST_PREFIX "\xff\xff"
-
-// Immutable
-static const KeyValueRef persistFormat( LiteralStringRef( PERSIST_PREFIX "Format" ), LiteralStringRef("FoundationDB/StorageServer/1/4") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/StorageServer/1/2"), LiteralStringRef("FoundationDB/StorageServer/1/5") );
-static const KeyRef persistID = LiteralStringRef( PERSIST_PREFIX "ID" );
-
-// (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = LiteralStringRef( PERSIST_PREFIX "Version" );
-static const KeyRangeRef persistShardAssignedKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "ShardAssigned/" ), LiteralStringRef( PERSIST_PREFIX "ShardAssigned0" ) );
-static const KeyRangeRef persistShardAvailableKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "ShardAvailable/" ), LiteralStringRef( PERSIST_PREFIX "ShardAvailable0" ) );
-static const KeyRangeRef persistByteSampleKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "BS/" ), LiteralStringRef( PERSIST_PREFIX "BS0" ) );
-static const KeyRangeRef persistByteSampleSampleKeys = KeyRangeRef( LiteralStringRef( PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/" ), LiteralStringRef( PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0" ) );
-static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
-// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
 void StorageServerDisk::makeNewStorageServerDurable() {
 	storage->set( persistFormat );
@@ -2969,6 +2980,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
+	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 
@@ -2976,7 +2988,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	data->byteSampleRecovery = restoreByteSample(data, storage, byteSampleSampleRecovered);
 
 	TraceEvent("ReadingDurableState", data->thisServerID);
-	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fID, fVersion, fLogProtocol) ) );
+	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fID, fVersion, fLogProtocol, fPrimaryLocality) ) );
 	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fShardAssigned, fShardAvailable) ) );
 	wait( byteSampleSampleRecovered.getFuture() );
 	TraceEvent("RestoringDurableState", data->thisServerID);
@@ -2998,6 +3010,9 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 
 	if (fLogProtocol.get().present())
 		data->logProtocol = BinaryReader::fromStringRef<uint64_t>(fLogProtocol.get().get(), Unversioned());
+
+	if (fPrimaryLocality.get().present())
+		data->primaryLocality = BinaryReader::fromStringRef<int8_t>(fPrimaryLocality.get().get(), Unversioned());
 
 	state Version version = BinaryReader::fromStringRef<Version>( fVersion.get().get(), Unversioned() );
 	debug_checkRestoredVersion( data->thisServerID, version, "StorageServer" );

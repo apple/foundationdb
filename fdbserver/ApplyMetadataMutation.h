@@ -149,7 +149,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
-					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey && m.param1 != configVersionKey) {
+					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("ToCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
@@ -236,8 +236,20 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					// Notifies all servers that a Master's server epoch ends
 					auto allServers = txnStateStore->readRange(serverTagKeys).get();
 					std::set<Tag> allTags;
-					for (auto &kv : allServers)
-						allTags.insert(decodeServerTagValue(kv.value));
+
+					if(m.param1 == killStorageKey) {
+						int8_t safeLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
+						for (auto &kv : allServers) {
+							Tag t = decodeServerTagValue(kv.value);
+							if(t.locality != safeLocality) {
+								allTags.insert(t);
+							}
+						}
+					} else {
+						for (auto &kv : allServers) {
+							allTags.insert(decodeServerTagValue(kv.value));
+						}
+					}
 
 					if (m.param1 == lastEpochEndKey) {
 						for (auto t : allTags)

@@ -136,6 +136,18 @@ private:
 		bool operator < (StringRef const& r) const {
 			return beginKey < r;
 		}
+		bool operator <= (Entry const& r) const {
+			return beginKey <= r.beginKey;
+		}
+		bool operator <= (StringRef const& r) const {
+			return beginKey <= r;
+		}
+		bool operator == (Entry const& r) const {
+			return beginKey == r.beginKey;
+		}
+		bool operator == (StringRef const& r) const {
+			return beginKey == r;
+		}
 
 		int segments() const { return 2*(values.size()+1); }
 	};

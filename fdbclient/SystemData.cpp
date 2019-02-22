@@ -381,8 +381,6 @@ std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	return excludedServersPrefix.toString() + as;
 }
 
-const KeyRef configVersionKey = LiteralStringRef("\xff/conf/confChange");
-
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
@@ -420,8 +418,12 @@ const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCom
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
 const KeyRef lastEpochEndPrivateKey = LiteralStringRef("\xff\xff/globals/lastEpochEnd");
+const KeyRef killStorageKey = LiteralStringRef("\xff/globals/killStorage");
+const KeyRef killStoragePrivateKey = LiteralStringRef("\xff\xff/globals/killStorage");
 const KeyRef rebootWhenDurableKey = LiteralStringRef("\xff/globals/rebootWhenDurable");
 const KeyRef rebootWhenDurablePrivateKey = LiteralStringRef("\xff\xff/globals/rebootWhenDurable");
+const KeyRef primaryLocalityKey = LiteralStringRef("\xff/globals/primaryLocality");
+const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/primaryLocality");
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 

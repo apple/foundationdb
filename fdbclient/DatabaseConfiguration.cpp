@@ -160,6 +160,7 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 bool DatabaseConfiguration::isValid() const {
 	if( !(initialized &&
 		tLogWriteAntiQuorum >= 0 &&
+		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
 		tLogReplicationFactor >= 1 &&
 		storageTeamSize >= 1 &&
 		getDesiredProxies() >= 1 &&
@@ -268,55 +269,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["usable_regions"] = usableRegions;
 
 		if(regions.size()) {
-			StatusArray regionArr;
-			for(auto& r : regions) {
-				StatusObject regionObj;
-				StatusArray dcArr;
-				StatusObject dcObj;
-				dcObj["id"] = r.dcId.toString();
-				dcObj["priority"] = r.priority;
-				dcArr.push_back(dcObj);
-
-				if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
-					regionObj["satellite_redundancy_mode"] = "one_satellite_single";
-				} else if(r.satelliteTLogReplicationFactor == 2 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
-					regionObj["satellite_redundancy_mode"] = "one_satellite_double";
-				} else if(r.satelliteTLogReplicationFactor == 3 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
-					regionObj["satellite_redundancy_mode"] = "one_satellite_triple";
-				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
-					regionObj["satellite_redundancy_mode"] = "two_satellite_safe";
-				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 2 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
-					regionObj["satellite_redundancy_mode"] = "two_satellite_fast";
-				} else if(r.satelliteTLogReplicationFactor != 0) {
-					regionObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
-					regionObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
-					regionObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
-					if(r.satelliteTLogPolicy) regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
-					regionObj["satellite_log_replicas_fallback"] = r.satelliteTLogReplicationFactorFallback;
-					regionObj["satellite_usable_dcs_fallback"] = r.satelliteTLogUsableDcsFallback;
-					regionObj["satellite_anti_quorum_fallback"] = r.satelliteTLogWriteAntiQuorumFallback;
-					if(r.satelliteTLogPolicyFallback) regionObj["satellite_log_policy_fallback"] = r.satelliteTLogPolicyFallback->info();
-				}
-
-				if( r.satelliteDesiredTLogCount != -1 ) {
-					regionObj["satellite_logs"] = r.satelliteDesiredTLogCount;
-				}
-
-				if(r.satellites.size()) {
-					for(auto& s : r.satellites) {
-						StatusObject satObj;
-						satObj["id"] = s.dcId.toString();
-						satObj["priority"] = s.priority;
-						satObj["satellite"] = 1;
-
-						dcArr.push_back(satObj);
-					}
-				}
-
-				regionObj["datacenters"] = dcArr;
-				regionArr.push_back(regionObj);
-			}
-			result["regions"] = regionArr;
+			result["regions"] = getRegionJSON();
 		}
 
 		if( desiredTLogCount != -1 ) {
@@ -349,6 +302,58 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 
 	return result;
+}
+
+StatusArray DatabaseConfiguration::getRegionJSON() const {
+	StatusArray regionArr;
+	for(auto& r : regions) {
+		StatusObject regionObj;
+		StatusArray dcArr;
+		StatusObject dcObj;
+		dcObj["id"] = r.dcId.toString();
+		dcObj["priority"] = r.priority;
+		dcArr.push_back(dcObj);
+
+		if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
+			regionObj["satellite_redundancy_mode"] = "one_satellite_single";
+		} else if(r.satelliteTLogReplicationFactor == 2 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
+			regionObj["satellite_redundancy_mode"] = "one_satellite_double";
+		} else if(r.satelliteTLogReplicationFactor == 3 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
+			regionObj["satellite_redundancy_mode"] = "one_satellite_triple";
+		} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
+			regionObj["satellite_redundancy_mode"] = "two_satellite_safe";
+		} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 2 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
+			regionObj["satellite_redundancy_mode"] = "two_satellite_fast";
+		} else if(r.satelliteTLogReplicationFactor != 0) {
+			regionObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
+			regionObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
+			regionObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
+			if(r.satelliteTLogPolicy) regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
+			regionObj["satellite_log_replicas_fallback"] = r.satelliteTLogReplicationFactorFallback;
+			regionObj["satellite_usable_dcs_fallback"] = r.satelliteTLogUsableDcsFallback;
+			regionObj["satellite_anti_quorum_fallback"] = r.satelliteTLogWriteAntiQuorumFallback;
+			if(r.satelliteTLogPolicyFallback) regionObj["satellite_log_policy_fallback"] = r.satelliteTLogPolicyFallback->info();
+		}
+
+		if( r.satelliteDesiredTLogCount != -1 ) {
+			regionObj["satellite_logs"] = r.satelliteDesiredTLogCount;
+		}
+
+		if(r.satellites.size()) {
+			for(auto& s : r.satellites) {
+				StatusObject satObj;
+				satObj["id"] = s.dcId.toString();
+				satObj["priority"] = s.priority;
+				satObj["satellite"] = 1;
+
+				dcArr.push_back(satObj);
+			}
+		}
+
+		regionObj["datacenters"] = dcArr;
+		regionArr.push_back(regionObj);
+	}
+	return regionArr;
 }
 
 std::string DatabaseConfiguration::toString() const {
