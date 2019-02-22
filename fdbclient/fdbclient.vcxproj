@@ -119,10 +119,7 @@
     <ClCompile Include="md5\md5.c" />
     <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ActorCompiler Include="MonitorLeader.actor.cpp" />
-    <ActorCompiler Include="ManagementAPI.actor.cpp">
-      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
-      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
-    </ActorCompiler>
+    <ActorCompiler Include="ManagementAPI.actor.cpp" />
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ActorCompiler Include="NativeAPI.actor.cpp" />
     <ActorCompiler Include="ReadYourWrites.actor.cpp" />
