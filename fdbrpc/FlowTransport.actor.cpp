@@ -558,9 +558,9 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll());
 				receiver->receive(objReader);
 			} else {
-                receiver->receive( reader );
-            }
-			g_currentDeliveryPeerAddress = {NetworkAddress()};
+				receiver->receive(reader);
+			}
+			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
 			TraceEvent(SevError, "ReceiverError").error(e).detail("Token", destination.token.toString()).detail("Peer", destination.getPrimaryAddress());
