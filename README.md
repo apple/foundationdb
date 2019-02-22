@@ -48,17 +48,10 @@ become the only build system available.
 
 1. Install [Docker](https://www.docker.com/).
 1. Check out the foundationdb repo.
-1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory.
-
-    ```shell
-    cd /dir/path/foundationdb
-    docker build ./build -t <image-tag-name>
-    ```
-
 1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
-    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' <image-tag-name> /bin/bash
+    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest /bin/bash
     ```
 
 1. Navigate to the container's mounted directory which contains the foundationdb repo.
@@ -66,6 +59,7 @@ become the only build system available.
     ```shell
     cd /docker/dir/path/foundationdb
     ```
+
 1. Run `make`.
 
 This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
