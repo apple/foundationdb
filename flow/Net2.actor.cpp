@@ -65,7 +65,7 @@ uint64_t removeFlags(uint64_t version) {
 	return version & versionFlagMask;
 }
 uint64_t addObjectSerializerFlag(uint64_t version) {
-	return version | versionFlagMask;
+	return version | objectSerializerFlag;
 }
 bool hasObjectSerializerFlag(uint64_t version) {
 	return (version & objectSerializerFlag) > 0;
