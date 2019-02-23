@@ -3447,82 +3447,19 @@ ACTOR Future<Void> pollMoveKeysLock( Database cx, MoveKeysLock lock ) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
 	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
-	Reference<AsyncVar<DatabaseConfiguration>> configuration;
-	std::vector<Optional<Key>> primaryDcId;
-	std::vector<Optional<Key>> remoteDcIds;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, Reference<AsyncVar<DatabaseConfiguration>> const& dbConfig, UID id)
-		: dbInfo(db), configuration(dbConfig), ddId(id) {}
-
-	void refreshDcIds() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-
-		const std::vector<RegionInfo>& regions = configuration->get().regions;
-		TraceEvent ev("DataDistributor", ddId);
-		if ( regions.size() > 0 ) {
-			primaryDcId.push_back( regions[0].dcId );
-			ev.detail("PrimaryDcID", regions[0].dcId.toHexString());
-		}
-		if ( regions.size() > 1 ) {
-			remoteDcIds.push_back( regions[1].dcId );
-			ev.detail("SecondaryDcID", regions[1].dcId.toHexString());
-		}
-	}
+	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
 };
 
-// TODO: remove lastLimited -- obtain this information of ratekeeper from proxy
-<<<<<<< HEAD
->>>>>>> Fix a segfault bug due to uncopied ratekeeper interface
-ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
-	double* lastLimited)
-=======
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
->>>>>>> Remove lastLimited from data distribution
 {
 	state Database cx = openDBOnServer(self->dbInfo, TaskDataDistributionLaunch, true, true);
-	state DatabaseConfiguration configuration = self->configuration->get();
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
-<<<<<<< HEAD
-=======
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-
-			Standalone<RangeResultRef> replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
-
-			for(auto& kv : replicaKeys) {
-				auto dcId = decodeDatacenterReplicasKey(kv.key);
-				auto replicas = decodeDatacenterReplicasValue(kv.value);
-				if ((self->primaryDcId.size() && self->primaryDcId[0] == dcId) ||
-						(self->remoteDcIds.size() && self->remoteDcIds[0] == dcId && configuration.usableRegions > 1)) {
-					if(replicas > configuration.storageTeamSize) {
-						tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
-					}
-				} else {
-					tr.clear(kv.key);
-				}
-			}
-
-			wait(tr.commit());
-			break;
-		}
-		catch(Error &e) {
-			wait(tr.onError(e));
-		}
-	}
-
-
->>>>>>> Minor fix on ratekeeper work registration.
 	//cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*) &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) );
 	//ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE );
 
@@ -3538,8 +3475,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
 				MoveKeysLock lock_ = wait( takeMoveKeysLock( cx, self->ddId ) );
 				lock = lock_;
-<<<<<<< HEAD
-				TraceEvent("DDInitTookMoveKeysLock", myId);
+				TraceEvent("DDInitTookMoveKeysLock", self->ddId);
 
 				DatabaseConfiguration configuration_ = wait( getDatabaseConfiguration(cx) );
 				configuration = configuration_;
@@ -3553,7 +3489,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					remoteDcIds.push_back( regions[1].dcId );
 				}
 
-				TraceEvent("DDInitGotConfiguration", myId).detail("Conf", configuration.toString());
+				TraceEvent("DDInitGotConfiguration", self->ddId).detail("Conf", configuration.toString());
 
 				state Transaction tr(cx);
 				loop {
@@ -3583,12 +3519,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					}
 				}
 
-				TraceEvent("DDInitUpdatedReplicaKeys", myId);
-				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, myId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
-=======
-				TraceEvent("DDInitTookMoveKeysLock", self->ddId);
-				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, self->ddId, lock, configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>() ) );
->>>>>>> Fix merge conflicts during rebase.
+				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId);
+				Reference<InitialDataDistribution> initData_ = wait( getInitialDataDistribution(cx, self->ddId, lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				initData = initData_;
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
@@ -3683,10 +3615,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, self->primaryDcId, configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, self->remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
+				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
@@ -3710,14 +3642,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	}
 }
 
-struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
-	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
-	UID ddId;
-	PromiseStream<Future<Void>> addActor;
-
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
-};
-
 static std::set<int> const& normalDataDistributorErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -3734,33 +3658,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
-	TraceEvent("DataDistributor_Starting", di.id());
-	self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
-
 	try {
 		TraceEvent("DataDistributor_Running", di.id());
-<<<<<<< HEAD
-		state double lastLimited = 0;
-		state Future<Void> distributor = reportErrorsExcept( dataDistribution( self->dbInfo, &lastLimited ), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-
-		wait( distributor || collection );
-=======
+		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
-		loop choose {
-			when ( wait( self->configuration->onChange() ) ) {
-				TraceEvent("DataDistributor_Restart", di.id())
-				.detail("Configuration", self->configuration->get().toString());
-				self->refreshDcIds();
-				distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
-			}
-			when ( wait( collection ) ) {
-				ASSERT(false);
-				throw internal_error();
-			}
-			when ( wait( distributor ) ) {}
-		}
->>>>>>> Remove lastLimited from data distribution
+		wait( distributor || collection );
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
