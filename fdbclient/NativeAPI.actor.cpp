@@ -505,7 +505,7 @@ ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 						when(state GetHealthMetricsReply rep =
 							 wait(loadBalance(cx->getMasterProxies(),
 											  &MasterProxyInterface::getHealthMetrics,
-											  GetHealthMetricsRequest()))) {
+											  GetHealthMetricsRequest(false)))) {
 							cx->healthMetrics.update(rep.healthMetrics, false, true);
 							break;
 						}
@@ -518,11 +518,11 @@ ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 				loop {
 					choose {
 						when(wait(cx->onMasterProxiesChanged())) {}
-						when(state GetDetailedHealthMetricsReply detailedRep =
+						when(state GetHealthMetricsReply detailedRep =
 							wait(loadBalance(cx->getMasterProxies(),
-											 &MasterProxyInterface::getDetailedHealthMetrics,
-											 GetDetailedHealthMetricsRequest()))) {
-							cx->healthMetrics.update(detailedRep.getHealthMetrics(), true, true);
+											 &MasterProxyInterface::getHealthMetrics,
+											 GetHealthMetricsRequest(true)))) {
+							cx->healthMetrics.update(detailedRep.healthMetrics, true, true);
 							detailedTimer = delay(
 								CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL);
 							break;

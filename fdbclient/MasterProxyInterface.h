@@ -46,7 +46,6 @@ struct MasterProxyInterface {
 	RequestStream< struct TxnStateRequest >  txnState;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
-	RequestStream< struct GetDetailedHealthMetricsRequest > getDetailedHealthMetrics;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -58,7 +57,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, getDetailedHealthMetrics);
+				   txnState, getHealthMetrics);
 	}
 
 	void initEndpoints() {
@@ -238,66 +237,43 @@ struct TxnStateRequest {
 struct GetHealthMetricsRequest
 {
 	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar)
 	{
-		serializer(ar, reply);
+		serializer(ar, reply, detailed);
 	}
 };
 
 struct GetHealthMetricsReply
 {
+	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 
-	template <class Ar>
-	void serialize(Ar& ar)
+	explicit GetHealthMetricsReply(HealthMetrics healthMetrics = HealthMetrics()) :
+		healthMetrics(healthMetrics)
 	{
-		serializer(ar, healthMetrics);
+		update(healthMetrics, true, true);
 	}
-};
 
-
-struct GetDetailedHealthMetricsRequest
-{
-	ReplyPromise<struct GetDetailedHealthMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar)
+	void update(HealthMetrics healthMetrics, bool detailedInput, bool detailedOutput)
 	{
-		serializer(ar, reply);
-	}
-};
-
-struct GetDetailedHealthMetricsReply
-{
-	Standalone<StringRef> serialized;
-
-	GetDetailedHealthMetricsReply() {}
-
-	void setHealthMetrics(const HealthMetrics& healthMetrics)
-	{
+		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
 		BinaryWriter bw(IncludeVersion());
-		bw << healthMetrics;
+		bw << this->healthMetrics;
 		serialized = Standalone<StringRef>(bw.toStringRef());
 	}
 
-	HealthMetrics getHealthMetrics()
-	{
-		if (serialized.size() > 0) {
-			BinaryReader br(serialized, IncludeVersion());
-			HealthMetrics result;
-			br >> result;
-			return result;
-		}
-		else
-			return HealthMetrics();
-	}
-
 	template <class Ar>
-	void serialize(Ar& ar)
-	{
+	void serialize(Ar& ar) {
 		serializer(ar, serialized);
+		if (ar.isDeserializing) {
+			BinaryReader br(serialized, IncludeVersion());
+			br >> healthMetrics;
+		}
 	}
 };
 
