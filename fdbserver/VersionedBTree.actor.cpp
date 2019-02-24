@@ -1728,11 +1728,15 @@ private:
 		std::string toString() const {
 			std::string r;
 			r += format("Cursor(%p) ver: %lld ", this, m_version);
-			r += format("  KV: '%s' -> '%s'\n",
-				m_kv.present() ? m_kv.get().key.printable().c_str() : "<np>",
-				m_kv.present() ? m_kv.get().value.printable().c_str() : "");
+			if(m_kv.present()) {
+				r += format("  KV: '%s' -> '%s'\n", m_kv.get().key.printable().c_str(), m_kv.get().value.printable().c_str());
+			}
+			else {
+				r += "  KV: <np>";
+			}
 			r += format("  Cur1: %s\n", m_cur1.toString().c_str());
 			r += format("  Cur2: %s\n", m_cur2.toString().c_str());
+
 			return r;
 		}
 
@@ -1830,10 +1834,9 @@ private:
 			// record is in effect at that version but it could indicate that the key was cleared and
 			// no longer exists from the user's perspective at that version
 			//
-			// If moving forward, cur2 must be the record after cur1 so we can determine if
-			// cur1 is to be returned below.
-			// If moving backward, cur2 is already the record after cur1
-			if(fwd && self->m_cur1.valid()) {
+			// cur2 must be the record immediately after cur1
+			// TODO:  This may already be the case, store state to track this condition and avoid the reset here
+			if(self->m_cur1.valid()) {
 				self->m_cur2 = self->m_cur1;
 				wait(success(self->m_cur2.move(true)));
 			}
@@ -1850,11 +1853,13 @@ private:
 
 				if(fwd) {
 					// Moving forward, move cur2 forward and keep cur1 pointing to the prior (predecessor) record
+					debug_printf("Cursor::move(%d): Moving forward, Cursor = %s\n", fwd, self->toString().c_str());
 					self->m_cur1 = self->m_cur2;
 					wait(success(self->m_cur2.move(true)));
 				}
 				else {
 					// Moving backward, move cur1 backward and keep cur2 pointing to the prior (successor) record
+					debug_printf("Cursor::move(%d): Moving backward, Cursor = %s\n", fwd, self->toString().c_str());
 					self->m_cur2 = self->m_cur1;
 					wait(success(self->m_cur1.move(false)));
 				}
@@ -1862,6 +1867,7 @@ private:
 			}
 
 			self->m_kv.reset();
+			debug_printf("Cursor::move(%d): Exit, end of db reached.  Cursor = %s\n", fwd, self->toString().c_str());
 			return Void();
 		}
 
@@ -1874,9 +1880,9 @@ private:
 
 			// Unsplit value, cur1 will hold the key and value memory
 			if(!rec.isMultiPart()) {
+				self->m_kv = KeyValueRef(rec.key, rec.value.get());
 				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString().c_str());
 
-				self->m_kv = KeyValueRef(rec.key, rec.value.get());
 				return Void();
 			}
 
@@ -2116,7 +2122,7 @@ KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	return kv;
 }
 
-ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
+ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<std::pair<std::string, Version>, Optional<std::string>> *written, int *pErrorCount) {
 	state int errors = 0;
 	state Key start = randomKV().key;
 	state Key end = randomKV().key;
@@ -2161,18 +2167,21 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		}
 
 		if(iLast == iEnd) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
@@ -2199,7 +2208,8 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	}
 
 	if(iLast != iEnd) {
-		errors += 1;
+		++errors;
+		++*pErrorCount;
 		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
@@ -2218,18 +2228,21 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	while(cur->isValid() && cur->getKey() >= start) {
 		if(r == results.rend()) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != r->key) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
 			break;
 		}
 		if(cur->getValue() != r->value) {
-			errors += 1;
+			++errors;
+			++*pErrorCount;
 			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
@@ -2239,14 +2252,15 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 	}
 
 	if(r != results.rend()) {
-		errors += 1;
+		++errors;
+		++*pErrorCount;
 		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
 }
 
-ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
+ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, std::map<std::pair<std::string, Version>, Optional<std::string>> *written, int *pErrorCount) {
 	// Read back every key at every version set or cleared and verify the result.
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
@@ -2267,6 +2281,7 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 			if(val.present()) {
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
 					++errors;
+					++*pErrorCount;
 					if(!cur->isValid())
 						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
 					else if(cur->getKey() != key)
@@ -2277,6 +2292,7 @@ ACTOR Future<int> verifyAll(VersionedBTree *btree, Version maxCommittedVersion, 
 			} else {
 				if(cur->isValid() && cur->getKey() == key) {
 					++errors;
+					++*pErrorCount;
 					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
 				}
 			}
@@ -2292,12 +2308,11 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 			state Version v = waitNext(vStream);
 
 			debug_printf("Verifying through version %lld\n", v);
-			state Future<int> vall = verifyAll(btree, v, written);
-			state Future<int> vrange = verifyRandomRange(btree, g_random->randomInt(1, v + 1), written);
+			state Future<int> vall = verifyAll(btree, v, written, pErrorCount);
+			state Future<int> vrange = verifyRandomRange(btree, g_random->randomInt(1, v + 1), written, pErrorCount);
 			wait(success(vall) && success(vrange));
 
 			int errors = vall.get() + vrange.get();
-			*pErrorCount += errors;
 
 			debug_printf("Verified through version %lld, %d errors\n", v, errors);
 
@@ -2611,6 +2626,7 @@ TEST_CASE("!/redwood/correctness") {
 	IPager *pager;
 
 	if(useDisk) {
+		printf("Deleting existing test data...\n");
 		deleteFile(pagerFile);
 		deleteFile(pagerFile + "0.pagerlog");
 		deleteFile(pagerFile + "1.pagerlog");
@@ -2619,6 +2635,7 @@ TEST_CASE("!/redwood/correctness") {
 	else
 		pager = createMemoryPager();
 
+	printf("Initializing...\n");
 	state int pageSize = g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	wait(btree->init());
@@ -2628,10 +2645,11 @@ TEST_CASE("!/redwood/correctness") {
 	// TODO:  Handle arbitrarily large keys
 	state int maxKeySize = g_random->randomInt(4, pageSize * 2);
 	state int maxValueSize = g_random->randomInt(0, pageSize * 2);
+	state int maxCommitSize = 5e6;
+	state int mutationBytesTarget = randomSize(50e6);
+	state double clearChance = g_random->random01() * .001;  // at most 1 in 1000
 
-	state int mutationBytesTarget = g_random->randomInt(100, (maxKeySize + maxValueSize) * 2000);
-
-	printf("Using page size %d, max key size %d, max value size %d, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, mutationBytesTarget);
+	printf("Using page size %d, max key size %d, max value size %d, clearchance %f total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
@@ -2648,8 +2666,9 @@ TEST_CASE("!/redwood/correctness") {
 	state SimpleCounter sets;
 	state SimpleCounter rangeClears;
 	state SimpleCounter keyBytesCleared;
-	state SimpleCounter valueBytesCleared;
 	state int errorCount;
+	state int mutationBytesThisCommit = 0;
+	state int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount);
@@ -2665,7 +2684,7 @@ TEST_CASE("!/redwood/correctness") {
 		}
 
 		// Sometimes do a clear range
-		if(g_random->random01() < .10) {
+		if(g_random->random01() < clearChance) {
 			Key start = randomKV(maxKeySize, 1).key;
 			Key end = (g_random->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
 
@@ -2702,8 +2721,8 @@ TEST_CASE("!/redwood/correctness") {
 						debug_printf("         Clearing key '%s' @%lld\n", last->first.first.c_str(), version);
 
 						keyBytesCleared += last->first.first.size();
-						valueBytesCleared += last->second.get().size();
-						mutationBytes += (last->first.first.size() + last->second.get().size());
+						mutationBytes += last->first.first.size();
+						mutationBytesThisCommit += last->first.first.size();
 
 						// If the last set was at version then just make it not present
 						if(last->first.second == version) {
@@ -2735,35 +2754,40 @@ TEST_CASE("!/redwood/correctness") {
 			keyBytesInserted += kv.key.size();
 			valueBytesInserted += kv.value.size();
 			mutationBytes += (kv.key.size() + kv.value.size());
+			mutationBytesThisCommit += (kv.key.size() + kv.value.size());
 
 			btree->set(kv);
 			written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			keys.insert(kv.key);
 		}
 
-		// Sometimes (and at end) commit
-		if(mutationBytes.get() >= mutationBytesTarget || g_random->random01() < .002) {
-			// Wait for btree commit and send the new version to committedVersions.
-			// Avoid capture of version as a member of *this
-			Version v = version;
-			commit = map(commit && btree->commit(), [=](Void) {
+		// Commit at end or after this commit's mutation bytes are reached
+		if(mutationBytes.get() >= mutationBytesTarget || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
+			// Wait for previous commit to finish
+			wait(commit);
+			printf("Committed.  Next commit %d bytes, %lld/%d (%.2f%%)  Stats: Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
+				mutationBytesThisCommit,
+				mutationBytes.get(),
+				mutationBytesTarget,
+				(double)mutationBytes.get() / mutationBytesTarget * 100,
+				(keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6,
+				keyBytesCleared.rate() / 1e6,
+				mutationBytes.rate() / 1e6
+			);
+
+			Version v = version;  // Avoid capture of version as a member of *this
+
+			commit = map(btree->commit(), [=](Void) {
 				// Notify the background verifier that version is committed and therefore readable
 				committedVersions.send(v);
 				return Void();
 			});
 
-			printf("Committing.  Stats: sets %s  clears %s  setKey %s  setVal %s  clearKey %s  clearVal %s  mutations %s\n",
-				   sets.toString().c_str(),
-				   rangeClears.toString().c_str(),
-				   keyBytesInserted.toString().c_str(),
-				   valueBytesInserted.toString().c_str(),
-				   keyBytesCleared.toString().c_str(),
-				   valueBytesCleared.toString().c_str(),
-				   mutationBytes.toString().c_str()
-			);
+			mutationBytesThisCommit = 0;
+			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if(useDisk && g_random->random01() < .1) {
+			if(useDisk && g_random->random01() < .02) {
 				printf("Recovering from disk.\n");
 
 				// Wait for outstanding commit
@@ -2794,13 +2818,13 @@ TEST_CASE("!/redwood/correctness") {
 				randomTask = randomReader(btree) || btree->getError();
 			}
 
-			// Check for errors
-			if(errorCount != 0)
-				throw internal_error();
-
 			++version;
 			btree->setWriteVersion(version);
 		}
+
+		// Check for errors
+		if(errorCount != 0)
+			throw internal_error();
 	}
 
 	debug_printf("Waiting for outstanding commit\n");
@@ -2808,6 +2832,10 @@ TEST_CASE("!/redwood/correctness") {
 	committedVersions.sendError(end_of_stream());
 	debug_printf("Waiting for verification to complete.\n");
 	wait(verifyTask);
+
+	// Check for errors
+	if(errorCount != 0)
+		throw internal_error();
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
@@ -2818,6 +2846,7 @@ TEST_CASE("!/redwood/correctness") {
 
 TEST_CASE("!/redwood/performance/set") {
 	state std::string pagerFile = "unittest_pageFile";
+	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
 	deleteFile(pagerFile + "0.pagerlog");
 	deleteFile(pagerFile + "1.pagerlog");
@@ -2825,11 +2854,11 @@ TEST_CASE("!/redwood/performance/set") {
 	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
 	wait(btree->init());
 
-	state int nodeCount = 10000000;
+	state int nodeCount = 10e6;
 	state int maxChangesPerVersion = 1000;
 	state int versions = 15000;
-	int maxKeySize = 50;
-	int maxValueSize = 100;
+	int maxKeySize = 25;
+	int maxValueSize = 75;
 
 	state std::string key(maxKeySize, 'k');
 	state std::string value(maxKeySize, 'v');
@@ -2837,7 +2866,9 @@ TEST_CASE("!/redwood/performance/set") {
 	state int records = 0;
 	state Future<Void> commit = Void();
 
-	state double startTime = now();
+	printf("Starting.\n");
+	state double intervalStart = timer();
+
 	while(--versions) {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
@@ -2854,25 +2885,27 @@ TEST_CASE("!/redwood/performance/set") {
 			++records;
 		}
 
-		if(g_random->random01() < (1.0 / 1000)) {
+		if(kvBytes > 5e6 || versions == 1) {
 			wait(commit);
-			commit = btree->commit();
-			wait(commit);
-			double elapsed = now() - startTime;
-			printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s %s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6, btree->counts.toString().c_str());
+			// Avoid capturing this to freeze counter values
+			int recs = records;
+			int kvb = kvBytes;
+			commit = map(btree->commit(), [=](Void result) {
+				double elapsed = timer() - intervalStart;
+				printf("Committed %d kvBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed, kvb / elapsed / 1e6);
+				intervalStart = timer();
+				return Void();
+			});
+			records = 0;
+			kvBytes = 0;
 		}
 	}
 
-	wait(btree->commit());
-	double elapsed = now() - startTime;
-	printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s %s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6, btree->counts.toString().c_str());
+	wait(commit);
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-
-	double elapsed = now() - startTime;
-	printf("Wrote (final) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 
 	return Void();
 }
