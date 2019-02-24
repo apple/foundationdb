@@ -93,6 +93,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
 	state double lastDetailedReply = 0.0; // request detailed metrics immediately
+	state bool expectingDetailedReply = false;
 
 	state int64_t lastTC = 0;
 
@@ -113,6 +114,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			nextRequestTimer = Never();
 			bool detailed = (g_network->now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE);
 			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, detailed)));
+			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
@@ -121,8 +123,8 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
-			healthMetricsReply->update(rep.healthMetrics, rep.detailed, true);
-			if (rep.detailed) {
+			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
+			if (expectingDetailedReply) {
 				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
 				lastDetailedReply = g_network->now();
 			}

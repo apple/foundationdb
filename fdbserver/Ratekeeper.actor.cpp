@@ -580,7 +580,6 @@ ACTOR Future<Void> rateKeeper(
 
 				reply.healthMetrics.update(self.healthMetrics, false, false);
 				reply.healthMetrics.tpsLimit = self.TPSLimit;
-				reply.detailed = req.detailed;
 				if (req.detailed) {
 					for (const auto &s : self.storageQueueInfo) {
 						self.healthMetrics.storageStats[s.key].cpuUsage = s.value.lastReply.cpuUsage;
