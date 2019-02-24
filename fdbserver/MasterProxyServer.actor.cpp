@@ -90,10 +90,9 @@ int getBytes(Promise<Version> const& r) { return 0; }
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate, GetHealthMetricsReply* healthMetricsReply,
 						   GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state Future<Void> nextRequestTimer = Never();
-	state Future<Void> nextDetailedRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
-	state Future<Void> detailedLeaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
+	state double lastDetailedReply = 0.0; // request detailed metrics immediately
 
 	state int64_t lastTC = 0;
 
@@ -103,23 +102,17 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			if ( db->get().distributor.present() ) {
 				TraceEvent("Proxy_DataDistributorChanged", myID)
 				.detail("DDID", db->get().distributor.get().id());
-				nextRequestTimer = Never();
-				nextDetailedRequestTimer = Void(); // trigger GetRate request
+				nextRequestTimer = Void(); // trigger GetRate request
 			} else {
 				TraceEvent("Proxy_DataDistributorDied", myID);
 				nextRequestTimer = Never();
-				nextDetailedRequestTimer = Never();
 				reply = Never();
 			}
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, false)));
-		}
-		when(wait(nextDetailedRequestTimer)) {
-			nextDetailedRequestTimer = Never();
-			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, true)));
+			bool detailed = (g_network->now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE);
+			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, detailed)));
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
@@ -128,24 +121,16 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
+			healthMetricsReply->update(rep.healthMetrics, rep.detailed, true);
 			if (rep.detailed) {
 				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
-				detailedLeaseTimeout = delay(SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE);
-				nextDetailedRequestTimer = delayJittered(SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE / 2);
-			}
-			else {
-				healthMetricsReply->update(rep.healthMetrics, false, true);
+				lastDetailedReply = g_network->now();
 			}
 		}
 		when ( wait(leaseTimeout ) ) {
 			*outTransactionRate = 0;
 			// TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
 			leaseTimeout = Never();
-		}
-		when(wait(detailedLeaseTimeout)) {
-			*outTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("DetailedLease", "Expired");
-			detailedLeaseTimeout = Never();
 		}
 	}
 }

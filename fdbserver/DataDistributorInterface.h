@@ -68,13 +68,12 @@ struct GetRateInfoRequest {
 struct GetRateInfoReply {
 	double transactionRate;
 	double leaseDuration;
-	double detailedLeaseDuration;
 	HealthMetrics healthMetrics;
 	bool detailed;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration, detailedLeaseDuration, healthMetrics, detailed);
+		serializer(ar, transactionRate, leaseDuration, healthMetrics, detailed);
 	}
 };
 
