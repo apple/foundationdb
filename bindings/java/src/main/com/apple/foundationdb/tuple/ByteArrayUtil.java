@@ -229,8 +229,7 @@ public class ByteArrayUtil {
 		int n = Arrays.binarySearch(arr, i);
 		if(n >= 0)
 			return n;
-		int ip = (n + 1) * -1;
-		return ip;
+		return (n + 1) * -1;
 	}
 
 	/**

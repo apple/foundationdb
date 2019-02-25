@@ -824,9 +824,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Get the number of bytes in the packed representation of this {@code Tuple}.
+	 * Get the number of bytes in the packed representation of this {@code Tuple}. Note that at the
+	 *  moment, this number is calculated by packing the {@code Tuple} and looking at its size. This method
+	 *  will memoize the result, however, so asking the same {@code Tuple} for its size multiple times
+	 *  is a fast operation.
 	 *
-	 * @return
+	 * @return the number of bytes in the packed representation of this {@code Tuple}
 	 */
 	public int getPackedSize() {
 		byte[] p = packMaybeVersionstamp(null);
@@ -847,7 +850,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 */
 	@Override
 	public int compareTo(Tuple t) {
-		return comparator.compare(elements, t.elements);
+		if(packed != null && t.packed != null) {
+			return ByteArrayUtil.compareUnsigned(packed, t.packed);
+		}
+		else {
+			return comparator.compare(elements, t.elements);
+		}
 	}
 
 	/**
