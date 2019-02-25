@@ -25,8 +25,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
 	"math/big"
 	"os"
@@ -37,6 +35,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 const verbose bool = false
@@ -661,6 +662,25 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			t = append(t, sm.waitAndPop().item)
 		}
 		sm.store(idx, []byte(t.Pack()))
+	case op == "TUPLE_PACK_VERSIONSTAMP":
+		var t tuple.Tuple
+		count := sm.waitAndPop().item.(int64)
+		for i := 0; i < int(count); i++ {
+			t = append(t, sm.waitAndPop().item)
+		}
+
+		incomplete, err := t.HasIncompleteVersionstamp()
+		if incomplete == false {
+			sm.store(idx, []byte("ERROR: NONE"))
+		} else {
+			if err != nil {
+				sm.store(idx, []byte("ERROR: MULTIPLE"))
+			} else {
+				packed := t.Pack()
+				sm.store(idx, "OK")
+				sm.store(idx, packed)
+			}
+		}
 	case op == "TUPLE_UNPACK":
 		t, e := tuple.Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
 		if e != nil {
@@ -893,7 +913,7 @@ func main() {
 		log.Fatal("API version not equal to value selected")
 	}
 
-	db, e = fdb.OpenDatabase(clusterFile)
+	db, e = fdb.Open(clusterFile, []byte("DB"))
 	if e != nil {
 		log.Fatal(e)
 	}
