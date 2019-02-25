@@ -24,6 +24,7 @@
 #include "flow/IndexedSet.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
+#include "flow/SystemMonitor.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -696,20 +697,10 @@ updateProcessStats(StorageServer* self)
 		return;
 	}
 
-	auto processMetrics = latestEventCache.get("ProcessMetrics");
-	std::string elapsedStr;
-	if (processMetrics.tryGetValue("Elapsed", elapsedStr)) {
-		double elapsed = std::stod(elapsedStr);
-
-		std::string cpuSecondsStr;
-		if (processMetrics.tryGetValue("CPUSeconds", cpuSecondsStr)) {
-			self->cpuUsage = 100 * std::stod(cpuSecondsStr) / elapsed;
-		}
-
-		std::string diskIdleSecondsStr;
-		if (processMetrics.tryGetValue("DiskIdleSeconds", diskIdleSecondsStr)) {
-			self->diskUsage = 100 * std::max(0.0, (elapsed - std::stod(diskIdleSecondsStr)) / elapsed);
-		}
+	SystemStatistics sysStats = getSystemStatistics();
+	if (sysStats.initialized) {
+		self->cpuUsage = 100 * sysStats.processCPUSeconds / sysStats.elapsed;
+		self->diskUsage = 100 * std::max(0.0, (sysStats.elapsed - sysStats.processDiskIdleSeconds) / sysStats.elapsed);
 	}
 }
 

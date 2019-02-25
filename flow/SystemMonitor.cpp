@@ -41,6 +41,14 @@ void systemMonitor() {
 	customSystemMonitor("ProcessMetrics", &statState, true );
 }
 
+SystemStatistics getSystemStatistics() {
+	static StatisticsState statState = StatisticsState();
+	return getSystemStatistics(
+		machineState.folder.present() ? machineState.folder.get() : "",
+		machineState.ip.present() ? machineState.ip.get() : 0,
+		&statState.systemState);
+}
+
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
 #define DETAILALLOCATORMEMUSAGE( size ) detail("TotalMemory"#size, FastAllocator<size>::getTotalMemory()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getApproximateMemoryUnused()).detail("ActiveThreads"#size, FastAllocator<size>::getActiveThreads())
 
