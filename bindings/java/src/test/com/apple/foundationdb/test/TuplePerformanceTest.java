@@ -13,30 +13,40 @@ import com.apple.foundationdb.tuple.Versionstamp;
 
 public class TuplePerformanceTest {
 
+	private enum GeneratedTypes {
+		ALL,
+		LONG,
+		FLOATING_POINT
+	}
+
 	private final Random r;
 	private final int ignoreIterations;
 	private final int iterations;
+	private final GeneratedTypes generatedTypes;
 
-	public TuplePerformanceTest(Random r, int ignoreIterations, int iterations) {
+	public TuplePerformanceTest(Random r, int ignoreIterations, int iterations, GeneratedTypes generatedTypes) {
 		this.r = r;
 		this.ignoreIterations = ignoreIterations;
 		this.iterations = iterations;
+		this.generatedTypes = generatedTypes;
 	}
 
-	public Tuple createTuple(int length) {
+	public Tuple createMultiTypeTuple(int length) {
 		List<Object> values = new ArrayList<>(length);
-		for (int i = 0; i < length; i++) {
+		for(int i = 0; i < length; i++) {
 			double choice = r.nextDouble();
-			if (choice < 0.1) {
+			if(choice < 0.1) {
 				values.add(null);
-			} else if (choice < 0.2) {
+			}
+			else if(choice < 0.2) {
 				byte[] bytes = new byte[r.nextInt(20)];
 				r.nextBytes(bytes);
 				values.add(bytes);
-			} else if (choice < 0.3) {
+			}
+			else if(choice < 0.3) {
 				char[] chars = new char[r.nextInt(20)];
 				for (int j = 0; j < chars.length; j++) {
-					chars[j] = (char)('a' + r.nextInt(26));
+					chars[j] = (char) ('a' + r.nextInt(26));
 				}
 				values.add(new String(chars));
 			}
@@ -67,7 +77,55 @@ public class TuplePerformanceTest {
 				values.add(nested);
 			}
 		}
-		return Tuple.from(values);
+		return Tuple.fromItems(values);
+	}
+
+	public Tuple createLongsTuple(int length) {
+		List<Object> values = new ArrayList<>(length);
+		for(int i = 0; i < length; i++) {
+			int byteLength = r.nextInt(Long.BYTES + 1);
+			long val = 0L;
+			for(int x = 0; x < byteLength; x++) {
+				int nextBytes = r.nextInt(256);
+				val = (val << 8) + nextBytes;
+			}
+			values.add(val);
+		}
+		return Tuple.fromItems(values);
+	}
+
+	public Tuple createFloatingPointTuple(int length) {
+		List<Object> values = new ArrayList<>(length);
+		for(int i = 0; i < length; i++) {
+			double choice = r.nextDouble();
+			if(choice < 0.40) {
+				values.add(r.nextFloat());
+			}
+			else if(choice < 0.80) {
+				values.add(r.nextDouble());
+			}
+			// These last two are more likely to produce NaN values
+			else if(choice < 0.90) {
+				values.add(Float.intBitsToFloat(r.nextInt()));
+			}
+			else {
+				values.add(Double.longBitsToDouble(r.nextLong()));
+			}
+		}
+		return Tuple.fromItems(values);
+	}
+
+	public Tuple createTuple(int length) {
+		switch (generatedTypes) {
+			case ALL:
+				return createMultiTypeTuple(length);
+			case LONG:
+				return createLongsTuple(length);
+			case FLOATING_POINT:
+				return createFloatingPointTuple(length);
+			default:
+				throw new IllegalStateException("unknown generated types " + generatedTypes);
+		}
 	}
 
 	public void run() {
@@ -169,7 +227,7 @@ public class TuplePerformanceTest {
 	}
 
 	public static void main(String[] args) {
-		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000);
+		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000, GeneratedTypes.ALL);
 		tester.run();
 	}
 }
