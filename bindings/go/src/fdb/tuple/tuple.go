@@ -81,7 +81,7 @@ type Versionstamp struct {
 
 var incompleteTransactionVersion = [10]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 
-const versionstampLength = 13
+const versionstampLength = 12
 
 // IncompleteVersionstamp .
 func IncompleteVersionstamp(userVersion uint16) Versionstamp {
@@ -543,7 +543,7 @@ func decodeVersionstamp(b []byte) (Versionstamp, int) {
 	return Versionstamp{
 		TransactionVersion: transactionVersion,
 		UserVersion:        userVersion,
-	}, versionstampLength
+	}, versionstampLength + 1
 }
 
 func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
@@ -598,7 +598,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			}
 			el, off = decodeUUID(b[i:])
 		case b[i] == versionstampCode:
-			if i+versionstampLength > len(b) {
+			if i+versionstampLength+1 > len(b) {
 				return nil, i, fmt.Errorf("insufficient bytes to decode Versionstamp starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeVersionstamp(b[i:])
