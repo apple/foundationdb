@@ -546,7 +546,13 @@ class TupleUtil {
 			return ByteArrayUtil.compareUnsigned((byte[])item1, (byte[])item2);
 		}
 		if(code1 == STRING_CODE) {
-			return ByteArrayUtil.compareUnsigned(((String)item1).getBytes(UTF8), ((String)item2).getBytes(UTF8));
+			try {
+				return StringUtil.compareUtf8((String)item1, (String)item2);
+			}
+			catch(IllegalArgumentException e) {
+				// Encountered malformed unicode when comparing. Use byte comparison.
+				return ByteArrayUtil.compareUnsigned(((String)item1).getBytes(UTF8), ((String)item2).getBytes(UTF8));
+			}
 		}
 		if(code1 == INT_ZERO_CODE) {
 			if(item1 instanceof Long && item2 instanceof Long) {

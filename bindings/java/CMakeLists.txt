@@ -56,6 +56,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/tuple/package-info.java
   src/main/com/apple/foundationdb/tuple/Tuple.java
   src/main/com/apple/foundationdb/tuple/TupleUtil.java
+  src/main/com/apple/foundationdb/tuple/StringUtil.java
   src/main/com/apple/foundationdb/tuple/Versionstamp.java)
 
 set(JAVA_TESTS_SRCS

@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 public class TupleTest {
 	private static final byte FF = (byte)0xff;
@@ -38,6 +39,7 @@ public class TupleTest {
 		try {
 			// FDB fdb = FDB.selectAPIVersion(610);
 			serializedForms();
+			comparisons();
 			/*
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
@@ -113,7 +115,16 @@ public class TupleTest {
 				Tuple.from(Float.intBitsToFloat(Integer.MAX_VALUE)), new byte[]{0x20, FF, FF, FF, FF},
 				Tuple.from(Double.longBitsToDouble(Long.MAX_VALUE)), new byte[]{0x21, FF, FF, FF, FF, FF, FF, FF, FF},
 				Tuple.from(Float.intBitsToFloat(~0)), new byte[]{0x20, 0x00, 0x00, 0x00, 0x00},
-				Tuple.from(Double.longBitsToDouble(~0L)), new byte[]{0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+				Tuple.from(Double.longBitsToDouble(~0L)), new byte[]{0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+				Tuple.from(""), new byte[]{0x02, 0x00},
+				Tuple.from("hello"), new byte[]{0x02, 'h', 'e', 'l', 'l', 'o', 0x00},
+				Tuple.from("\u4e2d\u6587"), new byte[]{0x02, (byte)0xe4, (byte)0xb8, (byte)0xad, (byte)0xe6, (byte)0x96, (byte)0x87, 0x00},
+				Tuple.from("\u03bc\u03ac\u03b8\u03b7\u03bc\u03b1"), new byte[]{0x02, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xac, (byte)0xce, (byte)0xb8, (byte)0xce, (byte)0xb7, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xb1, 0x00},
+				Tuple.from(new String(new int[]{0x1f525}, 0, 1)), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
+				Tuple.from("\ud83d\udd25"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
+				Tuple.from("\ud83e\udd6f"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00},
+				Tuple.from("\udd25\ud83e\udd6f"), new byte[]{0x02, 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // malformed string - low surrogate without high surrogate
+				Tuple.from("a\udd25\ud83e\udd6f"), new byte[]{0x02, 'a', 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00} // malformed string - low surrogate without high surrogate
 		);
 
 		for(TupleSerialization serialization : serializations) {
@@ -128,6 +139,78 @@ public class TupleTest {
 			}
 		}
 		System.out.println("All tuples had matching serializations");
+	}
+
+	private static void comparisons() {
+		List<Tuple> tuples = Arrays.asList(
+				Tuple.from(0L),
+				Tuple.from(BigInteger.ZERO),
+				Tuple.from(1L),
+				Tuple.from(BigInteger.ONE),
+				Tuple.from(-1L),
+				Tuple.from(BigInteger.ONE.negate()),
+				Tuple.from(Long.MAX_VALUE),
+				Tuple.from(Long.MIN_VALUE),
+				Tuple.from(BigInteger.valueOf(Long.MIN_VALUE).subtract(BigInteger.ONE)),
+				Tuple.from(BigInteger.valueOf(Long.MIN_VALUE).shiftLeft(1)),
+				Tuple.from(-0.0f),
+				Tuple.from(0.0f),
+				Tuple.from(-0.0),
+				Tuple.from(0.0),
+				Tuple.from(Float.NEGATIVE_INFINITY),
+				Tuple.from(Double.NEGATIVE_INFINITY),
+				Tuple.from(Float.NaN),
+				Tuple.from(Double.NaN),
+				Tuple.from(Float.intBitsToFloat(Float.floatToIntBits(Float.NaN) + 1)),
+				Tuple.from(Double.longBitsToDouble(Double.doubleToLongBits(Double.NaN) + 1)),
+				Tuple.from(Float.intBitsToFloat(Float.floatToIntBits(Float.NaN) + 2)),
+				Tuple.from(Double.longBitsToDouble(Double.doubleToLongBits(Double.NaN) + 2)),
+				Tuple.from(Float.intBitsToFloat(Float.floatToIntBits(Float.NaN) ^ Integer.MIN_VALUE)),
+				Tuple.from(Double.longBitsToDouble(Double.doubleToLongBits(Double.NaN) ^ Long.MIN_VALUE)),
+				Tuple.from(Float.intBitsToFloat(Float.floatToIntBits(Float.NaN) ^ Integer.MIN_VALUE + 1)),
+				Tuple.from(Double.longBitsToDouble(Double.doubleToLongBits(Double.NaN) ^ Long.MIN_VALUE + 1)),
+				Tuple.from(Float.POSITIVE_INFINITY),
+				Tuple.from(Double.POSITIVE_INFINITY),
+				Tuple.from((Object)new byte[0]),
+				Tuple.from((Object)new byte[]{0x00}),
+				Tuple.from((Object)new byte[]{0x00, FF}),
+				Tuple.from((Object)new byte[]{0x7f}),
+				Tuple.from((Object)new byte[]{(byte)0x80}),
+				Tuple.from("a"),
+				Tuple.from("\u03bc\u03ac\u03b8\u03b7\u03bc\u03b1"),
+				Tuple.from("\u03bc\u03b1\u0301\u03b8\u03b7\u03bc\u03b1"),
+				Tuple.from("\u4e2d\u6587"),
+				Tuple.from("\u4e2d\u570B"),
+				Tuple.from("\ud83d\udd25"),
+				Tuple.from("\ud83e\udd6f"),
+				Tuple.from("a\ud83d\udd25"),
+				Tuple.from("\ufb49"),
+				Tuple.from("\ud83d\udd25\ufb49"),
+				Tuple.from("\ud8ed\ud8ed"), // malformed string -- two high surrogates
+				Tuple.from("\ud8ed\ud8eda"), // malformed string -- two high surrogates
+				Tuple.from("\udd25\udd25"), // malformed string -- two low surrogates
+				Tuple.from("a\udd25\ud8ed"), // malformed string -- two low surrogates
+				Tuple.from("\udd25\ud83e\udd6f"), // malformed string -- low surrogate followed by high then low surrogate
+				Tuple.from("\udd6f\ud83e\udd6f"), // malformed string -- low surrogate followed by high then low surrogate
+				Tuple.from(new UUID(-1, 0)),
+				Tuple.from(new UUID(-1, -1)),
+				Tuple.from(new UUID(1, -1)),
+				Tuple.from(new UUID(1, 1))
+		);
+
+		for(Tuple t1 : tuples) {
+			for(Tuple t2 : tuples) {
+				System.out.println("Comparing " + t1 + " and " + t2);
+				// Copy the items over to new tuples to avoid having them use the memoized packed representations
+				Tuple t1copy = Tuple.fromList(t1.getItems());
+				Tuple t2copy = Tuple.fromList(t2.getItems());
+				int semanticComparison = t1copy.compareTo(t2copy);
+				int byteComparison = ByteArrayUtil.compareUnsigned(t1.pack(), t2.pack());
+				if(Integer.signum(semanticComparison) != Integer.signum(byteComparison)) {
+					throw new RuntimeException("Tuple t1 and t2 comparison mismatched: semantic = " + semanticComparison + " while byte order = " + byteComparison);
+				}
+			}
+		}
 	}
 
 	private static void runTests(final int reps, TransactionContext db) {
