@@ -376,14 +376,14 @@ struct DDQueueData {
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
 	void startRelocation(int priority) {
-		if(priority >= PRIORITY_TEAM_UNHEALTHY) {
+		if(priority >= PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
 		}
 		priority_relocations[priority]++;
 	}
 	void finishRelocation(int priority) {
-		if(priority >= PRIORITY_TEAM_UNHEALTHY) {
+		if(priority >= PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations--;
 			ASSERT(unhealthyRelocations >= 0);
 			if(unhealthyRelocations == 0) {
@@ -594,7 +594,7 @@ struct DDQueueData {
 			if( foundActiveFetching || foundActiveRelocation ) {
 				rd.wantsNewServers |= rrs.wantsNewServers;
 				rd.startTime = std::min( rd.startTime, rrs.startTime );
-				if( rrs.priority >= PRIORITY_TEAM_UNHEALTHY && rd.changesBoundaries() )
+				if( rrs.priority >= PRIORITY_TEAM_REDUNDANT && rd.changesBoundaries() )
 					rd.priority = std::max( rd.priority, rrs.priority );
 			}
 
@@ -757,7 +757,7 @@ struct DDQueueData {
 					inFlightActors.liveActorAt( it->range().begin ) &&
 						!rd.keys.contains( it->range() ) &&
 						it->value().priority >= rd.priority &&
-						rd.priority < PRIORITY_TEAM_UNHEALTHY ) {
+						rd.priority < PRIORITY_TEAM_REDUNDANT ) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
 						.detail("KeyBegin", printable(it->value().keys.begin))
 						.detail("KeyEnd", printable(it->value().keys.end))
@@ -943,8 +943,12 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			for(int i = 0; i < bestTeams.size(); i++) {
 				auto& serverIds = bestTeams[i].first->getServerIDs();
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
-				if (allHealthy && anyWithSource && !bestTeams[i].second) { // bestTeams[i] is not the source of the
-					                                                       // shard
+
+				if (allHealthy && anyWithSource && !bestTeams[i].second) {
+					// When all teams in bestTeams[i] do not hold the shard
+					// We randomly choose a server in bestTeams[i] as the shard's destination and
+					// move the shard to the randomly chosen server (in the remote DC), which will later
+					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
 					int idx = g_random->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);

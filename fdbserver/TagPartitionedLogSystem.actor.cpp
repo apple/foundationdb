@@ -117,7 +117,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return dbgid;
 	}
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery) {
 		return epochEnd( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 	}
 
@@ -714,7 +714,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) {
 		Version end = getEnd();
 		TraceEvent("TLogPeekSpecial", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality);
-		if(localEnd == invalidVersion || localEnd <= begin) {
+		if(peekLocality < 0 || localEnd == invalidVersion || localEnd <= begin) {
 			return peekAll(dbgid, begin, end, tag, true);
 		}
 
@@ -840,26 +840,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 	}
 
-	virtual Version getKnownCommittedVersion(int8_t loc) {
+	virtual Version getKnownCommittedVersion() {
+		Version result = invalidVersion;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc) {
-				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
-				if(versions.present()) {
-					return versions.get().first;
-				}
-				return invalidVersion;
+			auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+			if(versions.present()) {
+				result = std::max(result, versions.get().first);
 			}
 		}
-		return invalidVersion;
+		return result;
 	}
 
-	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) {
+	virtual Future<Void> onKnownCommittedVersionChange() {
+		std::vector<Future<Void>> result;
 		for(auto& it : lockResults) {
-			if(it.logSet->locality == loc) {
-				return TagPartitionedLogSystem::getDurableVersionChanged(it);
-			}
+			result.push_back(TagPartitionedLogSystem::getDurableVersionChanged(it));
 		}
-		return Never();
+		if(!result.size()) {
+			return Never();
+		}
+		return waitForAny(result);
 	}
 
 	void popLogRouter( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) { //FIXME: do not need to pop all generations of old logs
@@ -1254,7 +1254,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality, bool forceRecovery ) {
+	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality, bool* forceRecovery ) {
 		// Stops a co-quorum of tlogs so that no further versions can be committed until the DBCoreState coordination state is changed
 		// Creates a new logSystem representing the (now frozen) epoch
 		// No other important side effects.
@@ -1272,12 +1272,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			throw internal_error();
 		}
 
-		if(forceRecovery) {
+		if(*forceRecovery) {
 			DBCoreState modifiedState = prevState;
 
 			int8_t primaryLocality = -1;
 			for(auto& coreSet : modifiedState.tLogs) {
-				if(coreSet.isLocal && coreSet.locality >= 0) {
+				if(coreSet.isLocal && coreSet.locality >= 0 && coreSet.tLogLocalities[0].dcId() != locality.dcId()) {
 					primaryLocality = coreSet.locality;
 					break;
 				}
@@ -1345,10 +1345,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 					prevState = modifiedState;
 				} else {
-					forceRecovery = false;
+					*forceRecovery = false;
 				}
+			} else {
+				*forceRecovery = false;
 			}
 			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
+			for(int i = 0; i < prevState.tLogs.size(); i++) {
+				TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("Log", ::describe(prevState.tLogs[i].tLogs)).detail("Loc", prevState.tLogs[i].locality);
+			}
+			for(int i = 0; i < prevState.oldTLogData.size(); i++) {
+				for(int j = 0; j < prevState.oldTLogData[i].tLogs.size(); j++) {
+					TraceEvent("ForcedRecoveryTLogs", dbgid).detail("I", i).detail("J",j).detail("Log", ::describe(prevState.oldTLogData[i].tLogs[j].tLogs)).detail("Loc", prevState.oldTLogData[i].tLogs[j].locality);
+				}
+			}
 		}
 
 		TEST( true );	// Master recovery from pre-existing database
@@ -1455,7 +1465,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		if(forceRecovery) {
+		if(*forceRecovery) {
 			state std::vector<LogLockInfo> allLockResults;
 			ASSERT( lockResults.size() == 1 );
 			allLockResults.push_back(lockResults[0]);
@@ -2290,7 +2300,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	};
 };
 
-Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery) {
 	return TagPartitionedLogSystem::recoverAndEndEpoch( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 }
 

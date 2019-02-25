@@ -287,7 +287,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 	}
 
 	state Future<Void> tooLong = delay(4.5);
-	state std::string versionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
@@ -433,8 +433,8 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			for(auto i=m.begin(); i!=m.end(); ++i)
 				tr.set( StringRef(i->first), StringRef(i->second) );
 
-			tr.addReadConflictRange( singleKeyRange(configVersionKey) );
-			tr.set( configVersionKey, versionKey );
+			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
+			tr.set( moveKeysLockOwnerKey, versionKey );
 
 			wait( tr.commit() );
 			break;
@@ -702,7 +702,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 
 ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
 	state Transaction tr(cx);
-	state std::string versionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 
 	if(!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; //FIXME: correct return type
@@ -752,8 +752,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 					tr.set(kv.first, kv.second);
 			}
 
-			tr.addReadConflictRange( singleKeyRange(configVersionKey) );
-			tr.set( configVersionKey, versionKey );
+			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
+			tr.set( moveKeysLockOwnerKey, versionKey );
 
 			wait( tr.commit() );
 			return ConfigurationResult::SUCCESS;
@@ -1134,7 +1134,7 @@ Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuo
 
 ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
 	state Transaction tr(cx);
-	state std::string versionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
 	loop {
 		try {
@@ -1143,8 +1143,8 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.addReadConflictRange( singleKeyRange(configVersionKey) );
-			tr.set( configVersionKey, versionKey );
+			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
+			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 			for(auto& s : servers)
 				tr.set( encodeExcludedServersKey(s), StringRef() );
@@ -1162,7 +1162,7 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
 	state bool includeAll = false;
 	state Transaction tr(cx);
-	state std::string versionKey = g_random->randomUniqueID().toString();
+	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
 	loop {
 		try {
@@ -1173,9 +1173,9 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.addReadConflictRange( singleKeyRange(configVersionKey) );
+			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 
-			tr.set( configVersionKey, versionKey );
+			tr.set( moveKeysLockOwnerKey, versionKey );
 			tr.set( excludedServersVersionKey, excludeVersionKey );
 
 			for(auto& s : servers ) {
@@ -1540,16 +1540,18 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
-ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) {
+ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Key dcId ) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
-	while(!clusterInterface->get().present()) {
-		wait(clusterInterface->onChange());
+	loop {
+		choose {
+			when ( wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().forceRecovery.getReply( ForceRecoveryRequest(dcId) ) ) : Never() ) ) {
+				return Void();
+			}
+			when ( wait( clusterInterface->onChange() )) {}
+		}
 	}
-
-	wait(success(clusterInterface->get().get().forceRecovery.tryGetReply( ForceRecoveryRequest() )));
-	return Void();
 }
 
 ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {

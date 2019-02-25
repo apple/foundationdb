@@ -25,6 +25,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
@@ -523,11 +524,35 @@ void updateRate( Ratekeeper* self ) {
 	}
 }
 
+ACTOR Future<Void> configurationMonitor( Ratekeeper* self, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+	state Database cx = openDBOnServer(dbInfo, TaskDefaultEndpoint, true, true);
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
+
+				self->configuration.fromKeyValues( (VectorRef<KeyValueRef>) results );
+
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
+				wait( tr.commit() );
+				wait( watchFuture );
+				break;
+			} catch (Error& e) {
+				wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> rateKeeper(
 	Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	FutureStream< struct GetRateInfoRequest > getRateInfo,
-	DatabaseConfiguration configuration,
 	double* lastLimited)
 {
 	state Ratekeeper self;
@@ -537,7 +562,7 @@ ACTOR Future<Void> rateKeeper(
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
-	self.configuration = configuration;
+	state Future<Void> configMonitor = configurationMonitor(&self, dbInfo);
 	self.lastLimited = lastLimited;
 
 	TraceEvent("RkTLogQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
@@ -600,6 +625,7 @@ ACTOR Future<Void> rateKeeper(
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 				}
 			}
+			when(wait(configMonitor)) {}
 		}
 	}
 	return Void();

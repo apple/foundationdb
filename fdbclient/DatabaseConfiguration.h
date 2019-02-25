@@ -90,6 +90,7 @@ struct DatabaseConfiguration {
 
 	std::string toString() const;
 	StatusObject toJSON(bool noPolicies = false) const;
+	StatusArray getRegionJSON() const;
 	
 	RegionInfo getRegion( Optional<Key> dcId ) const {
 		if(!dcId.present()) {

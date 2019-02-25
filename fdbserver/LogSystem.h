@@ -627,9 +627,9 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) = 0;
 		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
 
-	virtual Version getKnownCommittedVersion(int8_t loc) = 0;
+	virtual Version getKnownCommittedVersion() = 0;
 
-	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) = 0;
+	virtual Future<Void> onKnownCommittedVersionChange() = 0;
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
@@ -649,7 +649,7 @@ struct ILogSystem {
 	static Reference<ILogSystem> fromOldLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const& );
 		// Constructs a new ILogSystem implementation from the old log data within a ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery);
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery);
 		// Constructs a new ILogSystem implementation based on the given oldState and rejoining log servers
 		// Ensures that any calls to push or confirmEpochLive in the current epoch but strictly later than change_epoch will not return
 		// Whenever changes in the set of available log servers require restarting recovery with a different end sequence, outLogSystem will be changed to a new ILogSystem

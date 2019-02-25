@@ -247,6 +247,7 @@ public:
 	void operator=(MapPair&& r) noexcept(true) { key = std::move(r.key); value = std::move(r.value); }
 
 	bool operator<(MapPair<Key,Value> const& r) const { return key < r.key; }
+	bool operator<=(MapPair<Key,Value> const& r) const { return key <= r.key; }
 	bool operator==(MapPair<Key,Value> const& r) const { return key == r.key; }
 	bool operator!=(MapPair<Key,Value> const& r) const { return key != r.key; }
 

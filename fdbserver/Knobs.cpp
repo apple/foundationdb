@@ -150,6 +150,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STORAGE_RECRUITMENT_DELAY,                            10.0 );
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
+	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
 	init( DD_MERGE_COALESCE_DELAY,                             120.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
@@ -167,6 +168,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
 	init( DD_FAILURE_TIME,                                       1.0 ); if( randomize && BUGGIFY ) DD_FAILURE_TIME = 10.0;
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
+
+	// TeamRemover
+	TR_FLAG_DISABLE_TEAM_REMOVER =                               false; if( randomize && BUGGIFY ) TR_FLAG_DISABLE_TEAM_REMOVER = g_random->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
+	init( TR_REMOVE_MACHINE_TEAM_DELAY,                         60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_MACHINE_TEAM_DELAY =  g_random->random01() * 60.0;
 
 	// Redwood Storage Engine
 	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
@@ -302,6 +307,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( CHECK_OUTSTANDING_INTERVAL,                            0.5 ); if( randomize && BUGGIFY ) CHECK_OUTSTANDING_INTERVAL = 0.001;
 	init( VERSION_LAG_METRIC_INTERVAL,                           0.5 ); if( randomize && BUGGIFY ) VERSION_LAG_METRIC_INTERVAL = 10.0;
 	init( MAX_VERSION_DIFFERENCE,           20 * VERSIONS_PER_SECOND );
+	init( FORCE_RECOVERY_CHECK_DELAY,                            5.0 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,             ProcessClass::UnsetFit );

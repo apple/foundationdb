@@ -1521,6 +1521,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 					if(poppedIsKnownCommitted) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
 					commitMessages(self, logData, ver, messages);
@@ -1559,6 +1560,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 						if(poppedIsKnownCommitted) {
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+							logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
 						if(self->terminated.isSet()) {

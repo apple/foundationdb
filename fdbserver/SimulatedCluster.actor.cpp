@@ -764,6 +764,10 @@ StringRef StringRefOf(const char* s) {
 void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumRegions) {
 	set_config("new");
 	const bool simple = false;  // Set true to simplify simulation configs for easier debugging
+	// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
+	// if we do not remove the surplus server and machine teams, the simulation test will report error.
+	// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
+	bool generateMachineTeamTestConfig = BUGGIFY_WITH_PROB(0.1) ? true : false;
 	bool generateFearless = simple ? false : (minimumRegions > 1 || g_random->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 ) );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
@@ -787,7 +791,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
 		//FIXME: log replicas must be more than storage replicas because otherwise better master exists will not recognize it needs to change dcs
 		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
-		int anti_quorum = g_random->randomInt(0, replication_factor);
+		int anti_quorum = g_random->randomInt(0, (replication_factor/2) + 1); //The anti quorum cannot be more than half of the replication factor, or the log system will continue to accept commits when a recovery is impossible
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 		                  "replica_datacenters:=1 min_replica_datacenters:=1",
@@ -1008,6 +1012,13 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
 		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minMachinesRequiredPerDatacenter()));
 		machine_count = g_random->randomInt( machine_count, std::max(machine_count+1, extraDB ? 6 : 10) );
+		if (generateMachineTeamTestConfig) {
+			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
+			// while the max possible machine team number is 10.
+			// If machine_count > 5, we can still test the effectivenss of machine teams
+			// Note: machine_count may be much larger than 5 because we may have a big replication factor
+			machine_count = std::max(machine_count, g_random->randomInt(5, extraDB ? 6 : 10));
+		}
 	}
 
 	//because we protect a majority of coordinators from being killed, it is better to run with low numbers of coordinators to prevent too many processes from being protected
