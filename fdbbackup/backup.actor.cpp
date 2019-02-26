@@ -1871,13 +1871,6 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 	{
 		state FileBackupAgent backupAgent;
 
-		if(ranges.size() > 1) {
-			fprintf(stderr, "Currently only a single restore range is supported!\n");
-			throw restore_error();
-		}
-
-		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
-
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
 
 		// If targetVersion is unset then use the maximum restorable version from the backup description
@@ -1899,7 +1892,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, targetVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
