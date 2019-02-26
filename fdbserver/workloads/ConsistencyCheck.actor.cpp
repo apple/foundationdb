@@ -62,7 +62,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 	int rateLimitMax;
 
 	// DataSet Size
-	int64_t dataSetSize;
+	int64_t bytesReadInPreviousRound;
 
 	//Randomize shard order with each iteration if true
 	bool shuffleShards;
@@ -92,7 +92,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		firstClient = clientId == 0;
 
 		repetitions = 0;
-		dataSetSize = 0;
+		bytesReadInPreviousRound = 0;
 	}
 
 	virtual std::string description()
@@ -583,8 +583,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state int effectiveClientCount = (self->distributed) ? self->clientCount : 1;
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment = (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		state int rateLimitForThisRound = self->dataSetSize == 0 ? self->rateLimitMax :
-			std::min(self->rateLimitMax, static_cast<int>(ceil(self->dataSetSize / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
+		state int rateLimitForThisRound = self->bytesReadInPreviousRound == 0 ? self->rateLimitMax :
+			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
@@ -1033,7 +1033,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}*/
 
-		self->dataSetSize = bytesReadInthisRound;
+		self->bytesReadInPreviousRound = bytesReadInthisRound;
 		return true;
 	}
 
