@@ -676,7 +676,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			sm.store(idx, []byte("ERROR: MULTIPLE"))
 		} else {
 			packed := t.Pack()
-			sm.store(idx, "OK")
+			sm.store(idx, []byte("OK"))
 			sm.store(idx, packed)
 		}
 	case op == "TUPLE_UNPACK":
