@@ -672,14 +672,12 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		incomplete, err := t.HasIncompleteVersionstamp()
 		if incomplete == false {
 			sm.store(idx, []byte("ERROR: NONE"))
+		} else if err != nil {
+			sm.store(idx, []byte("ERROR: MULTIPLE"))
 		} else {
-			if err != nil {
-				sm.store(idx, []byte("ERROR: MULTIPLE"))
-			} else {
-				packed := t.Pack()
-				sm.store(idx, "OK")
-				sm.store(idx, packed)
-			}
+			packed := t.Pack()
+			sm.store(idx, "OK")
+			sm.store(idx, packed)
 		}
 	case op == "TUPLE_UNPACK":
 		t, e := tuple.Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
