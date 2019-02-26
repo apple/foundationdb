@@ -73,6 +73,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	private List<Object> elements;
 	private int memoizedHash = 0;
 	private byte[] packed = null;
+	private int memoizedPackedSize = -1;
 
 	private Tuple(List<? extends Object> elements, Object newItem) {
 		this(elements);
@@ -81,12 +82,6 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	private Tuple(List<? extends Object> elements) {
 		this.elements = new ArrayList<>(elements);
-	}
-
-	private enum VersionstampExpectations {
-		UNKNOWN,
-		HAS_INCOMPLETE,
-		HAS_NO_INCOMPLETE
 	}
 
 	/**
@@ -313,13 +308,15 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	byte[] packInternal(byte[] prefix, boolean copy) {
 		boolean hasPrefix = prefix != null && prefix.length > 1;
 		if(packed == null) {
-			byte[] result = TupleUtil.pack(elements, prefix);
+			byte[] result = TupleUtil.pack(elements, prefix, getPackedSize());
 			if(hasPrefix) {
 				packed = Arrays.copyOfRange(result, prefix.length, result.length);
+				memoizedPackedSize = packed.length;
 				return result;
 			}
 			else {
 				packed = result;
+				memoizedPackedSize = packed.length;
 			}
 		}
 		if(hasPrefix) {
@@ -366,21 +363,23 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
-		return TupleUtil.packWithVersionstamp(elements, prefix);
+		return TupleUtil.packWithVersionstamp(elements, prefix, getPackedSize());
 	}
 
 	byte[] packWithVersionstampInternal(byte[] prefix, boolean copy) {
 		boolean hasPrefix = prefix != null && prefix.length > 0;
 		if(packed == null) {
-			byte[] result = TupleUtil.packWithVersionstamp(elements, prefix);
+			byte[] result = TupleUtil.packWithVersionstamp(elements, prefix, getPackedSize());
 			if(hasPrefix) {
 				byte[] withoutPrefix = Arrays.copyOfRange(result, prefix.length, result.length);
 				TupleUtil.adjustVersionPosition(packed, -1 * prefix.length);
 				packed = withoutPrefix;
+				memoizedPackedSize = packed.length;
 				return result;
 			}
 			else {
 				packed = result;
+				memoizedPackedSize = packed.length;
 			}
 		}
 		if(hasPrefix) {
@@ -398,13 +397,13 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		}
 	}
 
-	byte[] packMaybeVersionstamp(byte[] prefix) {
+	byte[] packMaybeVersionstamp() {
 		if(packed == null) {
 			if(hasIncompleteVersionstamp()) {
-				return packWithVersionstampInternal(prefix, false);
+				return packWithVersionstampInternal(null, false);
 			}
 			else {
-				return packInternal(prefix, false);
+				return packInternal(null, false);
 			}
 		}
 		else {
@@ -489,6 +488,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		Tuple t = new Tuple();
 		t.elements = TupleUtil.unpack(bytes, offset, length);
 		t.packed = Arrays.copyOfRange(bytes, offset, offset + length);
+		t.memoizedPackedSize = length;
 		return t;
 	}
 
@@ -727,11 +727,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		Object o = this.elements.get(index);
 		if(o == null) {
 			return null;
-		} else if(o instanceof Tuple) {
+		}
+		else if(o instanceof Tuple) {
 			return (Tuple)o;
-		} else if(o instanceof List<?>) {
-			return Tuple.fromItems((List<? extends Object>)o);
-		} else {
+		}
+		else if(o instanceof List<?>) {
+			return Tuple.fromItems((List<?>)o);
+		}
+		else {
 			throw new ClassCastException("Cannot convert item of type " + o.getClass() + " to tuple");
 		}
 	}
@@ -824,16 +827,23 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Get the number of bytes in the packed representation of this {@code Tuple}. Note that at the
-	 *  moment, this number is calculated by packing the {@code Tuple} and looking at its size. This method
-	 *  will memoize the result, however, so asking the same {@code Tuple} for its size multiple times
-	 *  is a fast operation.
+	 * Get the number of bytes in the packed representation of this {@code Tuple}. This is done by summing
+	 *  the serialized sizes of all of the elements of this {@code Tuple} and does not pack everything
+	 *  into a single {@code Tuple}. The return value of this function is stored within this {@code Tuple}
+	 *  after this function has been called so that subsequent calls on the same object are fast. This method
+	 *  does not validate that there is no more than one incomplete {@link Versionstamp} in this {@code Tuple}.
 	 *
 	 * @return the number of bytes in the packed representation of this {@code Tuple}
 	 */
 	public int getPackedSize() {
-		byte[] p = packMaybeVersionstamp(null);
-		return p.length;
+		if(memoizedPackedSize < 0) {
+			memoizedPackedSize = getPackedSize(false);
+		}
+		return memoizedPackedSize;
+	}
+
+	int getPackedSize(boolean nested) {
+		return TupleUtil.getPackedSize(elements, nested);
 	}
 
 	/**
@@ -871,7 +881,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	@Override
 	public int hashCode() {
 		if(memoizedHash == 0) {
-			memoizedHash = Arrays.hashCode(packMaybeVersionstamp(null));
+			memoizedHash = Arrays.hashCode(packMaybeVersionstamp());
 		}
 		return memoizedHash;
 	}

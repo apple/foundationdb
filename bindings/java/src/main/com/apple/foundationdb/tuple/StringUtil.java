@@ -71,5 +71,48 @@ final class StringUtil {
 		return Character.compare(c1, c2);
 	}
 
+	static int packedSize(String s) {
+		final int strLength = s.length();
+		int size = 0;
+		int pos = 0;
+
+		while(pos < strLength) {
+			char c = s.charAt(pos);
+			if(c == '\0') {
+				// Null is encoded as \x00\xff
+				size += 2;
+			}
+			else if(c <= 0x7f) {
+				// ASCII code point. Only 1 byte.
+				size += 1;
+			}
+			else if(c <= 0x07ff) {
+				// 2 byte code point
+				size += 2;
+			}
+			else if(Character.isHighSurrogate(c)) {
+				if(pos + 1 < s.length() && Character.isLowSurrogate(s.charAt(pos + 1))) {
+					// High surrogate followed by low surrogate means the code point
+					// is between U+10000 and U+10FFFF, so it requires 4 bytes.
+					size += 4;
+					pos += 1;
+				}
+				else {
+					throw new IllegalArgumentException("malformed UTF-16 has high surrogate not followed by low surrogate");
+				}
+			}
+			else if(Character.isLowSurrogate(c)) {
+				throw new IllegalArgumentException("malformed UTF-16 has low surrogate without prior high surrogate");
+			}
+			else {
+				// 3 byte code point
+				size += 3;
+			}
+			pos += 1;
+		}
+
+		return size;
+	}
+
 	private StringUtil() {}
 }

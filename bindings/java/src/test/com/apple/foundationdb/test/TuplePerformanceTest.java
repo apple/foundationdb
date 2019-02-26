@@ -16,7 +16,8 @@ public class TuplePerformanceTest {
 	private enum GeneratedTypes {
 		ALL,
 		LONG,
-		FLOATING_POINT
+		FLOATING_POINT,
+		STRING_LIKE
 	}
 
 	private final Random r;
@@ -77,7 +78,7 @@ public class TuplePerformanceTest {
 				values.add(nested);
 			}
 		}
-		return Tuple.fromItems(values);
+		return Tuple.fromList(values);
 	}
 
 	public Tuple createLongsTuple(int length) {
@@ -91,7 +92,7 @@ public class TuplePerformanceTest {
 			}
 			values.add(val);
 		}
-		return Tuple.fromItems(values);
+		return Tuple.fromList(values);
 	}
 
 	public Tuple createFloatingPointTuple(int length) {
@@ -112,7 +113,41 @@ public class TuplePerformanceTest {
 				values.add(Double.longBitsToDouble(r.nextLong()));
 			}
 		}
-		return Tuple.fromItems(values);
+		return Tuple.fromList(values);
+	}
+
+	public Tuple createStringLikeTuple(int length) {
+		List<Object> values = new ArrayList<>(length);
+		for(int i = 0; i < length; i++) {
+			double choice = r.nextDouble();
+			if(choice < 0.4) {
+				byte[] arr = new byte[r.nextInt(20)];
+				r.nextBytes(arr);
+				values.add(arr);
+			}
+			else if(choice < 0.8) {
+				// Random ASCII codepoints
+				int[] codepoints = new int[r.nextInt(20)];
+				for(int x = 0; x < codepoints.length; x++) {
+					codepoints[x] = r.nextInt(0x7F);
+				}
+				values.add(new String(codepoints, 0, codepoints.length));
+			}
+			else if(choice < 0.9) {
+				// All zeroes
+				byte[] zeroes = new byte[r.nextInt(20)];
+				values.add(zeroes);
+			}
+			else {
+				// Random Unicode codepoints
+				int[] codepoints = new int[r.nextInt(20)];
+				for(int x = 0; x < codepoints.length; x++) {
+					codepoints[x] = r.nextInt(0x10FFFF);
+				}
+				values.add(new String(codepoints, 0, codepoints.length));
+			}
+		}
+		return Tuple.fromList(values);
 	}
 
 	public Tuple createTuple(int length) {
@@ -123,6 +158,8 @@ public class TuplePerformanceTest {
 				return createLongsTuple(length);
 			case FLOATING_POINT:
 				return createFloatingPointTuple(length);
+			case STRING_LIKE:
+				return createStringLikeTuple(length);
 			default:
 				throw new IllegalStateException("unknown generated types " + generatedTypes);
 		}
@@ -143,6 +180,7 @@ public class TuplePerformanceTest {
 		long unpackNanos = 0L;
 		long equalsNanos = 0L;
 		long equalsArrayNanos = 0L;
+		long sizeNanos = 0L;
 		long hashNanos = 0L;
 		long secondHashNanos = 0L;
 		long subspacePackNanos = 0L;
@@ -150,6 +188,9 @@ public class TuplePerformanceTest {
 		long totalLength = 0L;
 		long totalBytes = 0L;
 		for(int i = 0; i < iterations; i++) {
+			if(i % 100_000 == 0) {
+				System.out.println("   iteration " + i);
+			}
 			int length = r.nextInt(20);
 			Tuple t = createTuple(length);
 
@@ -157,8 +198,8 @@ public class TuplePerformanceTest {
 			byte[] serialized = t.pack();
 			long endNanos = System.nanoTime();
 			packNanos += endNanos - startNanos;
-			totalLength += length;
-			totalBytes += serialized.length;
+			totalLength += t.size();
+			totalBytes += t.getPackedSize();
 
 			startNanos = System.nanoTime();
 			Tuple t2 = Tuple.fromBytes(serialized);
@@ -181,6 +222,15 @@ public class TuplePerformanceTest {
 			}
 			endNanos = System.nanoTime();
 			equalsArrayNanos += endNanos - startNanos;
+
+			tCopy = Tuple.fromList(t.getItems());
+			startNanos = System.nanoTime();
+			int size = tCopy.getPackedSize();
+			endNanos = System.nanoTime();
+			if (size != t.pack().length) {
+				throw new RuntimeException("packed size did not match actual packed length: " + t + " -- " + " " + tCopy.getPackedSize() + " instead of " + t.getPackedSize());
+			}
+			sizeNanos += endNanos - startNanos;
 
 			startNanos = System.nanoTime();
 			byte[] subspacePacked = subspace.pack(t);
@@ -229,6 +279,8 @@ public class TuplePerformanceTest {
 		System.out.printf("  Equals time per tuple:                 %f \u03BCs%n", equalsNanos * 1e-3 / iterations);
 		System.out.printf("  Equals time (using packed):            %f s%n", equalsArrayNanos * 1e-9);
 		System.out.printf("  Equals time (using packed) per tuple:  %f \u03BCs%n", equalsArrayNanos * 1e-3 / iterations);
+		System.out.printf("  Size time:                             %f s%n", sizeNanos * 1e-9);
+		System.out.printf("  Size time per tuple:                   %f \u03BCs%n", sizeNanos * 1e-3 / iterations);
 		System.out.printf("  Subspace pack time:                    %f s%n", subspacePackNanos * 1e-9);
 		System.out.printf("  Subspace pack time per tuple:          %f \u03BCs%n", subspacePackNanos * 1e-3 / iterations);
 		System.out.printf("  Subspace unpack time:                  %f s%n", subspaceUnpackNanos * 1e-9);

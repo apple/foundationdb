@@ -20,16 +20,17 @@
 
 package com.apple.foundationdb.test;
 
-import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
-import com.apple.foundationdb.tuple.Tuple;
-
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.tuple.Versionstamp;
 
 public class TupleTest {
 	private static final byte FF = (byte)0xff;
@@ -40,6 +41,7 @@ public class TupleTest {
 			// FDB fdb = FDB.selectAPIVersion(610);
 			serializedForms();
 			comparisons();
+			replaceTests();
 			/*
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
@@ -70,6 +72,7 @@ public class TupleTest {
 	private static void serializedForms() {
 		List<TupleSerialization> serializations = new ArrayList<>();
 		TupleSerialization.addAll(serializations,
+				Tuple.from(), new byte[0],
 				Tuple.from(0L), new byte[]{0x14},
 				Tuple.from(BigInteger.ZERO), new byte[]{0x14},
 				Tuple.from(1L), new byte[]{0x15, 0x01},
@@ -116,6 +119,9 @@ public class TupleTest {
 				Tuple.from(Double.longBitsToDouble(Long.MAX_VALUE)), new byte[]{0x21, FF, FF, FF, FF, FF, FF, FF, FF},
 				Tuple.from(Float.intBitsToFloat(~0)), new byte[]{0x20, 0x00, 0x00, 0x00, 0x00},
 				Tuple.from(Double.longBitsToDouble(~0L)), new byte[]{0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+				Tuple.from((Object)new byte[0]), new byte[]{0x01, 0x00},
+				Tuple.from((Object)new byte[]{0x01, 0x02, 0x03}), new byte[]{0x01, 0x01, 0x02, 0x03, 0x00},
+				Tuple.from((Object)new byte[]{0x00, 0x00, 0x00, 0x04}), new byte[]{0x01, 0x00, FF, 0x00, FF, 0x00, FF, 0x04, 0x00},
 				Tuple.from(""), new byte[]{0x02, 0x00},
 				Tuple.from("hello"), new byte[]{0x02, 'h', 'e', 'l', 'l', 'o', 0x00},
 				Tuple.from("\u4e2d\u6587"), new byte[]{0x02, (byte)0xe4, (byte)0xb8, (byte)0xad, (byte)0xe6, (byte)0x96, (byte)0x87, 0x00},
@@ -123,17 +129,42 @@ public class TupleTest {
 				Tuple.from(new String(new int[]{0x1f525}, 0, 1)), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
 				Tuple.from("\ud83d\udd25"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
 				Tuple.from("\ud83e\udd6f"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00},
+				Tuple.from("\ud83d"), new byte[]{0x02, 0x3f, 0x00},
 				Tuple.from("\udd25\ud83e\udd6f"), new byte[]{0x02, 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // malformed string - low surrogate without high surrogate
-				Tuple.from("a\udd25\ud83e\udd6f"), new byte[]{0x02, 'a', 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00} // malformed string - low surrogate without high surrogate
+				Tuple.from("a\udd25\ud83e\udd6f"), new byte[]{0x02, 'a', 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // malformed string - low surrogate without high surrogate
+				Tuple.from(Tuple.from((Object)null)), new byte[]{0x05, 0x00, FF, 0x00},
+				Tuple.from(Tuple.from(null, "hello")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x00},
+				Tuple.from(Arrays.asList(null, "hello")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x00},
+				Tuple.from(Tuple.from(null, "hell\0")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 0x00, FF, 0x00, 0x00},
+				Tuple.from(Arrays.asList(null, "hell\0")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 0x00, FF, 0x00, 0x00},
+				Tuple.from(Tuple.from((Object)null), "hello"), new byte[]{0x05, 0x00, FF, 0x00, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00},
+				Tuple.from(Tuple.from((Object)null), "hello", new byte[]{0x01, 0x00}, new byte[0]), new byte[]{0x05, 0x00, FF, 0x00, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x01, 0x01, 0x00, FF, 0x00, 0x01, 0x00},
+				Tuple.from(new UUID(0xba5eba11, 0x5ca1ab1e)), new byte[]{0x30, FF, FF, FF, FF, (byte)0xba, 0x5e, (byte)0xba, 0x11, 0x00, 0x00, 0x00, 0x00, 0x5c, (byte)0xa1, (byte)0xab, 0x1e},
+				Tuple.from(false), new byte[]{0x26},
+				Tuple.from(true), new byte[]{0x27},
+				Tuple.from((short)0x3019), new byte[]{0x16, 0x30, 0x19},
+				Tuple.from((byte)0x03), new byte[]{0x15, 0x03},
+				Tuple.from(Versionstamp.complete(new byte[]{(byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03})), new byte[]{0x33, (byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03, 0x00, 0x00},
+				Tuple.from(Versionstamp.complete(new byte[]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a}, 657)), new byte[]{0x33, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x02, (byte)0x91}
 		);
+		Tuple bigTuple = new Tuple();
+		List<byte[]> serializedForms = new ArrayList<>();
+		for(TupleSerialization serialization : serializations) {
+			bigTuple = bigTuple.addAll(serialization.tuple);
+			serializedForms.add(serialization.serialization);
+		}
+		serializations.add(new TupleSerialization(bigTuple, ByteArrayUtil.join(null, serializedForms)));
 
 		for(TupleSerialization serialization : serializations) {
 			System.out.println("Packing " + serialization.tuple + " (expecting: " + ByteArrayUtil.printable(serialization.serialization) + ")");
+			if(serialization.tuple.getPackedSize() != serialization.serialization.length) {
+				throw new RuntimeException("Tuple " + serialization.tuple + " packed size " + serialization.tuple.getPackedSize() + " does not match expected packed size " + serialization.serialization.length);
+			}
 			if(!Arrays.equals(serialization.tuple.pack(), serialization.serialization)) {
 				throw new RuntimeException("Tuple " + serialization.tuple + " has serialization " + ByteArrayUtil.printable(serialization.tuple.pack()) +
 						" which does not match expected serialization " + ByteArrayUtil.printable(serialization.serialization));
 			}
-			if(!Objects.equals(serialization.tuple, Tuple.fromBytes(serialization.serialization))) {
+			if(!Objects.equals(serialization.tuple, Tuple.fromItems(Tuple.fromBytes(serialization.serialization).getItems()))) {
 				throw new RuntimeException("Tuple " + serialization.tuple + " does not match deserialization " + Tuple.fromBytes(serialization.serialization) +
 						" which comes from serialization " + ByteArrayUtil.printable(serialization.serialization));
 			}
@@ -176,6 +207,16 @@ public class TupleTest {
 				Tuple.from((Object)new byte[]{0x00, FF}),
 				Tuple.from((Object)new byte[]{0x7f}),
 				Tuple.from((Object)new byte[]{(byte)0x80}),
+				Tuple.from(null, new byte[0]),
+				Tuple.from(null, new byte[]{0x00}),
+				Tuple.from(null, new byte[]{0x00, FF}),
+				Tuple.from(null, new byte[]{0x7f}),
+				Tuple.from(null, new byte[]{(byte)0x80}),
+				Tuple.from(Tuple.from(null, new byte[0])),
+				Tuple.from(Tuple.from(null, new byte[]{0x00})),
+				Tuple.from(Tuple.from(null, new byte[]{0x00, FF})),
+				Tuple.from(Tuple.from(null, new byte[]{0x7f})),
+				Tuple.from(Tuple.from(null, new byte[]{(byte)0x80})),
 				Tuple.from("a"),
 				Tuple.from("\u03bc\u03ac\u03b8\u03b7\u03bc\u03b1"),
 				Tuple.from("\u03bc\u03b1\u0301\u03b8\u03b7\u03bc\u03b1"),
@@ -195,7 +236,18 @@ public class TupleTest {
 				Tuple.from(new UUID(-1, 0)),
 				Tuple.from(new UUID(-1, -1)),
 				Tuple.from(new UUID(1, -1)),
-				Tuple.from(new UUID(1, 1))
+				Tuple.from(new UUID(1, 1)),
+				Tuple.from(false),
+				Tuple.from(true),
+				Tuple.from(Arrays.asList(0, 1, 2)),
+				Tuple.from(Arrays.asList(0, 1), "hello"),
+				Tuple.from(Arrays.asList(0, 1), "help"),
+				Tuple.from(Versionstamp.complete(new byte[]{0x0a, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03})),
+				Tuple.from(Versionstamp.complete(new byte[]{(byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03})),
+				Tuple.from(Versionstamp.complete(new byte[]{(byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03}, 1)),
+				Tuple.from(Versionstamp.complete(new byte[]{(byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03}, 0xa101)),
+				Tuple.from(Versionstamp.complete(new byte[]{(byte)0xaa, (byte)0xbb, (byte)0xcc, (byte)0xdd, (byte)0xee, FF, 0x00, 0x01, 0x02, 0x03}, 65535))
+
 		);
 
 		for(Tuple t1 : tuples) {
@@ -209,6 +261,47 @@ public class TupleTest {
 				if(Integer.signum(semanticComparison) != Integer.signum(byteComparison)) {
 					throw new RuntimeException("Tuple t1 and t2 comparison mismatched: semantic = " + semanticComparison + " while byte order = " + byteComparison);
 				}
+				int implicitByteComparison = t1.compareTo(t2);
+				if(Integer.signum(semanticComparison) != Integer.signum(implicitByteComparison)) {
+					throw new RuntimeException("Tuple t1 and t2 comparison mismatched: semantic = " + semanticComparison + " while implicit byte order = " + implicitByteComparison);
+				}
+			}
+		}
+	}
+
+	// These should be in ArrayUtilTest, but those can't be run at the moment, so here they go.
+	private static void replaceTests() {
+		List<byte[]> arrays = Arrays.asList(
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04}, new byte[]{0x03, 0x04, 0x03, 0x04},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03}, new byte[]{0x03, 0x03},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x03, 0x04, 0x05, 0x03, 0x04, 0x05},
+				new byte[]{0x00, 0x01, 0x02, 0x00, 0x01, 0x02, 0x00}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x00, 0x03, 0x04, 0x05, 0x00, 0x03, 0x04, 0x05, 0x00},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x01, 0x01, 0x01, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03, 0x04, 0x05}, new byte[]{0x03, 0x04, 0x05, 0x03, 0x04, 0x05, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03, 0x04}, new byte[]{0x03, 0x04, 0x03, 0x04, 0x01},
+				new byte[]{0x01, 0x01, 0x01, 0x01, 0x01}, new byte[]{0x01, 0x01}, new byte[]{0x03}, new byte[]{0x03, 0x03, 0x01},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, null, new byte[0],
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[]{0x01, 0x02}, new byte[0], new byte[0],
+				new byte[]{0x01, 0x02, 0x01, 0x02}, null, new byte[]{0x04}, new byte[]{0x01, 0x02, 0x01, 0x02},
+				new byte[]{0x01, 0x02, 0x01, 0x02}, new byte[0], new byte[]{0x04}, new byte[]{0x01, 0x02, 0x01, 0x02},
+				null, new byte[]{0x01, 0x02}, new byte[]{0x04}, null
+		);
+		for(int i = 0; i < arrays.size(); i += 4) {
+			byte[] src = arrays.get(i);
+			byte[] pattern = arrays.get(i + 1);
+			byte[] replacement = arrays.get(i + 2);
+			byte[] expectedResults = arrays.get(i + 3);
+			byte[] results = ByteArrayUtil.replace(src, pattern, replacement);
+			if(!Arrays.equals(results, expectedResults)) {
+				throw new RuntimeException("results " + ByteArrayUtil.printable(results) + " did not match expected results " +
+						ByteArrayUtil.printable(expectedResults) + " when replacing " + ByteArrayUtil.printable(pattern) +
+						" with " + ByteArrayUtil.printable(replacement) + " in " + ByteArrayUtil.printable(src));
+			}
+			if(src != null && src == results) {
+				throw new RuntimeException("src and results array are pointer-equal when replacing " + ByteArrayUtil.printable(pattern) +
+						" with " + ByteArrayUtil.printable(replacement) + " in " + ByteArrayUtil.printable(src));
 			}
 		}
 	}

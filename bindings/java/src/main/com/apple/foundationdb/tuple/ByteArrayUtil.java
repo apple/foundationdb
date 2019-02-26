@@ -20,7 +20,6 @@
 
 package com.apple.foundationdb.tuple;
 
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
@@ -154,7 +153,10 @@ public class ByteArrayUtil {
 	 * @return a newly created array where {@code pattern} replaced with {@code replacement}
 	 */
 	public static byte[] replace(byte[] src, byte[] pattern, byte[] replacement) {
-		return join(replacement, split(src, pattern));
+		if(src == null) {
+			return null;
+		}
+		return replace(src, 0, src.length, pattern, replacement);
 	}
 
 	/**
@@ -171,7 +173,69 @@ public class ByteArrayUtil {
 	 */
 	public static byte[] replace(byte[] src, int offset, int length,
 			byte[] pattern, byte[] replacement) {
-		return join(replacement, split(src, offset, length, pattern));
+		if(pattern == null || pattern.length == 0) {
+			return Arrays.copyOfRange(src, offset, offset + length);
+		}
+		ByteBuffer dest;
+		if(replacement == null || replacement.length != pattern.length) {
+			// Array might change size. This is the "tricky" case.
+			byte patternFirst = pattern[0];
+			int patternOccurrences = 0;
+			int currentPosition = offset;
+			while(currentPosition < offset + length) {
+				if(src[currentPosition] == patternFirst && regionEquals(src, currentPosition, pattern)) {
+					patternOccurrences++;
+					currentPosition += pattern.length;
+				}
+				else {
+					currentPosition++;
+				}
+			}
+			if(patternOccurrences == 0) {
+				// Pattern doesn't occur. Just return a copy of the needed region.
+				return Arrays.copyOfRange(src, offset, offset + length);
+			}
+			int replacementLength = (replacement == null) ? 0 : replacement.length;
+			int newLength = length + patternOccurrences * (replacementLength - pattern.length);
+			if(newLength == 0) {
+				return new byte[0];
+			}
+			else {
+				dest = ByteBuffer.allocate(newLength);
+			}
+		}
+		else {
+			// No matter what, the array will stay the same size as replacement.length = pattern.length
+			dest = ByteBuffer.allocate(length);
+		}
+		replace(src, offset, length, pattern, replacement, dest);
+		return dest.array();
+	}
+
+	static void replace(byte[] src, int offset, int length, byte[] pattern, byte[] replacement, ByteBuffer dest) {
+		if(pattern == null || pattern.length == 0) {
+			dest.put(src, offset, length);
+			return;
+		}
+		byte patternFirst = pattern[0];
+		int lastPosition = offset;
+		int currentPosition = offset;
+
+		while(currentPosition < offset + length) {
+			if(src[currentPosition] == patternFirst && regionEquals(src, currentPosition, pattern)) {
+				dest.put(src, lastPosition, currentPosition - lastPosition);
+				if(replacement != null) {
+					dest.put(replacement);
+				}
+				currentPosition += pattern.length;
+				lastPosition = currentPosition;
+			}
+			else {
+				currentPosition++;
+			}
+		}
+
+		dest.put(src, lastPosition, currentPosition - lastPosition);
 	}
 
 	/**
@@ -203,7 +267,7 @@ public class ByteArrayUtil {
 	 * @return a list of byte arrays from {@code src} now not containing {@code delimiter}
 	 */
 	public static List<byte[]> split(byte[] src, int offset, int length, byte[] delimiter) {
-		List<byte[]> parts = new LinkedList<byte[]>();
+		List<byte[]> parts = new LinkedList<>();
 		int idx = offset;
 		int lastSplitEnd = offset;
 		while(idx <= (offset+length) - delimiter.length) {
@@ -223,13 +287,6 @@ public class ByteArrayUtil {
 			parts.add(Arrays.copyOfRange(src, lastSplitEnd, offset + length));
 		}
 		return parts;
-	}
-
-	static int bisectLeft(BigInteger[] arr, BigInteger i) {
-		int n = Arrays.binarySearch(arr, i);
-		if(n >= 0)
-			return n;
-		return (n + 1) * -1;
 	}
 
 	/**
@@ -274,61 +331,6 @@ public class ByteArrayUtil {
 			}
 		}
 		return true;
-	}
-
-	/**
-	 * Scan through an array of bytes to find the first occurrence of a specific value.
-	 *
-	 * @param src array to scan. Must not be {@code null}.
-	 * @param what the value for which to search.
-	 * @param start the index at which to start the search. If this is at or after
-	 *  the end of {@code src}, the result will always be {@code -1}.
-	 * @param end the index one past the last entry at which to search
-	 *
-	 * @return return the location of the first instance of {@code value}, or
-	 *  {@code -1} if not found.
-	 */
-	static int findNext(byte[] src, byte what, int start, int end) {
-		for(int i = start; i < end; i++) {
-			if(src[i] == what)
-				return i;
-		}
-		return -1;
-	}
-
-	/**
-	 * Gets the index of the first element after the next occurrence of the byte sequence [nm]
-	 * @param v the bytes to scan through
-	 * @param n first character to find
-	 * @param m second character to find
-	 * @param start the index at which to start the scan
-	 *
-	 * @return the index after the next occurrence of [nm]
-	 */
-	static int findTerminator(byte[] v, byte n, byte m, int start) {
-		return findTerminator(v, n, m, start, v.length);
-	}
-
-	/**
-	 * Gets the index of the first element after the next occurrence of the byte sequence [nm]
-	 * @param v the bytes to scan through
-	 * @param n first character to find
-	 * @param m second character to find
-	 * @param start the index at which to start the scan
-	 * @param end the index at which to stop the search (exclusive)
-	 *
-	 * @return the index after the next occurrence of [nm]
-	 */
-	static int findTerminator(byte[] v, byte n, byte m, int start, int end) {
-		int pos = start;
-		while(true) {
-			pos = findNext(v, n, pos, end);
-			if(pos < 0)
-				return end;
-			if(pos + 1 == end || v[pos+1] != m)
-				return pos;
-			pos += 2;
-		}
 	}
 
 	/**
@@ -415,6 +417,15 @@ public class ByteArrayUtil {
 			else s.append(String.format("\\x%02x", b));
 		}
 		return s.toString();
+	}
+
+	static int nullCount(byte[] val) {
+		int nulls = 0;
+		for(int i = 0; i < val.length; i++) {
+			if(val[i] == 0x00)
+				nulls += 1;
+		}
+		return nulls;
 	}
 
 	private ByteArrayUtil() {}
