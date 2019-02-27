@@ -92,8 +92,7 @@ public:
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
-		std::map<NetworkAddress, bool> clientTLSConfigMap; // Does the client has TLS configured
-		std::map<NetworkAddress, std::string> traceLogGroupMap;
+		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
@@ -1234,9 +1233,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
 
-	db->clientTLSConfigMap[reply.getEndpoint().getPrimaryAddress()] = client_tls_configured;
-
-	db->traceLogGroupMap[reply.getEndpoint().getPrimaryAddress()] = traceLogGroup.toString();
+	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = {traceLogGroup.toString(), client_tls_configured};
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1247,8 +1244,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 
 	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
-	db->clientTLSConfigMap.erase(reply.getEndpoint().getPrimaryAddress());
-	db->traceLogGroupMap.erase(reply.getEndpoint().getPrimaryAddress());
+	db->clientStatusInfoMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1912,7 +1908,8 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.clientTLSConfigMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.clientStatusInfoMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 

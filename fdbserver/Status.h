@@ -30,8 +30,13 @@
 typedef std::map< NetworkAddress, std::pair<std::string,UID> > ProcessIssuesMap;
 typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > ClientVersionMap;
 
+struct ClientStatusInfo {
+	std::string traceLogGroup;
+	bool clientTLSConfigured; // Does client configure its TLS options
+};
+
 Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<std::pair<WorkerInterface, ProcessClass>> const& workers,
-	ProcessIssuesMap const& workerIssues, ProcessIssuesMap const& clientIssues, ClientVersionMap const& clientVersionMap, std::map<NetworkAddress, bool> const& clientTLSConfigMap, std::map<NetworkAddress, std::string> const& traceLogGroupMap,
+	ProcessIssuesMap const& workerIssues, ProcessIssuesMap const& clientIssues, ClientVersionMap const& clientVersionMap, std::map<NetworkAddress, struct ClientStatusInfo> const& clientStatusInfoMap,
 	ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
 
 #endif
