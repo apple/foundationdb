@@ -70,6 +70,7 @@ struct MutationRef {
 		MinV2,
 		AndV2,
 		CompareAndClear,
+		Exec,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.

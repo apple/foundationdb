@@ -35,11 +35,15 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/FDBExecArgs.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
+#if defined(CMAKE_BUILD) || !defined(WIN32)
+#include "versions.h"
+#endif
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -689,6 +693,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
+<<<<<<< HEAD
 ACTOR Future<Void> workerServer(
 		Reference<ClusterConnectionFile> connFile,
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
@@ -697,6 +702,15 @@ ACTOR Future<Void> workerServer(
 		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
 		std::string metricsConnFile, std::string metricsPrefix,
 		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold) {
+=======
+ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                LocalityData locality,
+                                Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                ProcessClass initialClass, std::string folder, int64_t memoryLimit,
+                                std::string metricsConnFile, std::string metricsPrefix,
+                                Promise<Void> recoveredDiskFiles, std::string _coordFolder) {
+>>>>>>> 2d5af668... Snapshot based backup and resotre implementation
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -717,6 +731,7 @@ ACTOR Future<Void> workerServer(
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
 	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	state std::string coordFolder = _coordFolder;
 
 	state WorkerInterface interf( locality );
 
@@ -832,7 +847,7 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, degraded );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded );
 				recoveries.push_back(recovery.getFuture());
 
 				tl = handleIOErrors( tl, kv, s.storeID );
@@ -989,7 +1004,7 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), degraded );
+					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded );
 					logData.first = handleIOErrors( logData.first, data, logId );
 					logData.first = handleIOErrors( logData.first, queue, logId );
 					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
@@ -1165,6 +1180,76 @@ ACTOR Future<Void> workerServer(
 			when( wait( loggingTrigger ) ) {
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
+			}
+			when(ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
+				int len = req.execPayLoad.size();
+				ExecCmdValueString execArg(req.execPayLoad.toString());
+				execArg.dbgPrint();
+				auto uidStr = execArg.getBinaryArgValue("uid");
+
+				int err = 0;
+				if (!g_network->isSimulated()) {
+					// bin path
+					auto snapBin = execArg.getBinaryPath();
+					auto dataFolder = "path=" + coordFolder;
+					vector<std::string> paramList;
+					// bin path
+					paramList.push_back(snapBin);
+					// user passed arguments
+					auto listArgs = execArg.getBinaryArgs();
+					for (auto elem : listArgs) {
+						paramList.push_back(elem);
+					}
+					// additional arguments
+					paramList.push_back(dataFolder);
+					const char* version = FDB_VT_VERSION;
+					std::string versionString = "version=";
+					versionString += version;
+					paramList.push_back(versionString);
+					std::string roleString = "role=coordinator";
+					paramList.push_back(roleString);
+					err = fdbFork(snapBin, paramList);
+				} else {
+					// copy the files
+					std::string folder = coordFolder;
+					std::string folderFrom = "./" + folder + "/.";
+					std::string folderTo = "./" + folder + "-snap-" + uidStr;
+
+					std::string folderToCreateCmd = "mkdir " + folderTo;
+					std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
+
+					TraceEvent("ExecTraceCoordSnapcommands")
+					    .detail("folderToCreateCmd", folderToCreateCmd)
+					    .detail("folderCopyCmd", folderCopyCmd);
+
+					vector<std::string> paramList;
+					std::string cpBin = "/bin/cp";
+					std::string mkdirBin = "/bin/mkdir";
+
+					paramList.push_back(mkdirBin);
+					paramList.push_back(folderTo);
+					err = fdbFork(mkdirBin, paramList);
+					TraceEvent("mkdirStatus").detail("errno", err);
+
+					if (err == 0) {
+						paramList.clear();
+						paramList.push_back(cpBin);
+						paramList.push_back("-a");
+						paramList.push_back(folderFrom);
+						paramList.push_back(folderTo);
+						err = fdbFork(cpBin, paramList);
+					}
+				}
+
+				auto tokenStr = "ExecTrace/Coordinators/" + uidStr;
+				auto te = TraceEvent("ExecTraceCoordinators");
+				te.detail("uid", uidStr);
+				te.detail("status", err);
+				te.detail("role", "coordinator");
+				te.detail("value", coordFolder);
+				te.detail("execPayLoad", req.execPayLoad.toString());
+				te.trackLatest(tokenStr.c_str());
+				req.reply.send(Void());
 			}
 			when( wait( errorForwarders.getResult() ) ) {}
 			when( wait( handleErrors ) ) {}
@@ -1344,7 +1429,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(v,1) );

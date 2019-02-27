@@ -60,6 +60,7 @@ struct WorkerInterface {
 	RequestStream< struct EventLogRequest > eventLogRequest;
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
+	RequestStream<struct ExecuteRequest> execReq;
 
 	TesterInterface testerInterface;
 
@@ -71,7 +72,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq);
 	}
 };
 
@@ -239,6 +240,26 @@ struct TraceBatchDumpRequest {
 	}
 };
 
+struct ExecuteRequest {
+	// FIXME: sramamoorthy, FDB6port enable flat_buffers
+	// constexpr static flat_buffers::FileIdentifier file_identifier = 16478959;
+	ReplyPromise<Void> reply;
+
+	Arena arena;
+	StringRef execPayLoad;
+
+	ExecuteRequest(StringRef execPayLoad) : execPayLoad(execPayLoad) {}
+
+	ExecuteRequest() : execPayLoad() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		// FIXME: sramamoorthy, FDB6port enable flat_buffers
+		// serializer(ar, v2(reply), v2(execPayLoad), v2(arena));
+		serializer(ar, reply, execPayLoad, arena);
+	}
+};
+
 struct LoadedReply {
 	constexpr static FileIdentifier file_identifier = 9956350;
 	Standalone<StringRef> payload;
@@ -403,7 +424,7 @@ ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMaste
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, std:;string folder, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -425,7 +446,7 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded);
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
 }
 
 typedef decltype(&tLog) TLogFn;

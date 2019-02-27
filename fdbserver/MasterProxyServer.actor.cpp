@@ -34,10 +34,12 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/ConflictSet.h"
+#include "fdbclient/SystemData.h"
 #include "flow/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/FDBExecArgs.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -727,8 +729,54 @@ ACTOR Future<Void> commitBatch(
 						toCommit.addTags(allSources);
 					}
 					toCommit.addTypedMessage(m);
-				}
-				else
+				} else if (m.type == MutationRef::Exec) {
+					auto ranges = self->keyInfo.intersectingRanges(allKeys);
+					std::set<Tag> allSources;
+
+					if (debugMutation("ProxyCommit", commitVersion, m))
+						TraceEvent("ProxyCommitTo", self->dbgid)
+						    .detail("To", "all sources")
+						    .detail("Mutation", m.toString())
+						    .detail("Version", commitVersion);
+
+					for (auto r : ranges) {
+						auto& tags = r.value().tags;
+						if (!tags.size()) {
+							for (auto info : r.value().src_info) {
+								tags.push_back(info->tag);
+							}
+							for (auto info : r.value().dest_info) {
+								tags.push_back(info->tag);
+							}
+							uniquify(tags);
+						}
+						allSources.insert(tags.begin(), tags.end());
+					}
+
+					auto param2 = m.param2.toString();
+					ExecCmdValueString execArg(param2);
+					execArg.dbgPrint();
+					auto uidStr = execArg.getBinaryArgValue("uid");
+					auto tokenStr = "ExecTrace/Proxy/" + uidStr;
+
+					auto te1 = TraceEvent("ProxyCommitTo", self->dbgid);
+					te1.detail("To", "all sources");
+					te1.detail("Mutation", m.toString());
+					te1.detail("Version", commitVersion);
+					te1.detail("numTags", allSources.size());
+					if (m.param1 == execSnap) {
+						te1.trackLatest(tokenStr.c_str());
+					}
+					// FIXME: sramamoorthy, FDB6port - dynamic tracing not supported?
+					// auto te = TraceEvent(SevDebug, "tagInfo");
+					int i = 0;
+					for (auto& tag : allSources) {
+						//	te.detail(format("tagId{}", ++i).c_str(), tag.toString());
+						toCommit.addTag(tag);
+					}
+					toCommit.addTypedMessage(m);
+					toCommit.setHasExecOp();
+				} else
 					UNREACHABLE();
 
 
@@ -1516,6 +1564,49 @@ ACTOR Future<Void> masterProxyServerCore(
 			rep.metadataVersion = commitData.metadataVersion;
 			rep.version = commitData.committedVersion.get();
 			req.reply.send(rep);
+		}
+		when(ExecRequest _execReq = waitNext(proxy.execReq.getFuture())) {
+			state ExecRequest execReq = _execReq;
+			if (execReq.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", execReq.debugID.get().first(),
+				                      "MasterProxyServer.masterProxyServerCore."
+				                      "ExecRequest");
+
+			TraceEvent("ExecRequest").detail("payload", execReq.execPayLoad.toString());
+
+			// get the list of coordinators
+			state Optional<Value> coordinators = commitData.txnStateStore->readValue(coordinatorsKey).get();
+			state std::vector<NetworkAddress> coordinatorsAddr =
+			    ClusterConnectionString(coordinators.get().toString()).coordinators();
+			state std::set<NetworkAddress> coordinatorsAddrSet;
+			for (int i = 0; i < coordinatorsAddr.size(); i++) {
+				coordinatorsAddrSet.insert(coordinatorsAddr[i]);
+			}
+
+			// get the list of workers
+			state std::vector<std::pair<WorkerInterface, ProcessClass>> workers =
+			    wait(db->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+
+			// send the exec command to the list of workers which are
+			// coordinators
+			state int i = 0;
+			state int numSucc = 0;
+			for (; i < workers.size(); i++) {
+				if (coordinatorsAddrSet.find(workers[i].first.address()) != coordinatorsAddrSet.end()) {
+					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].first.address());
+					try {
+						wait(timeoutError(workers[i].first.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 1.0));
+						++numSucc;
+					} catch (Error& e) {
+						TraceEvent("ExecReqFailed").detail("what", e.what());
+					}
+				}
+			}
+			if (numSucc >= (coordinatorsAddrSet.size() + 1) / 2) {
+				execReq.reply.send(Void());
+			} else {
+				execReq.reply.sendError(operation_failed());
+			}
 		}
 		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;

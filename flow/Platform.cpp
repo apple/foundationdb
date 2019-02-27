@@ -42,6 +42,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -2681,6 +2682,47 @@ void* loadFunction(void* lib, const char* func_name) {
 
 	return dlfcn;
 }
+
+int
+fdbFork(const std::string& path, const std::vector<std::string>& args)
+{
+    std::vector<char*> paramList;
+    for (int i = 0; i < args.size(); i++) {
+        paramList.push_back(const_cast<char*>(args[i].c_str()));
+    }
+    paramList.push_back(nullptr);
+
+	// FIXME: sramamoorthy, FDB6port, dynamic content fails
+	auto te = TraceEvent("fdbFork");
+    te.detail("cmd", path);
+	// for (int i = 0; i < args.size(); i++) {
+	//    te.detail("args", args[i]);
+	//}
+
+	pid_t pid = fork();
+    if (pid == -1) {
+        TraceEvent(SevWarnAlways, "Command failed to spawn")
+            .detail("cmd", path);
+        throw platform_error();
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+            TraceEvent(SevWarnAlways, "Command failed")
+                .detail("cmd", path)
+                .detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+            return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+        TraceEvent("Command status")
+            .detail("cmd", path)
+            .detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+    } else {
+        execv(const_cast<char*>(path.c_str()), &paramList[0]);
+        _exit(EXIT_FAILURE);
+    }
+    return 0;
+}
+
 
 void platformInit() {
 #ifdef WIN32
