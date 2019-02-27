@@ -21,7 +21,6 @@
 #ifndef FDBSERVER_RATEKEEPERINTERFACE_H
 #define FDBSERVER_RATEKEEPERINTERFACE_H
 
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"

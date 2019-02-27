@@ -21,7 +21,6 @@
 #ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
 #define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 

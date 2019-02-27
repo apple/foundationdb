@@ -24,7 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -675,11 +675,6 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			when (wait( timeout )) {
 				updateRate(&self, self.normalLimits);
 				updateRate(&self, self.batchLimits);
-
-				if(self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit) {
-					*self.lastLimited = now();
-				}
-
 
 				double tooOld = now() - 1.0;
 				for(auto p=self.proxy_transactionCounts.begin(); p!=self.proxy_transactionCounts.end(); ) {
