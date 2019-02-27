@@ -51,7 +51,7 @@ become the only build system available.
 1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
-    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest /bin/bash
+    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest
     ```
 
 1. Navigate to the container's mounted directory which contains the foundationdb repo.

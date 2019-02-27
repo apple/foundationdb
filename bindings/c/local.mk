@@ -31,6 +31,9 @@ CLEAN_TARGETS += fdb_c_tests_clean
 
 ifeq ($(PLATFORM),linux)
   fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libgcc -Wl,-z,nodelete -lm -lpthread -lrt -ldl
+  ifeq ($(LIBSTDCPP_HACK),1)
+    fdb_c_LIBS += lib/libstdc++.a
+  endif
   fdb_c_tests_LIBS += -lpthread
 endif
 
