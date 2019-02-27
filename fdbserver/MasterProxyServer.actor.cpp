@@ -88,12 +88,15 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 int getBytes(Promise<Version> const& r) { return 0; }
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate, double* outBatchTransactionRate) {
-	state Future<Void> nextRequestTimer = Void();
+	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
 	state int64_t lastTC = 0;
 
-	if (db->get().distributor.present()) nextRequestTimer = Void();
+	if (db->get().distributor.present()) {
+		nextRequestTimer = Void();
+	}
+
 	loop choose {
 		when ( wait( db->onChange() ) ) {
 			if ( db->get().distributor.present() ) {
@@ -119,7 +122,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
 		}
-		when ( wait(leaseTimeout ) ) {
+		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
 			*outBatchTransactionRate = 0;
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("BatchRate", 0).detail("Lease", "Expired");
