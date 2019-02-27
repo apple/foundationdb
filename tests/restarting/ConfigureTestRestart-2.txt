@@ -1,4 +1,5 @@
 testTitle=CloggedConfigureDatabaseTest
+    runSetup=false
     testName=ConfigureDatabase
     testDuration=300.0
 
@@ -9,4 +10,3 @@ testTitle=CloggedConfigureDatabaseTest
     testDuration=300.0
     scale=0.1
     clogginess=2.0
-

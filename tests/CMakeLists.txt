@@ -130,6 +130,9 @@ add_fdb_test(TEST_FILES rare/RYWDisable.txt)
 add_fdb_test(TEST_FILES rare/RandomReadWriteTest.txt)
 add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.txt)
 add_fdb_test(
+  TEST_FILES restarting/ConfigureTestRestart-1.txt
+             restarting/ConfigureTestRestart-2.txt)
+add_fdb_test(
   TEST_FILES restarting/CycleTestRestart-1.txt
              restarting/CycleTestRestart-2.txt)
 add_fdb_test(

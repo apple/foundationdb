@@ -826,6 +826,26 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
+	if (g_random->random01() < 0.5) {
+		if (g_random->random01() < 0.5) {
+			set_config("log_spill:=1");  // VALUE
+		}
+		int logVersion = g_random->randomInt( 0, 3 );
+		switch (logVersion) {
+		case 0:
+			break;
+		case 1:
+			set_config("log_version:=2");  // 6.0
+			break;
+		case 2:
+			set_config("log_version:=3");  // 6.1
+			break;
+		}
+	} else {
+		set_config("log_version:=3");  // 6.1
+		set_config("log_spill:=2");  // REFERENCE
+	}
+
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		//The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
 		StatusObject primaryObj;

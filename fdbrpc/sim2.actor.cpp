@@ -430,6 +430,10 @@ public:
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}
 
+		// Filesystems on average these days seem to start to have limits of around 255 characters for a
+		// filename.  We add ".part" below, so we need to stay under 250.
+		ASSERT( basename(filename).size() < 250 );
+
 		wait( g_simulator.onMachine( currentProcess ) );
 		try {
 			wait( delay(FLOW_KNOBS->MIN_OPEN_TIME + g_random->random01() * (FLOW_KNOBS->MAX_OPEN_TIME - FLOW_KNOBS->MIN_OPEN_TIME) ) );
