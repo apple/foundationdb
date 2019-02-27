@@ -218,13 +218,15 @@ struct TLogCommitRequest {
 
 	ReplyPromise<Version> reply;
 	Optional<UID> debugID;
+    bool hasExecOp;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, bool hasExecOp, Optional<UID> debugID )
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID), hasExecOp(hasExecOp){}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
+		// FIXME: sramamoorthy, FDB6port, flatbuffers related versioning missing
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID, hasExecOp);
 	}
 };
 

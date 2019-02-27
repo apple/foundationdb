@@ -2287,6 +2287,55 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	TEST(true); //NativeAPI atomic operation
 }
 
+ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayLoad, Optional<UID> debugID) {
+	try {
+		if (debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.executeCoordinators.Before");
+		}
+
+		loop {
+			state ExecRequest req(execPayLoad, debugID);
+			if (debugID.present()) {
+				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+				                      "NativeAPI.executeCoordinators.Inside loop");
+			}
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {
+					if (debugID.present()) {
+						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+						                      "NativeAPI.executeCoordinators."
+						                      "MasterProxyChangeDuringStart");
+					}
+				}
+				when(wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::execReq, req, cx->taskID))) {
+					if (debugID.present())
+						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+						                      "NativeAPI.executeCoordinators.After");
+					return Void();
+				}
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "NativeAPI.executeCoordinatorsError").error(e);
+		throw;
+	}
+}
+
+void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad) {
+	TraceEvent("Execute operation").detail("Key", cmdType.toString()).detail("Value", cmdPayLoad.toString());
+
+	if (cmdType.size() > CLIENT_KNOBS->KEY_SIZE_LIMIT) throw key_too_large();
+	if (cmdPayLoad.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) throw value_too_large();
+
+	auto& req = tr;
+
+	auto& t = req.transaction;
+	auto r = singleKeyRange(cmdType, req.arena);
+	auto v = ValueRef(req.arena, cmdPayLoad);
+	t.mutations.push_back(req.arena, MutationRef(MutationRef::Exec, r.begin, v));
+	return;
+}
+
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 	auto &req = tr;
 	auto &t = req.transaction;
@@ -3259,4 +3308,102 @@ void enableClientInfoLogging() {
 	ASSERT(networkOptions.logClientInfo.present() == false);
 	networkOptions.logClientInfo = true;
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled");
+}
+
+ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) {
+	state Transaction tr(inputCx);
+	state Database testCx = inputCx;
+	state DatabaseContext* cx = inputCx.getPtr();
+	// remember the client ID before the snap operation
+	state UID preSnapClientUID = cx->clientInfo->get().id;
+
+	TraceEvent("snapCreate")
+	    .detail("snapCmd", snapCmd.toString())
+	    .detail("snapCreateEnter", snapUID)
+	    .detail("preSnapClientUID", preSnapClientUID);
+
+	tr.debugTransaction(snapUID);
+	std::string snapString = "empty-binary:uid=" + snapUID.toString();
+	state Standalone<StringRef> uidPayLoad = makeString(snapString.size());
+	uint8_t* ptr = mutateString(uidPayLoad);
+	memcpy(ptr, ((uint8_t*)snapString.c_str()), snapString.size());
+	// disable popping of TLog
+	loop {
+		tr.reset();
+		try {
+			tr.execute(execDisableTLogPop, uidPayLoad);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("snapCreate").detail("snapCreate.After.LockingTLogs", snapUID);
+
+	int p = snapCmd.toString().find_first_of(':', 0);
+	state std::string snapPayLoad;
+
+	TraceEvent("snapCmd").detail("snapCmd", snapCmd.toString());
+	if (p == snapCmd.toString().npos) {
+		snapPayLoad = snapCmd.toString() + ":uid=" + snapUID.toString();
+	} else {
+		snapPayLoad = snapCmd.toString() + ",uid=" + snapUID.toString();
+	}
+	Standalone<StringRef> snapPayLoadRef = makeString(snapPayLoad.size());
+	uint8_t* ptr = mutateString(snapPayLoadRef);
+	memcpy(ptr, ((uint8_t*)snapPayLoad.c_str()), snapPayLoad.size());
+
+	// snap the storage and Tlogs
+	// if we retry the below command in failure cases with the same snapUID
+	// then the snapCreate can end up creating multiple snapshots with
+	// the same name which needs additional handling, hence we fail in
+	// failure cases and let the caller retry with different snapUID
+	try {
+		tr.reset();
+		tr.execute(execSnap, snapPayLoadRef);
+		wait(tr.commit());
+	} catch (Error& e) {
+		TraceEvent("snapCreate").detail("snapCreateErrorSnapTLogStorage", e.what());
+		throw;
+	}
+
+	TraceEvent("snapCreate").detail("snapCreate.After.SnappingTLogsStorage", snapUID);
+
+	// enable popping of the TLog
+	loop {
+		tr.reset();
+		try {
+			tr.execute(execEnableTLogPop, uidPayLoad);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("snapCreate").detail("snapCreate.After.UnlockingTLogs", snapUID);
+
+	// snap the coordinators
+	try {
+		Future<Void> exec = executeCoordinators(cx, snapPayLoad, snapUID);
+		wait(exec);
+	} catch (Error& e) {
+		TraceEvent("snapCreate").detail("snapCreateErrorSnapCoordinators", e.what());
+		throw;
+	}
+
+	TraceEvent("snapCreate").detail("snapCreate.After.SnappingCoords", snapUID);
+
+	// if the client IDs did not change then we have a clean snapshot
+	UID postSnapClientUID = cx->clientInfo->get().id;
+	if (preSnapClientUID != postSnapClientUID) {
+		TraceEvent("UID mismatch")
+		    .detail("preSnapClientUID", preSnapClientUID)
+		    .detail("postSnapClientUID", postSnapClientUID);
+		throw coordinators_changed();
+	}
+
+	TraceEvent("snapCreate").detail("snapCreate.Complete", snapUID);
+	return Void();
 }

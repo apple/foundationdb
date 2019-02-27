@@ -259,6 +259,14 @@ public:
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
+	// execute operation is similar to set, but the command will reach
+	// one of the proxies, all the TLogs and all the storage nodes.
+	// instead of setting a key and value on the DB, it executes the command
+	// that is passed in the value field.
+	// - cmdType can be used for logging purposes
+	// - cmdPayLoad contains the details of the command to be executed:
+	// format of the cmdPayLoad : <binary-path>:<arg1=val1>,<arg2=val2>...
+	void execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad);
 	void clear( const KeyRangeRef& range, bool addConflictRange = true );
 	void clear( const KeyRef& key, bool addConflictRange = true );
 	Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
@@ -323,6 +331,10 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
 std::string unprintable( const std::string& );
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::numeric_limits<int64_t>::min(), int64_t maxValue = std::numeric_limits<int64_t>::max() );
+
+// Takes a snapshot of the cluster, specifically the following persistent
+// states: coordinator, TLog and storage state
+ACTOR Future<Void> snapCreate(Database cx, StringRef snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif

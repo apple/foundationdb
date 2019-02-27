@@ -49,6 +49,7 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
+	RequestStream<struct ExecRequest> execReq;
 
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 
@@ -62,7 +63,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, execReq);
 	}
 
 	void initEndpoints() {
@@ -295,6 +296,25 @@ struct GetHealthMetricsRequest
 	void serialize(Ar& ar)
 	{
 		serializer(ar, reply, detailed);
+	}
+};
+
+struct ExecRequest {
+	// FIXME: sramamoorthy, FDB6PORT, flat-buffers related versioning disabled
+	// constexpr static flat_buffers::FileIdentifier file_identifier = 1315755287;
+	Arena arena;
+	StringRef execPayLoad;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayLoad(exec), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		// FIXME: sramamoorthy, FDB6PORT, flat-buffers related versioning disabled
+		// serializer(ar, v2(execPayLoad), v2(reply), v2(arena), v2(debugID));
+		serializer(ar, execPayLoad, reply, arena, debugID);
 	}
 };
 

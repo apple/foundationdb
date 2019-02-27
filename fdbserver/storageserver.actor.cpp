@@ -49,8 +49,12 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/FDBExecArgs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#if defined(CMAKE_BUILD) || !defined(WIN32)
+#include "versions.h"
+#endif
 
 using std::pair;
 using std::make_pair;
@@ -1834,14 +1838,14 @@ void addMutation( Reference<T>& target, Version version, MutationRef const& muta
 }
 
 template <class T>
-void splitMutations( KeyRangeMap<T>& map, VerUpdateRef const& update ) {
+void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update) {
 	for(auto& m : update.mutations) {
-		splitMutation(map, m, update.version);
+		splitMutation(data, map, m, update.version);
 	}
 }
 
 template <class T>
-void splitMutation( KeyRangeMap<T>& map, MutationRef const& m, Version ver ) {
+void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& m, Version ver) {
 	if(isSingleKeyMutation((MutationRef::Type) m.type)) {
 		if ( !SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(m.param1) )
 			addMutation( map.rangeContaining(m.param1)->value(), ver, m );
@@ -1855,8 +1859,92 @@ void splitMutation( KeyRangeMap<T>& map, MutationRef const& m, Version ver ) {
 				addMutation( i->value(), ver, MutationRef((MutationRef::Type)m.type, k.begin, k.end) );
 			}
 		}
-	}
-	else
+	} else if (m.type == MutationRef::Exec) {
+		std::string cmd = m.param1.toString();
+		int len = m.param2.size();
+		if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
+			TraceEvent("IgnoreNonSnapCommands").detail("execCommand", cmd);
+			return;
+		}
+		ExecCmdValueString execArg(m.param2.toString());
+		auto uidStr = execArg.getBinaryArgValue("uid");
+
+		int err = 0;
+		if (!g_network->isSimulated() || cmd != execSnap) {
+			// Run the exec command
+			auto binPath = execArg.getBinaryPath();
+			auto dataFolder = "path=" + data->folder;
+			vector<std::string> paramList;
+			// bin path
+			paramList.push_back(binPath);
+			// user passed arguments
+			auto listArgs = execArg.getBinaryArgs();
+			execArg.dbgPrint();
+			for (auto elem : listArgs) {
+				paramList.push_back(elem);
+			}
+			// additional arguments
+			paramList.push_back(dataFolder);
+			const char* version = FDB_VT_VERSION;
+			std::string versionString = "version=";
+			versionString += version;
+			paramList.push_back(versionString);
+			std::string roleString = "role=storage";
+			paramList.push_back(roleString);
+			err = fdbFork(binPath, paramList);
+		} else {
+			// copy the files
+			TraceEvent("ExecTraceStorage")
+			    .detail("storageFolder", data->folder)
+			    .detail("localMachineId", data->thisServerID.toString())
+			    .detail("durableVersion", data->durableVersion.get());
+
+			std::string folder = abspath(data->folder);
+
+			std::string folderFrom = folder + "/.";
+			std::string folderTo = folder + "-snap-" + uidStr;
+
+			std::string folderToCreateCmd = "mkdir " + folderTo;
+			std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
+
+			TraceEvent("ExecTraceStorageSnapcommands")
+			    .detail("folderToCreateCmd", folderToCreateCmd)
+			    .detail("folderCopyCmd", folderCopyCmd);
+
+			vector<std::string> paramList;
+			std::string cpBin = "/bin/cp";
+			std::string mkdirBin = "/bin/mkdir";
+
+			paramList.push_back(mkdirBin);
+			paramList.push_back(folderTo);
+			err = fdbFork(mkdirBin, paramList);
+			TraceEvent("mkdirStatus").detail("errno", err);
+
+			if (err == 0) {
+				paramList.clear();
+				paramList.push_back(cpBin);
+				paramList.push_back("-a");
+				paramList.push_back(folderFrom);
+				paramList.push_back(folderTo);
+				err = fdbFork(cpBin, paramList);
+			}
+		}
+		// FIXME, sramamoorthy, print for non execSnap commands too
+		if (cmd == execSnap) {
+			auto tokenStr = "ExecTrace/storage/" + uidStr;
+			TraceEvent te = TraceEvent("ExecTraceStorage");
+			te.detail("uid", uidStr);
+			te.detail("status", err);
+			te.detail("role", "storage");
+			te.detail("version", ver);
+			te.detail("mutation", m.toString());
+			te.detail("mid", data->thisServerID.toString());
+			te.detail("durableVersion", data->durableVersion.get());
+			te.detail("data_version", data->version.get());
+			te.detail("tag", data->tag.toString());
+			te.trackLatest(tokenStr.c_str());
+		}
+	} else
 		ASSERT(false);  // Unknown mutation type in splitMutations
 }
 
@@ -1981,7 +2069,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
 						// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
 						for(auto u = updatesToSplit.begin(); u != updatesToSplit.end(); ++u)
-							splitMutations( data->shards, *u );
+							splitMutations(data, data->shards, *u);
 
 						TEST( true );
 						TEST( shard->updates.size() );
@@ -2382,7 +2470,7 @@ public:
 			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
 			//}
 
-			splitMutation( data->shards, m, ver );
+			splitMutation(data, data->shards, m, ver);
 		}
 
 		if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();

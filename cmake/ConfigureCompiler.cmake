@@ -140,7 +140,7 @@ else()
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type
-    -fdiagnostics-color=always
+#    -fdiagnostics-color=always
     -fPIC)
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(

@@ -533,6 +533,16 @@ bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
 void* loadFunction(void* lib, const char* func_name);
 
+// FIXME: sramamoorthy, clang-format fails here fix it
+// wrapper to execv
+//  takes two arguments:
+//   1. path to the binary
+//   2. list of arguments
+//  returns:
+//   throws platform_error() if it is not able to spawn the process
+//   returns 0 on success or status from the command being run
+int fdbFork(const std::string& path, const std::vector<std::string>& args);
+
 #ifdef _WIN32
 inline static int ctzll( uint64_t value ) {
     unsigned long count = 0;

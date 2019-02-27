@@ -733,7 +733,7 @@ struct CompareFirst {
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
+	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1), hasExecOp(false) {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
@@ -805,6 +805,10 @@ struct LogPushData : NonCopyable {
 		return messagesWriter[loc].toValue();
 	}
 
+	void setHasExecOp() { hasExecOp = true; }
+
+	bool getHasExecOp() { return hasExecOp; }
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
@@ -812,6 +816,7 @@ private:
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
 	uint32_t subsequence;
+	bool hasExecOp;
 };
 
 #endif
