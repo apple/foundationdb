@@ -57,11 +57,11 @@ struct CoreTLogSet {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
 			serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
 			tLogVersion = TLogVersion::V2;
 		} else {
-			serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
+			serializer(ar, tLogVersion);
 		}
 	}
 };

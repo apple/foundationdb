@@ -112,11 +112,11 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
 			tLogVersion = TLogVersion::V2;
 		} else {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
+			serializer(ar, tLogVersion);
 		}
 		ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
 	}

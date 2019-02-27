@@ -822,17 +822,30 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
-	// FIXME: test not setting log_spill.
-	if (g_random->random01() < 0.5) {
-		if (g_random->random01() < 0.5) {
-			set_config("log_version:=2");  // 6.0
-		} else {
-			set_config("log_version:=3");  // 6.1
-		}
+	int logSpillType = g_random->randomInt( 0, 3 );
+	switch (logSpillType) {
+	case 0:
+		// Let both be the default.
+		break;
+	case 1: {
 		set_config("log_spill:=1");  // VALUE
-	} else {
+		int logVersion = g_random->randomInt( 0, 3 );
+		switch (logVersion) {
+		case 0:
+			break;
+		case 1:
+			set_config("log_version:=2");  // 6.0
+			break;
+		case 2:
+			set_config("log_version:=3");  // 6.1
+			break;
+		}
+		break;
+	}
+	case 2:
 		set_config("log_version:=3");  // 6.1
 		set_config("log_spill:=2");  // REFERENCE
+		break;
 	}
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
