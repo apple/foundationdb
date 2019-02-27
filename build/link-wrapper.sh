@@ -2,6 +2,11 @@
 
 set -e
 
+if [ -z ${CC+x} ]
+then
+    CC=gcc
+fi
+
 case $1 in
     Application | DynamicLibrary)
 	echo "Linking        $3"
