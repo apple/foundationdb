@@ -39,6 +39,7 @@ public:
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
+	TLogVersion tLogVersion;
 	IRepPolicyRef tLogPolicy;
 	LocalitySetRef logServerSet;
 	std::vector<int> logIndexArray;

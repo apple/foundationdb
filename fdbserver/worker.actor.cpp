@@ -232,10 +232,10 @@ struct TLogOptions {
 
 	static ErrorOr<TLogOptions> FromStringRef( StringRef s ) {
 		TLogOptions options;
-		for (StringRef kvpair = s.eat("_"); kvpair.size() != 0; kvpair = s.eat("_") ) {
-			StringRef key = kvpair.eat("=");
-			StringRef value = kvpair.eat("=");
-			if (kvpair.size() != 0) return default_error_or();
+		for (StringRef key = s.eat("_"), value = s.eat("_");
+		     s.size() != 0 || key.size();
+		     key = s.eat("_"), value = s.eat("_")) {
+			if (key.size() != 0 && value.size() == 0) return default_error_or();
 
 			if (key == LiteralStringRef("V")) {
 				ErrorOr<TLogVersion> tLogVersion = TLogVersion::FromStringRef(value);
@@ -260,8 +260,8 @@ struct TLogOptions {
 		if (version == TLogVersion::V2) return "";
 
 		std::string toReturn =
-			"V=" + boost::lexical_cast<std::string>(version) +
-			"_LS=" + boost::lexical_cast<std::string>(spillType);
+			"V_" + boost::lexical_cast<std::string>(version) +
+			"_LS_" + boost::lexical_cast<std::string>(spillType);
 		ASSERT_WE_THINK( FromStringRef( toReturn ).get() == *this );
 		return toReturn + "-";
 	}
@@ -303,6 +303,8 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 		}
 		else if( filename.startsWith( fileVersionedLogDataPrefix ) ) {
 			store.storedComponent = DiskStore::TLogData;
+			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
+			// because they might be different if a new option was introduced in this version.
 			StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
 			TraceEvent("DiskStoreVersioned").detail("Filename", printable(filename));
 			ErrorOr<TLogOptions> tLogOptions = TLogOptions::FromStringRef(optionsString);

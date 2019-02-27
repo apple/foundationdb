@@ -250,7 +250,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			if(!noPolicies)  result["log_replication_policy"] = tLogPolicy->info();
 		}
 
-		if ( tLogVersion != TLogVersion::DEFAULT ) {
+		if ( tLogVersion > TLogVersion::DEFAULT ) {
 			result["log_version"] = (int)tLogVersion;
 		}
 
@@ -266,9 +266,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "custom";
 		}
 
-		if ( tLogSpillType != TLogSpillType::DEFAULT ) {
-			result["log_spill"] = (int)tLogSpillType;
-		}
+		result["log_spill"] = (int)tLogSpillType;
 
 		if( remoteTLogReplicationFactor == 1 ) {
 			result["remote_redundancy_mode"] = "remote_single";
@@ -381,7 +379,12 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
-	else if (ck == LiteralStringRef("log_version")) { parse((&type), value); tLogVersion = (TLogVersion::Version)type; }
+	else if (ck == LiteralStringRef("log_version")) {
+		parse((&type), value);
+		type = std::max((int)TLogVersion::MIN_RECRUITABLE, type);
+		type = std::min((int)TLogVersion::MAX_SUPPORTED, type);
+		tLogVersion = (TLogVersion::Version)type;
+	}
 	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
 		// TODO:  Remove this once Redwood works as a log engine
 		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)

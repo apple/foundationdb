@@ -22,7 +22,9 @@
 #define FDBSERVER_DBCORESTATE_H
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/MasterInterface.h"
 
 // This structure is stored persistently in CoordinatedState and must be versioned carefully!
 // It records a synchronous replication topology which can be used in the absence of faults (or under a limited
@@ -44,6 +46,7 @@ struct CoreTLogSet {
 	int8_t locality;
 	Version startVersion;
 	std::vector<std::vector<int>> satelliteTagLocations;
+	TLogVersion tLogVersion;
 
 	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
 
@@ -54,7 +57,12 @@ struct CoreTLogSet {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+			tLogVersion = TLogVersion::V2;
+		} else {
+			serializer(ar, tLogs, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
+		}
 	}
 };
 
@@ -77,6 +85,7 @@ struct OldTLogCoreData {
 		else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, tLogs[0].tLogReplicationFactor, tLogs[0].tLogPolicy, epochEnd, tLogs[0].tLogLocalities);
+			tLogs[0].tLogVersion = TLogVersion::V2;
 		}
 	}
 };
@@ -126,6 +135,7 @@ struct DBCoreState {
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar, tLogs[0].tLogs, tLogs[0].tLogWriteAntiQuorum, recoveryCount, tLogs[0].tLogReplicationFactor, logSystemType);
+			tLogs[0].tLogVersion = TLogVersion::V2;
 
 			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();
 			serializer(ar, oldTLogData, tLogs[0].tLogPolicy, tLocalitySize);

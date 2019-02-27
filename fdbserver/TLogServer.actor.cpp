@@ -181,6 +181,8 @@ private:
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
+// persistFormat has been mostly invalidated by TLogVersion, and can probably be removed when
+// 4.6's TLog code is removed.
 static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
 static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/3"), LiteralStringRef("FoundationDB/LogServer/2/5") );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
