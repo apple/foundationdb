@@ -119,13 +119,14 @@ struct OpenDatabaseRequest {
 	Arena arena;
 	StringRef issues, traceLogGroup;
 	VectorRef<ClientVersionRef> supportedVersions;
+	bool client_tls_configured;
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, reply, arena);
+		serializer(ar, issues, supportedVersions, client_tls_configured, traceLogGroup, knownClientInfoID, reply, arena);
 	}
 };
 

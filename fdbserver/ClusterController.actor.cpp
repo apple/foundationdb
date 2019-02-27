@@ -92,6 +92,7 @@ public:
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
+		std::map<NetworkAddress, bool> clientTLSConfigMap; // Does the client has TLS configured
 		std::map<NetworkAddress, std::string> traceLogGroupMap;
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
@@ -1221,6 +1222,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
+	bool client_tls_configured,
 	Standalone<StringRef> traceLogGroup,
 	ReplyPromise<ClientDBInfo> reply)
 {
@@ -1231,6 +1233,8 @@ ACTOR Future<Void> clusterOpenDatabase(
 	if(supportedVersions.size() > 0) {
 		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
+
+	db->clientTLSConfigMap[reply.getEndpoint().getPrimaryAddress()] = client_tls_configured;
 
 	db->traceLogGroupMap[reply.getEndpoint().getPrimaryAddress()] = traceLogGroup.toString();
 
@@ -1243,6 +1247,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 
 	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
+	db->clientTLSConfigMap.erase(reply.getEndpoint().getPrimaryAddress());
 	db->traceLogGroupMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
@@ -1907,7 +1912,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.clientTLSConfigMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -2402,7 +2407,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
+			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.client_tls_configured, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );

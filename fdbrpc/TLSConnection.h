@@ -89,6 +89,12 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	Reference<ITLSPolicy> get_policy(PolicyType type);
 	bool enabled();
 
+	bool isConfigured() const {
+		return policyInfo.ca_path.size() || policyInfo.ca_contents.size() || policyInfo.cert_path.size() ||
+		       policyInfo.cert_contents.size() || policyInfo.key_path.size() || policyInfo.key_contents.size();
+	}
+
+
 	struct PolicyInfo {
 		std::string ca_path;
 		Standalone<StringRef> ca_contents;

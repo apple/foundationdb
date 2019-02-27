@@ -839,7 +839,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
+static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
+									std::map<NetworkAddress, std::string> traceLogGroupMap,
+									std::map<NetworkAddress, bool> clientTLSConfigMap) {
 	JsonBuilderObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -864,6 +866,11 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, 
 			JsonBuilderObject cli;
 			cli["address"] = client.toString();
 			cli["log_group"] = traceLogGroupMap[client];
+			bool client_tls_configured = false;
+			if (clientTLSConfigMap.find(client) != clientTLSConfigMap.end()) {
+				client_tls_configured = clientTLSConfigMap[client];
+			}
+			cli["tls_configured"] = client_tls_configured;
 			clients.push_back(cli);
 		}
 
@@ -1809,6 +1816,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
+		std::map<NetworkAddress, bool> clientTLSConfigMap,
 		std::map<NetworkAddress, std::string> traceLogGroupMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,
@@ -2029,7 +2037,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
+		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap, clientTLSConfigMap);
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {

@@ -299,6 +299,7 @@ struct Peer : NonCopyable {
 				break;
 			}
 		}
+
 		if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
 			// Keep the new connection
 			TraceEvent("IncomingConnection", conn->getDebugID())
@@ -648,6 +649,7 @@ ACTOR static Future<Void> connectionReader(
 
 					uint64_t connectionId = 0;
 					int32_t connectPacketSize = p->minimumSize();
+					bool client_tls_capable = false;
 					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
 						if(p->protocolVersion >= 0x0FDB00A444020001) {
 							connectionId = p->connectionId;
@@ -687,7 +689,8 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId);
+								.detail("ConnectionId", connectionId)
+								.detail("ConnectPacketSize", connectPacketSize);
 						}
 
 						if(connectionId > 1) {
