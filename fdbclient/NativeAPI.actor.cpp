@@ -2677,26 +2677,8 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			break;
 
 		case FDBTransactionOptions::TRANSACTION_LOGGING_ENABLE:
-			validateOptionValue(value, true);
-
-			if(value.get().size() > 100) {
-				throw invalid_option_value();
-			}
-
-			if(trLogInfo) {
-				if (trLogInfo->identifier.empty()) {
-					trLogInfo->identifier = printable(value.get());
-				}
-				else if (trLogInfo->identifier != printable(value.get())) {
-					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", printable(value.get()));
-					throw client_invalid_operation();
-				}
-				trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
-			}
-			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::TRACE_LOG));
-			}
-
+			setOption(FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER, value);
+			setOption(FDBTransactionOptions::LOG_TRANSACTION);
 			break;
 
 		case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
@@ -2718,10 +2700,10 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			else {
 				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::DONT_LOG));
 			}
-
 			break;
 
 		case FDBTransactionOptions::LOG_TRANSACTION:
+			validateOptionValue(value, false);
 			if (trLogInfo) {
 				trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
 			}
@@ -2729,7 +2711,6 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before logging the transaction");
 				throw client_invalid_operation();
 			}
-
 			break;
 
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
