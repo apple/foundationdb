@@ -54,7 +54,7 @@ struct GetRateInfoRequest {
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -64,11 +64,12 @@ struct GetRateInfoRequest {
 
 struct GetRateInfoReply {
 	double transactionRate;
+	double batchTransactionRate;
 	double leaseDuration;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration);
 	}
 };
 

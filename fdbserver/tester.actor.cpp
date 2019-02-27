@@ -150,8 +150,10 @@ int getOption( VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 			if( sscanf(options[i].value.toString().c_str(), "%d", &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
-			} else
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
 				throw test_specification_invalid();
+			}
 		}
 
 	return defaultValue;
@@ -164,8 +166,10 @@ uint64_t getOption( VectorRef<KeyValueRef> options, Key key, uint64_t defaultVal
 			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
-			} else
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
 				throw test_specification_invalid();
+			}
 		}
 
 	return defaultValue;
@@ -178,8 +182,10 @@ int64_t getOption( VectorRef<KeyValueRef> options, Key key, int64_t defaultValue
 			if( sscanf(options[i].value.toString().c_str(), "%lld", &r) ) {
 				options[i].value = LiteralStringRef("");
 				return r;
-			} else
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", printable(key));
 				throw test_specification_invalid();
+			}
 		}
 
 	return defaultValue;

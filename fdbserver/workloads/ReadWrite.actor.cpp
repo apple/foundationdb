@@ -96,6 +96,9 @@ struct ReadWriteWorkload : KVWorkload {
 	bool useRYW;
 	bool rampTransactionType;
 	bool rampUpConcurrency;
+	bool batchPriority;
+
+	Standalone<StringRef> descriptionString;
 
 	Int64MetricHandle totalReadsMetric;
 	Int64MetricHandle totalRetriesMetric;
@@ -174,6 +177,8 @@ struct ReadWriteWorkload : KVWorkload {
 		rampTransactionType = getOption(options, LiteralStringRef("rampTransactionType"), false);
 		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		doSetup = getOption(options, LiteralStringRef("setup"), true);
+		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
+		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
 
 		if (rampUpConcurrency) ASSERT( rampSweepCount == 2 );  // Implementation is hard coded to ramp up and down
 
@@ -213,7 +218,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual std::string description() { return "ReadWrite"; }
+	virtual std::string description() { return descriptionString.toString(); }
 	virtual Future<Void> setup( Database const& cx ) { return _setup( cx, this ); }
 	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
 
@@ -303,6 +308,13 @@ struct ReadWriteWorkload : KVWorkload {
 	Standalone<KeyValueRef> operator()( uint64_t n ) {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
 	} 
+
+	template <class Trans>
+	void setupTransaction(Trans *tr) {
+		if(batchPriority) {
+			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+	}
 
 	ACTOR static Future<Void> tracePeriodically( ReadWriteWorkload *self ) {
 		state double start = now();
@@ -456,7 +468,9 @@ struct ReadWriteWorkload : KVWorkload {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
+
 			try {
+				self->setupTransaction(&tr);
 				wait( self->readOp( &tr, keys, self, false ) );
 				wait( tr.warmRange( cx, allKeys ) );
 				break;
@@ -564,6 +578,7 @@ struct ReadWriteWorkload : KVWorkload {
 					extra_ranges.push_back(singleKeyRange( g_random->randomUniqueID().toString() ));
 
 				state Trans tr(cx);
+
 				if(tstart - self->clientBegin > self->debugTime && tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
 					debugID = g_random->randomUniqueID();
 					tr.debugTransaction(debugID);
@@ -578,6 +593,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 				loop{
 					try {
+						self->setupTransaction(&tr);
+
 						GRVStartTime = now();
 						self->transactionFailureMetric->startLatency = -1;
 
