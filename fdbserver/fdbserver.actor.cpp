@@ -791,18 +791,19 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 			}
 		}
 
-		if (!publicNetworkAddresses.back().isValid()) {
+		const NetworkAddress& currentPublicAddress = publicNetworkAddresses.back();
+		if (!currentPublicAddress.isValid()) {
 			fprintf(stderr, "ERROR: %s is not valid a public ip address\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (publicNetworkAddresses.back().isTLS()) {
+		if (currentPublicAddress.isTLS()) {
 			numTLSAddress += 1;
 		}
 
 		const std::string& listenAddressStr = listenAddressStrs[ii];
 		if (listenAddressStr == "public") {
-			listenNetworkAddresses.push_back(publicNetworkAddresses.back());
+			listenNetworkAddresses.push_back(currentPublicAddress);
 		} else {
 			try {
 				listenNetworkAddresses.push_back(NetworkAddress::parse(listenAddressStr));
@@ -811,7 +812,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 				throw;
 			}
 
-			if (listenNetworkAddresses.back().isTLS() != publicNetworkAddresses.back().isTLS()) {
+			if (listenNetworkAddresses.back().isTLS() != currentPublicAddress.isTLS()) {
 				fprintf(stderr,
 				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
 				        listenAddressStr.c_str(), publicAddressStr.c_str());
@@ -819,15 +820,17 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 			}
 		}
 
-		if ((clusterIsTLS && publicNetworkAddresses.back().isTLS()) ||
-		    (!clusterIsTLS && !publicNetworkAddresses.back().isTLS())) {
-			bool hasSameCoord =
-			    std::any_of(coordinators.begin(), coordinators.end(),
-			                [&](const NetworkAddress& address) { return address.toString() == publicAddressStr; });
-			if (!hasSameCoord) {
-				fprintf(stderr, "ERROR: public address %s not found in coordinator list.\n", publicAddressStr.c_str());
-				flushAndExit(FDB_EXIT_ERROR);
-			}
+		bool hasSameCoord =
+		    std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+			    if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+				    return address.isTLS() == currentPublicAddress.isTLS();
+			    }
+			    return true;
+		    });
+		if (!hasSameCoord) {
+			fprintf(stderr, "ERROR: TLS state of public address %s does not match in coordinator list.\n",
+			        publicAddressStr.c_str());
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 	}
 
