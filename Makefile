@@ -181,24 +181,6 @@ targets:
 	@for i in $(sort $(TARGETS)); do echo "  $$i" ; done
 	@echo "Append _clean to clean specific target."
 
-lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
-	@echo "Frobnicating   $@"
-	@mkdir -p lib
-	@rm -rf .libstdc++
-	@mkdir .libstdc++
-	@(cd .libstdc++ && ar x $<)
-	@for i in .libstdc++/*.o ; do \
-		nm $$i | grep -q \@ || continue ; \
-		nm $$i | awk '$$3 ~ /@@/ { COPY = $$3; sub(/@@.*/, "", COPY); print $$3, COPY; }' > .libstdc++/replacements ; \
-		objcopy --redefine-syms=.libstdc++/replacements $$i $$i.new && mv $$i.new $$i ; \
-		rm .libstdc++/replacements ; \
-		nm $$i | awk '$$3 ~ /@/ { print $$3; }' > .libstdc++/deletes ; \
-		objcopy --strip-symbols=.libstdc++/deletes $$i $$i.new && mv $$i.new $$i ; \
-		rm .libstdc++/deletes ; \
-	done
-	@ar rcs $@ .libstdc++/*.o
-	@rm -r .libstdc++
-
 docpreview: javadoc
 	@echo "Generating     docpreview"
 	@TARGETS= $(MAKE) -C documentation docpreview
