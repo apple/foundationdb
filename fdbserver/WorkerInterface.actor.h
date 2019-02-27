@@ -80,7 +80,9 @@ struct InitializeTLogRequest {
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
 	std::vector<Tag> allTags;
+	TLogVersion logVersion;
 	KeyValueStoreType storeType;
+	TLogSpillType spillType;
 	Tag remoteTag;
 	int8_t locality;
 	bool isPrimary;
@@ -93,7 +95,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags, storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply);
+		serializer(ar, recruitmentID, recoverFrom, recoverAt, knownCommittedVersion, epoch, recoverTags, allTags, storeType, remoteTag, locality, isPrimary, startVersion, logRouterTags, reply, logVersion, spillType);
 	}
 };
 
@@ -363,10 +365,18 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<Async
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
 
-namespace oldTLog {
+namespace oldTLog_4_6 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId);
 }
+namespace oldTLog_6_0 {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered);
+}
+
+typedef decltype(&tLog) TLogFn;
 
 #include "flow/unactorcompiler.h"
 #endif

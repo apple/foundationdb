@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/lexical_cast.hpp>
+
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -184,6 +186,7 @@ ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
 
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
+StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
@@ -220,13 +223,68 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 	UNREACHABLE();
 }
 
-struct DiskStore {
-	enum COMPONENT { TLogData, Storage };
+struct TLogOptions {
+	TLogOptions() = default;
+	TLogOptions( TLogVersion v, TLogSpillType s ) : version(v), spillType(s) {}
 
-	UID storeID;
-	std::string filename; // For KVStoreMemory just the base filename to be passed to IDiskQueue
-	COMPONENT storedComponent;
-	KeyValueStoreType storeType;
+	TLogVersion version = TLogVersion::DEFAULT;
+	TLogSpillType spillType = TLogSpillType::DEFAULT;
+
+	static ErrorOr<TLogOptions> FromStringRef( StringRef s ) {
+		TLogOptions options;
+		for (StringRef key = s.eat("_"), value = s.eat("_");
+		     s.size() != 0 || key.size();
+		     key = s.eat("_"), value = s.eat("_")) {
+			if (key.size() != 0 && value.size() == 0) return default_error_or();
+
+			if (key == LiteralStringRef("V")) {
+				ErrorOr<TLogVersion> tLogVersion = TLogVersion::FromStringRef(value);
+				if (tLogVersion.isError()) return tLogVersion.getError();
+				options.version = tLogVersion.get();
+			} else if (key == LiteralStringRef("LS")) {
+				ErrorOr<TLogSpillType> tLogSpillType = TLogSpillType::FromStringRef(value);
+				if (tLogSpillType.isError()) return tLogSpillType.getError();
+				options.spillType = tLogSpillType.get();
+			} else {
+				return default_error_or();
+			}
+		}
+		return options;
+	}
+
+	bool operator == ( const TLogOptions& o ) {
+		return version == o.version && spillType == o.spillType;
+	}
+
+	std::string toPrefix() const {
+		if (version == TLogVersion::V2) return "";
+
+		std::string toReturn =
+			"V_" + boost::lexical_cast<std::string>(version) +
+			"_LS_" + boost::lexical_cast<std::string>(spillType);
+		ASSERT_WE_THINK( FromStringRef( toReturn ).get() == *this );
+		return toReturn + "-";
+	}
+};
+
+TLogFn tLogFnForOptions( TLogOptions options ) {
+	auto tLogFn = tLog;
+	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::VALUE) return oldTLog_6_0::tLog;
+	if ( options.version == TLogVersion::V2 && options.spillType == TLogSpillType::REFERENCE) ASSERT(false);
+	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::VALUE ) return oldTLog_6_0::tLog;
+	if ( options.version == TLogVersion::V3 && options.spillType == TLogSpillType::REFERENCE) return tLog;
+	ASSERT(false);
+	return tLogFn;
+}
+
+struct DiskStore {
+	enum COMPONENT { TLogData, Storage, UNSET };
+
+	UID storeID = UID();
+	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
+	COMPONENT storedComponent = UNSET;
+	KeyValueStoreType storeType = KeyValueStoreType::END;
+	TLogOptions tLogOptions;
 };
 
 std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, KeyValueStoreType type) {
@@ -237,13 +295,32 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 		DiskStore store;
 		store.storeType = type;
 
-		StringRef prefix;
-		if( StringRef( files[idx] ).startsWith( fileStoragePrefix ) ) {
+		StringRef filename = StringRef( files[idx] );
+		Standalone<StringRef> prefix;
+		if( filename.startsWith( fileStoragePrefix ) ) {
 			store.storedComponent = DiskStore::Storage;
 			prefix = fileStoragePrefix;
 		}
-		else if( StringRef( files[idx] ).startsWith( fileLogDataPrefix ) ) {
+		else if( filename.startsWith( fileVersionedLogDataPrefix ) ) {
 			store.storedComponent = DiskStore::TLogData;
+			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
+			// because they might be different if a new option was introduced in this version.
+			StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
+			TraceEvent("DiskStoreVersioned").detail("Filename", printable(filename));
+			ErrorOr<TLogOptions> tLogOptions = TLogOptions::FromStringRef(optionsString);
+			if (tLogOptions.isError()) {
+				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", printable(filename));
+				continue;
+			}
+			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", printable(filename));
+			store.tLogOptions = tLogOptions.get();
+			prefix = filename.substr(0, fileVersionedLogDataPrefix.size() + optionsString.size() + 1);
+		}
+		else if( filename.startsWith( fileLogDataPrefix ) ) {
+			TraceEvent("DiskStoreUnversioned").detail("Filename", printable(filename));
+			store.storedComponent = DiskStore::TLogData;
+			store.tLogOptions.version = TLogVersion::V2;
+			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
 		}
 		else
@@ -479,7 +556,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	localInfo.myLocality = locality;
 	dbInfo->set(localInfo);
 
-	state Optional<std::string> incorrectConnectionString;
+	state Optional<double> incorrectTime;
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
@@ -488,17 +565,19 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
 			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
 			std::string connectionString = connFile->getConnectionString().toString();
+			if(!incorrectTime.present()) {
+				incorrectTime = now();
+			}
 			if(connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways the first time to account for transient issues (e.g. someone else changing the file right before us)
-				TraceEvent(incorrectConnectionString.present() && incorrectConnectionString.get() == connectionString ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
 					.detail("Filename", connFile->getFilename())
 					.detail("ConnectionStringFromFile", fileConnectionString.toString())
 					.detail("CurrentConnectionString", connectionString);
 			}
-			incorrectConnectionString = connectionString;
 		}
 		else {
-			incorrectConnectionString = Optional<std::string>();
+			incorrectTime = Optional<double>();
 		}
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
@@ -540,7 +619,13 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
-	state std::map<KeyValueStoreType::StoreType, std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
+	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
+	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
+	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
+	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
+	// here is no, so that when running with log_version==3, all files should say V=3.
+	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
+	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 
 	state WorkerInterface interf( locality );
 
@@ -625,9 +710,18 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
 				errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
+				std::string logQueueBasename;
+				const std::string filename = basename(s.filename);
+				if (StringRef(filename).startsWith(fileLogDataPrefix)) {
+					logQueueBasename = fileLogQueuePrefix.toString();
+				} else {
+					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
+					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
+				}
+				ASSERT_WE_THINK( StringRef( parentDirectory(s.filename) ).endsWith( StringRef(folder) ) );
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
-					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID,  10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
+					joinPath( folder, logQueueBasename + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID,  10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
 				filesClosed.add( kv->onClosed() );
 				filesClosed.add( queue->onClosed() );
 
@@ -637,8 +731,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
-				auto& logData = sharedLogs[s.storeType];
-				Future<Void> tl = tLog( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
+				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
+				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
+				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
+				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.first.isValid() || logData.first.isReady() ? logData.second : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
 				recoveries.push_back(recovery.getFuture());
 
 				tl = handleIOErrors( tl, kv, s.storeID );
@@ -741,7 +838,19 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
-				auto& logData = sharedLogs[req.storeType];
+				// For now, there's a one-to-one mapping of spill type to TLogVersion.
+				// With future work, a particular version of the TLog can support multiple
+				// different spilling strategies, at which point SpillType will need to be
+				// plumbed down into tLogFn.
+				if (req.logVersion < TLogVersion::MIN_RECRUITABLE) {
+					TraceEvent(SevError, "InitializeTLogInvalidLogVersion")
+						.detail("Version", req.logVersion)
+						.detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
+					req.reply.sendError(internal_error());
+				}
+				TLogOptions tLogOptions(req.logVersion, req.spillType);
+				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
+				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
 				logData.second.send(req);
 				if(!logData.first.isValid() || logData.first.isReady()) {
 					UID logId = g_random->randomUniqueID();
@@ -752,13 +861,14 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
 					startRole( Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details );
 
-					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
+					const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+					std::string filename = filenameFromId( req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
-					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), tlogQueueExtension.toString(), logId );
+					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-" ), tlogQueueExtension.toString(), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					logData.first = tLog( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>() );
+					logData.first = tLogFn( data, queue, dbInfo, locality, logData.second, logId, false, Promise<Void>(), Promise<Void>() );
 					logData.first = handleIOErrors( logData.first, data, logId );
 					logData.first = handleIOErrors( logData.first, queue, logId );
 					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, logData.first ) );
@@ -900,8 +1010,28 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 							included = fileExists(d.filename + "1.fdq");
 						}
 						if(d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
-							std::string basename = fileLogQueuePrefix.toString() + d.filename.substr(fileLogDataPrefix.size());
-							included = fileExists(basename + "0.fdq") && fileExists(basename + "1.fdq");
+							included = false;
+							// The previous code assumed that d.filename is a filename.  But that is not true.
+							// d.filename is a path. Removing a prefix and adding a new one just makes a broken
+							// directory name.  So fileExists would always return false.
+							// Weirdly, this doesn't break anything, as tested by taking a clean check of FDB,
+							// setting included to false always, and then running correctness.  So I'm just
+							// improving the situation by actually marking it as broken.
+							// FIXME: this whole thing
+							/*
+							std::string logDataBasename;
+							StringRef filename = d.filename;
+							if (filename.startsWith(fileLogDataPrefix)) {
+								logDataBasename = fileLogQueuePrefix.toString() + d.filename.substr(fileLogDataPrefix.size());
+							} else {
+								StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
+								logDataBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
+							}
+							TraceEvent("DiskStoreRequest").detail("FilenameBasename", logDataBasename);
+							if (fileExists(logDataBasename + "0.fdq") && fileExists(logDataBasename + "1.fdq")) {
+								included = true;
+							}
+							*/
 						}
 					}
 					if(included) {

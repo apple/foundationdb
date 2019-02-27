@@ -228,7 +228,7 @@ public class Subspace {
 		if(!contains(key))
 			throw new IllegalArgumentException("Cannot unpack key that is not contained in subspace.");
 
-		return Tuple.fromBytes(Arrays.copyOfRange(key, rawPrefix.length, key.length));
+		return Tuple.fromBytes(key, rawPrefix.length, key.length - rawPrefix.length);
 	}
 
 	/**

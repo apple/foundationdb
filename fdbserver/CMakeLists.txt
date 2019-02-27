@@ -48,7 +48,8 @@ set(FDBSERVER_SRCS
   MoveKeys.actor.h
   networktest.actor.cpp
   NetworkTest.h
-  OldTLogServer.actor.cpp
+  OldTLogServer_4_6.actor.cpp
+  OldTLogServer_6_0.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h
