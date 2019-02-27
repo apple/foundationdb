@@ -245,7 +245,9 @@ struct SystemStatistics {
 
 struct SystemStatisticsState;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, SystemStatisticsState **statState);
+class IPAddress;
+
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState);
 
 double getProcessorTimeThread();
 

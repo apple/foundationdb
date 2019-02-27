@@ -633,33 +633,21 @@ struct LogMessageVersion {
 };
 
 struct AddressExclusion {
-	uint32_t ip;
+	IPAddress ip;
 	int port;
 
 	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion( uint32_t ip ) : ip(ip), port(0) {}
-	explicit AddressExclusion( uint32_t ip, int port ) : ip(ip), port(port) {}
+	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
+	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
 
-	explicit AddressExclusion (std::string s) {
-		int a,b,c,d,p,count=-1;
-		if (sscanf(s.c_str(), "%d.%d.%d.%d:%d%n", &a,&b,&c,&d, &p, &count) == 5 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = p;
-		}
-		else if (sscanf(s.c_str(), "%d.%d.%d.%d%n", &a,&b,&c,&d, &count) == 4 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = 0;
-		}
-		else {
-			throw connection_string_invalid();
-		}
+	bool operator<(AddressExclusion const& r) const {
+		if (ip != r.ip) return ip < r.ip;
+		return port < r.port;
 	}
-
-	bool operator< (AddressExclusion const& r) const { if (ip != r.ip) return ip < r.ip; return port<r.port; }
-	bool operator== (AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
+	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
 
 	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip != 0 || port != 0; }
+	bool isValid() const { return ip.isValid() || port != 0; }
 
 	bool excludes( NetworkAddress const& addr ) const {
 		if(isWholeMachine())
@@ -669,9 +657,9 @@ struct AddressExclusion {
 
 	// This is for debugging and IS NOT to be used for serialization to persistant state
 	std::string toString() const {
-		std::string as = format( "%d.%d.%d.%d", (ip>>24)&0xff, (ip>>16)&0xff, (ip>>8)&0xff, ip&0xff );
-		if (!isWholeMachine())
-			as += format(":%d", port);
+		std::string as = format("%s", ip.toString().c_str());
+		const char* formatPatt = ip.isV6() ? "[%s]:%d" : "%s:%d";
+		if (!isWholeMachine()) return format(formatPatt, as.c_str(), port);
 		return as;
 	}
 

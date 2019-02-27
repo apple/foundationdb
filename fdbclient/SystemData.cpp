@@ -374,7 +374,7 @@ const AddressExclusion decodeExcludedServersKey( KeyRef const& key ) {
 }
 std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
-	std::string as = format( "%d.%d.%d.%d", (addr.ip>>24)&0xff, (addr.ip>>16)&0xff, (addr.ip>>8)&0xff, addr.ip&0xff );
+	std::string as = format("%s", addr.ip.toString().c_str());
 	//ASSERT( StringRef(as).endsWith(LiteralStringRef(":0")) == (addr.port == 0) );
 	if (!addr.isWholeMachine())
 		as += format(":%d", addr.port);

@@ -214,6 +214,28 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 		ASSERT( input == cs.toString() );
 	}
 
+	{
+		input = "0xxdeadbeef:100100100@[::1]:1234,[::1]:1235";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(input == cs.toString());
+	}
+
+	{
+		input = "0xxdeadbeef:100100100@[abcd:dcba::1]:1234,[abcd:dcba::abcd:1]:1234";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(input == cs.toString());
+	}
+
 	return Void();
 }
 

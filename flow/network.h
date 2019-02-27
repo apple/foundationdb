@@ -22,6 +22,7 @@
 #define FLOW_OPENNETWORK_H
 #pragma once
 
+#include <array>
 #include <string>
 #include <stdint.h>
 #include "flow/serialize.h"
@@ -75,25 +76,78 @@ enum {
 
 class Void;
 
+struct IPAddress {
+	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
+	// only the first 32bits are relevant and rest are initialized to
+	// 0.
+	typedef std::array<uint8_t, 16> IPAddressStore;
+
+	IPAddress();
+	explicit IPAddress(const IPAddressStore& v6addr);
+	explicit IPAddress(uint32_t v4addr);
+
+	bool isV6() const { return isV6addr; }
+	bool isV4() const { return !isV6addr; }
+	bool isValid() const;
+
+	// Returns raw v4/v6 representation of address. Caller is responsible
+	// to call these functions safely.
+	uint32_t toV4() const;
+	const IPAddressStore& toV6() const { return store; }
+
+	std::string toString() const;
+
+	bool operator==(const IPAddress& addr) const;
+	bool operator!=(const IPAddress& addr) const;
+	bool operator<(const IPAddress& addr) const;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, isV6addr);
+		if (isV6addr) {
+			serializer(ar, store);
+		} else {
+			uint32_t* parts = (uint32_t*)store.data();
+			serializer(ar, parts[0]);
+		}
+	}
+
+private:
+	bool isV6addr;
+	IPAddressStore store;
+};
+
 struct NetworkAddress {
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
-	uint32_t ip;
+	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
-	NetworkAddress() : ip(0), port(0), flags(FLAG_PRIVATE) {}
-	NetworkAddress( uint32_t ip, uint16_t port ) : ip(ip), port(port), flags(FLAG_PRIVATE) {}
-	NetworkAddress( uint32_t ip, uint16_t port, bool isPublic, bool isTLS ) : ip(ip), port(port),
-		flags( (isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0 ) ) {}
+	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE) {}
+	NetworkAddress(const IPAddress& address, uint16_t port, bool isPublic, bool isTLS)
+	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)) {}
+	NetworkAddress(uint32_t ip, uint16_t port, bool isPublic, bool isTLS)
+	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS) {}
 
-	bool operator == (NetworkAddress const& r) const { return ip==r.ip && port==r.port && flags==r.flags; }
-	bool operator != (NetworkAddress const& r) const { return ip!=r.ip || port!=r.port || flags!=r.flags; }
-	bool operator< (NetworkAddress const& r) const { if (flags != r.flags) return flags < r.flags; if (ip != r.ip) return ip < r.ip; return port<r.port; }
-	bool isValid() const { return ip != 0 || port != 0; }
+	NetworkAddress(uint32_t ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
+	NetworkAddress(const IPAddress& ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
+
+	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
+	bool operator!=(NetworkAddress const& r) const { return ip != r.ip || port != r.port || flags != r.flags; }
+	bool operator<(NetworkAddress const& r) const {
+		if (flags != r.flags)
+			return flags < r.flags;
+		else if (ip != r.ip)
+			return ip < r.ip;
+		return port < r.port;
+	}
+
+	bool isValid() const { return ip.isValid() || port != 0; }
 	bool isPublic() const { return !(flags & FLAG_PRIVATE); }
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
+	bool isV6() const { return ip.isV6(); }
 
 	static NetworkAddress parse( std::string const& );
 	static std::vector<NetworkAddress> parseList( std::string const& );
@@ -101,13 +155,18 @@ struct NetworkAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			uint32_t ipV4;
+			serializer(ar, ipV4, port, flags);
+			ip = IPAddress(ipV4);
+		} else {
+			serializer(ar, ip, port, flags);
+		}
 	}
 };
 
 typedef std::vector<NetworkAddress> NetworkAddressList;
 
-std::string toIPString(uint32_t ip);
 std::string toIPVectorString(std::vector<uint32_t> ips);
 
 template <class T> class Future;

@@ -183,8 +183,7 @@ public:
 		// Get and store the local address in the metric collection, but only if it is not 0.0.0.0:0
 		if( address.size() == 0 ) {
 			NetworkAddress addr = g_network->getLocalAddress();
-			if(addr.ip != 0 && addr.port != 0)
-				address = StringRef(addr.toString());
+			if (addr.ip.isValid() && addr.port != 0) address = StringRef(addr.toString());
 		}
 		return address.size() != 0;
 	}

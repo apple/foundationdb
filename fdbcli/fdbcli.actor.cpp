@@ -2031,7 +2031,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
-		std::map<uint32_t, std::set<uint16_t>> workerPorts;
+		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for(auto addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
@@ -2050,7 +2050,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					"excluded the correct machines or processes before removing them from the cluster:\n");
 			for(auto addr : absentExclusions) {
 				if(addr.port == 0)
-					printf("  %s\n", toIPString(addr.ip).c_str());
+					printf("  %s\n", addr.ip.toString().c_str());
 				else
 					printf("  %s\n", addr.toString().c_str());
 			}

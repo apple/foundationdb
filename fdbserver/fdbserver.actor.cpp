@@ -170,7 +170,7 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
-extern uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs );
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 extern const char* getHGVersion();
 
@@ -776,7 +776,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				uint32_t publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
 				publicNetworkAddresses.emplace_back(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());

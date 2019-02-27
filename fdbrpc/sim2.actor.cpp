@@ -135,28 +135,29 @@ struct SimClogging {
 		return t - tnow;
 	}
 
-	void clogPairFor( uint32_t from, uint32_t to, double t ) {
+	void clogPairFor(const IPAddress& from, const IPAddress& to, double t) {
 		auto& u = clogPairUntil[ std::make_pair( from, to ) ];
 		u = std::max(u, now() + t);
 	}
-	void clogSendFor( uint32_t from, double t ) {
+	void clogSendFor(const IPAddress& from, double t) {
 		auto& u = clogSendUntil[from];
 		u = std::max(u, now() + t);
 	}
-	void clogRecvFor( uint32_t from, double t ) {
+	void clogRecvFor(const IPAddress& from, double t) {
 		auto& u = clogRecvUntil[from];
 		u = std::max(u, now() + t);
 	}
-	double setPairLatencyIfNotSet( uint32_t from, uint32_t to, double t ) {
+	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
 		auto i = clogPairLatency.find( std::make_pair(from,to) );
 		if (i == clogPairLatency.end())
 			i = clogPairLatency.insert( std::make_pair( std::make_pair(from,to), t ) ).first;
 		return i->second;
 	}
+
 private:
-	std::map< uint32_t, double > clogSendUntil, clogRecvUntil;
-	std::map< std::pair<uint32_t, uint32_t>, double > clogPairUntil;
-	std::map< std::pair<uint32_t, uint32_t>, double > clogPairLatency;
+	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
+	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
+	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
 	double halfLatency() {
 		double a = g_random->random01();
 		const double pFast = 0.999;
@@ -789,9 +790,10 @@ public:
 		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
 		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
 
+		// TODO Support IPv6
 		myc->connect(peerc, toAddr);
-		peerc->connect(myc, NetworkAddress( getCurrentProcess()->address.ip + g_random->randomInt(0,256),
-											g_random->randomInt(40000, 60000) ));
+		IPAddress localIp(getCurrentProcess()->address.ip.toV4() + g_random->randomInt(0, 256));
+		peerc->connect(myc, NetworkAddress(localIp, g_random->randomInt(40000, 60000)));
 
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*g_random->random01()), myc );
@@ -1499,22 +1501,24 @@ public:
 
 		return (kt == ktMin);
 	}
-	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) {
+	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) {
 		if (mode == ClogDefault) {
 			double a = g_random->random01();
 			if ( a < 0.3 ) mode = ClogSend;
 			else if (a < 0.6 ) mode = ClogReceive;
 			else mode = ClogAll;
 		}
-		TraceEvent("ClogInterface").detail("IP", toIPString(ip)).detail("Delay", seconds)
-			.detail("Queue", mode==ClogSend?"Send":mode==ClogReceive?"Receive":"All");
+		TraceEvent("ClogInterface")
+		    .detail("IP", ip.toString())
+		    .detail("Delay", seconds)
+		    .detail("Queue", mode == ClogSend ? "Send" : mode == ClogReceive ? "Receive" : "All");
 
 		if (mode == ClogSend || mode==ClogAll)
 			g_clogging.clogSendFor( ip, seconds );
 		if (mode == ClogReceive || mode==ClogAll)
 			g_clogging.clogRecvFor( ip, seconds );
 	}
-	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) {
+	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) {
 		g_clogging.clogPairFor( from, to, seconds );
 	}
 	virtual std::vector<ProcessInfo*> getAllProcesses() const {
@@ -1653,7 +1657,7 @@ public:
 	INetwork *net2;
 
 	//Map from machine IP -> machine disk space info
-	std::map<uint32_t, SimDiskSpace> diskSpaceMap;
+	std::map<IPAddress, SimDiskSpace> diskSpaceMap;
 
 	//Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;

@@ -114,8 +114,12 @@ public:
 
 		std::string toString() const {
 			const NetworkAddress& address = addresses[0];
-			return format("name: %s address: %d.%d.%d.%d:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared);
+			return format(
+			    "name: %s address: %s:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
+			    address.ip.toString().c_str(), address.port,
+			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
+			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
+			    startingClass.toString().c_str(), excluded, cleared);
 		}
 
 		// Members not for external use
@@ -256,8 +260,8 @@ public:
 		allSwapsDisabled = true;
 	}
 
-	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) = 0;
-	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) = 0;
+	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
+	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
