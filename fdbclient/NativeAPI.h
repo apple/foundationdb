@@ -166,7 +166,7 @@ struct TransactionInfo {
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
-	enum LoggingLocation { DONT_LOG=0, TRACE_LOG = 1, DATABASE = 2 };
+	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
 	TransactionLogInfo() : logLocation(DONT_LOG) {}
 	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
