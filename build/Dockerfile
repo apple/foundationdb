@@ -1,5 +1,5 @@
 FROM ubuntu:15.04
-LABEL version=0.0.5
+LABEL version=0.0.6
 
 RUN sed -i -e 's/archive.ubuntu.com\|security.ubuntu.com/old-releases.ubuntu.com/g' -e 's/us\.old/old/g' /etc/apt/sources.list && apt-get clean
 
