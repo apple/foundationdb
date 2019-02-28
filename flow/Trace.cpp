@@ -828,6 +828,9 @@ TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) 
 TraceEvent& TraceEvent::detail( std::string key, const NetworkAddress& value ) {
 	return detailImpl( std::move(key), value.toString() );
 }
+TraceEvent& TraceEvent::detail( std::string key, const IPAddress& value ) {
+	return detailImpl( std::move(key), value.toString() );
+}
 TraceEvent& TraceEvent::detail( std::string key, const UID& value ) {
 	return detailf( std::move(key), "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
 }

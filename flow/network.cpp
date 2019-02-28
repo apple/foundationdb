@@ -133,6 +133,16 @@ std::string toIPVectorString(std::vector<uint32_t> ips) {
 	return output;
 }
 
+std::string toIPVectorString(const std::vector<IPAddress>& ips) {
+	std::string output;
+	const char* space = "";
+	for (auto ip : ips) {
+		output += format("%s%s", space, ip.toString().c_str());
+		space = " ";
+	}
+	return output;
+}
+
 Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {

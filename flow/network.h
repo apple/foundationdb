@@ -168,6 +168,7 @@ struct NetworkAddress {
 typedef std::vector<NetworkAddress> NetworkAddressList;
 
 std::string toIPVectorString(std::vector<uint32_t> ips);
+std::string toIPVectorString(const std::vector<IPAddress>& ips);
 
 template <class T> class Future;
 template <class T> class Promise;
