@@ -168,21 +168,28 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/packaging/foundationdb.ico)
 set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
 set(CPACK_COMPONENT_server_DEPENDS clients)
-if (INSTALL_LAYOUT MATCHES "OSX")
-  # MacOS needs a file exiension for the LICENSE file
-  set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/packaging/osx/resources/conclusion.rtf)
-  set(CPACK_PRODUCTBUILD_RESOURCES_DIR ${CMAKE_SOURCE_DIR}/packaging/osx/resources)
-  configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYONLY)
-  set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_BINARY_DIR}/License.txt)
-else()
-  set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
-  set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+
+# MacOS needs a file exiension for the LICENSE file
+configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYONLY)
+
+################################################################################
+# Filename of packages
+################################################################################
+
+if(NOT FDB_RELEASE)
+  set(prerelease_string ".PRERELEASE")
 endif()
+set(clients-filename "foundationdb-clients-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
+set(server-filename "foundationdb-server-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
 ################################################################################
 
+set(CPACK_RPM_clients-el6_FILE_NAME "${clients-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_clients-el7_FILE_NAME "${clients-filename}.el7.x86_64.rpm")
+set(CPACK_RPM_server-el6_FILE_NAME "${server-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_server-el7_FILE_NAME "${server-filename}.el7.x86_64.rpm")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION lib COMPONENT server)
@@ -246,6 +253,8 @@ set(CPACK_RPM_python_PACKAGE_REQUIRES
 # Configuration for DEB
 ################################################################################
 
+set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${clients-filename}_amd64.deb")
+set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
@@ -275,6 +284,14 @@ if(NOT WIN32)
     DESTINATION "Library/LaunchDaemons"
     COMPONENT server-pm)
 endif()
+
+################################################################################
+# Configuration for DEB
+################################################################################
+
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${clients-filename}.x86_64")
+set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${server-filename}.x86_64")
 
 ################################################################################
 # Server configuration

@@ -87,6 +87,7 @@ package_fast() {
     for _ in 1
     do
         make -j`nproc` packages
+        make -j`nproc` package
         __res=$?
         if [ ${__res} -ne 0 ]
         then
