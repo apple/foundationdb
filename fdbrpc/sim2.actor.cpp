@@ -790,9 +790,16 @@ public:
 		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
 		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
 
-		// TODO Support IPv6
 		myc->connect(peerc, toAddr);
-		IPAddress localIp(getCurrentProcess()->address.ip.toV4() + g_random->randomInt(0, 256));
+		IPAddress localIp;
+		if (getCurrentProcess()->address.ip.isV6()) {
+			IPAddress::IPAddressStore store = getCurrentProcess()->address.ip.toV6();
+			uint16_t* ipParts = (uint16_t*)store.data();
+			ipParts[7] += g_random->randomInt(0, 256);
+			localIp = IPAddress(store);
+		} else {
+			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + g_random->randomInt(0, 256));
+		}
 		peerc->connect(myc, NetworkAddress(localIp, g_random->randomInt(40000, 60000)));
 
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
@@ -968,17 +975,21 @@ public:
 	virtual void run() {
 		_run(this);
 	}
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess,
-		LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) {
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+	                                const char* coordinationFolder) {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
 		for( int i = 0; i < machine.processes.size(); i++ ) {
 			if( machine.processes[i]->locality.machineId() != locality.machineId() ) { // SOMEDAY: compute ip from locality to avoid this check
-				TraceEvent("Sim2Mismatch").detail("IP", format("%x", ip))
-						.detailext("MachineId", locality.machineId()).detail("NewName", name)
-						.detailext("ExistingMachineId", machine.processes[i]->locality.machineId()).detail("ExistingName", machine.processes[i]->name);
+				TraceEvent("Sim2Mismatch")
+				    .detail("IP", format("%s", ip.toString().c_str()))
+				    .detailext("MachineId", locality.machineId())
+				    .detail("NewName", name)
+				    .detailext("ExistingMachineId", machine.processes[i]->locality.machineId())
+				    .detail("ExistingName", machine.processes[i]->name);
 				ASSERT( false );
 			}
 			ASSERT( machine.processes[i]->address.port != port );

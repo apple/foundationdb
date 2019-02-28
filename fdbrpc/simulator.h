@@ -142,7 +142,9 @@ public:
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+	                                const char* coordinationFolder) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
