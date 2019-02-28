@@ -556,7 +556,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	localInfo.myLocality = locality;
 	dbInfo->set(localInfo);
 
-	state Optional<std::string> incorrectConnectionString;
+	state Optional<double> incorrectTime;
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
@@ -565,17 +565,19 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
 			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
 			std::string connectionString = connFile->getConnectionString().toString();
+			if(!incorrectTime.present()) {
+				incorrectTime = now();
+			}
 			if(connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways the first time to account for transient issues (e.g. someone else changing the file right before us)
-				TraceEvent(incorrectConnectionString.present() && incorrectConnectionString.get() == connectionString ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
 					.detail("Filename", connFile->getFilename())
 					.detail("ConnectionStringFromFile", fileConnectionString.toString())
 					.detail("CurrentConnectionString", connectionString);
 			}
-			incorrectConnectionString = connectionString;
 		}
 		else {
-			incorrectConnectionString = Optional<std::string>();
+			incorrectTime = Optional<double>();
 		}
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();

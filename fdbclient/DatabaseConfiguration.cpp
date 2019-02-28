@@ -381,8 +381,16 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("proxies")) parse(&masterProxyCount, value);
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
-	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
-	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
+	else if (ck == LiteralStringRef("log_replicas")) {
+		parse(&tLogReplicationFactor, value);
+		tLogWriteAntiQuorum = std::min(tLogWriteAntiQuorum, tLogReplicationFactor/2);
+	}
+	else if (ck == LiteralStringRef("log_anti_quorum")) {
+		parse(&tLogWriteAntiQuorum, value);
+		if(tLogReplicationFactor > 0) {
+			tLogWriteAntiQuorum = std::min(tLogWriteAntiQuorum, tLogReplicationFactor/2);
+		}
+	}
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
 	else if (ck == LiteralStringRef("log_version")) {
 		parse((&type), value);

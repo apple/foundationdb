@@ -73,9 +73,10 @@ based build system.
 
 To build with CMake, generally the following is required (works on Linux and
 Mac OS - for Windows see below):
+
 1. Check out this repository.
-2. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
-1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/). 
+1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/). 
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/).
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
@@ -135,7 +136,7 @@ edit and navigation features your IDE supports.
 For example, if you want to use XCode to make changes to FoundationDB you can
 create a XCode-project with the following command:
 
-```
+```sh
 cmake -G Xcode -DOPEN_FOR_IDE=ON <FDB_SOURCE_DIRECTORY>
 ```
 
@@ -165,14 +166,14 @@ can use [Hombrew](https://brew.sh/). LibreSSL will not be installed in
 `/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
 will look somethink like this:
 
-```
+```sh
 cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
 To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
-```
+```sh
 cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
 make
 cpack
@@ -184,13 +185,13 @@ Under Windows, the build instructions are very similar, with the main difference
 that Visual Studio is used to compile.
 
 1. Install Visual Studio 2017 (Community Edition is tested)
-2. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
-1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/). 
+1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/).
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/).
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
-1. Set JAVA_HOME to the unpacked location and JAVA_COMPILE to
-   $JAVA_HOME/bin/javac
+1. Set `JAVA_HOME` to the unpacked location and JAVA_COMPILE to
+   `$JAVA_HOME/bin/javac`.
 1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
    won't build the Windows installer.
 1. Create a build directory (you can have the build directory anywhere you
@@ -198,10 +199,11 @@ that Visual Studio is used to compile.
 1. `cd build`
 1. `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
 1. This should succeed. In which case you can build using msbuild:
-   `msbuild /p:Configuration=Release fdb.sln`. You can also open the resulting
+   `msbuild /p:Configuration=Release foundationdb.sln`. You can also open the resulting
    solution in Visual Studio and compile from there. However, be aware that
    using Visual Studio for development is currently not supported as Visual
-   Studio will only know about the generated files.
+   Studio will only know about the generated files. `msbuild` is located at
+   `c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe` for Visual Studio 15.
 
 If you want TLS support to be enabled under Windows you currently have to build
 and install LibreSSL yourself as the newer LibreSSL versions are not provided
