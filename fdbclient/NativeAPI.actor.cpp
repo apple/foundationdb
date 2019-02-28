@@ -1068,8 +1068,19 @@ bool GetRangeLimits::hasSatisfiedMinRows() {
 
 AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 	//Must not change: serialized to the database!
+	auto parsedIp = IPAddress::parse(key.toString());
+	if (parsedIp.present()) {
+		return AddressExclusion(parsedIp.get());
+	}
+
 	try {
 		auto addr = NetworkAddress::parse(key.toString());
+		if (addr.isTLS()) {
+			TraceEvent(SevWarnAlways, "AddressExclusionParseError")
+				.detail("String", printable(key))
+				.detail("Description", "Address inclusion string should not include `:tls' suffix.");
+			return AddressExclusion();
+		}
 		return AddressExclusion(addr.ip, addr.port);
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));

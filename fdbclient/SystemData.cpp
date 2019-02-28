@@ -374,11 +374,7 @@ const AddressExclusion decodeExcludedServersKey( KeyRef const& key ) {
 }
 std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
-	std::string as = format("%s", addr.ip.toString().c_str());
-	//ASSERT( StringRef(as).endsWith(LiteralStringRef(":0")) == (addr.port == 0) );
-	if (!addr.isWholeMachine())
-		as += format(":%d", addr.port);
-	return excludedServersPrefix.toString() + as;
+	return excludedServersPrefix.toString() + addr.toString();
 }
 
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
