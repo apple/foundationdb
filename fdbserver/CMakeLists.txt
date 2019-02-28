@@ -185,6 +185,4 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient)
 
-if(NOT OPEN_FOR_IDE)
-  install(TARGETS fdbserver DESTINATION ${FDB_SBIN_DIR} COMPONENT server)
-endif()
+fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
