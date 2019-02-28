@@ -1180,7 +1180,31 @@ public:
 		// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
 		// by the same process that failed the first task execution anyway, which is a very rare case.
 		#endif
-		return IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
+		Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
+
+		if(g_network->isSimulated()) {
+			int blockSize = 0;
+			// Extract block size from the filename, if present
+			size_t lastComma = path.find_last_of(',');
+			if(lastComma != path.npos) {
+				blockSize = atoi(path.substr(lastComma + 1).c_str());
+			}
+			if(blockSize <= 0) {
+				blockSize = g_random->randomInt(1e4, 1e6);
+			}
+			if(g_random->random01() < .01) {
+				blockSize /= g_random->randomInt(1, 3);
+			}
+
+			return map(f, [=](Reference<IAsyncFile> fr) {
+				int readAhead = g_random->randomInt(0, 3);
+				int reads = g_random->randomInt(1, 3);
+				int cacheSize = g_random->randomInt(0, 3);
+				return Reference<IAsyncFile>(new AsyncFileReadAheadCache(fr, blockSize, readAhead, reads, cacheSize));
+			});
+		}
+
+		return f;
 	}
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {

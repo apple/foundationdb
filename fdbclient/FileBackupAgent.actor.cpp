@@ -402,10 +402,16 @@ FileBackupAgent::FileBackupAgent()
 
 namespace fileBackup {
 
-	// Padding bytes for backup files.  The largest padded area that could ever have to be written is
-	// the size of two 32 bit ints and the largest key size and largest value size.  Since CLIENT_KNOBS
-	// may not be initialized yet a conservative constant is being used.
-	std::string paddingFFs(128 * 1024, 0xFF);
+	// Return a block of contiguous padding bytes, growing if needed.
+	Value makePadding(int size) {
+		static Value pad;
+		if(pad.size() < size) {
+			pad = makeString(size);
+			memset(mutateString(pad), '\xff', pad.size());
+		}
+
+		return pad.substr(0, size);
+	}
 
 	// File Format handlers.
 	// Both Range and Log formats are designed to be readable starting at any 1MB boundary
@@ -443,11 +449,18 @@ namespace fileBackup {
 		RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0) : file(file), blockSize(blockSize), blockEnd(0), fileVersion(1001) {}
 
 		// Handles the first block and internal blocks.  Ends current block if needed.
-		ACTOR static Future<Void> newBlock(RangeFileWriter *self, int bytesNeeded) {
+		// The final flag is used in simulation to pad the file's final block to a whole block size
+		ACTOR static Future<Void> newBlock(RangeFileWriter *self, int bytesNeeded, bool final = false) {
 			// Write padding to finish current block if needed
 			int bytesLeft = self->blockEnd - self->file->size();
 			if(bytesLeft > 0) {
-				Void _ = wait(self->file->append((uint8_t *)paddingFFs.data(), bytesLeft));
+				state Value paddingFFs = makePadding(bytesLeft);
+				Void _ = wait(self->file->append(paddingFFs.begin(), bytesLeft));
+			}
+
+			if(final) {
+				ASSERT(g_network->isSimulated());
+				return Void();
 			}
 
 			// Set new blockEnd
@@ -467,6 +480,15 @@ namespace fileBackup {
 			if(self->file->size() + bytesNeeded > self->blockEnd)
 				throw backup_bad_block_size();
 
+			return Void();
+		}
+
+		// Used in simulation only to create backup file sizes which are an integer multiple of the block size
+		Future<Void> padEnd() {
+			ASSERT(g_network->isSimulated());
+			if(file->size() > 0) {
+				return newBlock(this, 0, true);
+			}
 			return Void();
 		}
 
@@ -622,7 +644,8 @@ namespace fileBackup {
 				// Write padding if needed
 				int bytesLeft = self->blockEnd - self->file->size();
 				if(bytesLeft > 0) {
-					Void _ = wait(self->file->append((uint8_t *)paddingFFs.data(), bytesLeft));
+					state Value paddingFFs = makePadding(bytesLeft);
+					Void _ = wait(self->file->append(paddingFFs.begin(), bytesLeft));
 				}
 
 				// Set new blockEnd
@@ -1109,6 +1132,10 @@ namespace fileBackup {
 						TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
 						state Key nextKey = done ? endKey : keyAfter(lastKey);
 						Void _ = wait(rangeFile.writeKey(nextKey));
+
+						if(BUGGIFY) {
+							rangeFile.padEnd();
+						}
 
 						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
 						TraceEvent("FileBackupWroteRangeFile")
