@@ -46,8 +46,8 @@ import com.apple.foundationdb.tuple.Versionstamp;
  * </p>
  */
 public class Subspace {
-	static final Tuple EMPTY_TUPLE = Tuple.from();
-	static final byte[] EMPTY_BYTES = new byte[0];
+	private static final Tuple EMPTY_TUPLE = Tuple.from();
+	private static final byte[] EMPTY_BYTES = new byte[0];
 
 	private final byte[] rawPrefix;
 
@@ -248,8 +248,7 @@ public class Subspace {
 	 * @return the {@link Range} of keyspace corresponding to {@code tuple}
 	 */
 	public Range range(Tuple tuple) {
-		Range p = tuple.range();
-		return new Range(join(rawPrefix, p.begin), join(rawPrefix, p.end));
+		return tuple.range(rawPrefix);
 	}
 
 	/**

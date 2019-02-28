@@ -21,6 +21,7 @@
 package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
@@ -89,7 +90,7 @@ class TupleUtil {
 					x += 1;
 				}
 			}
-			throw new IllegalArgumentException("no terminator found for bytes starting at " + from);
+			throw new IllegalArgumentException("No terminator found for bytes starting at " + from);
 		}
 	}
 
@@ -135,6 +136,7 @@ class TupleUtil {
 			else {
 				ByteArrayUtil.replace(encoded, 0, encoded.length, NULL_ARR, NULL_ESCAPED_ARR, encodedBytes);
 			}
+			totalLength += encoded.length + nullCount;
 			return this;
 		}
 
@@ -157,6 +159,10 @@ class TupleUtil {
 		}
 	}
 
+	private static boolean useOldVersionOffsetFormat() {
+		return FDB.instance().getAPIVersion() < 520;
+	}
+
 	// These four functions are for adjusting the encoding of floating point numbers so
 	// that when their byte representation is written out in big-endian order, unsigned
 	// lexicographic byte comparison orders the values in the same way as the semantic
@@ -165,32 +171,32 @@ class TupleUtil {
 	// in the case that the number is positive. For these purposes, 0.0 is positive and -0.0
 	// is negative.
 
-	static int encodeFloatBits(float f) {
+	private static int encodeFloatBits(float f) {
 		int intBits = Float.floatToRawIntBits(f);
 		return (intBits < 0) ? (~intBits) : (intBits ^ Integer.MIN_VALUE);
 	}
 
-	static long encodeDoubleBits(double d) {
+	private static long encodeDoubleBits(double d) {
 		long longBits = Double.doubleToRawLongBits(d);
 		return (longBits < 0L) ? (~longBits) : (longBits ^ Long.MIN_VALUE);
 	}
 
-	static float decodeFloatBits(int i) {
+	private static float decodeFloatBits(int i) {
 		int origBits = (i >= 0) ? (~i) : (i ^ Integer.MIN_VALUE);
 		return Float.intBitsToFloat(origBits);
 	}
 
-	static double decodeDoubleBits(long l) {
+	private static double decodeDoubleBits(long l) {
 		long origBits = (l >= 0) ? (~l) : (l ^ Long.MIN_VALUE);
 		return Double.longBitsToDouble(origBits);
 	}
 
 	// Get the minimal number of bytes in the representation of a long.
-	static int minimalByteCount(long i) {
+	private static int minimalByteCount(long i) {
 		return (Long.SIZE + 7 - Long.numberOfLeadingZeros(i >= 0 ? i : -i)) / 8;
 	}
 
-	static int minimalByteCount(BigInteger i) {
+	private static int minimalByteCount(BigInteger i) {
 		int bitLength = (i.compareTo(BigInteger.ZERO) >= 0) ? i.bitLength() : i.negate().bitLength();
 		return (bitLength + 7) / 8;
 	}
@@ -221,7 +227,7 @@ class TupleUtil {
 	}
 
 	static void adjustVersionPosition(byte[] packed, int delta) {
-		if(FDB.instance().getAPIVersion() < 520) {
+		if(useOldVersionOffsetFormat()) {
 			adjustVersionPosition300(packed, delta);
 		}
 		else {
@@ -285,7 +291,7 @@ class TupleUtil {
 		else if(t instanceof List<?>)
 			encode(state, (List<?>)t);
 		else if(t instanceof Tuple)
-			encode(state, ((Tuple)t).getItems());
+			encode(state, (Tuple)t);
 		else
 			throw new IllegalArgumentException("Unsupported data type: " + t.getClass().getName());
 	}
@@ -409,6 +415,10 @@ class TupleUtil {
 		state.add(nil);
 	}
 
+	static void encode(EncodeState state, Tuple value) {
+		encode(state, value.elements);
+	}
+
 	static void decode(DecodeState state, byte[] rep, int pos, int last) {
 		//System.out.println("Decoding '" + ArrayUtils.printable(rep) + "' at " + pos);
 
@@ -491,8 +501,8 @@ class TupleUtil {
 			int n = positive ? code - INT_ZERO_CODE : INT_ZERO_CODE - code;
 			int end = start + n;
 
-			if(rep.length < last) {
-				throw new RuntimeException("Invalid tuple (possible truncation)");
+			if(last < end) {
+				throw new IllegalArgumentException("Invalid tuple (possible truncation)");
 			}
 
 			if(positive && (n < Long.BYTES || rep[start] > 0)) {
@@ -530,12 +540,16 @@ class TupleUtil {
 			}
 		}
 		else if(code == VERSIONSTAMP_CODE) {
+			if(start + Versionstamp.LENGTH > last) {
+				throw new IllegalArgumentException("Invalid tuple (possible truncation)");
+			}
 			Versionstamp val = Versionstamp.fromBytes(Arrays.copyOfRange(rep, start, start + Versionstamp.LENGTH));
 			state.add(val, start + Versionstamp.LENGTH);
 		}
 		else if(code == NESTED_CODE) {
 			DecodeState subResult = new DecodeState();
 			int endPos = start;
+			boolean foundEnd = false;
 			while(endPos < last) {
 				if(rep[endPos] == nil) {
 					if(endPos + 1 < last && rep[endPos+1] == (byte)0xff) {
@@ -543,12 +557,16 @@ class TupleUtil {
 						endPos += 2;
 					} else {
 						endPos += 1;
+						foundEnd = true;
 						break;
 					}
 				} else {
 					decode(subResult, rep, endPos, last);
 					endPos = subResult.end;
 				}
+			}
+			if(!foundEnd) {
+				throw new IllegalArgumentException("No terminator found for nested tuple starting at " + start);
 			}
 			state.add(subResult.values, endPos);
 		}
@@ -558,6 +576,10 @@ class TupleUtil {
 	}
 
 	static int compareItems(Object item1, Object item2) {
+		if(item1 == item2) {
+			// If we have pointer equality, just return 0 immediately.
+			return 0;
+		}
 		int code1 = TupleUtil.getCodeFor(item1);
 		int code2 = TupleUtil.getCodeFor(item2);
 
@@ -603,14 +625,14 @@ class TupleUtil {
 			}
 		}
 		if(code1 == FLOAT_CODE) {
-			// This is done for the same reason that double comparison is done
-			// that way.
+			// This is done over vanilla float comparison basically to handle NaNs
+			// sorting correctly.
 			int fbits1 = encodeFloatBits((Float)item1);
 			int fbits2 = encodeFloatBits((Float)item2);
 			return Integer.compareUnsigned(fbits1, fbits2);
 		}
 		if(code1 == DOUBLE_CODE) {
-			// This is done over vanilla double comparison basically to handle NaN
+			// This is done over vanilla double comparison basically to handle NaNs
 			// sorting correctly.
 			long dbits1 = encodeDoubleBits((Double)item1);
 			long dbits2 = encodeDoubleBits((Double)item2);
@@ -637,58 +659,57 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unknown tuple data type: " + item1.getClass());
 	}
 
-	static List<Object> unpack(byte[] bytes, int start, int length) {
-		DecodeState decodeState = new DecodeState();
-		int pos = start;
-		int end = start + length;
-		while(pos < end) {
-			decode(decodeState, bytes, pos, end);
-			pos = decodeState.end;
+	static List<Object> unpack(byte[] bytes) {
+		try {
+			DecodeState decodeState = new DecodeState();
+			int pos = 0;
+			int end = bytes.length;
+			while (pos < end) {
+				decode(decodeState, bytes, pos, end);
+				pos = decodeState.end;
+			}
+			return decodeState.values;
 		}
-		return decodeState.values;
+		catch(IndexOutOfBoundsException | BufferOverflowException e) {
+			throw new IllegalArgumentException("Invalid tuple (possible truncation)", e);
+		}
 	}
 
-	static void encodeAll(EncodeState state, List<Object> items, byte[] prefix) {
-		if(prefix != null) {
-			state.add(prefix);
-		}
+	static void encodeAll(EncodeState state, List<Object> items) {
 		for(Object t : items) {
 			encode(state, t);
 		}
-		//System.out.println("Joining whole tuple...");
 	}
 
-	static byte[] pack(List<Object> items, byte[] prefix, int expectedSize) {
-		ByteBuffer dest = ByteBuffer.allocate(expectedSize + (prefix != null ? prefix.length : 0));
+	static void pack(ByteBuffer dest, List<Object> items) {
+		ByteOrder origOrder = dest.order();
 		EncodeState state = new EncodeState(dest);
-		if(prefix != null) {
-			state.add(prefix);
-		}
-		encodeAll(state, items, prefix);
+		encodeAll(state, items);
+		dest.order(origOrder);
 		if(state.versionPos >= 0) {
-			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple packInternal");
-		}
-		else {
-			return dest.array();
+			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
 		}
 	}
 
-	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix, int expectedSize) {
-		ByteBuffer dest = ByteBuffer.allocate(expectedSize + (prefix != null ? prefix.length : 0));
+	static byte[] pack(List<Object> items, int expectedSize) {
+		ByteBuffer dest = ByteBuffer.allocate(expectedSize);
+		pack(dest, items);
+		return dest.array();
+	}
+
+	static byte[] packWithVersionstamp(List<Object> items, int expectedSize) {
+		ByteBuffer dest = ByteBuffer.allocate(expectedSize);
 		EncodeState state = new EncodeState(dest);
-		if(prefix != null) {
-			state.add(prefix);
-		}
-		encodeAll(state, items, prefix);
+		encodeAll(state, items);
 		if(state.versionPos < 0) {
 			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple packInternal with versionstamp");
 		}
 		else {
-			if(state.versionPos > 0xffff) {
+			if(useOldVersionOffsetFormat() && state.versionPos > 0xffff) {
 				throw new IllegalArgumentException("Tuple has incomplete version at position " + state.versionPos + " which is greater than the maximum " + 0xffff);
 			}
 			dest.order(ByteOrder.LITTLE_ENDIAN);
-			if (FDB.instance().getAPIVersion() < 520) {
+			if (useOldVersionOffsetFormat()) {
 				dest.putShort((short)state.versionPos);
 			} else {
 				dest.putInt(state.versionPos);
@@ -740,7 +761,7 @@ class TupleUtil {
 				packedSize += 1 + Versionstamp.LENGTH;
 				Versionstamp versionstamp = (Versionstamp)item;
 				if(!versionstamp.isComplete()) {
-					int suffixSize = FDB.instance().getAPIVersion() < 520 ? Short.BYTES : Integer.BYTES;
+					int suffixSize = useOldVersionOffsetFormat() ? Short.BYTES : Integer.BYTES;
 					packedSize += suffixSize;
 				}
 			}
@@ -776,7 +797,7 @@ class TupleUtil {
 
 	public static void main(String[] args) {
 		try {
-			byte[] bytes = pack(Collections.singletonList(4), null, 2);
+			byte[] bytes = pack(Collections.singletonList(4), 2);
 			DecodeState result = new DecodeState();
 			decode(result, bytes, 0, bytes.length);
 			int val = ((Number)result.values.get(0)).intValue();
@@ -788,7 +809,7 @@ class TupleUtil {
 		}
 
 		try {
-			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), null, 15);
+			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), 15);
 			DecodeState result = new DecodeState();
 			decode(result, bytes, 0, bytes.length);
 			String string = (String)result.values.get(0);
