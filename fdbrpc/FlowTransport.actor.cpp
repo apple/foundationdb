@@ -198,10 +198,14 @@ public:
 
 #pragma pack( push, 1 )
 struct ConnectPacket {
-	uint32_t connectPacketLength;  // sizeof(ConnectPacket)-sizeof(uint32_t), or perhaps greater in later protocol versions
+	// The size of ConnectPacket depends on whether it is carrying IPv6 or IPv6
+	// address. The value does not inclueds the size of `connectPacketLength` itself,
+	// but only the other fields of this structure.
+	uint32_t connectPacketLength;
 	uint64_t protocolVersion;      // Expect currentProtocolVersion
 	uint16_t canonicalRemotePort;  // Port number to reconnect to the originating process
 	uint64_t connectionId;         // Multi-version clients will use the same Id for both connections, other connections will set this to zero. Added at protocol Version 0x0FDB00A444020001.
+
 	union {
 		uint32_t v4;
 		uint8_t v6[16];

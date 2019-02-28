@@ -77,6 +77,10 @@ bool IPAddress::isValid() const {
 }
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
+	if (s.empty()) {
+		throw connection_string_invalid();
+	}
+
 	bool isTLS = false;
 	std::string f;
 	if( s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0 ) {
@@ -198,6 +202,12 @@ TEST_CASE("/flow/network/ipaddress") {
 
 	{
 		auto addr = "2001";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(!addrParsed.present());
+	}
+
+	{
+		auto addr = "8.8.8.8:12";
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}

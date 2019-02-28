@@ -1073,6 +1073,7 @@ AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 		return AddressExclusion(parsedIp.get());
 	}
 
+	// Not a whole machine, includes `port'.
 	try {
 		auto addr = NetworkAddress::parse(key.toString());
 		if (addr.isTLS()) {

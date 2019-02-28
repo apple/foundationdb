@@ -659,6 +659,9 @@ ACTOR Future<Void> restartSimulatedSystem(
 
 			auto ip = ini.GetValue(machineIdString.c_str(), "ipAddr");
 
+			// Helper to translate the IP address stored in INI file to out IPAddress representation.
+			// After IPv6 work, we store the actual string representation of IP address, however earlier, it was
+			// instead the 32 bit integer value.
 			auto parseIp = [](const char* ipStr) -> IPAddress {
 				Optional<IPAddress> parsedIp = IPAddress::parse(ipStr);
 				if (parsedIp.present()) {
