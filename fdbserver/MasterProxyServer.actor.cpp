@@ -87,7 +87,7 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 
 int getBytes(Promise<Version> const& r) { return 0; }
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, double* outTransactionRate, double* outBatchTransactionRate) {
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate, double* outBatchTransactionRate) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -111,7 +111,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount)));
+			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount)));
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
@@ -1127,6 +1127,7 @@ ACTOR static Future<Void> transactionStarter(
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
 
 	state int64_t transactionCount = 0;
+	state int64_t batchTransactionCount = 0;
 	state TransactionRateInfo normalRateInfo(10);
 	state TransactionRateInfo batchRateInfo(0);
 
@@ -1134,7 +1135,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &normalRateInfo.rate, &batchRateInfo.rate));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate));
 	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1216,6 +1217,7 @@ ACTOR static Future<Void> transactionStarter(
 		.detail("LastBatchLeftToStart", batchLeftToStart);*/
 
 		transactionCount += transactionsStarted[0] + transactionsStarted[1];
+		batchTransactionCount += batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
 
 		normalRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);
 		batchRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);

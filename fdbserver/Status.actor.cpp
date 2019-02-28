@@ -1439,6 +1439,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
 		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
+		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
 		int ssCount = ratekeeper.getInt("StorageServers");
 		int tlogCount = ratekeeper.getInt("TLogs");
 		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
@@ -1461,6 +1462,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["transactions_per_second_limit"] = tpsLimit;
 		(*qos)["batch_transactions_per_second_limit"] = batchTpsLimit;
 		(*qos)["released_transactions_per_second"] = transPerSec;
+		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if(!perfLimit.empty()) {

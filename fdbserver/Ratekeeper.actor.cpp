@@ -137,11 +137,18 @@ struct RatekeeperLimits {
 	{}
 };
 
+struct TransactionCounts {
+	int64_t total;
+	int64_t batch;
+
+	TransactionCount() : total(0), batch(0) {}
+};
+
 struct Ratekeeper {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
-	std::map<UID, std::pair<int64_t, double> > proxy_transactionCountAndTime;
-	Smoother smoothReleasedTransactions, smoothTotalDurableBytes;
+	std::map<UID, std::pair<TransactionCounts, double> > proxy_transactionCountAndTime;
+	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	DatabaseConfiguration configuration;
 
 	Int64MetricHandle actualTpsMetric;
@@ -152,7 +159,7 @@ struct Ratekeeper {
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
 
-	Ratekeeper() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
+	Ratekeeper() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
 		lastWarning(0),
 		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE),
@@ -521,6 +528,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 			.detail("Reason", limitReason)
 			.detail("ReasonServerID", reasonID)
 			.detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
+			.detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
 			.detail("TPSBasis", actualTps)
 			.detail("StorageServers", sscount)
 			.detail("Proxies", self->proxy_transactionCountAndTime.size())
@@ -614,10 +622,15 @@ ACTOR Future<Void> rateKeeper(
 
 				auto& p = self.proxy_transactionCountAndTime[ req.requesterID ];
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.first).detail("Delta", req.totalReleasedTransactions - p.first);
-				if (p.first > 0)
-					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.first );
+				if (p.first.total > 0) {
+					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.first.total );
+				}
+				if(p.first.batch > 0) {
+					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.first.batch );
+				}
 
-				p.first = req.totalReleasedTransactions;
+				p.first.total = req.totalReleasedTransactions;
+				p.first.batch = req.batchReleasedTransactions;
 				p.second = now();
 
 				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCountAndTime.size();
