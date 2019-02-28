@@ -657,17 +657,16 @@ struct AddressExclusion {
 
 	// This is for debugging and IS NOT to be used for serialization to persistant state
 	std::string toString() const {
-		std::string as = format("%s", ip.toString().c_str());
-		const char* formatPatt = ip.isV6() ? "[%s]:%d" : "%s:%d";
-		if (!isWholeMachine()) return format(formatPatt, as.c_str(), port);
-		return as;
+		if (!isWholeMachine())
+			return formatIpPort(ip, port);
+		return ip.toString();
 	}
 
 	static AddressExclusion parse( StringRef const& );
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		serializer(ar, ip, port);
 	}
 };
 

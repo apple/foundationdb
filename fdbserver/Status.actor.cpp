@@ -1673,7 +1673,7 @@ static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issu
 		std::map<std::string, std::vector<std::string>> deduplicatedIssues;
 
 		for(auto i : issues) {
-			deduplicatedIssues[i.second.first].push_back(format("%s:%d", i.first.ip.toString().c_str(), i.first.port));
+			deduplicatedIssues[i.second.first].push_back(formatIpPort(i.first.ip, i.first.port));
 		}
 
 		for (auto i : deduplicatedIssues) {

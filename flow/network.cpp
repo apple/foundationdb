@@ -122,13 +122,7 @@ std::vector<NetworkAddress> NetworkAddress::parseList( std::string const& addrs 
 }
 
 std::string NetworkAddress::toString() const {
-	const char* patt;
-	if (isV6()) {
-		patt = "[%s]:%d%s";
-	} else {
-		patt = "%s:%d%s";
-	}
-	return format(patt, ip.toString().c_str(), port, isTLS() ? ":tls" : "");
+	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
 }
 
 std::string toIPVectorString(std::vector<uint32_t> ips) {
@@ -149,6 +143,11 @@ std::string toIPVectorString(const std::vector<IPAddress>& ips) {
 		space = " ";
 	}
 	return output;
+}
+
+std::string formatIpPort(const IPAddress& ip, uint16_t port) {
+	const char* patt = ip.isV6() ? "[%s]:%d" : "%s:%d";
+	return format(patt, ip.toString().c_str(), port);
 }
 
 Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
@@ -187,6 +186,21 @@ TEST_CASE("/flow/network/ipaddress") {
 		ASSERT(addrParsed.isV6());
 		ASSERT(addrParsed.isTLS());
 		ASSERT(addrParsed.toString() == addrCompressed);
-		return Void();
 	}
+
+	{
+		auto addr = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+		auto addrCompressed = "2001:db8:85a3::8a2e:370:7334";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(addrParsed.present());
+		ASSERT(addrParsed.get().toString() == addrCompressed);
+	}
+
+	{
+		auto addr = "2001";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(!addrParsed.present());
+	}
+
+	return Void();
 }

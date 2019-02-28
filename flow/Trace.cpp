@@ -333,8 +333,7 @@ public:
 
 	void annotateEvent( TraceEventFields &fields ) {
 		if(localAddress.present()) {
-			fields.addField("Machine",
-			                format("%s:%d", localAddress.get().ip.toString().c_str(), localAddress.get().port));
+			fields.addField("Machine", formatIpPort(localAddress.get().ip, localAddress.get().port));
 		}
 
 		fields.addField("LogGroup", logGroup);
@@ -717,7 +716,7 @@ bool TraceEvent::init() {
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
-			detailf("Machine", "%s:%d", local.ip.toString().c_str(), local.port);
+			detail("Machine", formatIpPort(local.ip, local.port));
 		}
 		detail("ID", id);
 		if(err.isValid()) {
@@ -1019,7 +1018,7 @@ void TraceBatch::dump() {
 	std::string machine;
 	if(g_network->isSimulated()) {
 		NetworkAddress local = g_network->getLocalAddress();
-		machine = format("%s:%d", local.ip.toString().c_str(), local.port);
+		machine = formatIpPort(local.ip, local.port);
 	}
 
 	for(int i = 0; i < attachBatch.size(); i++) {

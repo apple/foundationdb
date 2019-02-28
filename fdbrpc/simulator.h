@@ -115,8 +115,8 @@ public:
 		std::string toString() const {
 			const NetworkAddress& address = addresses[0];
 			return format(
-			    "name: %s address: %s:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
-			    address.ip.toString().c_str(), address.port,
+			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
+			    formatIpPort(address.ip, address.port).c_str(),
 			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
 			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
 			    startingClass.toString().c_str(), excluded, cleared);

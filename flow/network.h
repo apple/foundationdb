@@ -170,6 +170,7 @@ typedef std::vector<NetworkAddress> NetworkAddressList;
 
 std::string toIPVectorString(std::vector<uint32_t> ips);
 std::string toIPVectorString(const std::vector<IPAddress>& ips);
+std::string formatIpPort(const IPAddress& ip, uint16_t port);
 
 template <class T> class Future;
 template <class T> class Promise;
