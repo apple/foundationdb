@@ -1456,7 +1456,6 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.cpuUsage = self->cpuUsage;
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
-	reply.desiredOldestVersion = self->desiredOldestVersion.get();
 	req.reply.send( reply );
 }
 

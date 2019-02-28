@@ -347,14 +347,13 @@ struct StorageQueuingMetricsReply {
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
 	Version version; // current storage server version
-	Version desiredOldestVersion; // desired oldest version in storage queue
 	Version durableVersion; // latest version durable on storage server
 	double cpuUsage;
 	double diskUsage;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, desiredOldestVersion, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
 	}
 };
 

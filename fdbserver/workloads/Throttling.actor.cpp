@@ -72,10 +72,10 @@ struct ThrottlingWorkload : KVWorkload {
 	double throttlingMultiplier;
 	int transactionsCommitted;
 	int64_t worstStorageQueue;
-	int64_t worstStorageNDV;
+	int64_t worstStorageDurabilityLag;
 	int64_t worstTLogQueue;
 	int64_t detailedWorstStorageQueue;
-	int64_t detailedWorstStorageNDV;
+	int64_t detailedWorstStorageDurabilityLag;
 	int64_t detailedWorstTLogQueue;
 	double detailedWorstCpuUsage;
 	double detailedWorstDiskUsage;
@@ -85,8 +85,8 @@ struct ThrottlingWorkload : KVWorkload {
 	bool healthMetricsStoppedUpdating;
 
 	ThrottlingWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), transactionsCommitted(0), worstStorageQueue(0), worstStorageNDV(0), worstTLogQueue(0),
-	    detailedWorstStorageQueue(0), detailedWorstStorageNDV(0), detailedWorstTLogQueue(0), detailedWorstCpuUsage(0.0),
+	  : KVWorkload(wcx), transactionsCommitted(0), worstStorageQueue(0), worstStorageDurabilityLag(0), worstTLogQueue(0),
+	    detailedWorstStorageQueue(0), detailedWorstStorageDurabilityLag(0), detailedWorstTLogQueue(0), detailedWorstCpuUsage(0.0),
 	    detailedWorstDiskUsage(0.0), healthMetricsStoppedUpdating(false) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
 		healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
@@ -117,25 +117,25 @@ struct ThrottlingWorkload : KVWorkload {
 
 			self->tokenBucket.transactionRate = healthMetrics.tpsLimit * self->throttlingMultiplier / self->clientCount;
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
-			self->worstStorageNDV = std::max(self->worstStorageNDV, healthMetrics.worstStorageNDV);
+			self->worstStorageDurabilityLag = std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
 			self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
 
 			TraceEvent("HealthMetrics")
 			    .detail("WorstStorageQueue", healthMetrics.worstStorageQueue)
-			    .detail("WorstStorageNDV", healthMetrics.worstStorageNDV)
+			    .detail("WorstStorageDurabilityLag", healthMetrics.worstStorageDurabilityLag)
 			    .detail("WorstTLogQueue", healthMetrics.worstTLogQueue)
 			    .detail("TpsLimit", healthMetrics.tpsLimit);
 
 			TraceEvent traceStorageQueue("StorageQueue");
-			TraceEvent traceStorageNDV("StorageNDV");
+			TraceEvent traceStorageDurabilityLag("StorageDurabilityLag");
 			TraceEvent traceCpuUsage("CpuUsage");
 			TraceEvent traceDiskUsage("DiskUsage");
 			for (const auto& ss : healthMetrics.storageStats) {
 				auto storageStats = ss.second;
 				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
 				traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageQueue);
-				self->detailedWorstStorageNDV = std::max(self->detailedWorstStorageNDV, storageStats.storageNDV);
-				traceStorageNDV.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageNDV);
+				self->detailedWorstStorageDurabilityLag = std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
+				traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageDurabilityLag);
 				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
 				traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.cpuUsage);
 				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
@@ -212,24 +212,24 @@ struct ThrottlingWorkload : KVWorkload {
 			return false;
 		}
 		bool correctHealthMetricsState = true;
-		if (worstStorageQueue == 0 || worstStorageNDV == 0 || worstTLogQueue == 0 || transactionsCommitted == 0)
+		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0 || transactionsCommitted == 0)
 			correctHealthMetricsState = false;
 		if (sendDetailedHealthMetrics) {
-			if (detailedWorstStorageQueue == 0 || detailedWorstStorageNDV == 0 || detailedWorstTLogQueue == 0 ||
+			if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 || detailedWorstTLogQueue == 0 ||
 			    detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
 				correctHealthMetricsState = false;
 		} else {
-			if (detailedWorstStorageQueue != 0 || detailedWorstStorageNDV != 0 || detailedWorstTLogQueue != 0 ||
+			if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 || detailedWorstTLogQueue != 0 ||
 			    detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
 				correctHealthMetricsState = false;
 		}
 		if (!correctHealthMetricsState) {
 			TraceEvent(SevError, "IncorrectHealthMetricsState")
 				.detail("WorstStorageQueue", worstStorageQueue)
-				.detail("WorstStorageNDV", worstStorageNDV)
+				.detail("WorstStorageDurabilityLag", worstStorageDurabilityLag)
 				.detail("WorstTLogQueue", worstTLogQueue)
 				.detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
-				.detail("DetailedWorstStorageNDV", detailedWorstStorageNDV)
+				.detail("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag)
 				.detail("DetailedWorstTLogQueue", detailedWorstTLogQueue)
 				.detail("DetailedWorstCpuUsage", detailedWorstCpuUsage)
 				.detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
@@ -242,8 +242,8 @@ struct ThrottlingWorkload : KVWorkload {
 		m.push_back(PerfMetric("TransactionsCommitted", transactionsCommitted, false));
 		m.push_back(PerfMetric("WorstStorageQueue", worstStorageQueue, true));
 		m.push_back(PerfMetric("DetailedWorstStorageQueue", detailedWorstStorageQueue, true));
-		m.push_back(PerfMetric("WorstStorageNDV", worstStorageNDV, true));
-		m.push_back(PerfMetric("DetailedWorstStorageNDV", detailedWorstStorageNDV, true));
+		m.push_back(PerfMetric("WorstStorageDurabilityLag", worstStorageDurabilityLag, true));
+		m.push_back(PerfMetric("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag, true));
 		m.push_back(PerfMetric("WorstTLogQueue", worstTLogQueue, true));
 		m.push_back(PerfMetric("DetailedWorstTLogQueue", detailedWorstTLogQueue, true));
 		m.push_back(PerfMetric("DetailedWorstCpuUsage", detailedWorstCpuUsage, true));

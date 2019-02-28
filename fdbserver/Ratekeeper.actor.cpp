@@ -82,13 +82,13 @@ struct StorageQueueInfo {
 	StorageQueuingMetricsReply lastReply;
 	StorageQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothDurableVersion, smoothLatestVersion, smoothDesiredOldestVersion;
+	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothDesiredOldestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited)
 	{
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
@@ -154,7 +154,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
 					myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
 					myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
-					myQueueInfo->value.smoothDesiredOldestVersion.reset(reply.get().desiredOldestVersion);
+					myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
 				} else {
 					self->smoothTotalDurableBytes.addDelta( reply.get().bytesDurable - myQueueInfo->value.prevReply.bytesDurable );
 					myQueueInfo->value.smoothDurableBytes.setTotal( reply.get().bytesDurable );
@@ -163,7 +163,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothFreeSpace.setTotal( reply.get().storageBytes.available );
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
 					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
-					myQueueInfo->value.smoothDesiredOldestVersion.setTotal(reply.get().desiredOldestVersion);
+					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 				}
 			} else {
 				if(myQueueInfo->value.valid) {
@@ -269,7 +269,7 @@ void updateRate( Ratekeeper* self ) {
 
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
-	int64_t worstStorageNDVStorageServer = 0;
+	int64_t worstStorageDurabilityLagStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
 
 	std::multimap<double, StorageQueueInfo*> storageTPSLimitReverseIndex;
@@ -300,9 +300,9 @@ void updateRate( Ratekeeper* self ) {
 		self->healthMetrics.storageStats[ss.id].storageQueue = storageQueue;
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
-		int64_t storageNDV = ss.smoothDesiredOldestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
-		self->healthMetrics.storageStats[ss.id].storageNDV = storageNDV;
-		worstStorageNDVStorageServer = std::max(worstStorageNDVStorageServer, storageNDV);
+		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
+		self->healthMetrics.storageStats[ss.id].storageDurabilityLag = storageDurabilityLag;
+		worstStorageDurabilityLagStorageServer = std::max(worstStorageDurabilityLagStorageServer, storageDurabilityLag);
 
 		int64_t b = storageQueue - targetBytes;
 		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
@@ -355,7 +355,7 @@ void updateRate( Ratekeeper* self ) {
 	}
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
-	self->healthMetrics.worstStorageNDV = worstStorageNDVStorageServer;
+	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for(auto ss = storageTPSLimitReverseIndex.begin(); ss != storageTPSLimitReverseIndex.end() && ss->first < self->TPSLimit; ++ss) {
