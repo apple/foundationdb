@@ -533,7 +533,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.trackLatest("RkUpdate");
+			.trackLatest(name.c_str());
 	}
 }
 

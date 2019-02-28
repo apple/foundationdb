@@ -1120,8 +1120,93 @@ std::string TraceEventFields::getValue(std::string key) const {
 		return value;
 	}
 	else {
+		TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
+		if(tryGetValue("Type", value)) {
+			ev.detail("Event", value);
+		}
+		ev.detail("FieldName", key);
+
 		throw attribute_not_found();
 	}
+}
+
+namespace {
+void parseNumericValue(std::string const& s, double &outValue, bool permissive = false) {
+	double d = 0;
+	int consumed = 0;
+	int r = sscanf(s.c_str(), "%lf%n", &d, &consumed);
+	if (r == 1 && (consumed == s.size() || permissive)) {
+		outValue = d;
+		return;
+	}
+
+	throw attribute_not_found();
+}
+
+void parseNumericValue(std::string const& s, int &outValue, bool permissive = false) {
+	long long int iLong = 0;
+	int consumed = 0;
+	int r = sscanf(s.c_str(), "%lld%n", &iLong, &consumed);
+	if (r == 1 && (consumed == s.size() || permissive)) {
+		if (std::numeric_limits<int>::min() <= iLong && iLong <= std::numeric_limits<int>::max()) {
+			outValue = (int)iLong;  // Downcast definitely safe
+			return;
+		}
+		else {
+			throw attribute_too_large();
+		}
+	}
+
+	throw attribute_not_found();
+}
+
+void parseNumericValue(std::string const& s, int64_t &outValue, bool permissive = false) {
+	long long int i = 0;
+	int consumed = 0;
+	int r = sscanf(s.c_str(), "%lld%n", &i, &consumed);
+	if (r == 1 && (consumed == s.size() || permissive)) {
+		outValue = i;
+		return;
+	}
+
+	throw attribute_not_found();
+}
+
+template<class T>
+T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
+	std::string field = fields.getValue(key);
+
+	try {
+		T value;
+		parseNumericValue(field, value, permissive);
+		return value;
+	}
+	catch(Error &e) {
+		std::string type;
+
+		TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
+		if(fields.tryGetValue("Type", type)) {
+			ev.detail("Event", type);
+		}
+		ev.detail("FieldName", key);
+		ev.detail("FieldValue", field);
+		ev.error(e);
+
+		throw;
+	}
+}
+} // namespace
+
+int TraceEventFields::getInt(std::string key, bool permissive) const {
+	return getNumericValue<int>(*this, key, permissive);
+}
+
+int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
+	return getNumericValue<int64_t>(*this, key, permissive);
+}
+
+double TraceEventFields::getDouble(std::string key, bool permissive) const {
+	return getNumericValue<double>(*this, key, permissive);
 }
 
 std::string TraceEventFields::toString() const {
