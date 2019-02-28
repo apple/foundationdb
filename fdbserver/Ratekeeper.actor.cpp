@@ -141,7 +141,7 @@ struct TransactionCounts {
 	int64_t total;
 	int64_t batch;
 
-	TransactionCount() : total(0), batch(0) {}
+	TransactionCounts() : total(0), batch(0) {}
 };
 
 struct Ratekeeper {
