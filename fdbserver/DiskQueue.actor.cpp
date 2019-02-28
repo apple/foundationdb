@@ -796,6 +796,8 @@ public:
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
 	virtual location getNextReadLocation() { return nextReadLocation; }
+	virtual location getNextCommitLocation() { ASSERT( initialized ); return lastCommittedSeq + sizeof(Page); }
+	virtual location getNextPushLocation() { ASSERT( initialized ); return endLocation(); }
 
 	virtual Future<Void> getError() { return rawQueue->getError(); }
 	virtual Future<Void> onClosed() { return rawQueue->onClosed(); }
@@ -1160,8 +1162,9 @@ private:
 				.detail("Context", context)
 				.detail("File0Name", rawQueue->files[0].dbgFilename);
 
-		for(int i = 1; i >= 0; i--)
-			if ( firstPages(i).checkHash() && firstPages(i).seq <= (size_t)loc ) {
+		for(int i = 1; i >= 0; i--) {
+			ASSERT_WE_THINK( firstPages(i).checkHash() );
+			if ( firstPages(i).seq <= (size_t)loc ) {
 				*file = i;
 				*page = (loc - firstPages(i).seq)/sizeof(Page);
 				if (context)
@@ -1176,6 +1179,7 @@ private:
 				ok = true;
 				break;
 			}
+		}
 		if (!ok)
 			TraceEvent(SevError, "DiskQueueLocationError", dbgid)
 				.detail("Page0Valid", firstPages(0).checkHash())
@@ -1245,6 +1249,9 @@ public:
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
 
 	virtual Future<Standalone<StringRef>> read( location start, location end ) { return queue->read( start, end ); }
+	virtual location getNextCommitLocation() { return queue->getNextCommitLocation(); }
+	virtual location getNextPushLocation() { return queue->getNextPushLocation(); }
+
 
 	virtual location push( StringRef contents ) {
 		pushed = queue->push(contents);

@@ -532,6 +532,11 @@ public:
 		return b;
 	}
 
+	const void* peekBytes( int bytes ) {
+		ASSERT( begin + bytes <= end );
+		return begin;
+	}
+
 	void serializeBytes(void* data, int bytes) {
 		memcpy(data, readBytes(bytes), bytes);
 	}
@@ -555,6 +560,7 @@ public:
 	BinaryReader( const void* data, int length, VersionOptions vo ) {
 		begin = (const char*)data;
 		end = begin + length;
+		check = nullptr;
 		vo.read(*this);
 	}
 	template <class VersionOptions>
@@ -579,8 +585,19 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != nullptr);
+		begin = check;
+		check = nullptr;
+	}
+
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };

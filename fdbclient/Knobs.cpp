@@ -188,6 +188,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	}
 	init(CSI_STATUS_DELAY,						  10.0  );
 
-	init( CONSISTENCY_CHECK_RATE_LIMIT,            50e6 );
-	init( CONSISTENCY_CHECK_RATE_WINDOW,            1.0 );
+	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 );
+	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
+	init( CONSISTENCY_CHECK_RATE_WINDOW,		  1.0  );
 }

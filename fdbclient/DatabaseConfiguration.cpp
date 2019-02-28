@@ -30,7 +30,9 @@ void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
 	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
+	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
+	tLogSpillType = TLogSpillType::DEFAULT;
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
@@ -166,7 +168,12 @@ bool DatabaseConfiguration::isValid() const {
 		getDesiredProxies() >= 1 &&
 		getDesiredLogs() >= 1 &&
 		getDesiredResolvers() >= 1 &&
+		tLogVersion != TLogVersion::UNSET &&
+		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
 		tLogDataStoreType != KeyValueStoreType::END &&
+		tLogSpillType != TLogSpillType::UNSET &&
+		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
 		storageServerStoreType != KeyValueStoreType::END &&
 		autoMasterProxyCount >= 1 &&
 		autoResolverCount >= 1 &&
@@ -244,6 +251,10 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			if(!noPolicies)  result["log_replication_policy"] = tLogPolicy->info();
 		}
 
+		if ( tLogVersion > TLogVersion::DEFAULT ) {
+			result["log_version"] = (int)tLogVersion;
+		}
+
 		if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
 			result["storage_engine"] = "ssd-1";
 		} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
@@ -255,6 +266,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else {
 			result["storage_engine"] = "custom";
 		}
+
+		result["log_spill"] = (int)tLogSpillType;
 
 		if( remoteTLogReplicationFactor == 1 ) {
 			result["remote_redundancy_mode"] = "remote_single";
@@ -371,11 +384,18 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
+	else if (ck == LiteralStringRef("log_version")) {
+		parse((&type), value);
+		type = std::max((int)TLogVersion::MIN_RECRUITABLE, type);
+		type = std::min((int)TLogVersion::MAX_SUPPORTED, type);
+		tLogVersion = (TLogVersion::Version)type;
+	}
 	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
 		// TODO:  Remove this once Redwood works as a log engine
 		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
 	}
+	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
 	else if (ck == LiteralStringRef("auto_proxies")) parse(&autoMasterProxyCount, value);
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);

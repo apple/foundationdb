@@ -145,6 +145,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for( auto& log : tLogSet.logRouters) {
 					logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
 				}
+				logSet->tLogVersion = tLogSet.tLogVersion;
 				logSet->tLogWriteAntiQuorum = tLogSet.tLogWriteAntiQuorum;
 				logSet->tLogReplicationFactor = tLogSet.tLogReplicationFactor;
 				logSet->tLogPolicy = tLogSet.tLogPolicy;
@@ -171,6 +172,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for( auto & log : tLogData.logRouters) {
 					logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
 				}
+				logSet->tLogVersion = tLogData.tLogVersion;
 				logSet->tLogWriteAntiQuorum = tLogData.tLogWriteAntiQuorum;
 				logSet->tLogReplicationFactor = tLogData.tLogReplicationFactor;
 				logSet->tLogPolicy = tLogData.tLogPolicy;
@@ -207,6 +209,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for( auto & log : tLogSet.logRouters) {
 					logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
 				}
+				logSet->tLogVersion = tLogSet.tLogVersion;
 				logSet->tLogWriteAntiQuorum = tLogSet.tLogWriteAntiQuorum;
 				logSet->tLogReplicationFactor = tLogSet.tLogReplicationFactor;
 				logSet->tLogPolicy = tLogSet.tLogPolicy;
@@ -234,6 +237,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for( auto & log : tLogSet.logRouters) {
 						logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
 					}
+					logSet->tLogVersion = tLogSet.tLogVersion;
 					logSet->tLogWriteAntiQuorum = tLogSet.tLogWriteAntiQuorum;
 					logSet->tLogReplicationFactor = tLogSet.tLogReplicationFactor;
 					logSet->tLogPolicy = tLogSet.tLogPolicy;
@@ -271,6 +275,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					coreSet.tLogs.push_back(log->get().id());
 					coreSet.tLogLocalities.push_back(log->get().interf().locality);
 				}
+				coreSet.tLogVersion = t->tLogVersion;
 				coreSet.tLogWriteAntiQuorum = t->tLogWriteAntiQuorum;
 				coreSet.tLogReplicationFactor = t->tLogReplicationFactor;
 				coreSet.tLogPolicy = t->tLogPolicy;
@@ -293,6 +298,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 							coreSet.tLogs.push_back(log->get().id());
 						}
 						coreSet.tLogLocalities = t->tLogLocalities;
+						coreSet.tLogVersion = t->tLogVersion;
 						coreSet.tLogWriteAntiQuorum = t->tLogWriteAntiQuorum;
 						coreSet.tLogReplicationFactor = t->tLogReplicationFactor;
 						coreSet.tLogPolicy = t->tLogPolicy;
@@ -1032,6 +1038,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(logSet->isLocal || remoteLogsWrittenToCoreState) {
 				logSystemConfig.tLogs.push_back(TLogSet());
 				TLogSet& log = logSystemConfig.tLogs.back();
+				log.tLogVersion = logSet->tLogVersion;
 				log.tLogWriteAntiQuorum = logSet->tLogWriteAntiQuorum;
 				log.tLogReplicationFactor = logSet->tLogReplicationFactor;
 				log.tLogPolicy = logSet->tLogPolicy;
@@ -1059,6 +1066,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for( int j = 0; j < oldLogData[i].tLogs.size(); j++ ) {
 					TLogSet& log = logSystemConfig.oldTLogs[i].tLogs[j];
 					Reference<LogSet> logSet = oldLogData[i].tLogs[j];
+					log.tLogVersion = logSet->tLogVersion;
 					log.tLogWriteAntiQuorum = logSet->tLogWriteAntiQuorum;
 					log.tLogReplicationFactor = logSet->tLogReplicationFactor;
 					log.tLogPolicy = logSet->tLogPolicy;
@@ -1384,6 +1392,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				failed.push_back( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) );
 				failureTrackers.push_back( monitorLog(logVar, failed[j] ) );
 			}
+			logSet->tLogVersion = coreSet.tLogVersion;
 			logSet->tLogReplicationFactor = coreSet.tLogReplicationFactor;
 			logSet->tLogWriteAntiQuorum = coreSet.tLogWriteAntiQuorum;
 			logSet->tLogPolicy = coreSet.tLogPolicy;
@@ -1410,6 +1419,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					logSet->logServers.push_back( logVar );
 					allLogServers.push_back( logVar );
 				}
+				logSet->tLogVersion = log.tLogVersion;
 				logSet->tLogReplicationFactor = log.tLogReplicationFactor;
 				logSet->tLogWriteAntiQuorum = log.tLogWriteAntiQuorum;
 				logSet->tLogPolicy = log.tLogPolicy;
@@ -1729,6 +1739,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
 		logSet->tLogReplicationFactor = configuration.getRemoteTLogReplicationFactor();
+		logSet->tLogVersion = configuration.tLogVersion;
 		logSet->tLogPolicy = configuration.getRemoteTLogPolicy();
 		logSet->isLocal = false;
 		logSet->locality = remoteLocality;
@@ -1786,7 +1797,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = self->recruitmentID;
+			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
+			req.spillType = configuration.tLogSpillType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->recoverAt.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
@@ -1858,6 +1871,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
+		logSystem->tLogs[0]->tLogVersion = configuration.tLogVersion;
 		logSystem->tLogs[0]->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
 		logSystem->tLogs[0]->tLogReplicationFactor = configuration.tLogReplicationFactor;
 		logSystem->tLogs[0]->tLogPolicy = configuration.tLogPolicy;
@@ -1879,6 +1893,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			logSystem->tLogs[1]->isLocal = true;
 			logSystem->tLogs[1]->locality = tagLocalitySatellite;
+			logSystem->tLogs[1]->tLogVersion = configuration.tLogVersion;
 			logSystem->tLogs[1]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 
 			logSystem->tLogs[1]->tLogLocalities.resize( recr.satelliteTLogs.size() );
@@ -1962,7 +1977,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
+			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
+			req.spillType = configuration.tLogSpillType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->recoverAt.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
@@ -2005,7 +2022,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
 				InitializeTLogRequest &req = sreqs[i];
 				req.recruitmentID = logSystem->recruitmentID;
+				req.logVersion = configuration.tLogVersion;
 				req.storeType = configuration.tLogDataStoreType;
+				req.spillType = configuration.tLogSpillType;
 				req.recoverFrom = oldLogSystem->getLogSystemConfig();
 				req.recoverAt = oldLogSystem->recoverAt.get();
 				req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;

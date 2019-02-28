@@ -564,7 +564,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), laten
 
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
 	try {
-		state Optional<std::string> incorrectConnectionString;
+		state Optional<double> incorrectTime;
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
@@ -575,17 +575,19 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
 				req.issues = LiteralStringRef("incorrect_cluster_file_contents");
 				std::string connectionString = ccf->getConnectionString().toString();
+				if(!incorrectTime.present()) {
+					incorrectTime = now();
+				}
 				if(ccf->canGetFilename()) {
-					// Don't log a SevWarnAlways the first time to account for transient issues (e.g. someone else changing the file right before us)
-					TraceEvent(incorrectConnectionString.present() && incorrectConnectionString.get() == connectionString ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+					// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+					TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
 						.detail("Filename", ccf->getFilename())
 						.detail("ConnectionStringFromFile", fileConnectionString.toString())
 						.detail("CurrentConnectionString", connectionString);
 				}
-				incorrectConnectionString = connectionString;
 			}
 			else {
-				incorrectConnectionString = Optional<std::string>();
+				incorrectTime = Optional<double>();
 			}
 
 			choose {

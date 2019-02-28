@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <math.h>
+
 #include "flow/IRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -56,8 +58,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//If true, then any failure of the consistency check will be logged as SevError.  Otherwise, it will be logged as SevWarn
 	bool failureIsError;
 
-	//Ideal number of bytes per second to read from each storage server
-	int rateLimit;
+	//Max number of bytes per second to read from each storage server
+	int rateLimitMax;
+
+	// DataSet Size
+	int64_t bytesReadInPreviousRound;
 
 	//Randomize shard order with each iteration if true
 	bool shuffleShards;
@@ -78,7 +83,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		distributed = getOption(options, LiteralStringRef("distributed"), true);
 		shardSampleFactor = std::max(getOption(options, LiteralStringRef("shardSampleFactor"), 1), 1);
 		failureIsError = getOption(options, LiteralStringRef("failureIsError"), false);
-		rateLimit = getOption(options, LiteralStringRef("rateLimit"), 0);
+		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
 
@@ -87,6 +92,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		firstClient = clientId == 0;
 
 		repetitions = 0;
+		bytesReadInPreviousRound = 0;
 	}
 
 	virtual std::string description()
@@ -585,7 +591,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state int effectiveClientCount = (self->distributed) ? self->clientCount : 1;
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment = (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(self->rateLimit, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state int rateLimitForThisRound = self->bytesReadInPreviousRound == 0 ? self->rateLimitMax :
+			std::min(self->rateLimitMax, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float) CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
+		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
+		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
+		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(rateLimitForThisRound, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
+		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
 		if(g_network->isSimulated()) {
@@ -912,11 +923,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 							shardKeys += data.size();
 						}
 						//after requesting each shard, enforce rate limit based on how much data will likely be read
-						if(self->rateLimit > 0)
+						if(rateLimitForThisRound > 0)
 						{
 								wait(rateLimiter->getAllowance(totalReadAmount));
 						}
 						bytesReadInRange += totalReadAmount;
+						bytesReadInthisRound += totalReadAmount;
 
 						//Advance to the next set of entries
 						if(firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more)
@@ -1029,7 +1041,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}*/
 
-
+		self->bytesReadInPreviousRound = bytesReadInthisRound;
 		return true;
 	}
 
