@@ -96,6 +96,7 @@ struct IPAddress {
 	const IPAddressStore& toV6() const { return store; }
 
 	std::string toString() const;
+	static Optional<IPAddress> parse(std::string str);
 
 	bool operator==(const IPAddress& addr) const;
 	bool operator!=(const IPAddress& addr) const;

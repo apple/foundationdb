@@ -59,6 +59,15 @@ std::string IPAddress::toString() const {
 	}
 }
 
+Optional<IPAddress> IPAddress::parse(std::string str) {
+	try {
+		auto addr = boost::asio::ip::address::from_string(str);
+		return addr.is_v6() ? IPAddress(addr.to_v6().to_bytes()) : IPAddress(addr.to_v4().to_ulong());
+	} catch (...) {
+		return Optional<IPAddress>();
+	}
+}
+
 bool IPAddress::isValid() const {
 	if (!isV6()) {
 		return toV4() != 0;
@@ -84,15 +93,14 @@ NetworkAddress NetworkAddress::parse( std::string const& s ) {
 			throw connection_string_invalid();
 		}
 
-		try {
-			auto port = std::stoi(f.substr(addrEnd + 2));
-			auto addr = boost::asio::ip::address::from_string(f.substr(1, addrEnd - 1));
-			ASSERT(addr.is_v6());
-			return NetworkAddress(IPAddress(addr.to_v6().to_bytes()), port, true, isTLS);
-		} catch (...) {
+		auto port = std::stoi(f.substr(addrEnd + 2));
+		auto addr = IPAddress::parse(f.substr(1, addrEnd - 1));
+		if (!addr.present()) {
 			throw connection_string_invalid();
 		}
+		return NetworkAddress(addr.get(), port, true, isTLS);
 	} else {
+		// TODO: Use IPAddress::parse
 		int a, b, c, d, port, count = -1;
 		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
 			throw connection_string_invalid();
