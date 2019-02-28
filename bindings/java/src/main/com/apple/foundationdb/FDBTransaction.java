@@ -41,8 +41,23 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	class ReadSnapshot implements ReadTransaction {
 		@Override
+		public boolean isSnapshot() {
+			return true;
+		}
+
+		@Override
+		public ReadTransaction snapshot() {
+			return this;
+		}
+
+		@Override
 		public CompletableFuture<Long> getReadVersion() {
 			return FDBTransaction.this.getReadVersion();
+		}
+
+		@Override
+		public void setReadVersion(long version) {
+			FDBTransaction.this.setReadVersion(version);
 		}
 
 		@Override
@@ -127,6 +142,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
+		public void addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
+			// Do nothing
+		}
+
+		@Override
+		public void addReadConflictKeyIfNotSnapshot(byte[] key) {
+			// Do nothing
+		}
+
+		@Override
 		public TransactionOptions options() {
 			return FDBTransaction.this.options();
 		}
@@ -155,6 +180,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		snapshot = new ReadSnapshot();
 		options = new TransactionOptions(this);
 		transactionOwner = true;
+	}
+
+	@Override
+	public boolean isSnapshot() {
+		return false;
 	}
 
 	@Override
@@ -322,8 +352,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
+	public void addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
+		addReadConflictRange(keyBegin, keyEnd);
+	}
+
+	@Override
 	public void addReadConflictRange(byte[] keyBegin, byte[] keyEnd) {
 		addConflictRange(keyBegin, keyEnd, ConflictRangeType.READ);
+	}
+
+	@Override
+	public void addReadConflictKeyIfNotSnapshot(byte[] key) {
+		addReadConflictKey(key);
 	}
 
 	@Override
