@@ -9,4 +9,4 @@ endif()
 # as soon as we get rid of the old build system
 target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
 
-fdb_install(TARGETS fdbmonitor DESTINATION libexec COMPONENT server)
+fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
