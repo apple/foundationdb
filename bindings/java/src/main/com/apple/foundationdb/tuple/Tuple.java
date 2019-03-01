@@ -315,9 +315,11 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Get an encoded representation of this {@code Tuple}. Each element is encoded to
-	 *  {@code byte}s and concatenated.
+	 *  {@code byte}s and concatenated. Note that once a {@code Tuple} has been packed, its
+	 *  serialized representation is stored internally so that future calls to this function
+	 *  are faster than the initial call.
 	 *
-	 * @return a packed representation of this {@code Tuple}.
+	 * @return a packed representation of this {@code Tuple}
 	 */
 	public byte[] pack() {
 		return packInternal(null, true);
@@ -326,10 +328,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Get an encoded representation of this {@code Tuple}. Each element is encoded to
 	 *  {@code byte}s and concatenated, and then the prefix supplied is prepended to
-	 *  the array.
+	 *  the array. Note that once a {@code Tuple} has been packed, its serialized representation
+	 *  is stored internally so that future calls to this function are faster than the
+	 *  initial call.
 	 *
-	 * @param prefix additional byte-array prefix to prepend to packed bytes.
-	 * @return a packed representation of this {@code Tuple} prepended by the {@code prefix}.
+	 * @param prefix additional byte-array prefix to prepend to the packed bytes
+	 * @return a packed representation of this {@code Tuple} prepended by the {@code prefix}
 	 */
 	public byte[] pack(byte[] prefix) {
 		return packInternal(prefix, true);
@@ -359,6 +363,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  It is up to the caller to ensure that there is enough space allocated within the buffer
 	 *  to avoid {@link java.nio.BufferOverflowException}s. The client may call {@link #getPackedSize()}
 	 *  to determine how large this {@code Tuple} will be once packed in order to allocate sufficient memory.
+	 *  Note that unlike {@link #pack()}, the serialized representation of this {@code Tuple} is not stored, so
+	 *  calling this function multiple times with the same {@code Tuple} requires serializing the {@code Tuple}
+	 *  multiple times.
 	 * <br>
 	 * <br>
 	 * This method will throw an error if there are any incomplete {@link Versionstamp}s in this {@code Tuple}.
@@ -402,6 +409,10 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  {@link com.apple.foundationdb.Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
 	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.foundationdb.MutationType}, and the transaction's
 	 *  version will then be filled in at commit time.
+	 * <br>
+	 * <br>
+	 * Note that once a {@code Tuple} has been packed, its serialized representation is stored internally so that
+	 *  future calls to this function are faster than the initial call.
 	 *
 	 * @param prefix additional byte-array prefix to prepend to packed bytes.
 	 * @return a packed representation of this {@code Tuple} for use with versionstamp ops.
@@ -477,11 +488,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Construct a new {@code Tuple} with elements decoded from a supplied {@code byte} array.
-	 *  The passed byte array must not be {@code null}.
+	 *  The passed byte array must not be {@code null}. This will throw an exception if the passed byte
+	 *  array does not represent a valid {@code Tuple}. For example, this will throw an error if it
+	 *  encounters an unknown type code or if there is a packed element that appears to be truncated.
 	 *
 	 * @param bytes encoded {@code Tuple} source
 	 *
 	 * @return a new {@code Tuple} constructed by deserializing the provided {@code byte} array
+	 * @throws IllegalArgumentException if {@code bytes} does not represent a valid {@code Tuple}
 	 */
 	public static Tuple fromBytes(byte[] bytes) {
 		return fromBytes(bytes, 0, bytes.length);
@@ -489,13 +503,17 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Construct a new {@code Tuple} with elements decoded from a supplied {@code byte} array.
-	 *  The passed byte array must not be {@code null}.
+	 *  The passed byte array must not be {@code null}. This will throw an exception if the specified slice of
+	 *  the passed byte array does not represent a valid {@code Tuple}. For example, this will throw an error
+	 *  if it encounters an unknown type code or if there is a packed element that appears to be truncated.
 	 *
 	 * @param bytes encoded {@code Tuple} source
 	 * @param offset starting offset of byte array of encoded data
 	 * @param length length of encoded data within the source
 	 *
 	 * @return a new {@code Tuple} constructed by deserializing the specified slice of the provided {@code byte} array
+	 * @throws IllegalArgumentException if {@code offset} or {@code length} are negative or would exceed the size of
+	 *  the array or if {@code bytes} does not represent a valid {@code Tuple}
 	 */
 	public static Tuple fromBytes(byte[] bytes, int offset, int length) {
 		if(offset < 0 || offset > bytes.length) {
@@ -864,7 +882,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  the serialized sizes of all of the elements of this {@code Tuple} and does not pack everything
 	 *  into a single {@code Tuple}. The return value of this function is stored within this {@code Tuple}
 	 *  after this function has been called so that subsequent calls on the same object are fast. This method
-	 *  does not validate that there is no more than one incomplete {@link Versionstamp} in this {@code Tuple}.
+	 *  does not validate that there is not more than one incomplete {@link Versionstamp} in this {@code Tuple}.
 	 *
 	 * @return the number of bytes in the packed representation of this {@code Tuple}
 	 */
