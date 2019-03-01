@@ -207,20 +207,20 @@ set(server-filename "foundationdb-server-${PROJECT_VERSION}.${CURRENT_GIT_VERSIO
 set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
 
 set(CPACK_RPM_PACKAGE_NAME "foundationdb")
-set(CPACK_RPM_CLIENTS-EL6-PACKAGE_NAME "foundationdb-clients")
-set(CPACK_RPM_CLIENTS-EL7-PACKAGE_NAME "foundationdb-clients")
-set(CPACK_RPM_SERVER-EL6-PACKAGE_NAME "foundationdb-server")
-set(CPACK_RPM_SERVER-EL7-PACKAGE_NAME "foundationdb-server")
+set(CPACK_RPM_CLIENTS-EL6_PACKAGE_NAME "foundationdb-clients")
+set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
+set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server")
+set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 
 set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${clients-filename}.el6.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${clients-filename}.el7.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL6_FILE_NAME "${server-filename}.el6.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL7_FILE_NAME "${server-filename}.el7.x86_64.rpm")
 
-set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO-FILE_NAME "${clients-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO-FILE_NAME "${clients-filename}.el7-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_DEBUGINFO-FILE_NAME "${server-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_DEBUGINFO-FILE_NAME "${server-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${clients-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${clients-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${server-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${server-filename}.el7-debuginfo.x86_64.rpm")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
