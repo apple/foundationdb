@@ -1093,7 +1093,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			contract = {
 				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE || 
-																									(FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),
+                                                                                                   (FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),
 				std::make_pair( error_code_read_version_already_set, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::INITIALIZE_NEW_DATABASE) )
 			};
 		}
