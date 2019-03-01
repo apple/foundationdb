@@ -21,7 +21,7 @@ project(foundationdb
   VERSION 6.1.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES ASM C CXX)
+  LANGUAGES C CXX ASM)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")

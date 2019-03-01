@@ -1,6 +1,11 @@
 export
 PLATFORM := $(shell uname)
 ARCH := $(shell uname -m)
+ifeq ("$(wildcard /etc/centos-release)", "")
+	LIBSTDCPP_HACK = 1
+else
+	LIBSTDCPP_HACK = 0
+endif
 
 TOPDIR := $(shell pwd)
 
@@ -198,6 +203,7 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	done
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
+
 
 docpreview: javadoc
 	@echo "Generating     docpreview"

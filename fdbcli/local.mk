@@ -22,14 +22,13 @@
 
 fdbcli_CFLAGS := $(fdbclient_CFLAGS)
 fdbcli_LDFLAGS := $(fdbrpc_LDFLAGS)
-fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl $(FDB_TLS_LIB)
+fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)
 fdbcli_STATIC_LIBS := $(TLS_LIBS)
 
 fdbcli_GENERATED_SOURCES += versions.h
 
 ifeq ($(PLATFORM),linux)
-  fdbcli_LDFLAGS += -static-libstdc++ -static-libgcc
-  fdbcli_LIBS += -lpthread -lrt
+  fdbcli_LDFLAGS += -static-libstdc++ -static-libgcc -lpthread -lrt -ldl
 else ifeq ($(PLATFORM),osx)
   fdbcli_LDFLAGS += -lc++
 endif

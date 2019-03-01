@@ -2,6 +2,11 @@
 
 set -e
 
+if [ -z ${CC+x} ]
+then
+    CC=gcc
+fi
+
 case $1 in
     Application | DynamicLibrary)
 	echo "Linking        $3"
@@ -18,7 +23,7 @@ case $1 in
 	    OPTIONS=
 	fi
 
-	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL -o $3" )
+	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL \$$2_LDFLAGS -o $3" )
 
 	if echo $OPTIONS | grep -q -- -static-libstdc\+\+ ; then
 	    OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ `$CC -print-file-name=libstdc++.a`\ -lm, )
