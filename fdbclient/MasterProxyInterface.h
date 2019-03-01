@@ -116,10 +116,11 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 struct GetReadVersionReply {
 	Version version;
 	bool locked;
+	Optional<Value> metadataVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked);
+		serializer(ar, version, locked, metadataVersion);
 	}
 };
 

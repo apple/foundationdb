@@ -2382,6 +2382,7 @@ namespace fileBackup {
 
 			state RestoreConfig restore(task);
 			restore.stateEnum().set(tr, ERestoreState::COMPLETED);
+			tr->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
 			// Clear the file map now since it could be huge.
 			restore.fileSet().clear(tr);
 

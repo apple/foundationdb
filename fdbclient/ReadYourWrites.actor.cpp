@@ -1046,7 +1046,7 @@ public:
 				return Void();
 			}
 			
-			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), ryw->getMaxWriteKey()));
+			ryw->writeRangeToNativeTransaction(KeyRangeRef(StringRef(), allKeys.end));
 
 			auto conflictRanges = ryw->readConflicts.ranges();
 			for( auto iter = conflictRanges.begin(); iter != conflictRanges.end(); ++iter ) {
@@ -1222,7 +1222,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
 	
-	if(key >= getMaxReadKey())
+	if(key >= getMaxReadKey() && (!tr.apiVersionAtLeast(610) || key != metadataVersionKey))
 		return key_outside_legal_range();
 
 	//There are no keys in the database with size greater than KEY_SIZE_LIMIT
@@ -1499,8 +1499,18 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		throw used_during_commit();
 	}
 
-	if(key >= getMaxWriteKey())
+	if (key == metadataVersionKey) {
+		if(!tr.apiVersionAtLeast(610)) {
+			throw key_outside_legal_range();
+		}
+
+		if(operationType != MutationRef::SetVersionstampedValue || operand != metadataVersionRequiredValue) {
+			throw client_invalid_operation();
+		}
+	}
+	else if(key >= getMaxWriteKey()) {
 		throw key_outside_legal_range();
+	}
 
 	if(!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type) operationType))
 		throw invalid_mutation_type();
@@ -1565,7 +1575,10 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 		BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
 		return;
 	}
-	
+	if (key == metadataVersionKey) {
+		throw client_invalid_operation();
+	}
+
 	bool addWriteConflict = !options.getAndResetWriteConflictDisabled();
 
 	if(checkUsedDuringCommit()) {

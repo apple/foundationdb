@@ -178,7 +178,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						}
 					}
 				}
-			} else if( m.param1 == databaseLockedKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
+			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -223,6 +223,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 
 					// Insert the logDestination into each range of vecBackupKeys overlapping the decoded range
 					for (auto& logRange : vecBackupKeys->modify(KeyRangeRef(logRangeBegin, logRangeEnd))) {
+						logRange->value().insert(logDestination);
+					}
+					for (auto& logRange : vecBackupKeys->modify(singleKeyRange(metadataVersionKey))) {
 						logRange->value().insert(logDestination);
 					}
 
@@ -345,6 +348,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			if (range.contains(databaseLockedKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(databaseLockedKey));
 			}
+			if (range.contains(metadataVersionKey)) {
+				if(!initialCommit) txnStateStore->clear(singleKeyRange(metadataVersionKey));
+			}
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
@@ -413,6 +419,21 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							auto	&logRangeMap = logRange->value();
 
 							// Remove the backup name from the range
+							logRangeMap.erase(logDestination);
+						}
+					}
+
+					bool foundKey = false;
+					for(auto &it : vecBackupKeys->intersectingRanges(normalKeys)) {
+						if(it.value().count(logDestination) > 0) {
+							foundKey = true;
+							break;
+						}
+					}
+					if(!foundKey) {
+						auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
+						for (auto logRange : logRanges) {
+							auto &logRangeMap = logRange->value();
 							logRangeMap.erase(logDestination);
 						}
 					}

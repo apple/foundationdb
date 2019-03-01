@@ -1523,8 +1523,8 @@ namespace dbBackup {
 				}
 			}
 
+			state Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
 			loop {
-				state Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
 				try {
 					srcTr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 					srcTr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1551,6 +1551,21 @@ namespace dbBackup {
 					break;
 				} catch (Error &e) {
 					wait(srcTr2->onError(e));
+				}
+			}
+
+			state Reference<ReadYourWritesTransaction> srcTr3(new ReadYourWritesTransaction(taskBucket->src));
+			loop {
+				try {
+					srcTr3->setOption(FDBTransactionOptions::LOCK_AWARE);
+					srcTr3->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					srcTr3->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
+
+					wait(srcTr3->commit());
+					break;
+				} catch(Error &e) {
+					wait(srcTr3->onError(e));
 				}
 			}
 

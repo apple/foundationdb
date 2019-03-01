@@ -493,6 +493,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	auto lockedKey = parent->txnStateStore->readValue(databaseLockedKey).get();
 	state bool locked = lockedKey.present() && lockedKey.get().size();
 
+	state Optional<Value> metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
+
 	// We respond to a minimal subset of the master proxy protocol.  Our sole purpose is to receive a single write-only transaction
 	// which might repair our configuration, and return it.
 	loop choose {
@@ -501,6 +503,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				GetReadVersionReply rep;
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
+				rep.metadataVersion = metadataVersion;
 				req.reply.send( rep );
 			} else
 				req.reply.send(Never());  // We can't perform causally consistent reads without recovering

@@ -159,6 +159,9 @@ public:
 	Reference<Cluster> cluster;
 
 	int apiVersion;
+
+	int mvcInsertLocation;
+	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
 };
 
 #endif
