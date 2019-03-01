@@ -67,14 +67,18 @@ public:
 		if(offset >= fileSize)
 			return 0;  // TODO:  Should this throw since the input isn't really valid?
 
+		if(length == 0) {
+			return 0;
+		}
+
 		// If reading past the end then clip length to just read to the end
 		if(offset + length > fileSize)
 			length = fileSize - offset;   // Length is at least 1 since offset < fileSize
 
 		// Calculate block range for the blocks that contain this data
 		state int firstBlockNum = offset / f->m_block_size;
-		state int lastBlockNum = (offset + length) / f->m_block_size;
-		state int blockNum;
+		ASSERT(f->m_block_size > 0);
+		state int lastBlockNum = (offset + length - 1) / f->m_block_size;
 
 		// Start reads (if needed) of the block range required for this read, plus the read ahead blocks
 		// The futures for the read started will be stored in the cache but since things can be evicted from
@@ -84,8 +88,10 @@ public:
 
 		// Start blocks up to the read ahead size beyond the last needed block but don't go past the end of the file
 		state int lastBlockNumInFile = ((fileSize + f->m_block_size - 1) / f->m_block_size) - 1;
+		ASSERT(lastBlockNum <= lastBlockNumInFile);
 		int lastBlockToStart = std::min<int>(lastBlockNum + f->m_read_ahead_blocks, lastBlockNumInFile);
 
+		state int blockNum;
 		for(blockNum = firstBlockNum; blockNum <= lastBlockToStart; ++blockNum) {
 			Future<Reference<CacheBlock>> fblock;
 

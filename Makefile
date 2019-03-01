@@ -1,6 +1,11 @@
 export
 PLATFORM := $(shell uname)
 ARCH := $(shell uname -m)
+ifeq ("$(wildcard /etc/centos-release)", "")
+	LIBSTDCPP_HACK = 1
+else
+	LIBSTDCPP_HACK = 0
+endif
 
 TOPDIR := $(shell pwd)
 
@@ -70,6 +75,12 @@ ifneq ($(CCACHE),)
 else
   CCACHE_CC := $(CC)
   CCACHE_CXX := $(CXX)
+endif
+
+# Default variables don't get pushed into the environment, but scripts in build/
+# rely on the existence of CC in the environment.
+ifeq ($(origin CC), default)
+  CC := $(CC)
 endif
 
 ACTORCOMPILER := bin/actorcompiler.exe
@@ -198,6 +209,7 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	done
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
+
 
 docpreview: javadoc
 	@echo "Generating     docpreview"
