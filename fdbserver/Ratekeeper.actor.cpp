@@ -141,13 +141,15 @@ struct TransactionCounts {
 	int64_t total;
 	int64_t batch;
 
-	TransactionCounts() : total(0), batch(0) {}
+	double time;
+
+	TransactionCounts() : total(0), batch(0), time(0) {}
 };
 
 struct Ratekeeper {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
-	std::map<UID, std::pair<TransactionCounts, double> > proxy_transactionCountAndTime;
+	std::map<UID, TransactionCounts> proxy_transactionCounts;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	DatabaseConfiguration configuration;
 
@@ -517,10 +519,6 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 	limits.tpsLimitMetric = std::min(limits.tpsLimit, 1e6);
 	limits.reasonMetric = limitReason;
 
-	if( self->smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * limits.tpsLimit ) {
-		(*self->lastLimited) = now();
-	}
-
 	if (g_random->random01() < 0.1) {
 		std::string name = "RkUpdate" + limits.context;
 		TraceEvent(name.c_str())
@@ -531,7 +529,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 			.detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
 			.detail("TPSBasis", actualTps)
 			.detail("StorageServers", sscount)
-			.detail("Proxies", self->proxy_transactionCountAndTime.size())
+			.detail("Proxies", self->proxy_transactionCounts.size())
 			.detail("TLogs", tlcount)
 			.detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
@@ -603,15 +601,15 @@ ACTOR Future<Void> rateKeeper(
 				updateRate(&self, self.normalLimits);
 				updateRate(&self, self.batchLimits);
 
-				if(self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.normalLimits.tpsLimit) {
+				if(self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit) {
 					*self.lastLimited = now();
 				}
 
 
 				double tooOld = now() - 1.0;
-				for(auto p=self.proxy_transactionCountAndTime.begin(); p!=self.proxy_transactionCountAndTime.end(); ) {
-					if (p->second.second < tooOld)
-						p = self.proxy_transactionCountAndTime.erase(p);
+				for(auto p=self.proxy_transactionCounts.begin(); p!=self.proxy_transactionCounts.end(); ) {
+					if (p->second.time < tooOld)
+						p = self.proxy_transactionCounts.erase(p);
 					else
 						++p;
 				}
@@ -620,21 +618,21 @@ ACTOR Future<Void> rateKeeper(
 			when (GetRateInfoRequest req = waitNext(getRateInfo)) {
 				GetRateInfoReply reply;
 
-				auto& p = self.proxy_transactionCountAndTime[ req.requesterID ];
+				auto& p = self.proxy_transactionCounts[ req.requesterID ];
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.first).detail("Delta", req.totalReleasedTransactions - p.first);
-				if (p.first.total > 0) {
-					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.first.total );
+				if (p.total > 0) {
+					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.total );
 				}
-				if(p.first.batch > 0) {
-					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.first.batch );
+				if(p.batch > 0) {
+					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.batch );
 				}
 
-				p.first.total = req.totalReleasedTransactions;
-				p.first.batch = req.batchReleasedTransactions;
-				p.second = now();
+				p.total = req.totalReleasedTransactions;
+				p.batch = req.batchReleasedTransactions;
+				p.time = now();
 
-				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCountAndTime.size();
-				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCountAndTime.size();
+				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCounts.size();
+				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 				req.reply.send( reply );
 			}

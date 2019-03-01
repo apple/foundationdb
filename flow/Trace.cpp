@@ -1185,12 +1185,12 @@ T getNumericValue(TraceEventFields const& fields, std::string key, bool permissi
 		std::string type;
 
 		TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
+		ev.error(e);
 		if(fields.tryGetValue("Type", type)) {
 			ev.detail("Event", type);
 		}
 		ev.detail("FieldName", key);
 		ev.detail("FieldValue", field);
-		ev.error(e);
 
 		throw;
 	}
