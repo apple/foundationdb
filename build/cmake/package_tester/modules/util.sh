@@ -24,7 +24,7 @@ then
         successOr ${@:1}
     }
 
-    successOrOr() {
+    successOr() {
         local __res=$?
         if [ ${__res} -ne 0 ]
         then
