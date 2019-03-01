@@ -98,83 +98,83 @@ void fdb_flow_test() {
 }
 
 namespace FDB {
-class DatabaseImpl : public Database, NonCopyable {
-public:
-	virtual ~DatabaseImpl() { fdb_database_destroy(db); }
+	class DatabaseImpl : public Database, NonCopyable {
+	public:
+		virtual ~DatabaseImpl() { fdb_database_destroy(db); }
 
-	Reference<Transaction> createTransaction() override;
-	void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
+		Reference<Transaction> createTransaction() override;
+		void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
-private:
-	FDBDatabase* db;
-	explicit DatabaseImpl(FDBDatabase* db) : db(db) {}
+	private:
+		FDBDatabase* db;
+		explicit DatabaseImpl(FDBDatabase* db) : db(db) {}
 
-	friend class API;
-};
+		friend class API;
+	};
 
-class TransactionImpl : public Transaction, private NonCopyable, public FastAllocated<TransactionImpl> {
-	friend class DatabaseImpl;
+	class TransactionImpl : public Transaction, private NonCopyable, public FastAllocated<TransactionImpl> {
+		friend class DatabaseImpl;
 
-public:
-	virtual ~TransactionImpl() {
-		if (tr) {
-			fdb_transaction_destroy(tr);
+	public:
+		virtual ~TransactionImpl() {
+			if (tr) {
+				fdb_transaction_destroy(tr);
+			}
 		}
-	}
 
-	void setReadVersion(Version v) override;
-	Future<Version> getReadVersion() override;
+		void setReadVersion(Version v) override;
+		Future<Version> getReadVersion() override;
 
-	Future<Optional<FDBStandalone<ValueRef>>> get(const Key& key, bool snapshot = false) override;
-	Future<FDBStandalone<KeyRef>> getKey(const KeySelector& key, bool snapshot = false) override;
+		Future<Optional<FDBStandalone<ValueRef>>> get(const Key& key, bool snapshot = false) override;
+		Future<FDBStandalone<KeyRef>> getKey(const KeySelector& key, bool snapshot = false) override;
 
-	Future<Void> watch(const Key& key) override;
+		Future<Void> watch(const Key& key) override;
 
-	using Transaction::getRange;
-	Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
-	                                               GetRangeLimits limits = GetRangeLimits(), bool snapshot = false,
-	                                               bool reverse = false,
-	                                               FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
+		using Transaction::getRange;
+		Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin, const KeySelector& end,
+													   GetRangeLimits limits = GetRangeLimits(), bool snapshot = false,
+													   bool reverse = false,
+													   FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 
-	void addReadConflictRange(KeyRangeRef const& keys) override;
-	void addReadConflictKey(KeyRef const& key) override;
-	void addWriteConflictRange(KeyRangeRef const& keys) override;
-	void addWriteConflictKey(KeyRef const& key) override;
+		void addReadConflictRange(KeyRangeRef const& keys) override;
+		void addReadConflictKey(KeyRef const& key) override;
+		void addWriteConflictRange(KeyRangeRef const& keys) override;
+		void addWriteConflictKey(KeyRef const& key) override;
 
-	void atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) override;
-	void set(const KeyRef& key, const ValueRef& value) override;
-	void clear(const KeyRangeRef& range) override;
-	void clear(const KeyRef& key) override;
+		void atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) override;
+		void set(const KeyRef& key, const ValueRef& value) override;
+		void clear(const KeyRangeRef& range) override;
+		void clear(const KeyRef& key) override;
 
-	Future<Void> commit() override;
-	Version getCommittedVersion() override;
-	Future<FDBStandalone<StringRef>> getVersionstamp() override;
+		Future<Void> commit() override;
+		Version getCommittedVersion() override;
+		Future<FDBStandalone<StringRef>> getVersionstamp() override;
 
-	void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
+		void setOption(FDBTransactionOption option, Optional<StringRef> value = Optional<StringRef>()) override;
 
-	Future<Void> onError(Error const& e) override;
+		Future<Void> onError(Error const& e) override;
 
-	void cancel() override;
-	void reset() override;
+		void cancel() override;
+		void reset() override;
 
-	TransactionImpl() : tr(NULL) {}
-	TransactionImpl(TransactionImpl&& r) noexcept(true) {
-		tr = r.tr;
-		r.tr = NULL;
-	}
-	TransactionImpl& operator=(TransactionImpl&& r) noexcept(true) {
-		tr = r.tr;
-		r.tr = NULL;
-		return *this;
-	}
+		TransactionImpl() : tr(NULL) {}
+		TransactionImpl(TransactionImpl&& r) noexcept(true) {
+			tr = r.tr;
+			r.tr = NULL;
+		}
+		TransactionImpl& operator=(TransactionImpl&& r) noexcept(true) {
+			tr = r.tr;
+			r.tr = NULL;
+			return *this;
+		}
 
-private:
-	FDBTransaction* tr;
+	private:
+		FDBTransaction* tr;
 
-	explicit TransactionImpl(FDBDatabase* db);
-};
+		explicit TransactionImpl(FDBDatabase* db);
+	};
 
-    static inline void throw_on_error( fdb_error_t e ) {
+	static inline void throw_on_error( fdb_error_t e ) {
 		if (e)
 			throw Error(e);
 	}
@@ -262,47 +262,47 @@ private:
 		return fdb_error_predicate( pred, e.code() );
 	}
 
-    Reference<Database> API::createDatabase(std::string const& connFilename) {
-	    FDBDatabase *db;
+	Reference<Database> API::createDatabase(std::string const& connFilename) {
+		FDBDatabase *db;
 		throw_on_error(fdb_create_database(connFilename.c_str(), &db));
-	    return Reference<Database>(new DatabaseImpl(db));
-    }
+		return Reference<Database>(new DatabaseImpl(db));
+	}
 
-    int API::getAPIVersion() const {
+	int API::getAPIVersion() const {
 		return version;
 	}
 
-    Reference<Transaction> DatabaseImpl::createTransaction() {
-	    return Reference<Transaction>(new TransactionImpl(db));
-    }
+	Reference<Transaction> DatabaseImpl::createTransaction() {
+		return Reference<Transaction>(new TransactionImpl(db));
+	}
 
-    void DatabaseImpl::setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value) {
-	    if (value.present())
+	void DatabaseImpl::setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value) {
+		if (value.present())
 			throw_on_error(fdb_database_set_option(db, option, value.get().begin(), value.get().size()));
 		else
 			throw_on_error(fdb_database_set_option(db, option, NULL, 0));
-    }
+	}
 
-    TransactionImpl::TransactionImpl(FDBDatabase* db) {
-	    throw_on_error(fdb_database_create_transaction(db, &tr));
-    }
+	TransactionImpl::TransactionImpl(FDBDatabase* db) {
+		throw_on_error(fdb_database_create_transaction(db, &tr));
+	}
 
-    void TransactionImpl::setReadVersion(Version v) {
-	    fdb_transaction_set_read_version( tr, v );
-    }
+	void TransactionImpl::setReadVersion(Version v) {
+		fdb_transaction_set_read_version( tr, v );
+	}
 
-    Future<Version> TransactionImpl::getReadVersion() {
-	    return backToFuture<Version>( fdb_transaction_get_read_version( tr ), [](Reference<CFuture> f){
+	Future<Version> TransactionImpl::getReadVersion() {
+		return backToFuture<Version>( fdb_transaction_get_read_version( tr ), [](Reference<CFuture> f){
 				Version value;
 
 				throw_on_error( fdb_future_get_version( f->f, &value ) );
 
 				return value;
 			} );
-    }
+	}
 
-    Future<Optional<FDBStandalone<ValueRef>>> TransactionImpl::get(const Key& key, bool snapshot) {
-	    return backToFuture< Optional<FDBStandalone<ValueRef>> >( fdb_transaction_get( tr, key.begin(), key.size(), snapshot ), [](Reference<CFuture> f) {
+	Future<Optional<FDBStandalone<ValueRef>>> TransactionImpl::get(const Key& key, bool snapshot) {
+		return backToFuture< Optional<FDBStandalone<ValueRef>> >( fdb_transaction_get( tr, key.begin(), key.size(), snapshot ), [](Reference<CFuture> f) {
 				fdb_bool_t present;
 				uint8_t const* value;
 				int value_length;
@@ -315,17 +315,17 @@ private:
 					return Optional<FDBStandalone<ValueRef>>();
 				}
 			} );
-    }
+	}
 
-    Future<Void> TransactionImpl::watch(const Key& key) {
-	    return backToFuture< Void >( fdb_transaction_watch( tr, key.begin(), key.size() ), [](Reference<CFuture> f) {
+	Future<Void> TransactionImpl::watch(const Key& key) {
+		return backToFuture< Void >( fdb_transaction_watch( tr, key.begin(), key.size() ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
 				return Void();
 			} );
-    }
+	}
 
-    Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(const KeySelector& key, bool snapshot) {
-	    return backToFuture< FDBStandalone<KeyRef> >( fdb_transaction_get_key( tr, key.key.begin(), key.key.size(), key.orEqual, key.offset, snapshot ), [](Reference<CFuture> f) {
+	Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(const KeySelector& key, bool snapshot) {
+		return backToFuture< FDBStandalone<KeyRef> >( fdb_transaction_get_key( tr, key.key.begin(), key.key.size(), key.orEqual, key.offset, snapshot ), [](Reference<CFuture> f) {
 				uint8_t const* key;
 				int key_length;
 
@@ -333,12 +333,12 @@ private:
 
 				return FDBStandalone<KeyRef>( f, KeyRef( key, key_length ) );
 			} );
-    }
+	}
 
-    Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin, const KeySelector& end,
-                                                                    GetRangeLimits limits, bool snapshot, bool reverse,
-                                                                    FDBStreamingMode streamingMode) {
-	    // FIXME: iteration
+	Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin, const KeySelector& end,
+																	GetRangeLimits limits, bool snapshot, bool reverse,
+																	FDBStreamingMode streamingMode) {
+		// FIXME: iteration
 		return backToFuture< FDBStandalone<RangeResultRef> >( fdb_transaction_get_range( tr, begin.key.begin(), begin.key.size(), begin.orEqual, begin.offset, end.key.begin(), end.key.size(), end.orEqual, end.offset, limits.rows, limits.bytes, streamingMode, 1, snapshot, reverse ), [](Reference<CFuture> f) {
 				FDBKeyValue const* kv;
 				int count;
@@ -348,89 +348,89 @@ private:
 
 				return FDBStandalone<RangeResultRef>( f, RangeResultRef( VectorRef<KeyValueRef>( (KeyValueRef*)kv, count ), more ) );
 			} );
-    }
+	}
 
-    void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {
-	    throw_on_error( fdb_transaction_add_conflict_range( tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ ) );
-    }
+	void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {
+		throw_on_error( fdb_transaction_add_conflict_range( tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ ) );
+	}
 
-    void TransactionImpl::addReadConflictKey(KeyRef const& key) {
-	    return addReadConflictRange(KeyRange(KeyRangeRef(key, keyAfter(key))));
-    }
+	void TransactionImpl::addReadConflictKey(KeyRef const& key) {
+		return addReadConflictRange(KeyRange(KeyRangeRef(key, keyAfter(key))));
+	}
 
-    void TransactionImpl::addWriteConflictRange(KeyRangeRef const& keys) {
-	    throw_on_error( fdb_transaction_add_conflict_range( tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE ) );
-    }
+	void TransactionImpl::addWriteConflictRange(KeyRangeRef const& keys) {
+		throw_on_error( fdb_transaction_add_conflict_range( tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE ) );
+	}
 
-    void TransactionImpl::addWriteConflictKey(KeyRef const& key) {
-	    return addWriteConflictRange(KeyRange(KeyRangeRef(key, keyAfter(key))));
-    }
+	void TransactionImpl::addWriteConflictKey(KeyRef const& key) {
+		return addWriteConflictRange(KeyRange(KeyRangeRef(key, keyAfter(key))));
+	}
 
-    void TransactionImpl::atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) {
-	    fdb_transaction_atomic_op( tr, key.begin(), key.size(), operand.begin(), operand.size(), operationType );
-    }
+	void TransactionImpl::atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) {
+		fdb_transaction_atomic_op( tr, key.begin(), key.size(), operand.begin(), operand.size(), operationType );
+	}
 
-    void TransactionImpl::set(const KeyRef& key, const ValueRef& value) {
-	    fdb_transaction_set( tr, key.begin(), key.size(), value.begin(), value.size() );
-    }
+	void TransactionImpl::set(const KeyRef& key, const ValueRef& value) {
+		fdb_transaction_set( tr, key.begin(), key.size(), value.begin(), value.size() );
+	}
 
-    void TransactionImpl::clear(const KeyRangeRef& range) {
-	    fdb_transaction_clear_range( tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() );
-    }
+	void TransactionImpl::clear(const KeyRangeRef& range) {
+		fdb_transaction_clear_range( tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() );
+	}
 
-    void TransactionImpl::clear(const KeyRef& key) {
-	    fdb_transaction_clear( tr, key.begin(), key.size() );
-    }
+	void TransactionImpl::clear(const KeyRef& key) {
+		fdb_transaction_clear( tr, key.begin(), key.size() );
+	}
 
-    Future<Void> TransactionImpl::commit() {
-	    return backToFuture< Void >( fdb_transaction_commit( tr ), [](Reference<CFuture> f) {
+	Future<Void> TransactionImpl::commit() {
+		return backToFuture< Void >( fdb_transaction_commit( tr ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
 				return Void();
 			} );
-    }
+	}
 
-    Version TransactionImpl::getCommittedVersion() {
-	    Version v;
+	Version TransactionImpl::getCommittedVersion() {
+		Version v;
 
 		throw_on_error( fdb_transaction_get_committed_version( tr, &v ) );
 		return v;
-    }
+	}
 
-    Future<FDBStandalone<StringRef>> TransactionImpl::getVersionstamp() {
-	    return backToFuture<FDBStandalone<KeyRef>>(fdb_transaction_get_versionstamp(tr), [](Reference<CFuture> f) {
+	Future<FDBStandalone<StringRef>> TransactionImpl::getVersionstamp() {
+		return backToFuture<FDBStandalone<KeyRef>>(fdb_transaction_get_versionstamp(tr), [](Reference<CFuture> f) {
 			uint8_t const* key;
 			int key_length;
 
 			throw_on_error( fdb_future_get_key( f->f, &key, &key_length ) );
 
 			return FDBStandalone<StringRef>( f, StringRef( key, key_length ) );
-	    });
-    }
+		});
+	}
 
-    void TransactionImpl::setOption(FDBTransactionOption option, Optional<StringRef> value) {
-	    if ( value.present() ) {
+	void TransactionImpl::setOption(FDBTransactionOption option, Optional<StringRef> value) {
+		if ( value.present() ) {
 			throw_on_error( fdb_transaction_set_option( tr, option, value.get().begin(), value.get().size() ) );
 		} else {
 			throw_on_error( fdb_transaction_set_option( tr, option, NULL, 0 ) );
 		}
-    }
+	}
 
-    Future<Void> TransactionImpl::onError(Error const& e) {
-	    return backToFuture< Void >( fdb_transaction_on_error( tr, e.code() ), [](Reference<CFuture> f) {
+	Future<Void> TransactionImpl::onError(Error const& e) {
+		return backToFuture< Void >( fdb_transaction_on_error( tr, e.code() ), [](Reference<CFuture> f) {
 				throw_on_error( fdb_future_get_error( f->f ) );
 				return Void();
 			} );
-    }
+	}
 
-    void TransactionImpl::cancel() {
-	    fdb_transaction_cancel( tr );
-    }
+	void TransactionImpl::cancel() {
+		fdb_transaction_cancel( tr );
+	}
 
-    void TransactionImpl::reset() {
-	    fdb_transaction_reset( tr );
-    }
+	void TransactionImpl::reset() {
+		fdb_transaction_reset( tr );
+	}
 
-    std::string printable( const StringRef& val ) {
+	std::string printable( const StringRef& val ) {
 		std::string s;
 		for(int i=0; i<val.size(); i++) {
 			uint8_t b = val[i];
