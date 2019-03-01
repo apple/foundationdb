@@ -299,6 +299,7 @@ public:
 	Arena lastArena;
 	double cpuUsage;
 	double diskUsage;
+	double currentRate = 1.0;
 
 	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
 	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
@@ -483,6 +484,7 @@ public:
 			specialCounter(cc, "DurableVersion", [self](){ return self->durableVersion.get(); });
 			specialCounter(cc, "DesiredOldestVersion", [self](){ return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
+			specialCounter(cc, "LocalRatekeeper", [self]{ return self->currentRate; });
 
 			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
@@ -1447,10 +1449,12 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	StorageQueuingMetricsReply reply;
 	reply.localTime = now();
 	reply.instanceID = self->instanceID;
+	reply.tag = self->tag;
 	reply.bytesInput = self->counters.bytesInput.getValue();
 	reply.bytesDurable = self->counters.bytesDurable.getValue();
 
 	reply.storageBytes = self->storage.getStorageBytes();
+	reply.localRateLimit = self->currentRate;
 
 	reply.version = self->version.get();
 	reply.cpuUsage = self->cpuUsage;
@@ -3333,6 +3337,23 @@ ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
 	return Void();
 }
 
+ACTOR Future<Void> localRatekeeper(StorageServer* self) {
+	loop {
+		// we want to allow for bursts as long as the server is happy
+		// This actor has to run with very high priority so it is imperative
+		// that it doeesn't run too often and is cheap
+		wait(delay(self->currentRate > 0.99 ? 5.0 : 1.0, TaskMaxPriority));
+		auto versionLag = self->storageVersion() - self->durableVersion.get();
+		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
+			self->currentRate = 0.0;
+		} else if (versionLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
+			self->currentRate = versionLag / SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX;
+		} else {
+			self->currentRate = 1.0;
+		}
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
@@ -3349,6 +3370,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(self->otherError.getFuture());
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
+	actors.add(localRatekeeper(self));
 
 	self->coreStarted.send( Void() );
 
@@ -3410,23 +3432,39 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.recieved"); //.detail("TaskID", g_network->getCurrentTask());
 
-				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
-					req.reply.send(GetValueReply());
-				else
-					actors.add( getValueQ( self, req ) );
+				if (g_random->random01() > self->currentRate) {
+					req.reply.sendError(future_version());
+				} else {
+					if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
+						req.reply.send(GetValueReply());
+					else
+						actors.add( getValueQ( self, req ) );
+				}
 			}
 			when( WatchValueRequest req = waitNext(ssi.watchValue.getFuture()) ) {
 				// TODO: fast load balancing?
 				// SOMEDAY: combine watches for the same key/value into a single watch
-				actors.add( watchValueQ( self, req ) );
+				if (g_random->random01() > self->currentRate) {
+					req.reply.sendError(future_version());
+				} else {
+					actors.add( watchValueQ( self, req ) );
+				}
 			}
 			when (GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
 				// Warning: This code is executed at extremely high priority (TaskLoadBalancedEndpoint), so downgrade before doing real work
-				actors.add( getKey( self, req ) );
+				if (g_random->random01() > self->currentRate) {
+					req.reply.sendError(future_version());
+				} else {
+					actors.add( getKey( self, req ) );
+				}
 			}
 			when (GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture()) ) {
 				// Warning: This code is executed at extremely high priority (TaskLoadBalancedEndpoint), so downgrade before doing real work
-				actors.add( getKeyValues( self, req ) );
+				if (g_random->random01() > self->currentRate) {
+					req.reply.sendError(future_version());
+				} else {
+					actors.add( getKeyValues( self, req ) );
+				}
 			}
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {
