@@ -199,6 +199,9 @@ private:
 
 inline bool Endpoint::isLocal() const {
 	auto localAddrs = FlowTransport::transport().getLocalAddresses();
+	if (localAddrs.empty()) {
+		return addresses[0] == NetworkAddress();
+	}
 	return std::find(localAddrs.begin(), localAddrs.end(), addresses[0]) != localAddrs.end();
 }
 

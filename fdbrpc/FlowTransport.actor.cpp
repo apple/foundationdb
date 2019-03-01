@@ -34,7 +34,7 @@
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-static NetworkAddressList g_currentDeliveryPeerAddress;
+static NetworkAddressList g_currentDeliveryPeerAddress = {NetworkAddress()};
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 const UID WLTOKEN_PING_PACKET(-1, 1);
@@ -491,11 +491,14 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 		}
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
-		if (destination.token.first() != -1)
-			sendPacket( self,
-				SerializeSource<Endpoint>( Endpoint( self->localAddresses, destination.token ) ),
-				Endpoint( destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
-				false, true );
+		if (destination.token.first() != -1) {
+			sendPacket(self,
+			           SerializeSource<Endpoint>(Endpoint(self->localAddresses.empty()
+			                                                  ? NetworkAddressList(1, NetworkAddress())
+			                                                  : self->localAddresses,
+			                                              destination.token)),
+			           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false, true);
+		}
 	}
 
 	if( inReadSocket )
@@ -905,7 +908,7 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
 	endpoint.token = g_random->randomUniqueID();
 	if (receiver->isStream()) {
-		endpoint.addresses = self->localAddresses;
+		endpoint.addresses = self->localAddresses.empty() ? NetworkAddressList(1, NetworkAddress()) : self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
 	} else {
 		endpoint.addresses = {NetworkAddress()};
@@ -919,7 +922,7 @@ void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageRece
 }
 
 void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.addresses = self->localAddresses;
+	endpoint.addresses = self->localAddresses.empty() ? NetworkAddressList(1, NetworkAddress()) : self->localAddresses;
 	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
 	Endpoint::Token otoken = endpoint.token;
 	self->endpoints.insert( receiver, endpoint.token, taskID );
