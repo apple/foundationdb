@@ -28,10 +28,6 @@
 # build directory can be found in `/build`, the
 # source code will be located in `/foundationdb`
 
-declare -A test_start_state
-declare -A test_exit_state
-declare -a tests
-
 if [ -z "${tests_sh_included}" ]
 then
    tests_sh_included=1

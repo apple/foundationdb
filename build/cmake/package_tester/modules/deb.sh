@@ -10,7 +10,7 @@ then
        local __res=0
        enterfun
        echo "Install FoundationDB"
-       cd /build
+       cd /build/packages
        package_names=()
        for f in "${package_files[@]}"
        do
