@@ -1394,8 +1394,8 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 	}
 }
 
-ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database() ) {
-	state std::string id = g_nondeterministic_random->randomUniqueID().toString();
+ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
+										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1451,8 +1451,9 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest);
-	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest);
+	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
+	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
 	state DatabaseBackupAgent backupAgent(src);
 
@@ -3060,7 +3061,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(ccf, -1, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
