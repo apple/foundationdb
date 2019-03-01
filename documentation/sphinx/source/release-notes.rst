@@ -20,6 +20,8 @@ Performance
 Fixes
 -----
 
+* Python: Creating a ``SingleFloat`` for the tuple layer didn't work with integers. `(PR #1216) <https://github.com/apple/foundationdb/pull/1216>`_
+
 Status
 ------
 
