@@ -49,7 +49,7 @@ Encoding: `b'\x05' + ''.join(map(lambda x: b'\x00\xff' if x is None else pack(x)
 Test case: `pack( (“foo\x00bar”, None, ()) ) == b'\x05\x01foo\x00\xffbar\x00\x00\xff\x05\x00\x00'`  
 Status: Standard
 
-The list is ended with a 0x00 byte. Nulls within the tuple are encoded as `\x00\xff`. There is no other null escaping. In particular, 0x00 bytes that are within the nested types can be left as-is as they are passed over when decoding the interior types. To show how this fixes the bug in the previous version of nested tuples, the empty tuple is now encoded as `\x05\x00` while the tuple containing only null is encoded as `\x05\x00\xff\x00`, so the first tuple will sort first.
+The list ends with a 0x00 byte. Nulls within the tuple are encoded as `\x00\xff`. There is no other null escaping. In particular, 0x00 bytes that are within the nested types can be left as-is as they are passed over when decoding the interior types. To show how this fixes the bug in the previous version of nested tuples, the empty tuple is now encoded as `\x05\x00` while the tuple containing only null is encoded as `\x05\x00\xff\x00`, so the first tuple will sort first.
 
 ### **Negative arbitrary-precision Integer**
 
@@ -90,7 +90,7 @@ Typecodes:
 &nbsp;`0x21` - double (64 bits)  
 &nbsp;`0x22` - long double (80 bits)  
 Length: 4 - 10 bytes  
-Test case: `pack( -42f ) == b'=\xd7\xff\xff'`  
+Test case: `pack( -42f ) == b'\x20\x3d\xd7\xff\xff'`
 Encoding: Big-endian IEEE binary representation, followed by the following transformation:  
 ```python
  if ord(rep[0])&0x80: # Check sign bit
