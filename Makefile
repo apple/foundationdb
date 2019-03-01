@@ -77,6 +77,12 @@ else
   CCACHE_CXX := $(CXX)
 endif
 
+# Default variables don't get pushed into the environment, but scripts in build/
+# rely on the existence of CC in the environment.
+ifeq ($(origin CC), default)
+  CC := $(CC)
+endif
+
 ACTORCOMPILER := bin/actorcompiler.exe
 
 # UNSTRIPPED := 1
