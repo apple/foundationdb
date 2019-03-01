@@ -230,6 +230,25 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
+         "batch_performance_limited_by":{
+            "reason_server_id":"7f8d623d0cb9966e",
+            "reason_id":0,
+            "name":{
+               "$enum":[
+                  "workload",
+                  "storage_server_write_queue_size",
+                  "storage_server_write_bandwidth_mvcc",
+                  "storage_server_readable_behind",
+                  "log_server_mvcc_write_bandwidth",
+                  "log_server_write_queue",
+                  "storage_server_min_free_space",
+                  "storage_server_min_free_space_ratio",
+                  "log_server_min_free_space",
+                  "log_server_min_free_space_ratio"
+               ]
+            },
+            "description":"The database is not being saturated by the workload."
+         },
          "performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
             "reason_id":0,
@@ -249,7 +268,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             },
             "description":"The database is not being saturated by the workload."
          },
+         "batch_transactions_per_second_limit":0,
          "transactions_per_second_limit":0,
+         "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,

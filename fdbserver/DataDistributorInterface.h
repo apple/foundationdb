@@ -51,24 +51,26 @@ struct DataDistributorInterface {
 struct GetRateInfoRequest {
 	UID requesterID;
 	int64_t totalReleasedTransactions;
+	int64_t batchReleasedTransactions;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, reply);
 	}
 };
 
 struct GetRateInfoReply {
 	double transactionRate;
+	double batchTransactionRate;
 	double leaseDuration;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration);
 	}
 };
 
