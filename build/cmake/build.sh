@@ -87,7 +87,8 @@ package_fast() {
     for _ in 1
     do
         make -j`nproc` packages
-        make -j`nproc` package
+        cpack
+        cpack -G RPM -D GENERATE_EL6=ON
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -133,6 +134,7 @@ rpm() {
         then
             break
         fi
+        fakeroot cpack -G RPM -D GENERATE_EL6=ON
         fakeroot cpack -G RPM
         __res=$?
         if [ ${__res} -ne 0 ]
