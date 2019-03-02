@@ -239,7 +239,7 @@ struct GetHealthMetricsRequest
 	ReplyPromise<struct GetHealthMetricsReply> reply;
 	bool detailed;
 
-	GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar)
