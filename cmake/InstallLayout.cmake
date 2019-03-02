@@ -27,34 +27,34 @@ function(install_symlink)
     set(multi_value_options "")
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
+    set(rel_path "")
     string(REGEX MATCHALL "\\/" slashes "${IN_LINK_NAME}")
-    list(LENGTH slashes num_link_subdirs)
-    foreach(i RANGE 1 ${num_link_subdirs})
+    foreach(ignored IN LISTS slashes)
       set(rel_path "../${rel_path}")
     endforeach()
     if("${IN_FILE_DIR}" MATCHES "bin")
       if("${IN_LINK_DIR}" MATCHES "lib")
         install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
+          TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "lib/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-tgz")
         install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
+          TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "usr/lib64/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-el6"
                      "${IN_COMPONENT}-el7"
                      "${IN_COMPONENT}-deb")
         install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
+          TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "usr/lib64/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-deb")
       elseif("${IN_LINK_DIR}" MATCHES "bin")
         install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
+          TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "bin/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-tgz")
         install_symlink_impl(
-          TO "../${rel_path}/bin/${IN_FILE_NAME}"
+          TO "../${rel_path}bin/${IN_FILE_NAME}"
           DESTINATION "usr/bin/${IN_LINK_NAME}"
           COMPONENTS "${IN_COMPONENT}-el6"
                      "${IN_COMPONENT}-el7"
