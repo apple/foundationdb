@@ -259,7 +259,7 @@ struct GetHealthMetricsReply
 		update(healthMetrics, true, true);
 	}
 
-	void update(HealthMetrics healthMetrics, bool detailedInput, bool detailedOutput)
+	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput)
 	{
 		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
 		BinaryWriter bw(IncludeVersion());
