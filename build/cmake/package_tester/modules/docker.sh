@@ -119,7 +119,7 @@ then
                     then
                         docker_wait_any
                     fi
-                    echo "Starting Test ${curr_test}"
+                    echo "Starting Test ${curr_name}/${curr_test}"
                     docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
                         -v "${fdb_build}:/build"\
                         ${curr_name}\
