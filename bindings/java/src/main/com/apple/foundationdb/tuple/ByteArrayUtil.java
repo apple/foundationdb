@@ -187,10 +187,6 @@ public class ByteArrayUtil {
 			// Array might change size. This is the "tricky" case.
 			int newLength = replace(src, offset, length, pattern, replacement, null);
 			if(newLength != length) {
-				if(newLength < 0) {
-					System.out.println("oops");
-					newLength = replace(src, offset, length, pattern, replacement, null);
-				}
 				dest = ByteBuffer.allocate(newLength);
 			}
 			else {
