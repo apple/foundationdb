@@ -9,9 +9,9 @@ if(NOT OPEN_FOR_IDE)
   install_symlink(
     COMPONENT clients
     FILE_DIR bin
-    LINK_DIR lib
+    LINK_DIR fdbmonitor
     FILE_NAME fdbbackup
-    LINK_NAME foundationdb/backup_agent/backup_agent)
+    LINK_NAME backup_agent/backup_agent)
   install_symlink(
     COMPONENT clients
     FILE_DIR bin

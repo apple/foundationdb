@@ -59,6 +59,17 @@ function(install_symlink)
           COMPONENTS "${IN_COMPONENT}-el6"
                      "${IN_COMPONENT}-el7"
                      "${IN_COMPONENT}-deb")
+      elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
+        install_symlink_impl(
+          TO "../../${rel_path}bin/${IN_FILE_NAME}"
+          DESTINATION "lib/foundationdb/${IN_LINK_NAME}"
+          COMPONENTS "${IN_COMPONENT}-tgz")
+        install_symlink_impl(
+          TO "../../${rel_path}bin/${IN_FILE_NAME}"
+          DESTINATION "usr/lib/foundationdb/${IN_LINK_NAME}"
+          COMPONENTS "${IN_COMPONENT}-el6"
+                     "${IN_COMPONENT}-el7"
+                     "${IN_COMPONENT}-deb")
       else()
         message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")
       endif()
@@ -276,7 +287,7 @@ set(CPACK_RPM_SERVER-EL7_PRE_UNINSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
 
 set(CPACK_RPM_SERVER-EL6_PACKAGE_REQUIRES
-  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}, initscripts >= 9.03")
+  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 #set(CPACK_RPM_java_PACKAGE_REQUIRES
