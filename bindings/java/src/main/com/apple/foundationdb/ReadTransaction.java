@@ -93,9 +93,10 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param keyBegin the first key in the range (inclusive)
 	 * @param keyEnd the last key in the range (exclusive)
+	 * @return {@code true} if the read conflict range was added and {@code false} otherwise
 	 * @see Transaction#addReadConflictRange(byte[], byte[])
 	 */
-	void addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd);
+	boolean addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd);
 
 	/**
 	 * Adds the read conflict range that this {@code ReadTransaction} would have added as if it had read
@@ -104,9 +105,10 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  of the database does not add a conflict range for the read key.
 	 *
 	 * @param key the key to add to the read conflict range set (it this is not a snapshot view of the database)
+	 * @return {@code true} if the read conflict key was added and {@code false} otherwise
 	 * @see Transaction#addReadConflictKey(byte[])
 	 */
-	void addReadConflictKeyIfNotSnapshot(byte[] key);
+	boolean addReadConflictKeyIfNotSnapshot(byte[] key);
 
 	/**
 	 * Gets a value from the database. The call will return {@code null} if the key is not

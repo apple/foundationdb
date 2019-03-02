@@ -142,13 +142,15 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public void addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
-			// Do nothing
+		public boolean addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
+			// This is a snapshot transaction; do not add the conflict range.
+			return false;
 		}
 
 		@Override
-		public void addReadConflictKeyIfNotSnapshot(byte[] key) {
-			// Do nothing
+		public boolean addReadConflictKeyIfNotSnapshot(byte[] key) {
+			// This is a snapshot transaction; do not add the conflict key.
+			return false;
 		}
 
 		@Override
@@ -352,8 +354,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public void addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
+	public boolean addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd) {
 		addReadConflictRange(keyBegin, keyEnd);
+		return true;
 	}
 
 	@Override
@@ -362,8 +365,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public void addReadConflictKeyIfNotSnapshot(byte[] key) {
+	public boolean addReadConflictKeyIfNotSnapshot(byte[] key) {
 		addReadConflictKey(key);
+		return true;
 	}
 
 	@Override
