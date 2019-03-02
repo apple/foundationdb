@@ -126,7 +126,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
 			if (expectingDetailedReply) {
 				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
-				lastDetailedReply = g_network->now();
+				lastDetailedReply = now();
 			}
 		}
 		when ( wait(leaseTimeout ) ) {
