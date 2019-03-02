@@ -6,6 +6,8 @@ then
 
    source ${source_dir}/modules/util.sh
 
+   conf_save_extension=".rpmsave"
+
    install() {
        local __res=0
        enterfun
