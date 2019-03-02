@@ -8,14 +8,13 @@ if [ $1 -eq 1 ]; then
       NEWDB=1
     fi
 
-    /usr/bin/systemctl enable foundationdb >/dev/null 2>&1
-    /usr/bin/systemctl start foundationdb >/dev/null 2>&1
+    /sbin/chkconfig --add foundationdb >/dev/null 2>&1
+    /sbin/service foundationdb start >/dev/null 2>&1
 
     if [ "$NEWDB" != "" ]; then
         /usr/bin/fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory" --timeout 20 >/dev/null 2>&1
     fi
 else
-    /usr/bin/systemctl condrestart foundationdb >/dev/null 2>&1
+    /sbin/service foundationdb condrestart >/dev/null 2>&1
 fi
 exit 0
-

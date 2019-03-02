@@ -277,7 +277,7 @@ set(CPACK_RPM_SERVER-EL7_PRE_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preserver.sh)
 
 set(CPACK_RPM_SERVER-EL6_POST_INSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver.sh)
+  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver-el6.sh)
 set(CPACK_RPM_SERVER-EL7_POST_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver.sh)
 
