@@ -1500,7 +1500,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if (key == metadataVersionKey) {
-		if(!tr.apiVersionAtLeast(610)) {
+		if(!tr.apiVersionAtLeast(610) && key >= getMaxWriteKey()) {
 			throw key_outside_legal_range();
 		}
 

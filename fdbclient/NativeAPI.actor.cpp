@@ -474,7 +474,7 @@ DatabaseContext::DatabaseContext(
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
 	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvcInsertLocation(0)
+	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0)
 {
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -1943,15 +1943,15 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 			return metadataVersion.getFuture();
 		} else {
 			if(ver.isError()) return ver.getError();
-			if(ver.get() == cx->metadataVersionCache[cx->mvcInsertLocation].first) {
-				return cx->metadataVersionCache[cx->mvcInsertLocation].second;
+			if(ver.get() == cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+				return cx->metadataVersionCache[cx->mvCacheInsertLocation].second;
 			}
 
 			Version v = ver.get();
-			int hi = cx->mvcInsertLocation;
-			int lo = (cx->mvcInsertLocation+1)%cx->metadataVersionCache.size();
+			int hi = cx->mvCacheInsertLocation;
+			int lo = (cx->mvCacheInsertLocation+1)%cx->metadataVersionCache.size();
 
-			while(true) {
+			while(hi!=lo) {
 				int cu = hi > lo ? (hi + lo)/2 : ((hi + cx->metadataVersionCache.size() + lo)/2)%cx->metadataVersionCache.size();
 				if(v == cx->metadataVersionCache[cu].first) {
 					return cx->metadataVersionCache[cu].second;
@@ -2872,9 +2872,9 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<Transact
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
-	if(rep.version > cx->metadataVersionCache[cx->mvcInsertLocation].first) {
-		cx->mvcInsertLocation = (cx->mvcInsertLocation + 1)%cx->metadataVersionCache.size();
-		cx->metadataVersionCache[cx->mvcInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
+	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
 	}
 
 	metadataVersion.send(rep.metadataVersion);

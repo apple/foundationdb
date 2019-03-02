@@ -160,7 +160,7 @@ public:
 
 	int apiVersion;
 
-	int mvcInsertLocation;
+	int mvCacheInsertLocation;
 	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
 };
 

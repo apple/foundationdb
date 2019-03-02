@@ -165,10 +165,19 @@ struct VersionStampWorkload : TestWorkload {
 		state Version readVersion = wait(tr.getReadVersion());
 
 		if(BUGGIFY) {
-			tr.reset();
 			if(g_random->random01() < 0.5) {
-				readVersion--;
+				loop {
+					try {
+						tr.makeSelfConflicting();
+						wait(tr.commit());
+						readVersion = tr.getCommittedVersion() - 1;
+						break;
+					} catch( Error &e ) {
+						wait( tr.onError(e) );
+					}
+				}
 			}
+			tr.reset();
 			tr.setVersion(readVersion);
 		}
 
@@ -177,8 +186,11 @@ struct VersionStampWorkload : TestWorkload {
 			try {
 				Standalone<RangeResultRef> result_ = wait(tr.getRange(KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
-				if((self->apiVersion >= 610 || self->apiVersion == Database::API_VERSION_LATEST) && tr.get(metadataVersionKey).get().present() && self->key_commit.count(metadataVersionKey)) {
-					result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey,tr.get(metadataVersionKey).get().get()));
+				if((self->apiVersion >= 610 || self->apiVersion == Database::API_VERSION_LATEST) && self->key_commit.count(metadataVersionKey)) {
+					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
+					if(mVal.present()) {
+						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey,mVal.get()));
+					}
 				}
 				ASSERT(result.size() <= self->nodeCount);
 				if (self->failIfDataLost) {
