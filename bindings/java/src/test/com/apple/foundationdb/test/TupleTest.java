@@ -916,6 +916,42 @@ public class TupleTest {
 						" with " + ByteArrayUtil.printable(replacement) + " in " + ByteArrayUtil.printable(src));
 			}
 		}
+
+		try {
+			ByteArrayUtil.replace(null, 0, 1, new byte[]{0x00}, new byte[]{0x00, FF});
+			throw new RuntimeException("able to replace null bytes");
+		}
+		catch(NullPointerException e) {
+			// eat
+		}
+		try {
+			ByteArrayUtil.replace(new byte[]{0x00, 0x01}, -1, 2, new byte[]{0x00}, new byte[]{0x00, FF});
+			throw new RuntimeException("able to use negative offset");
+		}
+		catch(IllegalArgumentException e) {
+			// eat
+		}
+		try {
+			ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 3, 2, new byte[]{0x00}, new byte[]{0x00, FF});
+			throw new RuntimeException("able to use offset after end of array");
+		}
+		catch(IllegalArgumentException e) {
+			// eat
+		}
+		try {
+			ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 1, -1, new byte[]{0x00}, new byte[]{0x00, FF});
+			throw new RuntimeException("able to use negative length");
+		}
+		catch(IllegalArgumentException e) {
+			// eat
+		}
+		try {
+			ByteArrayUtil.replace(new byte[]{0x00, 0x01}, 1, 2, new byte[]{0x00}, new byte[]{0x00, FF});
+			throw new RuntimeException("able to give length that exceeds end of the array");
+		}
+		catch(IllegalArgumentException e) {
+			// eat
+		}
 	}
 
 	private static void runTests(final int reps, TransactionContext db) {

@@ -173,35 +173,31 @@ public class ByteArrayUtil {
 	 */
 	public static byte[] replace(byte[] src, int offset, int length,
 			byte[] pattern, byte[] replacement) {
+		if(offset < 0 || offset > src.length) {
+			throw new IllegalArgumentException("Invalid offset for array pattern replacement");
+		}
+		if(length < 0 || offset + length > src.length) {
+			throw new IllegalArgumentException("Invalid length for array pattern replacement");
+		}
 		if(pattern == null || pattern.length == 0) {
 			return Arrays.copyOfRange(src, offset, offset + length);
 		}
 		ByteBuffer dest;
 		if(replacement == null || replacement.length != pattern.length) {
 			// Array might change size. This is the "tricky" case.
-			byte patternFirst = pattern[0];
-			int patternOccurrences = 0;
-			int currentPosition = offset;
-			while(currentPosition < offset + length) {
-				if(src[currentPosition] == patternFirst && regionEquals(src, currentPosition, pattern)) {
-					patternOccurrences++;
-					currentPosition += pattern.length;
+			int newLength = replace(src, offset, length, pattern, replacement, null);
+			if(newLength != length) {
+				if(newLength < 0) {
+					System.out.println("oops");
+					newLength = replace(src, offset, length, pattern, replacement, null);
 				}
-				else {
-					currentPosition++;
-				}
-			}
-			if(patternOccurrences == 0) {
-				// Pattern doesn't occur. Just return a copy of the needed region.
-				return Arrays.copyOfRange(src, offset, offset + length);
-			}
-			int replacementLength = (replacement == null) ? 0 : replacement.length;
-			int newLength = length + patternOccurrences * (replacementLength - pattern.length);
-			if(newLength == 0) {
-				return new byte[0];
+				dest = ByteBuffer.allocate(newLength);
 			}
 			else {
-				dest = ByteBuffer.allocate(newLength);
+				// If the array size didn't change, as the pattern and replacement lengths
+				// differ, it must be the case that there weren't any occurrences of pattern in src
+				// between offset and offset + length, so we can just return a copy.
+				return Arrays.copyOfRange(src, offset, offset + length);
 			}
 		}
 		else {
@@ -212,21 +208,30 @@ public class ByteArrayUtil {
 		return dest.array();
 	}
 
-	static void replace(byte[] src, int offset, int length, byte[] pattern, byte[] replacement, ByteBuffer dest) {
+	// Replace any occurrences of pattern in src between offset and offset + length with replacement.
+	// The new array is serialized into dest and the new length is returned.
+	static int replace(byte[] src, int offset, int length, byte[] pattern, byte[] replacement, ByteBuffer dest) {
 		if(pattern == null || pattern.length == 0) {
-			dest.put(src, offset, length);
-			return;
+			if(dest != null) {
+				dest.put(src, offset, length);
+			}
+			return length;
 		}
 		byte patternFirst = pattern[0];
 		int lastPosition = offset;
 		int currentPosition = offset;
+		int newLength = 0;
+		int replacementLength = replacement == null ? 0 : replacement.length;
 
 		while(currentPosition < offset + length) {
 			if(src[currentPosition] == patternFirst && regionEquals(src, currentPosition, pattern)) {
-				dest.put(src, lastPosition, currentPosition - lastPosition);
-				if(replacement != null) {
-					dest.put(replacement);
+				if(dest != null) {
+					dest.put(src, lastPosition, currentPosition - lastPosition);
+					if(replacement != null) {
+						dest.put(replacement);
+					}
 				}
+				newLength += currentPosition - lastPosition + replacementLength;
 				currentPosition += pattern.length;
 				lastPosition = currentPosition;
 			}
@@ -235,7 +240,12 @@ public class ByteArrayUtil {
 			}
 		}
 
-		dest.put(src, lastPosition, currentPosition - lastPosition);
+		newLength += currentPosition - lastPosition;
+		if(dest != null) {
+			dest.put(src, lastPosition, currentPosition - lastPosition);
+		}
+
+		return newLength;
 	}
 
 	/**
