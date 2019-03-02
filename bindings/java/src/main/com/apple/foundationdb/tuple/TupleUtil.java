@@ -40,6 +40,7 @@ class TupleUtil {
 	private static final Charset UTF8 = Charset.forName("UTF-8");
 	private static final BigInteger LONG_MIN_VALUE = BigInteger.valueOf(Long.MIN_VALUE);
 	private static final BigInteger LONG_MAX_VALUE = BigInteger.valueOf(Long.MAX_VALUE);
+	private static final int UUID_BYTES = 2 * Long.BYTES;
 	private static final IterableComparator iterableComparator = new IterableComparator();
 
 	private static final byte BYTES_CODE            = 0x01;
@@ -475,10 +476,10 @@ class TupleUtil {
 			state.add(true, start);
 		}
 		else if(code == UUID_CODE) {
-			ByteBuffer bb = ByteBuffer.wrap(rep, start, 2 * Long.BYTES).order(ByteOrder.BIG_ENDIAN);
+			ByteBuffer bb = ByteBuffer.wrap(rep, start, UUID_BYTES).order(ByteOrder.BIG_ENDIAN);
 			long msb = bb.getLong();
 			long lsb = bb.getLong();
-			state.add(new UUID(msb, lsb), start + 16);
+			state.add(new UUID(msb, lsb), start + UUID_BYTES);
 		}
 		else if(code == POS_INT_END) {
 			int n = rep[start] & 0xff;
@@ -533,8 +534,8 @@ class TupleUtil {
 				if (val.compareTo(LONG_MIN_VALUE) >= 0 && val.compareTo(LONG_MAX_VALUE) <= 0) {
 					state.add(val.longValue(), end);
 				} else {
-					// This can occur if the thing can be represented with 8 bytes but not
-					// the right sign information.
+					// This can occur if the thing can be represented with 8 bytes but requires using
+					// the most-significant bit as a normal bit instead of the sign bit.
 					state.add(val, end);
 				}
 			}
@@ -745,7 +746,7 @@ class TupleUtil {
 			else if(item instanceof Boolean)
 				packedSize += 1;
 			else if(item instanceof UUID)
-				packedSize += 1 + 2 * Long.BYTES;
+				packedSize += 1 + UUID_BYTES;
 			else if(item instanceof BigInteger) {
 				BigInteger bigInt = (BigInteger)item;
 				int byteCount = minimalByteCount(bigInt);
