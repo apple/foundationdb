@@ -1,7 +1,11 @@
 # RPM specifics
 if(CPACK_GENERATOR MATCHES "RPM")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
-  set(CPACK_COMPONENTS_ALL clients-el6 clients-el7 server-el6 server-el7)
+  if(GENERATE_EL6)
+    set(CPACK_COMPONENTS_ALL clients-el6 server-el6)
+  else()
+    set(CPACK_COMPONENTS_ALL clients-el7 server-el7)
+  endif()
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
 elseif(CPACK_GENERATOR MATCHES "DEB")
