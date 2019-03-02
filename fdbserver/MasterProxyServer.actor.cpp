@@ -112,7 +112,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			bool detailed = (g_network->now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE);
+			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, detailed)));
 			expectingDetailedReply = detailed;
 		}
