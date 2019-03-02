@@ -253,7 +253,7 @@ struct GetHealthMetricsReply
 	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 
-	explicit GetHealthMetricsReply(HealthMetrics healthMetrics = HealthMetrics()) :
+	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics()) :
 		healthMetrics(healthMetrics)
 	{
 		update(healthMetrics, true, true);
