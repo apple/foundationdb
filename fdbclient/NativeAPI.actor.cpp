@@ -983,7 +983,12 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::SEND_DETAILED_HEALTH_METRICS:
 			validateOptionValue(value, true);
 			int sendDetailedHealthMetrics;
-			std::istringstream(value.get().toString()) >> sendDetailedHealthMetrics;
+			try {
+				sendDetailedHealthMetrics = std::stoi(value.get().toString());
+			} catch (...) {
+				TraceEvent(SevWarnAlways, "InvalidDetailedMetricsOptionValue").detail("Value", value.get().toString());
+				throw invalid_option_value();
+			}
 			networkOptions.sendDetailedHealthMetrics = (sendDetailedHealthMetrics > 0);
 			break;
 		default:
