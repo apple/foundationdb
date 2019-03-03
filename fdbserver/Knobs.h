@@ -57,6 +57,7 @@ public:
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
 	int64_t UPDATE_STORAGE_BYTE_LIMIT;
+	int64_t REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
 	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
