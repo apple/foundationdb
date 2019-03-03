@@ -242,6 +242,95 @@ static Version decodeTagMessageRefsKey( StringRef key ) {
 	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessageRefsKey(key), Unversioned() ) );
 }
 
+// Reservations will be granted in the order that they are received (FIFO).
+// If this reservation is a part of a call with a timeout, then one might wish
+// to alter this class to support granting them in reverse order (LIFO).
+class ResourceLimiter {
+public:
+	// I would like this to be an RAII move-only class.  However, those don't
+	// play well with Futures and wait statements, so it has to be a heap allocated
+	// Reference<> instead. :/
+	class Reservation : public ReferenceCounted<Reservation> {
+	public:
+		// Allow Reservation to be default constructed and moved, but not copied.
+		Reservation() = default;
+		Reservation(const Reservation&) = delete;
+		Reservation& operator=(const Reservation&) = delete;
+		Reservation(Reservation&&) = default;
+		Reservation& operator=(Reservation&&) = default;
+
+		Reservation(ResourceLimiter* semaphore, uint64_t amount) : semaphore(semaphore), amount(amount) {}
+		virtual ~Reservation() { release(); }
+
+		void release() {
+			if (semaphore == nullptr)
+				return;
+
+			// Theoretically, code run when semaphore->release is called could cause the destruction of
+			// whomever holds this reservation, which would then cause a double release of this
+			// reservation.  Thus, we should reset our amount before releasing it.
+			ResourceLimiter *oldLimiter = semaphore;
+			semaphore = nullptr;
+			oldLimiter->release(amount);
+			// This causes destruction to no-op and release to crash if called twice, the latter of which
+			// I consider a feature.
+			amount = 0;
+		}
+
+	private:
+		ResourceLimiter* semaphore = nullptr;
+		uint64_t amount = 0;
+	};
+
+	explicit ResourceLimiter(uint64_t available) : outstandingReservations(0), available(available), maximum(available) {}
+
+	Future<Reference<Reservation>> acquire(uint64_t amount) {
+		if (requests.size() == 0 && (available >= amount || outstandingReservations == 0)) {
+			TEST(amount > available && outstandingReservations == 0);
+			// Always allow at least one reservation to be done, as the point of this is to limit, not to
+			// block entirely.
+			available -= amount;
+			outstandingReservations++;
+			return Future<Reference<Reservation>>( Reference<Reservation>(new Reservation(this, amount) ) );
+		} else {
+			Promise<Reference<Reservation>> fulfillment;
+			requests.push_back(std::make_pair(amount, fulfillment));
+			return fulfillment.getFuture();
+		}
+	}
+
+	void release(uint64_t amount) {
+		available += amount;
+		outstandingReservations--;
+		ASSERT(outstandingReservations >= 0);
+		ASSERT(available <= maximum);
+
+		while (requests.size() > 0 && (requests.front().first <= available || outstandingReservations == 0)) {
+			amount = requests.front().first;
+			available -= amount;
+			Promise<Reference<Reservation>> fulfillment = requests.front().second;
+			requests.pop_front();
+			outstandingReservations++;
+			fulfillment.send( Reference<Reservation>( new Reservation(this, amount) ) );
+		}
+	}
+
+	uint64_t currentlyReserved() const {
+		return maximum - available;
+	}
+
+	size_t pendingRequests() const {
+		return requests.size();
+	}
+
+private:
+	std::deque<std::pair<uint64_t, Promise<Reference<Reservation>>>> requests;
+	int32_t outstandingReservations;
+	int64_t available;
+	int64_t maximum;
+};
+
+
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
 	Deque<UID> queueOrder;
@@ -274,6 +363,7 @@ struct TLogData : NonCopyable {
 
 	std::map<UID, PeekTrackerData> peekTracker;
 	WorkerCache<TLogInterface> tlogCache;
+	ResourceLimiter peekMemoryLimiter;
 
 	PromiseStream<Future<Void>> sharedActors;
 	Promise<Void> terminated;
@@ -285,6 +375,7 @@ struct TLogData : NonCopyable {
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
+			  peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
@@ -449,6 +540,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "QueueDiskBytesFree", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().free; });
 		specialCounter(cc, "QueueDiskBytesAvailable", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().available; });
 		specialCounter(cc, "QueueDiskBytesTotal", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().total; });
+		specialCounter(cc, "PeekMemoryReserved", [tLogData]() { return tLogData->peekMemoryLimiter.currentlyReserved(); });
+		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.pendingRequests(); });
 	}
 
 	~LogData() {
@@ -1227,9 +1320,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? printable(kv1[0].key) : "").detail("Tag2ResultsLast", kv2.size() ? printable(kv2[0].key) : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
-			state std::vector<Future<Standalone<StringRef>>> messageReads;
+			state std::vector<std::pair<IDiskQueue::location, IDiskQueue::location>> commitLocations;
 			state bool earlyEnd = false;
 			uint32_t mutationBytes = 0;
+			uint64_t commitBytes = 0;
 			for (auto &kv : kvrefs) {
 				VectorRef<SpilledData> spilledData;
 				BinaryReader r(kv.value, Unversioned());
@@ -1240,12 +1334,22 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 						break;
 					}
 					if (sd.version >= req.begin) {
-						messageReads.push_back( self->rawPersistentQueue->read(sd.start, sd.end) );
+						commitLocations.push_back( std::make_pair(sd.start, sd.end) );
+						// This isn't perfect, because we aren't accounting for page boundaries, but should be
+						// close enough.
+						commitBytes += sd.end.lo - sd.start.lo;
 						mutationBytes += sd.mutationBytes;
 					}
 				}
 				if (earlyEnd) break;
 			}
+			state Reference<ResourceLimiter::Reservation> memoryReservation = wait( self->peekMemoryLimiter.acquire(commitBytes) );
+			state std::vector<Future<Standalone<StringRef>>> messageReads;
+			messageReads.reserve( commitLocations.size() );
+			for (const auto& pair : commitLocations) {
+				messageReads.push_back( self->rawPersistentQueue->read(pair.first, pair.second) );
+			}
+			commitLocations.clear();
 			wait( waitForAll( messageReads ) );
 
 			state Version lastRefMessageVersion = 0;
@@ -1274,6 +1378,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			}
 
 			messageReads.clear();
+			memoryReservation->release();
 
 			if (earlyEnd)
 				endVersion = lastRefMessageVersion + 1;

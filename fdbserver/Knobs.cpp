@@ -71,6 +71,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( CONCURRENT_LOG_ROUTER_READS,                             1 );
 	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
 	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
+	init( TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES,            2e9 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES = 2e6;
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
