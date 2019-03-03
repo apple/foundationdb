@@ -144,11 +144,14 @@ public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
-		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
+		dbg_file0BeginSeq(0), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
+		fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES), readingBuffer( dbgid ),
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
-		if(BUGGIFY)
-			fileExtensionBytes = 8<<10;
+		if (BUGGIFY)
+			fileExtensionBytes = 1<<10 * g_random->randomSkewedUInt32( 1, 40<<10 );
+		if (BUGGIFY)
+			fileShrinkBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.
@@ -241,6 +244,7 @@ public:
 	int64_t writingPos;  // Position within files[1] that will be next written
 
 	int64_t fileExtensionBytes;
+	int64_t fileShrinkBytes;
 
 	Int64MetricHandle stallCount;
 
@@ -274,6 +278,13 @@ public:
 				std::swap(firstPages[0], firstPages[1]);
 				files[1].popped = 0;
 				writingPos = 0;
+
+				if (files[1].size > pageData.size() + fileExtensionBytes + fileShrinkBytes) {
+					// Either shrink files[1] to the size of files[0], or chop off fileShrinkBytes
+					int64_t maxShrink = std::max( (files[1].size - files[0].size+_PAGE_SIZE-1)/_PAGE_SIZE*_PAGE_SIZE, fileShrinkBytes );
+					files[1].size -= maxShrink;
+					waitfor.push_back( files[1].f->truncate( files[1].size ) );
+				}
 			} else {
 				// Extend files[1] to accomodate the new write and about 10MB or 2x current size for future writes.
 				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
