@@ -562,18 +562,19 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 
 struct SpilledData {
 	SpilledData() = default;
-	SpilledData(Version version, IDiskQueue::location start, IDiskQueue::location end)
-		: version(version), start(start), end(end) {
+	SpilledData(Version version, IDiskQueue::location start, IDiskQueue::location end, uint32_t mutationBytes)
+		: version(version), start(start), end(end), mutationBytes(mutationBytes) {
 	}
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) {
-		serializer(ar, version, start, end);
+		serializer(ar, version, start, end, mutationBytes);
 	}
 
 	Version version = 0;
 	IDiskQueue::location start = 0;
 	IDiskQueue::location end = 0;
+	uint32_t mutationBytes = 0;
 };
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
 template <class Ar> void load( Ar& ar, SpilledData& data ) { data.serialize_unversioned(ar); }
@@ -671,22 +672,25 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
 						const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
 						refSpilledTagCount++;
-						SpilledData spilledData( currentVersion, begin, end );
+
+						uint32_t size = msg->second.expectedSize();
+						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
+							// Fast forward until we find a new version.
+							size += msg->second.expectedSize();
+						}
+
+						SpilledData spilledData( currentVersion, begin, end, size );
 						wr << spilledData;
 
 						if (vs && (vs->spilledData.empty() || vs->spilledData.back().version != currentVersion)) {
 							vs->spilledData.push_back( spilledData );
 						}
 
-						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
-							// Fast forward until we find a new version.
+						Future<Void> f = yield(TaskUpdateStorage);
+						if(!f.isReady()) {
+							wait(f);
+							msg = std::upper_bound(tagData->versionMessages.begin(), tagData->versionMessages.end(), std::make_pair(currentVersion, LengthPrefixedStringRef()), CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
 						}
-					}
-
-					Future<Void> f = yield(TaskUpdateStorage);
-					if(!f.isReady()) {
-						wait(f);
-						msg = std::upper_bound(tagData->versionMessages.begin(), tagData->versionMessages.end(), std::make_pair(currentVersion, LengthPrefixedStringRef()), CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
 					}
 				}
 				if (refSpilledTagCount > 0) {
@@ -1216,7 +1220,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				messages.serializeBytes( messages2.toStringRef() );
 		} else {
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
-			state Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
+			Standalone<VectorRef<KeyValueRef>> kvrefs = wait(
 					self->persistentData->readRange(KeyRangeRef(
 							persistTagMessageRefsKey(logData->logId, req.tag, req.begin),
 							persistTagMessageRefsKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1))));
@@ -1224,15 +1228,23 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? printable(kv1[0].key) : "").detail("Tag2ResultsLast", kv2.size() ? printable(kv2[0].key) : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
+			state bool earlyEnd = false;
+			uint32_t mutationBytes = 0;
 			for (auto &kv : kvrefs) {
 				VectorRef<SpilledData> spilledData;
 				BinaryReader r(kv.value, Unversioned());
 				r >> spilledData;
 				for (const SpilledData& sd : spilledData) {
+					if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+						earlyEnd = true;
+						break;
+					}
 					if (sd.version >= req.begin) {
 						messageReads.push_back( self->rawPersistentQueue->read(sd.start, sd.end) );
+						mutationBytes += sd.mutationBytes;
 					}
 				}
+				if (earlyEnd) break;
 			}
 			wait( waitForAll( messageReads ) );
 
@@ -1250,24 +1262,17 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 				messages << int32_t(-1) << entry.version;
 
-				// FIXME: push DESIRED_TOTAL_BYTES into parseMessagesForTag
-				// FIXME: maybe push this copy in as well
 				std::vector<StringRef> parsedMessages = parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags);
 				for (StringRef msg : parsedMessages) {
 					messages << msg;
 				}
 
 				lastRefMessageVersion = entry.version;
-
-				if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-					break;
-				}
 			}
 
 			messageReads.clear();
-			kvrefs = Standalone<VectorRef<KeyValueRef>>();
 
-			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
+			if (earlyEnd)
 				endVersion = lastRefMessageVersion + 1;
 			else
 				messages.serializeBytes( messages2.toStringRef() );
