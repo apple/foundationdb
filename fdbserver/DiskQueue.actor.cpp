@@ -985,19 +985,16 @@ private:
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
 		} else {
-			// FIXME: This allocation is excessive and unnecessary.  We know the overhead per page that
-			// we'll be stripping out (sizeof(PageHeader)), so we should be able to do a smaller
-			// allocation.  But we should be able to re-use the space allocated for pagedData, which
-			// would mean not having to allocate 2x the space for a read.
-			Standalone<StringRef> unpagedData = makeString(pagedData.size());
-			uint8_t *buf = mutateString(unpagedData);
-			memset(buf, 0, unpagedData.size());
+			// Reusing pagedData wastes # of pages * sizeof(PageHeader) bytes, but means
+			// we don't have to double allocate in a hot, memory hungry call.
+			uint8_t *buf = mutateString(pagedData);
 			const Page *data = reinterpret_cast<const Page*>(pagedData.begin());
 
 			// Only start copying from `start` in the first page.
 			if( data->payloadSize > startingOffset ) {
-				memcpy(buf, data->payload+startingOffset, data->payloadSize-startingOffset);
-				buf += data->payloadSize-startingOffset;
+				const int length = data->payloadSize-startingOffset;
+				memmove(buf, data->payload+startingOffset, length);
+				buf += length;
 			}
 			data++;
 
@@ -1005,16 +1002,19 @@ private:
 			while (data->seq != ((end.lo-1)/sizeof(Page)*sizeof(Page))) {
 				// These pages can have varying amounts of data, as pages with partial
 				// data will be zero-filled when commit is called.
-				memcpy(buf, data->payload, data->payloadSize);
-				buf += data->payloadSize;
+				const int length = data->payloadSize;
+				memmove(buf, data->payload, length);
+				buf += length;
 				data++;
 			}
 
 			// Copy only until `end` in the last page.
-			memcpy(buf, data->payload, std::min(endingOffset, data->payloadSize));
-			buf += std::min(endingOffset, data->payloadSize);
+			const int length = data->payloadSize;
+			memmove(buf, data->payload, std::min(endingOffset, length));
+			buf += std::min(endingOffset, length);
 
-			unpagedData.contents() = unpagedData.substr(0, buf - unpagedData.begin());
+			memset(buf, 0, pagedData.size() - (buf - pagedData.begin()));
+			Standalone<StringRef> unpagedData = pagedData.substr(0, buf - pagedData.begin());
 			return unpagedData;
 		}
 	}
