@@ -297,12 +297,16 @@ void updateRate( Ratekeeper* self ) {
 		}
 
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
-		self->healthMetrics.storageStats[ss.id].storageQueue = storageQueue;
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
 		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
-		self->healthMetrics.storageStats[ss.id].storageDurabilityLag = storageDurabilityLag;
 		worstStorageDurabilityLagStorageServer = std::max(worstStorageDurabilityLagStorageServer, storageDurabilityLag);
+
+		auto& ssMetrics = self->healthMetrics.storageStats[ss.id];
+		ssMetrics.storageQueue = storageQueue;
+		ssMetrics.storageDurabilityLag = storageDurabilityLag;
+		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
+		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		int64_t b = storageQueue - targetBytes;
 		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
@@ -603,16 +607,8 @@ ACTOR Future<Void> rateKeeper(
 				reply.transactionRate = self.TPSLimit / self.proxy_transactionCountAndTime.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
-				reply.healthMetrics.update(self.healthMetrics, false, false);
+				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
 				reply.healthMetrics.tpsLimit = self.TPSLimit;
-				if (req.detailed) {
-					for (const auto &s : self.storageQueueInfo) {
-						self.healthMetrics.storageStats[s.key].cpuUsage = s.value.lastReply.cpuUsage;
-						self.healthMetrics.storageStats[s.key].diskUsage = s.value.lastReply.diskUsage;
-					}
-					reply.healthMetrics.storageStats = self.healthMetrics.storageStats;
-					reply.healthMetrics.tLogQueue = self.healthMetrics.tLogQueue;
-				}
 
 				req.reply.send( reply );
 			}
