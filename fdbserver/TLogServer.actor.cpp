@@ -655,18 +655,18 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 
 struct SpilledData {
 	SpilledData() = default;
-	SpilledData(Version version, IDiskQueue::location start, IDiskQueue::location end, uint32_t mutationBytes)
-		: version(version), start(start), end(end), mutationBytes(mutationBytes) {
+	SpilledData(Version version, IDiskQueue::location start, uint32_t length, uint32_t mutationBytes)
+		: version(version), start(start), length(length), mutationBytes(mutationBytes) {
 	}
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) {
-		serializer(ar, version, start, end, mutationBytes);
+		serializer(ar, version, start, length, mutationBytes);
 	}
 
 	Version version = 0;
 	IDiskQueue::location start = 0;
-	IDiskQueue::location end = 0;
+	uint32_t length = 0;
 	uint32_t mutationBytes = 0;
 };
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
@@ -681,7 +681,7 @@ struct VerifyState {
 
 ACTOR void verifyPersistentData( TLogData* self, VerifyState* vs ) {
 	for (auto iter = vs->spilledData.begin(); iter != vs->spilledData.end(); iter++) {
-		vs->readfutures.push_back( self->rawPersistentQueue->read( iter->start, iter->end ) );
+		vs->readfutures.push_back( self->rawPersistentQueue->read( iter->start, iter->start.lo + iter->length ) );
 	}
 	try {
 		wait( waitForAll(vs->readfutures) );
@@ -764,6 +764,8 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						// spill everything else by reference
 						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
 						const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
+						ASSERT(end > begin && end.lo - begin.lo < std::numeric_limits<uint32_t>::max());
+						uint32_t length = static_cast<uint32_t>(end.lo - begin.lo);
 						refSpilledTagCount++;
 
 						uint32_t size = msg->second.expectedSize();
@@ -772,7 +774,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 							size += msg->second.expectedSize();
 						}
 
-						SpilledData spilledData( currentVersion, begin, end, size );
+						SpilledData spilledData( currentVersion, begin, length, size );
 						wr << spilledData;
 
 						if (vs && (vs->spilledData.empty() || vs->spilledData.back().version != currentVersion)) {
@@ -1334,10 +1336,11 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 						break;
 					}
 					if (sd.version >= req.begin) {
-						commitLocations.push_back( std::make_pair(sd.start, sd.end) );
+						const IDiskQueue::location end = sd.start.lo + sd.length;
+						commitLocations.push_back( std::make_pair(sd.start, end) );
 						// This isn't perfect, because we aren't accounting for page boundaries, but should be
 						// close enough.
-						commitBytes += sd.end.lo - sd.start.lo;
+						commitBytes += sd.length;
 						mutationBytes += sd.mutationBytes;
 					}
 				}
