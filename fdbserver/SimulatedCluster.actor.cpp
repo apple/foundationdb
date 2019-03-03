@@ -842,9 +842,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			break;
 		}
 	} else {
-		// FIXME: Temporarily disable spill-by-reference.
-		//set_config("log_version:=3");  // 6.1
-		//set_config("log_spill:=2");  // REFERENCE
+		set_config("log_version:=3");  // 6.1
+		set_config("log_spill:=2");  // REFERENCE
 	}
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
