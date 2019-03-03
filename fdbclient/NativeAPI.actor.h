@@ -172,34 +172,37 @@ struct TransactionInfo {
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
-	TransactionLogInfo() : logToDatabase(true) {}
-	TransactionLogInfo(std::string identifier) : logToDatabase(false), identifier(identifier) {}
+	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
-	BinaryWriter trLogWriter{ IncludeVersion() };
-	bool logsAdded{ false };
-	bool flushed{ false };
+	TransactionLogInfo() : logLocation(DONT_LOG) {}
+	TransactionLogInfo(LoggingLocation location) : logLocation(location) {}
+	TransactionLogInfo(std::string id, LoggingLocation location) : logLocation(location), identifier(id) {}
 
+	void setIdentifier(std::string id) { identifier = id; }
+	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 	template <typename T>
 	void addLog(const T& event) {
-		ASSERT(logToDatabase || identifier.present());
-
-		if(identifier.present()) {
-			event.logEvent(identifier.get());
+		if(logLocation & TRACE_LOG) {
+			ASSERT(!identifier.empty())
+			event.logEvent(identifier);
 		}
 
 		if (flushed) {
 			return;
 		}
 
-		if(logToDatabase) {
+		if(logLocation & DATABASE) {
 			logsAdded = true;
 			static_assert(std::is_base_of<FdbClientLogEvents::Event, T>::value, "Event should be derived class of FdbClientLogEvents::Event");
 			trLogWriter << event;
 		}
 	}
 
-	bool logToDatabase;
-	Optional<std::string> identifier;
+	BinaryWriter trLogWriter{ IncludeVersion() };
+	bool logsAdded{ false };
+	bool flushed{ false };
+	int logLocation;
+	std::string identifier;
 };
 
 struct Watch : public ReferenceCounted<Watch>, NonCopyable {

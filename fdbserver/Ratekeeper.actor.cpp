@@ -85,11 +85,10 @@ struct StorageQueueInfo {
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
-	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited)
+		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT)
 	{
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
@@ -112,26 +111,63 @@ struct TLogQueueInfo {
 	}
 };
 
+struct RatekeeperLimits {
+	double tpsLimit;
+	Int64MetricHandle tpsLimitMetric;
+	Int64MetricHandle reasonMetric;
+
+	int64_t storageTargetBytes;
+	int64_t storageSpringBytes;
+	int64_t logTargetBytes;
+	int64_t logSpringBytes;
+	int64_t maxVersionDifference;
+
+	std::string context;
+
+	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, int64_t maxVersionDifference) :
+		tpsLimit(std::numeric_limits<double>::infinity()),
+		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+		reasonMetric(StringRef("Ratekeeper.Reason" + context)),
+		storageTargetBytes(storageTargetBytes),
+		storageSpringBytes(storageSpringBytes),
+		logTargetBytes(logTargetBytes),
+		logSpringBytes(logSpringBytes),
+		maxVersionDifference(maxVersionDifference),
+		context(context)
+	{}
+};
+
+struct TransactionCounts {
+	int64_t total;
+	int64_t batch;
+
+	double time;
+
+	TransactionCounts() : total(0), batch(0), time(0) {}
+};
+
 struct Ratekeeper {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
-	std::map<UID, std::pair<int64_t, double> > proxy_transactionCountAndTime;
-	Smoother smoothReleasedTransactions, smoothTotalDurableBytes;
-	double TPSLimit;
+
+	std::map<UID, TransactionCounts> proxy_transactionCounts;
+	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 
-	Int64MetricHandle tpsLimitMetric;
 	Int64MetricHandle actualTpsMetric;
-	Int64MetricHandle reasonMetric;
+
 	double lastWarning;
 	double* lastLimited;
 
-	Ratekeeper() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), TPSLimit(std::numeric_limits<double>::infinity()),
-		tpsLimitMetric(LiteralStringRef("Ratekeeper.TPSLimit")),
+	RatekeeperLimits normalLimits;
+	RatekeeperLimits batchLimits;
+
+	Ratekeeper() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
-		reasonMetric(LiteralStringRef("Ratekeeper.Reason")),
-		lastWarning(0)
+		lastWarning(0),
+		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE),
+		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH)
 	{}
 };
 
@@ -253,15 +289,15 @@ ACTOR Future<Void> trackEachStorageServer(
 	}
 }
 
-void updateRate( Ratekeeper* self ) {
+void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
-	double actualTPS = self->smoothReleasedTransactions.smoothRate();
-	self->actualTpsMetric = (int64_t)actualTPS;
+	double actualTps = self->smoothReleasedTransactions.smoothRate();
+	self->actualTpsMetric = (int64_t)actualTps;
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back up from this value
-	actualTPS = std::max( std::max( 1.0, actualTPS ), self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT );
+	actualTps = std::max( std::max( 1.0, actualTps ), self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT );
 
-	self->TPSLimit = std::numeric_limits<double>::infinity();
+	limits.tpsLimit = std::numeric_limits<double>::infinity();
 	UID reasonID = UID();
 	limitReason_t limitReason = limitReason_t::unlimited;
 
@@ -272,7 +308,8 @@ void updateRate( Ratekeeper* self ) {
 	int64_t worstStorageDurabilityLagStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
 
-	std::multimap<double, StorageQueueInfo*> storageTPSLimitReverseIndex;
+	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
+	std::map<UID, limitReason_t> ssReasons;
 
 	// Look at each storage server's write queue, compute and store the desired rate ratio
 	for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
@@ -280,19 +317,19 @@ void updateRate( Ratekeeper* self ) {
 		if (!ss.valid) continue;
 		++sscount;
 
-		ss.limitReason = limitReason_t::unlimited;
+		limitReason_t ssLimitReason = limitReason_t::unlimited;
 
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
-		int64_t springBytes = std::max<int64_t>(1, std::min(SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(1, std::min(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
-		if (targetBytes != SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER) {
+		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits.storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
+		int64_t targetBytes = std::max<int64_t>(1, std::min(limits.storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		if (targetBytes != limits.storageTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
-				ss.limitReason = limitReason_t::storage_server_min_free_space;
+				ssLimitReason = limitReason_t::storage_server_min_free_space;
 			} else {
-				ss.limitReason = limitReason_t::storage_server_min_free_space_ratio;
+				ssLimitReason = limitReason_t::storage_server_min_free_space_ratio;
 			}
 		}
 
@@ -312,10 +349,11 @@ void updateRate( Ratekeeper* self ) {
 		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
-		//inputRate = std::max( inputRate, actualTPS / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
+		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
 		/*if( g_random->random01() < 0.1 ) {
-			TraceEvent("RateKeeperUpdateRate", ss.id)
+			std::string name = "RateKeeperUpdateRate" + limits.context;
+			TraceEvent(name, ss.id)
 				.detail("MinFreeSpace", minFreeSpace)
 				.detail("SpringBytes", springBytes)
 				.detail("TargetBytes", targetBytes)
@@ -325,7 +363,7 @@ void updateRate( Ratekeeper* self ) {
 				.detail("SmoothDurableBytesTotal", ss.smoothDurableBytes.smoothTotal())
 				.detail("TargetRateRatio", targetRateRatio)
 				.detail("SmoothInputBytesRate", ss.smoothInputBytes.smoothRate())
-				.detail("ActualTPS", actualTPS)
+				.detail("ActualTPS", actualTps)
 				.detail("InputRate", inputRate)
 				.detail("VerySmoothDurableBytesRate", ss.verySmoothDurableBytes.smoothRate())
 				.detail("B", b);
@@ -333,36 +371,38 @@ void updateRate( Ratekeeper* self ) {
 
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
 		double maxBytesPerSecond = (targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0);
-		double limitTPS = std::min(actualTPS * maxBytesPerSecond / std::max(1.0e-8, inputRate), maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
-		if (ss.limitReason == limitReason_t::unlimited)
-			ss.limitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
+		double limitTps = std::min(actualTps * maxBytesPerSecond / std::max(1.0e-8, inputRate), maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
+		if (ssLimitReason == limitReason_t::unlimited)
+			ssLimitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
 
 		if (targetRateRatio > 0 && inputRate > 0) {
 			ASSERT(inputRate != 0);
-			double smoothedRate = std::max( ss.verySmoothDurableBytes.smoothRate(), actualTPS / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
+			double smoothedRate = std::max( ss.verySmoothDurableBytes.smoothRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 			double x =  smoothedRate / (inputRate * targetRateRatio);
-			double lim = actualTPS * x;
-			if (lim < limitTPS) {
-				limitTPS = lim;
-				if (ss.limitReason == limitReason_t::unlimited || ss.limitReason == limitReason_t::storage_server_write_bandwidth_mvcc)
-					ss.limitReason = limitReason_t::storage_server_write_queue_size;
+			double lim = actualTps * x;
+			if (lim < limitTps) {
+				limitTps = lim;
+				if (ssLimitReason == limitReason_t::unlimited || ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc)
+					ssLimitReason = limitReason_t::storage_server_write_queue_size;
 			}
 		}
 
-		storageTPSLimitReverseIndex.insert(std::make_pair(limitTPS, &ss));
+		storageTpsLimitReverseIndex.insert(std::make_pair(limitTps, &ss));
 
-		if(limitTPS < self->TPSLimit && (ss.limitReason == limitReason_t::storage_server_min_free_space || ss.limitReason == limitReason_t::storage_server_min_free_space_ratio)) {
+		if(limitTps < limits.tpsLimit && (ssLimitReason == limitReason_t::storage_server_min_free_space || ssLimitReason == limitReason_t::storage_server_min_free_space_ratio)) {
 			reasonID = ss.id;
-			self->TPSLimit = limitTPS;
-			limitReason = ss.limitReason;
+			limits.tpsLimit = limitTps;
+			limitReason = ssLimitReason;
 		}
+
+		ssReasons[ss.id] = ssLimitReason;
 	}
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
 	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
-	for(auto ss = storageTPSLimitReverseIndex.begin(); ss != storageTPSLimitReverseIndex.end() && ss->first < self->TPSLimit; ++ss) {
+	for(auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits.tpsLimit; ++ss) {
 		if(ignoredMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredMachines.insert(ss->second->locality.zoneId());
 			continue;
@@ -372,9 +412,9 @@ void updateRate( Ratekeeper* self ) {
 		}
 
 		limitingStorageQueueStorageServer = ss->second->lastReply.bytesInput - ss->second->smoothDurableBytes.smoothTotal();
-		self->TPSLimit = ss->first;
-		limitReason = storageTPSLimitReverseIndex.begin()->second->limitReason;
-		reasonID = storageTPSLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst SS, we still report it as the limiting process
+		limits.tpsLimit = ss->first;
+		limitReason = ssReasons[storageTpsLimitReverseIndex.begin()->second->id];
+		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst SS, we still report it as the limiting process
 
 		break;
 	}
@@ -406,7 +446,7 @@ void updateRate( Ratekeeper* self ) {
 		}
 
 		// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
-		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE/2) / (SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE/4);
+		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits.maxVersionDifference/2) / (limits.maxVersionDifference/4);
 		worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
 		limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
 	}
@@ -425,9 +465,9 @@ void updateRate( Ratekeeper* self ) {
 
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
-		int64_t springBytes = std::max<int64_t>(1, std::min(SERVER_KNOBS->SPRING_BYTES_TLOG, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(1, std::min(SERVER_KNOBS->TARGET_BYTES_PER_TLOG, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
-		if (targetBytes != SERVER_KNOBS->TARGET_BYTES_PER_TLOG) {
+		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits.logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
+		int64_t targetBytes = std::max<int64_t>(1, std::min(limits.logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		if (targetBytes != limits.logTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
 			} else {
@@ -447,7 +487,7 @@ void updateRate( Ratekeeper* self ) {
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
-			self->TPSLimit = 0.0;
+			limits.tpsLimit = 0.0;
 		}
 
 		double targetRateRatio = std::min( ( b + springBytes ) / (double)springBytes, 2.0 );
@@ -460,13 +500,13 @@ void updateRate( Ratekeeper* self ) {
 		double inputRate = tl.smoothInputBytes.smoothRate();
 
 		if (targetRateRatio > 0) {
-			double smoothedRate = std::max( tl.verySmoothDurableBytes.smoothRate(), actualTPS / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
+			double smoothedRate = std::max( tl.verySmoothDurableBytes.smoothRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 			double x = smoothedRate / (inputRate * targetRateRatio);
 			if (targetRateRatio < .75)  //< FIXME: KNOB for 2.0
 				x = std::max(x, 0.95);
-			double lim = actualTPS * x;
-			if (lim < self->TPSLimit){
-				self->TPSLimit = lim;
+			double lim = actualTps * x;
+			if (lim < limits.tpsLimit){
+				limits.tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = tlogLimitReason;
 			}
@@ -474,9 +514,9 @@ void updateRate( Ratekeeper* self ) {
 		if (inputRate > 0) {
 			// Don't let any tlogs use up its target bytes faster than its MVCC window!
 			double x = ((targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0)) / inputRate;
-			double lim = actualTPS * x;
-			if (lim < self->TPSLimit){
-				self->TPSLimit = lim;
+			double lim = actualTps * x;
+			if (lim < limits.tpsLimit){
+				limits.tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = limitReason_t::log_server_mvcc_write_bandwidth;
 			}
@@ -485,10 +525,10 @@ void updateRate( Ratekeeper* self ) {
 
 	self->healthMetrics.worstTLogQueue = worstStorageQueueTLog;
 
-	self->TPSLimit = std::max(self->TPSLimit, 0.0);
+	limits.tpsLimit = std::max(limits.tpsLimit, 0.0);
 
 	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
-		self->TPSLimit = std::max(self->TPSLimit, 100.0);
+		limits.tpsLimit = std::max(limits.tpsLimit, 100.0);
 	}
 
 	int64_t totalDiskUsageBytes = 0;
@@ -499,22 +539,20 @@ void updateRate( Ratekeeper* self ) {
 		if (s.value.valid)
 			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
 
-	self->tpsLimitMetric = std::min(self->TPSLimit, 1e6);
-	self->reasonMetric = limitReason;
+	limits.tpsLimitMetric = std::min(limits.tpsLimit, 1e6);
+	limits.reasonMetric = limitReason;
 
-	if( self->smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self->TPSLimit ) {
-		(*self->lastLimited) = now();
-	}
-
-	if (g_random->random01() < 0.1){
-		TraceEvent("RkUpdate")
-			.detail("TPSLimit", self->TPSLimit)
+	if (g_random->random01() < 0.1) {
+		std::string name = "RkUpdate" + limits.context;
+		TraceEvent(name.c_str())
+			.detail("TPSLimit", limits.tpsLimit)
 			.detail("Reason", limitReason)
 			.detail("ReasonServerID", reasonID)
 			.detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
-			.detail("TPSBasis", actualTPS)
+			.detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
+			.detail("TPSBasis", actualTps)
 			.detail("StorageServers", sscount)
-			.detail("Proxies", self->proxy_transactionCountAndTime.size())
+			.detail("Proxies", self->proxy_transactionCounts.size())
 			.detail("TLogs", tlcount)
 			.detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
@@ -524,7 +562,7 @@ void updateRate( Ratekeeper* self ) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.trackLatest("RkUpdate");
+			.trackLatest(name.c_str());
 	}
 }
 
@@ -583,11 +621,18 @@ ACTOR Future<Void> rateKeeper(
 		choose {
 			when (wait( track )) { break; }
 			when (wait( timeout )) {
-				updateRate( &self );
+				updateRate(&self, self.normalLimits);
+				updateRate(&self, self.batchLimits);
+
+				if(self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit) {
+					*self.lastLimited = now();
+				}
+
+
 				double tooOld = now() - 1.0;
-				for(auto p=self.proxy_transactionCountAndTime.begin(); p!=self.proxy_transactionCountAndTime.end(); ) {
-					if (p->second.second < tooOld)
-						p = self.proxy_transactionCountAndTime.erase(p);
+				for(auto p=self.proxy_transactionCounts.begin(); p!=self.proxy_transactionCounts.end(); ) {
+					if (p->second.time < tooOld)
+						p = self.proxy_transactionCounts.erase(p);
 					else
 						++p;
 				}
@@ -596,19 +641,25 @@ ACTOR Future<Void> rateKeeper(
 			when (GetRateInfoRequest req = waitNext(getRateInfo)) {
 				GetRateInfoReply reply;
 
-				auto& p = self.proxy_transactionCountAndTime[ req.requesterID ];
+				auto& p = self.proxy_transactionCounts[ req.requesterID ];
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.first).detail("Delta", req.totalReleasedTransactions - p.first);
-				if (p.first > 0)
-					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.first );
+				if (p.total > 0) {
+					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.total );
+				}
+				if(p.batch > 0) {
+					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.batch );
+				}
 
-				p.first = req.totalReleasedTransactions;
-				p.second = now();
+				p.total = req.totalReleasedTransactions;
+				p.batch = req.batchReleasedTransactions;
+				p.time = now();
 
-				reply.transactionRate = self.TPSLimit / self.proxy_transactionCountAndTime.size();
+				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCounts.size();
+				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
-				reply.healthMetrics.tpsLimit = self.TPSLimit;
+				reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
 
 				req.reply.send( reply );
 			}

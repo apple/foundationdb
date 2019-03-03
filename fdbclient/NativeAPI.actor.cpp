@@ -362,15 +362,17 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			cx->clientStatusUpdater.inStatusQ.swap(cx->clientStatusUpdater.outStatusQ);
 			// Split Transaction Info into chunks
 			state std::vector<TrInfoChunk> trChunksQ;
-			for (auto &bw : cx->clientStatusUpdater.outStatusQ) {
+			for (auto &entry : cx->clientStatusUpdater.outStatusQ) {
+				auto &bw = entry.second;
 				int64_t value_size_limit = BUGGIFY ? g_random->randomInt(1e3, CLIENT_KNOBS->VALUE_SIZE_LIMIT) : CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 				int num_chunks = (bw.getLength() + value_size_limit - 1) / value_size_limit;
 				std::string random_id = g_random->randomAlphaNumeric(16);
+				std::string user_provided_id = entry.first.size() ? entry.first + "/" : "";
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
 					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
-					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(4, '\x00'));
+					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + user_provided_id + std::string(4, '\x00'));
 					int32_t pos = littleEndian32(clientLatencyName.size());
 					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int32_t), &pos, sizeof(int32_t));
 					if (i == num_chunks - 1) {
@@ -1987,7 +1989,7 @@ void Transaction::operator=(Transaction&& r) noexcept(true) {
 void Transaction::flushTrLogsIfEnabled() {
 	if (trLogInfo && trLogInfo->logsAdded && trLogInfo->trLogWriter.getData()) {
 		ASSERT(trLogInfo->flushed == false);
-		cx->clientStatusUpdater.inStatusQ.push_back(std::move(trLogInfo->trLogWriter));
+		cx->clientStatusUpdater.inStatusQ.push_back({ trLogInfo->identifier, std::move(trLogInfo->trLogWriter) });
 		trLogInfo->flushed = true;
 	}
 }
@@ -2763,25 +2765,40 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			break;
 
 		case FDBTransactionOptions::TRANSACTION_LOGGING_ENABLE:
+			setOption(FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER, value);
+			setOption(FDBTransactionOptions::LOG_TRANSACTION);
+			break;
+
+		case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
 			validateOptionValue(value, true);
 
-			if(value.get().size() > 100) {
+			if (value.get().size() > 100) {
 				throw invalid_option_value();
 			}
 
-			if(trLogInfo) {
-				if(!trLogInfo->identifier.present()) {
+			if (trLogInfo) {
+				if (trLogInfo->identifier.empty()) {
 					trLogInfo->identifier = printable(value.get());
 				}
-				else if(trLogInfo->identifier.get() != printable(value.get())) {
-					TraceEvent(SevWarn, "CannotChangeTransactionLoggingIdentifier").detail("PreviousIdentifier", trLogInfo->identifier.get()).detail("NewIdentifier", printable(value.get()));
+				else if (trLogInfo->identifier != printable(value.get())) {
+					TraceEvent(SevWarn, "CannotChangeDebugTransactionIdentifier").detail("PreviousIdentifier", trLogInfo->identifier).detail("NewIdentifier", printable(value.get()));
 					throw client_invalid_operation();
 				}
 			}
 			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get())));
+				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(printable(value.get()), TransactionLogInfo::DONT_LOG));
 			}
+			break;
 
+		case FDBTransactionOptions::LOG_TRANSACTION:
+			validateOptionValue(value, false);
+			if (trLogInfo) {
+				trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
+			}
+			else {
+				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before logging the transaction");
+				throw client_invalid_operation();
+			}
 			break;
 
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
@@ -3154,7 +3171,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	if(!cx->isError()) {
 		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
-			return Reference<TransactionLogInfo>(new TransactionLogInfo());
+			return Reference<TransactionLogInfo>(new TransactionLogInfo(TransactionLogInfo::DATABASE));
 		}
 	}
 

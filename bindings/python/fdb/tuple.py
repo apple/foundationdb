@@ -79,7 +79,7 @@ class SingleFloat(object):
             self.value = ctypes.c_float(value).value
         elif isinstance(value, ctypes.c_float):
             self.value = value.value
-        elif isinstance(value, six.integertypes):
+        elif isinstance(value, six.integer_types):
             self.value = ctypes.c_float(value).value
         else:
             raise ValueError("Incompatible type for single-precision float: " + repr(value))

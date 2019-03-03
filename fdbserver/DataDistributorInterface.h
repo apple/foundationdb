@@ -52,27 +52,29 @@ struct DataDistributorInterface {
 struct GetRateInfoRequest {
 	UID requesterID;
 	int64_t totalReleasedTransactions;
-	ReplyPromise<struct GetRateInfoReply> reply;
+	int64_t batchReleasedTransactions;
 	bool detailed;
+	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions, bool detailed )
-		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), detailed(detailed) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, bool detailed)
+		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply, detailed);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, detailed, reply);
 	}
 };
 
 struct GetRateInfoReply {
 	double transactionRate;
+	double batchTransactionRate;
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration, healthMetrics);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
 	}
 };
 
