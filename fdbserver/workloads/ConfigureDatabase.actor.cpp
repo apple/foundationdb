@@ -236,6 +236,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
+	static Future<ConfigurationResult::Type> IssueConfigurationChange( Database cx, const std::string& config, bool force ) {
+		printf("Issuing configuration change: %s\n", config.c_str());
+		return changeConfig(cx, config, force);
+	}
+
 	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
 		wait(success( changeConfig( cx, "single", true ) ));
 		return Void();
@@ -330,7 +335,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (g_random->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
 				if (g_random->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
-				wait(success( changeConfig( cx, config, false ) ));
+				wait(success( IssueConfigurationChange( cx, config, false ) ));
 
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			}
@@ -343,11 +348,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			}
 			else if ( randomChoice == 5) {
-				wait(success( changeConfig( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) ));
+				wait(success( IssueConfigurationChange( cx, storeTypes[g_random->randomInt( 0, sizeof(storeTypes)/sizeof(storeTypes[0]))], true ) ));
 			}
 			else if ( randomChoice == 6 ) {
 				// Some configurations will be invalid, and that's fine.
-				wait(success( changeConfig( cx, logTypes[g_random->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
+				wait(success( IssueConfigurationChange( cx, logTypes[g_random->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
 			}
 			else {
 				ASSERT(false);
