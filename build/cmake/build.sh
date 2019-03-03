@@ -102,7 +102,7 @@ package() {
     local __res=0
     for _ in 1
     do
-        configure
+        build
         __res=$?
         if [ ${__res} -ne 0 ]
         then
