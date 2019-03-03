@@ -1218,19 +1218,19 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	explicit FlowLock(int64_t permits) : permits(permits), active(0) {}
 
 	Future<Void> take(int taskID = TaskDefaultYield, int64_t amount = 1) {
-		ASSERT(amount <= permits);
-		if (active + amount <= permits) {
+		ASSERT(amount <= permits || active == 0);
+		if (active + amount <= permits || active == 0) {
 			active += amount;
 			return safeYieldActor(this, taskID, amount);
 		}
 		return takeActor(this, taskID, amount);
 	}
 	void release( int64_t amount = 1 ) {
-		ASSERT( active > 0 || amount == 0 );
+		ASSERT( (active > 0 || amount == 0) && active - amount >= 0 );
 		active -= amount;
 
 		while( !takers.empty() ) {
-			if( active + takers.begin()->second <= permits ) {
+			if( active + takers.begin()->second <= permits || active == 0 ) {
 				std::pair< Promise<Void>, int64_t > next = std::move( *takers.begin() );
 				active += next.second;
 				takers.pop_front();
