@@ -1064,10 +1064,10 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 	}
 }
 
-std::vector<StringRef> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
+ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
-	std::vector<StringRef> relevantMessages;
-	BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
+	state std::vector<StringRef> relevantMessages;
+	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
 		uint32_t messageLength = 0;
 		uint32_t subsequence = 0;
@@ -1095,7 +1095,7 @@ std::vector<StringRef> parseMessagesForTag( StringRef commitBlob, Tag tag, int l
 		if (match) {
 			relevantMessages.push_back( StringRef((uint8_t*)begin, messageLength) );
 		}
-		// FIXME: Yield here so Evan doesn't have to
+		wait(yield());
 	}
 	return relevantMessages;
 }
@@ -1248,26 +1248,29 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			}
 			wait( waitForAll( messageReads ) );
 
-			Version lastRefMessageVersion = 0;
-			for (int i = 0; i < messageReads.size(); i++ ) {
-				Standalone<StringRef> queueEntryData = messageReads[i].get();
+			state Version lastRefMessageVersion = 0;
+			state int index = 0;
+			loop {
+				if (index >= messageReads.size()) break;
+				Standalone<StringRef> queueEntryData = messageReads[index].get();
 				uint8_t valid;
 				const uint32_t length = *(uint32_t*)queueEntryData.begin();
 				queueEntryData = queueEntryData.substr( 4, queueEntryData.size() - 4);
 				BinaryReader rd( queueEntryData, IncludeVersion() );
-				TLogQueueEntry entry;
+				state TLogQueueEntry entry;
 				rd >> entry >> valid;
 				ASSERT( valid == 0x01 );
 				ASSERT( length + sizeof(valid) == queueEntryData.size() );
 
 				messages << int32_t(-1) << entry.version;
 
-				std::vector<StringRef> parsedMessages = parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags);
+				std::vector<StringRef> parsedMessages = wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
 				for (StringRef msg : parsedMessages) {
 					messages << msg;
 				}
 
 				lastRefMessageVersion = entry.version;
+				index++;
 			}
 
 			messageReads.clear();
