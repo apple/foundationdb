@@ -1523,6 +1523,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 					if(poppedIsKnownCommitted) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
 					commitMessages(self, logData, ver, messages);
@@ -1561,6 +1562,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 						if(poppedIsKnownCommitted) {
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+							logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
 						if(self->terminated.isSet()) {
@@ -1911,7 +1913,6 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
 	state TLogInterface recruited(self->dbgid, locality);
-	recruited.locality = locality;
 	recruited.initEndpoints();
 
 	DUMPTOKEN( recruited.peekMessages );
