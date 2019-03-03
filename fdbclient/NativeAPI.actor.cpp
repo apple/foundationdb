@@ -468,70 +468,27 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 
 ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 	state bool sendDetailedHealthMetrics = networkOptions.sendDetailedHealthMetrics;
-	if (!cx->getMasterProxies().isValid() || !cx->getMasterProxies()->size()) {
-		// Wait until at least one proxy is available
-		loop
-		{
-			wait(cx->onMasterProxiesChanged());
-			if (cx->getMasterProxies().isValid() && cx->getMasterProxies()->size())
-				break;
-		}
-	}
-	state Future<Void> detailedTimer = Void();
-	if (!sendDetailedHealthMetrics)
-		detailedTimer = Never();
-	loop
-	{
-		if (!sendDetailedHealthMetrics &&
-			networkOptions.sendDetailedHealthMetrics) {
-			// Network option has been set
-			TraceEvent("EnablingDetailedHealthMetrics");
-			sendDetailedHealthMetrics = true;
-			detailedTimer = Void();
-		} else if (sendDetailedHealthMetrics &&
-			       !networkOptions.sendDetailedHealthMetrics) {
-			// Network option has been unset
-			TraceEvent("DisablingDetailedHealthMetrics");
-			sendDetailedHealthMetrics = false;
-			detailedTimer = Never();
-		}
-		state Future<Void> timer =
-			delay(CLIENT_KNOBS->UPDATE_HEALTH_METRICS_INTERVAL);
-		choose
-		{
-			when(wait(timer))
-			{
-				loop {
-					choose {
-						when(wait(cx->onMasterProxiesChanged())) {}
-						when(state GetHealthMetricsReply rep =
-							 wait(loadBalance(cx->getMasterProxies(),
-											  &MasterProxyInterface::getHealthMetrics,
-											  GetHealthMetricsRequest(false)))) {
-							cx->healthMetrics.update(rep.healthMetrics, false, true);
-							break;
-						}
-					}
+	state double lastDetailed = 0;
+	loop {
+		wait( delay(CLIENT_KNOBS->UPDATE_HEALTH_METRICS_INTERVAL) );
+		TraceEvent("HERE");
+		state bool sendDetailed = networkOptions.sendDetailedHealthMetrics && now() - lastDetailed > CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL;
+		loop {
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {}
+				when(state GetHealthMetricsReply rep =
+					 wait(cx->getMasterProxies().isValid() && cx->getMasterProxies()->size() ?
+						  loadBalance(cx->getMasterProxies(),
+                                      &MasterProxyInterface::getHealthMetrics,
+                                      GetHealthMetricsRequest(sendDetailed)) :
+						  Never())) {
+						cx->healthMetrics.update(rep.healthMetrics, sendDetailed, true);
+						break;
 				}
 			}
-			when(wait(detailedTimer))
-			{
-				ASSERT(sendDetailedHealthMetrics);
-				loop {
-					choose {
-						when(wait(cx->onMasterProxiesChanged())) {}
-						when(state GetHealthMetricsReply detailedRep =
-							wait(loadBalance(cx->getMasterProxies(),
-											 &MasterProxyInterface::getHealthMetrics,
-											 GetHealthMetricsRequest(true)))) {
-							cx->healthMetrics.update(detailedRep.healthMetrics, true, true);
-							detailedTimer = delay(
-								CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL);
-							break;
-						}
-					}
-				}
-			}
+		}
+		if(sendDetailed) {
+			lastDetailed = now();
 		}
 	}
 }
