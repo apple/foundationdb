@@ -87,10 +87,14 @@ Future<Void> forwardValue(Promise<T> out, Future<T> in)
 
 int getBytes(Promise<Version> const& r) { return 0; }
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate, double* outBatchTransactionRate) {
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
+						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
+	state double lastDetailedReply = 0.0; // request detailed metrics immediately
+	state bool expectingDetailedReply = false;
+
 	state int64_t lastTC = 0;
 
 	if (db->get().distributor.present()) {
@@ -102,7 +106,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			if ( db->get().distributor.present() ) {
 				TraceEvent("Proxy_DataDistributorChanged", myID)
 				.detail("DDID", db->get().distributor.get().id());
-				nextRequestTimer = Void();  // trigger GetRate request
+				nextRequestTimer = Void(); // trigger GetRate request
 			} else {
 				TraceEvent("Proxy_DataDistributorDied", myID);
 				nextRequestTimer = Never();
@@ -111,7 +115,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount)));
+			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
+			reply = brokenPromiseToNever(db->get().distributor.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, detailed)));
+			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
@@ -121,6 +127,11 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
+			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
+			if (expectingDetailedReply) {
+				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
+				lastDetailedReply = now();
+			}
 		}
 		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
@@ -1119,8 +1130,8 @@ ACTOR static Future<Void> transactionStarter(
 	MasterProxyInterface proxy,
 	Reference<AsyncVar<ServerDBInfo>> db,
 	PromiseStream<Future<Void>> addActor,
-	ProxyCommitData* commitData
-	)
+	ProxyCommitData* commitData, GetHealthMetricsReply* healthMetricsReply,
+	GetHealthMetricsReply* detailedHealthMetricsReply)
 {
 	state double lastGRVTime = 0;
 	state PromiseStream<Void> GRVTimer;
@@ -1135,7 +1146,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
 	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1355,6 +1366,22 @@ ACTOR static Future<Void> readRequestServer(
 	}
 }
 
+ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply)
+{
+	loop {
+		choose {
+			when(GetHealthMetricsRequest req =
+				 waitNext(proxy.getHealthMetrics.getFuture()))
+			{
+				if (req.detailed)
+					req.reply.send(*detailedHealthMetricsReply);
+				else
+					req.reply.send(*healthMetricsReply);
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self, Reference<AsyncVar<ServerDBInfo>> db) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
@@ -1433,6 +1460,9 @@ ACTOR Future<Void> masterProxyServerCore(
 	state std::set<Sequence> txnSequences;
 	state Sequence maxSequence = std::numeric_limits<Sequence>::max();
 
+	state GetHealthMetricsReply healthMetricsReply;
+	state GetHealthMetricsReply detailedHealthMetricsReply;
+
 	addActor.send( fetchVersions(&commitData) );
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
 
@@ -1463,8 +1493,9 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData, db));
-	addActor.send(transactionStarter(proxy, db, addActor, &commitData));
+	addActor.send(transactionStarter(proxy, db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, &commitData));
+	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

@@ -159,6 +159,9 @@ public:
 	Reference<Cluster> cluster;
 
 	int apiVersion;
+
+	HealthMetrics healthMetrics;
+	Future<Void> updateHealthMetrics;
 };
 
 #endif

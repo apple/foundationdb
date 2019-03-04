@@ -149,8 +149,10 @@ struct TransactionCounts {
 struct Ratekeeper {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
+
 	std::map<UID, TransactionCounts> proxy_transactionCounts;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
+	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 
 	Int64MetricHandle actualTpsMetric;
@@ -187,6 +189,8 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
 					myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
 					myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
+					myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
+					myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
 				} else {
 					self->smoothTotalDurableBytes.addDelta( reply.get().bytesDurable - myQueueInfo->value.prevReply.bytesDurable );
 					myQueueInfo->value.smoothDurableBytes.setTotal( reply.get().bytesDurable );
@@ -194,6 +198,8 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothInputBytes.setTotal( reply.get().bytesInput );
 					myQueueInfo->value.smoothFreeSpace.setTotal( reply.get().storageBytes.available );
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
+					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
+					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 				}
 			} else {
 				if(myQueueInfo->value.valid) {
@@ -299,6 +305,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
+	int64_t worstStorageDurabilityLagStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
 
 	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
@@ -328,6 +335,16 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
+
+		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
+		worstStorageDurabilityLagStorageServer = std::max(worstStorageDurabilityLagStorageServer, storageDurabilityLag);
+
+		auto& ssMetrics = self->healthMetrics.storageStats[ss.id];
+		ssMetrics.storageQueue = storageQueue;
+		ssMetrics.storageDurabilityLag = storageDurabilityLag;
+		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
+		ssMetrics.diskUsage = ss.lastReply.diskUsage;
+
 		int64_t b = storageQueue - targetBytes;
 		double targetRateRatio = std::min(( b + springBytes ) / (double)springBytes, 2.0);
 
@@ -381,6 +398,9 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 		ssReasons[ss.id] = ssLimitReason;
 	}
 
+	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
+	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
+
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for(auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits.tpsLimit; ++ss) {
 		if(ignoredMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
@@ -410,11 +430,11 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 			auto& ss = i->value;
 			if (!ss.valid) continue;
 
-			minSSVer = std::min(minSSVer, ss.lastReply.v);
+			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
 			// Machines that ratekeeper isn't controlling can fall arbitrarily far behind
 			if(ignoredMachines.count(i->value.locality.zoneId()) == 0) {
-				minLimitingSSVer = std::min(minLimitingSSVer, ss.lastReply.v);
+				minLimitingSSVer = std::min(minLimitingSSVer, ss.lastReply.version);
 			}
 		}
 
@@ -456,6 +476,7 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 		}
 
 		int64_t queue = tl.lastReply.bytesInput - tl.smoothDurableBytes.smoothTotal();
+		self->healthMetrics.tLogQueue[tl.id] = queue;
 		int64_t b = queue - targetBytes;
 		worstStorageQueueTLog = std::max(worstStorageQueueTLog, queue);
 
@@ -501,6 +522,8 @@ void updateRate( Ratekeeper* self, RatekeeperLimits &limits ) {
 			}
 		}
 	}
+
+	self->healthMetrics.worstTLogQueue = worstStorageQueueTLog;
 
 	limits.tpsLimit = std::max(limits.tpsLimit, 0.0);
 
@@ -634,6 +657,10 @@ ACTOR Future<Void> rateKeeper(
 				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
+
+				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
+				reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
+
 				req.reply.send( reply );
 			}
 			when (wait(err.getFuture())) {}
