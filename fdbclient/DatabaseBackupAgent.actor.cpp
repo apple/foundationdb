@@ -1933,7 +1933,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> atomicSwitchover(DatabaseBackupAgent* backupAgent, Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix) {
+	ACTOR static Future<Void> atomicSwitchover(DatabaseBackupAgent* backupAgent, Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix, bool forceAction) {
 		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state int status = wait(backupAgent->getStateValue(dest, destlogUid));
@@ -1943,7 +1943,7 @@ public:
 			throw backup_duplicate();
 		}
 
-		if (!g_network->isSimulated()) {
+		if (!g_network->isSimulated() && !forceAction) {
 			state StatusObject srcStatus = wait(StatusClient::statusFetcher(backupAgent->taskBucket->src->getConnectionFile()));
 			StatusObject destStatus = wait(StatusClient::statusFetcher(dest->getConnectionFile()));
 			checkAtomicSwitchOverConfig(srcStatus, destStatus, tagName);
@@ -2397,8 +2397,8 @@ Future<Void> DatabaseBackupAgent::unlockBackup(Reference<ReadYourWritesTransacti
 	return DatabaseBackupAgentImpl::unlockBackup(this, tr, tagName);
 }
 
-Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix) {
-	return DatabaseBackupAgentImpl::atomicSwitchover(this, dest, tagName, backupRanges, addPrefix, removePrefix);
+Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix, bool forceAction) {
+	return DatabaseBackupAgentImpl::atomicSwitchover(this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction);
 }
 
 Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone, Key addPrefix, Key removePrefix, bool lockDatabase, bool databasesInSync) {

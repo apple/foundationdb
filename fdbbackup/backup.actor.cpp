@@ -1640,7 +1640,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 	return Void();
 }
 
-ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName) {
+ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool forceAction) {
 	try
 	{
 		state DatabaseBackupAgent backupAgent(src);
@@ -1651,7 +1651,7 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 		}
 
 
-		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef()));
+		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
 	}
 
@@ -3222,7 +3222,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( statusDBBackup(sourceDb, db, tagName, maxErrors) );
 				break;
 			case DB_SWITCH:
-				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName) );
+				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName, forceAction) );
 				break;
 			case DB_ABORT:
 				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial) );
