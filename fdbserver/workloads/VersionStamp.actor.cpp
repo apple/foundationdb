@@ -40,7 +40,7 @@ struct VersionStampWorkload : TestWorkload {
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> key_commit;
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> versionStampKey_commit;
 	int apiVersion;
-	bool onlyTestChangingMetadataVersion;
+	bool soleOwnerOfMetadataVersionKey;
 
 	VersionStampWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
@@ -54,7 +54,7 @@ struct VersionStampWorkload : TestWorkload {
 		vsKeyPrefix = LiteralStringRef("K_").withPrefix(prefix);
 		vsValuePrefix = LiteralStringRef("V_").withPrefix(prefix);
 		validateExtraDB = getOption(options, LiteralStringRef("validateExtraDB"), false);
-		onlyTestChangingMetadataVersion = getOption(options, LiteralStringRef("onlyTestChangingMetadataVersion"), false);
+		soleOwnerOfMetadataVersionKey = getOption(options, LiteralStringRef("soleOwnerOfMetadataVersionKey"), false);
 	}
 
 	virtual std::string description() { return "VersionStamp"; }
@@ -212,7 +212,7 @@ struct VersionStampWorkload : TestWorkload {
 					ASSERT(all_values_iter != self->key_commit.end());  // Reading a key that we didn't commit.
 					const auto& all_values = all_values_iter->second;
 
-					if(it.key == metadataVersionKey && !self->onlyTestChangingMetadataVersion) {
+					if(it.key == metadataVersionKey && !self->soleOwnerOfMetadataVersionKey) {
 						if(self->failIfDataLost) {
 							for(auto& it : all_values) {
 								ASSERT(it.first <= parsedVersion);
@@ -325,8 +325,13 @@ struct VersionStampWorkload : TestWorkload {
 				state bool error = false;
 				state Error err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
+				state Key testKey;
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
+					if(key == metadataVersionKey) {
+						testKey = "testKey" + g_random->randomUniqueID().toString();
+						tr.atomicOp(testKey, versionStampValue, MutationRef::SetVersionstampedValue);
+					}
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
@@ -349,7 +354,7 @@ struct VersionStampWorkload : TestWorkload {
 							state ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
 							cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 							try {
-								Optional<Value> vs_value = wait(cur_tr.get(key));
+								Optional<Value> vs_value = wait(cur_tr.get(key == metadataVersionKey ? testKey : key));
 								if (!vs_value.present()) {
 									error = true;
 									break;
