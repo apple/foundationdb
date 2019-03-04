@@ -28,6 +28,20 @@
 typedef bool(*compare_pages)(void*,void*);
 typedef int64_t loc_t;
 
+// 0 -> 0
+// 1 -> 4k
+// 4k -> 4k
+int64_t pageCeiling( int64_t loc ) {
+	return (loc+_PAGE_SIZE-1)/_PAGE_SIZE*_PAGE_SIZE;
+}
+
+// 0 -> 0
+// 1 -> 0
+// 4k -> 4k
+int64_t pageFloor( int64_t loc ) {
+	return loc / _PAGE_SIZE * _PAGE_SIZE;
+}
+
 struct StringBuffer {
 	Standalone<StringRef> str;
 	int reserved;
@@ -279,9 +293,10 @@ public:
 				files[1].popped = 0;
 				writingPos = 0;
 
-				if (files[1].size > pageData.size() + fileExtensionBytes + fileShrinkBytes) {
+				const int64_t activeDataVolume = pageCeiling(files[0].size - files[0].popped + fileExtensionBytes + fileShrinkBytes);
+				if (files[1].size > activeDataVolume) {
 					// Either shrink files[1] to the size of files[0], or chop off fileShrinkBytes
-					int64_t maxShrink = std::max( (files[1].size - files[0].size+_PAGE_SIZE-1)/_PAGE_SIZE*_PAGE_SIZE, fileShrinkBytes );
+					int64_t maxShrink = std::max( pageFloor(files[1].size - activeDataVolume), fileShrinkBytes );
 					files[1].size -= maxShrink;
 					waitfor.push_back( files[1].f->truncate( files[1].size ) );
 				}
