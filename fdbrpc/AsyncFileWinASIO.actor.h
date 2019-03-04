@@ -43,10 +43,7 @@ public:
 	// FIXME: This implementation isn't actually asynchronous - it just does operations synchronously!
 
 	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, boost::asio::io_service* ios ) {
-		if (!(flags & OPEN_UNBUFFERED)) {
-			TraceEvent(SevError, "FileOpenError").detail("Reason", "Must be unbuffered").detail("Flags", flags).detail("File", filename);
-			return io_error();
-		}
+		ASSERT( flags & OPEN_UNBUFFERED );
 
 		std::string open_filename = filename;
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
