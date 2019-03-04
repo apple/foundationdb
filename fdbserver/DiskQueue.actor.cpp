@@ -968,10 +968,10 @@ private:
 				// might be a bit overly aggressive here, but it's behavior we need to tolerate.
 				throw io_error();
 			}
-			ASSERT( ((Page*)pagedData.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)pagedData.begin())->seq == pageFloor(start.lo) );
 			ASSERT(pagedData.size() == (toPage - fromPage + 1) * _PAGE_SIZE );
 
-			ASSERT( ((Page*)pagedData.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)pagedData.end() - 1)->seq == pageFloor(end.lo - 1) );
 			return pagedData;
 		} else {
 			ASSERT(fromFile == 0);
@@ -984,9 +984,9 @@ private:
 				throw io_error();
 			}
 			ASSERT(firstChunk.size() == ( ( file0size / sizeof(Page) ) - fromPage ) * _PAGE_SIZE );
-			ASSERT( ((Page*)firstChunk.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)firstChunk.begin())->seq == pageFloor(start.lo) );
 			ASSERT(secondChunk.size() == (toPage + 1) * _PAGE_SIZE);
-			ASSERT( ((Page*)secondChunk.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)secondChunk.end() - 1)->seq == pageFloor(end.lo - 1) );
 			return firstChunk.withSuffix(secondChunk);
 		}
 	}
@@ -1005,7 +1005,7 @@ private:
 		if (endingOffset == 0) endingOffset = sizeof(Page);
 		if (endingOffset > 0) endingOffset -= sizeof(PageHeader);
 
-		if ((end.lo-1)/sizeof(Page)*sizeof(Page) == start.lo/sizeof(Page)*sizeof(Page)) {
+		if (pageFloor(end.lo-1) == pageFloor(start.lo)) {
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
@@ -1025,7 +1025,7 @@ private:
 			data++;
 
 			// Copy all the middle pages
-			while (data->seq != ((end.lo-1)/sizeof(Page)*sizeof(Page))) {
+			while (data->seq != pageFloor(end.lo-1)) {
 				// These pages can have varying amounts of data, as pages with partial
 				// data will be zero-filled when commit is called.
 				const int length = data->payloadSize;
@@ -1094,14 +1094,14 @@ private:
 
 			self->readBufArena = page.arena();
 			self->readBufPage = (Page*)page.begin();
-			if (!self->readBufPage->checkHash() || self->readBufPage->seq < self->nextReadLocation/sizeof(Page)*sizeof(Page)) {
+			if (!self->readBufPage->checkHash() || self->readBufPage->seq < pageFloor(self->nextReadLocation)) {
 				TraceEvent("DQRecInvalidPage", self->dbgid).detail("NextReadLocation", self->nextReadLocation).detail("HashCheck", self->readBufPage->checkHash())
-					.detail("Seq", self->readBufPage->seq).detail("Expect", self->nextReadLocation/sizeof(Page)*sizeof(Page)).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+					.detail("Seq", self->readBufPage->seq).detail("Expect", pageFloor(self->nextReadLocation)).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 				wait( self->rawQueue->truncateBeforeLastReadPage() );
 				break;
 			}
 			//TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
-			ASSERT( self->readBufPage->seq == self->nextReadLocation/sizeof(Page)*sizeof(Page) );
+			ASSERT( self->readBufPage->seq == pageFloor(self->nextReadLocation) );
 			self->lastPoppedSeq = self->readBufPage->popped;
 		}
 
@@ -1110,10 +1110,10 @@ private:
 		int f; int64_t p;
 		TEST( self->lastPoppedSeq/sizeof(Page) != self->poppedSeq/sizeof(Page) );  // DiskQueue: Recovery popped position not fully durable
 		self->findPhysicalLocation( self->lastPoppedSeq, &f, &p, "lastPoppedSeq" );
-		wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
+		wait(self->rawQueue->setPoppedPage( f, p, pageFloor(self->lastPoppedSeq) ));
 
 		// Writes go at the end of our reads (but on the next page)
-		self->nextPageSeq = self->nextReadLocation/sizeof(Page)*sizeof(Page);
+		self->nextPageSeq = pageFloor(self->nextReadLocation);
 		if (self->nextReadLocation % sizeof(Page) > sizeof(PageHeader)) self->nextPageSeq += sizeof(Page);
 
 		TraceEvent("DQRecovered", self->dbgid).detail("LastPoppedSeq", self->lastPoppedSeq).detail("PoppedSeq", self->poppedSeq).detail("NextPageSeq", self->nextPageSeq).detail("File0Name", self->rawQueue->files[0].dbgFilename);
