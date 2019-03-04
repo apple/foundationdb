@@ -62,6 +62,9 @@ struct TokenBucket {
 	}
 };
 
+constexpr const double TokenBucket::addTokensInterval;
+constexpr const double TokenBucket::maxSleepTime;
+
 struct ThrottlingWorkload : KVWorkload {
 
 	double testDuration;
