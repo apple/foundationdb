@@ -71,6 +71,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
+	init( UPDATE_HEALTH_METRICS_INTERVAL,          0.5 );
+	init( UPDATE_DETAILED_HEALTH_METRICS_INTERVAL, 5.0 );
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;

@@ -162,6 +162,9 @@ public:
 
 	int mvCacheInsertLocation;
 	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
+
+	HealthMetrics healthMetrics;
+	Future<Void> updateHealthMetrics;
 };
 
 #endif

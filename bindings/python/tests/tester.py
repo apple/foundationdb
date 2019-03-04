@@ -21,6 +21,7 @@
 
 
 import ctypes
+import math
 import sys
 import os
 import struct
@@ -498,6 +499,8 @@ class Tester:
                 elif inst.op == six.u("ENCODE_FLOAT"):
                     f_bytes = inst.pop()
                     f = struct.unpack(">f", f_bytes)[0]
+                    if not math.isnan(f) and not math.isinf(f) and not f == -0.0 and f == int(f):
+                        f = int(f)
                     inst.push(fdb.tuple.SingleFloat(f))
                 elif inst.op == six.u("ENCODE_DOUBLE"):
                     d_bytes = inst.pop()

@@ -133,5 +133,6 @@ struct StatisticsState {
 
 void systemMonitor();
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics = false);
+SystemStatistics getSystemStatistics();
 
 #endif /* FLOW_SYSTEM_MONITOR_H */

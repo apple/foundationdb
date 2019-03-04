@@ -45,6 +45,8 @@ struct MasterProxyInterface {
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 
+	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
@@ -53,7 +55,9 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion, txnState);
+		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations,
+				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
+				   txnState, getHealthMetrics);
 	}
 
 	void initEndpoints() {
@@ -228,6 +232,49 @@ struct TxnStateRequest {
 	template <class Ar> 
 	void serialize(Ar& ar) { 
 		serializer(ar, data, sequence, last, reply, arena);
+	}
+};
+
+struct GetHealthMetricsRequest
+{
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply, detailed);
+	}
+};
+
+struct GetHealthMetricsReply
+{
+	Standalone<StringRef> serialized;
+	HealthMetrics healthMetrics;
+
+	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics()) :
+		healthMetrics(healthMetrics)
+	{
+		update(healthMetrics, true, true);
+	}
+
+	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput)
+	{
+		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
+		BinaryWriter bw(IncludeVersion());
+		bw << this->healthMetrics;
+		serialized = Standalone<StringRef>(bw.toStringRef());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serialized);
+		if (ar.isDeserializing) {
+			BinaryReader br(serialized, IncludeVersion());
+			br >> healthMetrics;
+		}
 	}
 };
 

@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
 #define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 
@@ -51,24 +52,29 @@ struct DataDistributorInterface {
 struct GetRateInfoRequest {
 	UID requesterID;
 	int64_t totalReleasedTransactions;
+	int64_t batchReleasedTransactions;
+	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, bool detailed)
+		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, reply);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, detailed, reply);
 	}
 };
 
 struct GetRateInfoReply {
 	double transactionRate;
+	double batchTransactionRate;
 	double leaseDuration;
+	HealthMetrics healthMetrics;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, leaseDuration);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics);
 	}
 };
 

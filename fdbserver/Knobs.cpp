@@ -342,15 +342,20 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SMOOTHING_AMOUNT,                                      1.0 ); if( slowRateKeeper ) SMOOTHING_AMOUNT = 5.0;
 	init( SLOW_SMOOTHING_AMOUNT,                                10.0 ); if( slowRateKeeper ) SLOW_SMOOTHING_AMOUNT = 50.0;
 	init( METRIC_UPDATE_RATE,                                     .1 ); if( slowRateKeeper ) METRIC_UPDATE_RATE = 0.5;
+	init( DETAILED_METRIC_UPDATE_RATE,                           5.0 );
 
 	bool smallStorageTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
 	init( SPRING_BYTES_STORAGE_SERVER,                         100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER = 300e3;
+	init( TARGET_BYTES_PER_STORAGE_SERVER_BATCH,               500e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER_BATCH = 1500e3;
+	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                    50e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
 	init( SPRING_BYTES_TLOG,								   400e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG = 200e3;
+	init( TARGET_BYTES_PER_TLOG_BATCH,                        1000e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG_BATCH = 1000e3;
+	init( SPRING_BYTES_TLOG_BATCH,                             200e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG_BATCH = 100e3;
 	init( TLOG_SPILL_THRESHOLD,                               1500e6 ); if( smallTlogTarget ) TLOG_SPILL_THRESHOLD = 1500e3; if( randomize && BUGGIFY ) TLOG_SPILL_THRESHOLD = 0;
 	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 3000e3;
 	init( TLOG_RECOVER_MEMORY_LIMIT, TARGET_BYTES_PER_TLOG + SPRING_BYTES_TLOG );
@@ -361,6 +366,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MIN_FREE_SPACE_RATIO,                                 0.05 );
 
 	init( MAX_TL_SS_VERSION_DIFFERENCE,                         1e99 ); // if( randomize && BUGGIFY ) MAX_TL_SS_VERSION_DIFFERENCE = std::max(1.0, 0.25 * VERSIONS_PER_SECOND); // spring starts at half this value //FIXME: this knob causes ratekeeper to clamp on idle cluster in simulation that have a large number of logs
+	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
 	init( MAX_MACHINES_FALLING_BEHIND,                             1 );
 
 	//Storage Metrics
@@ -389,6 +395,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( LONG_BYTE_SAMPLE_RECOVERY_DELAY,                      60.0 );
 	init( BYTE_SAMPLE_LOAD_PARALLELISM,                           32 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_PARALLELISM = 1;
 	init( BYTE_SAMPLE_LOAD_DELAY,                                0.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_DELAY = 0.1;
+	init( UPDATE_STORAGE_PROCESS_STATS_INTERVAL,                 5.0 );
 
 	//Wait Failure
 	init( BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS,               2 );

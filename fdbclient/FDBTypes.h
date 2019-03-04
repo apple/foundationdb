@@ -724,4 +724,72 @@ struct ClusterControllerPriorityInfo {
 	}
 };
 
+struct HealthMetrics {
+	struct StorageStats {
+		int64_t storageQueue;
+		int64_t storageDurabilityLag;
+		double diskUsage;
+		double cpuUsage;
+
+		bool operator==(StorageStats const &r) const {
+			return (
+				(storageQueue == r.storageQueue) &&
+				(storageDurabilityLag == r.storageDurabilityLag) &&
+				(diskUsage == r.diskUsage) &&
+				(cpuUsage == r.cpuUsage)
+			);
+		}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, storageQueue, storageDurabilityLag, diskUsage, cpuUsage);
+		}
+	};
+
+	int64_t worstStorageQueue;
+	int64_t worstStorageDurabilityLag;
+	int64_t worstTLogQueue;
+	double tpsLimit;
+	std::map<UID, StorageStats> storageStats;
+	std::map<UID, int64_t> tLogQueue;
+
+	HealthMetrics()
+		: worstStorageQueue(0)
+		, worstStorageDurabilityLag(0)
+		, worstTLogQueue(0)
+		, tpsLimit(0.0)
+	{}
+
+	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
+	{
+		worstStorageQueue = hm.worstStorageQueue;
+		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
+		worstTLogQueue = hm.worstTLogQueue;
+		tpsLimit = hm.tpsLimit;
+
+		if (!detailedOutput) {
+			storageStats.clear();
+			tLogQueue.clear();
+		} else if (detailedInput) {
+			storageStats = hm.storageStats;
+			tLogQueue = hm.tLogQueue;
+		}
+	}
+
+	bool operator==(HealthMetrics const& r) const {
+		return (
+			worstStorageQueue == r.worstStorageQueue &&
+			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
+			worstTLogQueue == r.worstTLogQueue &&
+			storageStats == r.storageStats &&
+			tLogQueue == r.tLogQueue
+		);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, storageStats, tLogQueue);
+	}
+};
+
 #endif
