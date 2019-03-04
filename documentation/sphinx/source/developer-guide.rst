@@ -586,7 +586,7 @@ Conflicts can be *avoided*, reducing isolation, in two ways:
 
 Conflicts can be *created*, increasing isolation, by :ref:`explicitly adding <api-python-conflict-ranges>` read or write conflict ranges. 
 
-.. warning:: Ordering of *write* operations and *add read conflict range* operations should be considered carefully as it could result in unexpected behavior. Adding read conflict ranges will skip adding conflicts for the range of keys that have been written previously in the transaction. Adding them before the respective writes will add to the conflict ranges.
+.. note:: *add read conflict range* behaves as if the client is reading the range. This means *add read conflict range* will not add conflict ranges for keys that have been written earlier in the same transaction. This is the intended behavior, as it allows users to compose transactions together without introducing unnecessary conflicts.
 
 For example, suppose you have a transactional function that increments a set of counters using atomic addition. :ref:`developer-guide-atomic-operations` do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose::
 
