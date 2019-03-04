@@ -471,7 +471,6 @@ ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
 	state double lastDetailed = 0;
 	loop {
 		wait( delay(CLIENT_KNOBS->UPDATE_HEALTH_METRICS_INTERVAL) );
-		TraceEvent("HERE");
 		state bool sendDetailed = networkOptions.sendDetailedHealthMetrics && now() - lastDetailed > CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL;
 		loop {
 			choose {
