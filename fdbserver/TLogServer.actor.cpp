@@ -199,8 +199,18 @@ static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringR
 static const KeyRangeRef persistKnownCommittedVersionKeys = KeyRangeRef( LiteralStringRef( "knownCommitted/" ), LiteralStringRef( "knownCommitted0" ) );
 static const KeyRangeRef persistLocalityKeys = KeyRangeRef( LiteralStringRef( "Locality/" ), LiteralStringRef( "Locality0" ) );
 static const KeyRangeRef persistLogRouterTagsKeys = KeyRangeRef( LiteralStringRef( "LogRouterTags/" ), LiteralStringRef( "LogRouterTags0" ) );
+static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
 static const KeyRange persistTagMessageRefsKeys = prefixRange(LiteralStringRef("TagMsgRef/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+
+static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
+	BinaryWriter wr( Unversioned() );
+	wr.serializeBytes(persistTagMessagesKeys.begin);
+	wr << id;
+	wr << tag;
+	wr << bigEndian64( version );
+	return wr.toStringRef();
+}
 
 static Key persistTagMessageRefsKey( UID id, Tag tag, Version version ) {
 	BinaryWriter wr( Unversioned() );
@@ -234,8 +244,16 @@ static Version decodeTagPoppedValue( ValueRef value ) {
 	return BinaryReader::fromStringRef<Version>( value, Unversioned() );
 }
 
+static StringRef stripTagMessagesKey( StringRef key ) {
+	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
+}
+
 static StringRef stripTagMessageRefsKey( StringRef key ) {
 	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size() );
+}
+
+static Version decodeTagMessagesKey( StringRef key ) {
+	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
 }
 
 static Version decodeTagMessageRefsKey( StringRef key ) {
@@ -470,8 +488,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
-			Key msgKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
+			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
+			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
+			tLogData->persistentData->clear( KeyRangeRef( msgRefKey, strinc(msgRefKey) ) );
 			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( poppedKey, strinc(poppedKey) ) );
 		}
@@ -557,9 +577,15 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 
 	if (data->nothingPersistent) return;
 
-	self->persistentData->clear( KeyRangeRef(
-		persistTagMessageRefsKey( logData->logId, data->tag, Version(0) ),
-		persistTagMessageRefsKey( logData->logId, data->tag, data->popped ) ) );
+	if (data->tag == txsTag) {
+		self->persistentData->clear( KeyRangeRef(
+					persistTagMessagesKey( logData->logId, data->tag, Version(0) ),
+					persistTagMessagesKey( logData->logId, data->tag, data->popped ) ) );
+	} else {
+		self->persistentData->clear( KeyRangeRef(
+					persistTagMessageRefsKey( logData->logId, data->tag, Version(0) ),
+					persistTagMessageRefsKey( logData->logId, data->tag, data->popped ) ) );
+	}
 	if (data->popped > logData->persistentDataVersion)
 		data->nothingPersistent = true;
 }
@@ -670,7 +696,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 							wr << msg->second.toStringRef();
 						}
-						self->persistentData->set( KeyValueRef( persistTagMessageRefsKey( logData->logId, tagData->tag, currentVersion ), wr.toStringRef() ) );
+						self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tagData->tag, currentVersion ), wr.toStringRef() ) );
 					} else {
 						// spill everything else by reference
 						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
@@ -1211,17 +1237,17 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if (req.tag == txsTag) {
 			Standalone<VectorRef<KeyValueRef>> kvs = wait(
 					self->persistentData->readRange(KeyRangeRef(
-							persistTagMessageRefsKey(logData->logId, req.tag, req.begin),
-							persistTagMessageRefsKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+							persistTagMessagesKey(logData->logId, req.tag, req.begin),
+							persistTagMessagesKey(logData->logId, req.tag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 
 			for (auto &kv : kvs) {
-				auto ver = decodeTagMessageRefsKey(kv.key);
+				auto ver = decodeTagMessagesKey(kv.key);
 				messages << int32_t(-1) << ver;
 				messages.serializeBytes(kv.value);
 			}
 
 			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
-				endVersion = decodeTagMessageRefsKey(kvs.end()[-1].key) + 1;
+				endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 			else
 				messages.serializeBytes( messages2.toStringRef() );
 		} else {
