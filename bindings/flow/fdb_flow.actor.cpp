@@ -335,9 +335,7 @@ namespace FDB {
 			} );
 	}
 
-	Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin, const KeySelector& end,
-																	GetRangeLimits limits, bool snapshot, bool reverse,
-																	FDBStreamingMode streamingMode) {
+	Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin, const KeySelector& end, GetRangeLimits limits, bool snapshot, bool reverse, FDBStreamingMode streamingMode) {
 		// FIXME: iteration
 		return backToFuture< FDBStandalone<RangeResultRef> >( fdb_transaction_get_range( tr, begin.key.begin(), begin.key.size(), begin.orEqual, begin.offset, end.key.begin(), end.key.size(), end.orEqual, end.offset, limits.rows, limits.bytes, streamingMode, 1, snapshot, reverse ), [](Reference<CFuture> f) {
 				FDBKeyValue const* kv;
