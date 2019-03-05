@@ -1299,6 +1299,7 @@ namespace fileBackup {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 			Void _ = wait(checkTaskVersion(cx, task, name, version));
 
+			state double startTime = timer();
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
 			// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN which will mean not done.
@@ -1689,7 +1690,8 @@ namespace fileBackup {
 					.detail("SnapshotBeginVersion", snapshotBeginVersion)
 					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 					.detail("CurrentVersion", recentReadVersion)
-					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds)
+					.detail("DispatchTimeSeconds", timer() - startTime);
 				Params.snapshotFinished().set(task, true);
 			}
 

@@ -100,7 +100,7 @@ If <secret> is not specified, it will be looked up in :ref:`blob credential sour
 
 An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups``.
 
-Blob store Backup URLs can have optional parameters at the end which set various limits on interactions with the blob store.  All values must be positive decimal integers.  The default values are not very restrictive.  The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service.
+Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive.  The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service.
 
 Here is a complete list of valid parameters:
 
@@ -130,7 +130,11 @@ Here is a complete list of valid parameters:
 
  *max_send_bytes_per_second* (or *sbps*) - Max send bytes per second for all requests combined.
 
- *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined
+ *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
+
+ *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
+ 
+  **Example**: The URL parameter *header=x-amz-storage-class:REDUCED_REDUNDANCY* would send the HTTP header required to use the reduced redundancy storage option in the S3 API.
 
 .. _blob-credential-files:
 
