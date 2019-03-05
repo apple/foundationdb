@@ -657,6 +657,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_FORCE,           "-f",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
