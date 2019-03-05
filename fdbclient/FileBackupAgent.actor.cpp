@@ -129,7 +129,11 @@ public:
 	KeyBackedProperty<Key> removePrefix() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 	KeyBackedProperty<Key> batchFuture() {
@@ -166,6 +170,15 @@ public:
 	// Total number of file blocks in the fileMap
 	KeyBackedBinaryValue<int64_t> fileBlockCount() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
+		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
+		if (ranges.empty()) {
+			state KeyRange range = wait(self->restoreRange().getD(tr));
+			ranges.push_back(range);
+		}
+		return ranges;
 	}
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
@@ -365,7 +378,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<KeyRange> range = restore.restoreRange().getD(tr);
+	state Future<std::vector<KeyRange>> ranges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
 	state Future<Key> addPrefix = restore.addPrefix().getD(tr);
 	state Future<Key> removePrefix = restore.removePrefix().getD(tr);
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
@@ -374,17 +387,19 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore.getUid();
-	wait(success(range) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) && success(progress));
+	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) && success(progress));
 
-	return format("%s  URL: %s  Begin: '%s'  End: '%s'  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
-					progress.get().c_str(),
-					url.get().toString().c_str(),
-					printable(range.get().begin).c_str(),
-					printable(range.get().end).c_str(),
-					printable(addPrefix.get()).c_str(),
-					printable(removePrefix.get()).c_str(),
-					restoreVersion.get()
-	);
+	std::string returnStr;
+	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
+	for (auto &range : ranges.get()) {
+		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
+	}
+	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
+						printable(addPrefix.get()).c_str(),
+						printable(removePrefix.get()).c_str(),
+						restoreVersion.get()
+					   );
+	return returnStr;
 }
 
 
@@ -2472,10 +2487,26 @@ namespace fileBackup {
 		static struct : InputParams {
 			// The range of data that the (possibly empty) data represented, which is set if it intersects the target restore range
 			static TaskParam<KeyRange> originalFileRange() { return LiteralStringRef(__FUNCTION__); }
+			static TaskParam<std::vector<KeyRange>> originalFileRanges() { return LiteralStringRef(__FUNCTION__); }
+
+			static std::vector<KeyRange> getOriginalFileRanges(Reference<Task> task) {
+				if (originalFileRanges().exists(task)) {
+					return Params.originalFileRanges().get(task);
+				}
+				else {
+					std::vector<KeyRange> range;
+					if (originalFileRange().exists(task))
+						range.push_back(Params.originalFileRange().get(task));
+					return range;
+				}
+			}
 		} Params;
 
 		std::string toString(Reference<Task> task) {
-			return RestoreFileTaskFuncBase::toString(task) + format(" originalFileRange '%s'", printable(Params.originalFileRange().get(task)).c_str());
+			std::string returnStr = RestoreFileTaskFuncBase::toString(task);
+			for(auto &range : Params.getOriginalFileRanges(task))
+				returnStr += format("  originalFileRange '%s'", printable(range).c_str());
+			return returnStr;
 		}
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
@@ -2495,28 +2526,29 @@ namespace fileBackup {
 				.detail("ReadLen", readLen)
 				.detail("TaskInstance", THIS_ADDR);
 
-			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			state Future<Reference<IBackupContainer>> bc;
-			state Future<KeyRange> restoreRange;
+			state Future<std::vector<KeyRange>> restoreRanges;
 			state Future<Key> addPrefix;
 			state Future<Key> removePrefix;
 
-			loop {
+			loop{
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 					bc = restore.sourceContainer().getOrThrow(tr);
-					restoreRange = restore.restoreRange().getD(tr);
+					restoreRanges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
 					addPrefix = restore.addPrefix().getD(tr);
 					removePrefix = restore.removePrefix().getD(tr);
 
 					wait(taskBucket->keepRunning(tr, task));
 
-					wait(success(bc) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
+					wait(success(bc) && success(restoreRanges) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
 					break;
 
-				} catch(Error &e) {
+				}
+				catch (Error &e) {
 					wait(tr->onError(e));
 				}
 			}
@@ -2526,113 +2558,128 @@ namespace fileBackup {
 
 			// First and last key are the range for this file
 			state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
-
+			state std::vector<KeyRange> originalFileRanges;
 			// If fileRange doesn't intersect restore range then we're done.
-			if(!fileRange.intersects(restoreRange.get()))
-				return Void();
+			state int index;
+			for (index = 0; index < restoreRanges.get().size(); index++) {
+				auto &restoreRange = restoreRanges.get()[index];
+				if (!fileRange.intersects(restoreRange))
+					continue;
 
-			// We know the file range intersects the restore range but there could still be keys outside the restore range.
-			// Find the subvector of kv pairs that intersect the restore range.  Note that the first and last keys are just the range endpoints for this file
-			int rangeStart = 1;
-			int rangeEnd = blockData.size() - 1;
-			// Slide start forward, stop if something in range is found
-			while(rangeStart < rangeEnd && !restoreRange.get().contains(blockData[rangeStart].key))
-				++rangeStart;
-			// Side end backward, stop if something in range is found
-			while(rangeEnd > rangeStart && !restoreRange.get().contains(blockData[rangeEnd - 1].key))
-				--rangeEnd;
+				// We know the file range intersects the restore range but there could still be keys outside the restore range.
+				// Find the subvector of kv pairs that intersect the restore range.  Note that the first and last keys are just the range endpoints for this file
+				int rangeStart = 1;
+				int rangeEnd = blockData.size() - 1;
+				// Slide start forward, stop if something in range is found
+				while (rangeStart < rangeEnd && !restoreRange.contains(blockData[rangeStart].key))
+					++rangeStart;
+				// Side end backward, stop if something in range is found
+				while (rangeEnd > rangeStart && !restoreRange.contains(blockData[rangeEnd - 1].key))
+					--rangeEnd;
 
-			state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
+				state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
 
-			// Shrink file range to be entirely within restoreRange and translate it to the new prefix
-			// First, use the untranslated file range to create the shrunk original file range which must be used in the kv range version map for applying mutations
-			state KeyRange originalFileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.get().begin), std::min(fileRange.end,   restoreRange.get().end));
-			Params.originalFileRange().set(task, originalFileRange);
+				// Shrink file range to be entirely within restoreRange and translate it to the new prefix
+				// First, use the untranslated file range to create the shrunk original file range which must be used in the kv range version map for applying mutations
+				state KeyRange originalFileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin), std::min(fileRange.end, restoreRange.end));
+				originalFileRanges.push_back(originalFileRange);
 
-			// Now shrink and translate fileRange
-			Key fileEnd = std::min(fileRange.end,   restoreRange.get().end);
-			if(fileEnd == (removePrefix.get() == StringRef() ? normalKeys.end : strinc(removePrefix.get())) ) {
-				fileEnd = addPrefix.get() == StringRef() ? normalKeys.end : strinc(addPrefix.get());
-			} else {
-				fileEnd = fileEnd.removePrefix(removePrefix.get()).withPrefix(addPrefix.get());
-			}
-			fileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.get().begin).removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),fileEnd);
+				// Now shrink and translate fileRange
+				Key fileEnd = std::min(fileRange.end, restoreRange.end);
+				if (fileEnd == (removePrefix.get() == StringRef() ? normalKeys.end : strinc(removePrefix.get()))) {
+					fileEnd = addPrefix.get() == StringRef() ? normalKeys.end : strinc(addPrefix.get());
+				}
+				else {
+					fileEnd = fileEnd.removePrefix(removePrefix.get()).withPrefix(addPrefix.get());
+				}
+				fileRange = KeyRangeRef(std::max(fileRange.begin, restoreRange.begin).removePrefix(removePrefix.get()).withPrefix(addPrefix.get()), fileEnd);
 
-			state int start = 0;
-			state int end = data.size();
-			state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+				state int start = 0;
+				state int end = data.size();
+				state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
-			tr->reset();
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->reset();
+				loop{
+					try {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					state int i = start;
-					state int txBytes = 0;
-					state int iend = start;
+						state int i = start;
+						state int txBytes = 0;
+						state int iend = start;
 
-					// find iend that results in the desired transaction size
-					for(; iend < end && txBytes < dataSizeLimit; ++iend) {
-						txBytes += data[iend].key.expectedSize();
-						txBytes += data[iend].value.expectedSize();
+						// find iend that results in the desired transaction size
+						for (; iend < end && txBytes < dataSizeLimit; ++iend) {
+							txBytes += data[iend].key.expectedSize();
+							txBytes += data[iend].value.expectedSize();
+						}
+
+						// Clear the range we are about to set.
+						// If start == 0 then use fileBegin for the start of the range, else data[start]
+						// If iend == end then use fileEnd for the end of the range, else data[iend]
+						state KeyRange trRange = KeyRangeRef((start == 0) ? fileRange.begin : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())
+														   , (iend == end) ? fileRange.end : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
+
+						tr->clear(trRange);
+
+						for (; i < iend; ++i) {
+							tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+							tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()), data[i].value);
+						}
+
+						// Add to bytes written count
+						restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
+
+						state Future<Void> checkLock = checkDatabaseLock(tr, restore.getUid());
+
+						wait(taskBucket->keepRunning(tr, task));
+
+						wait(checkLock);
+
+						wait(tr->commit());
+
+						TraceEvent("FileRestoreCommittedRange")
+							.suppressFor(60)
+							.detail("RestoreUID", restore.getUid())
+							.detail("FileName", rangeFile.fileName)
+							.detail("FileVersion", rangeFile.version)
+							.detail("FileSize", rangeFile.fileSize)
+							.detail("ReadOffset", readOffset)
+							.detail("ReadLen", readLen)
+							.detail("CommitVersion", tr->getCommittedVersion())
+							.detail("BeginRange", printable(trRange.begin))
+							.detail("EndRange", printable(trRange.end))
+							.detail("StartIndex", start)
+							.detail("EndIndex", i)
+							.detail("DataSize", data.size())
+							.detail("Bytes", txBytes)
+							.detail("OriginalFileRange", printable(originalFileRange))
+							.detail("TaskInstance", THIS_ADDR);
+
+						// Commit succeeded, so advance starting point
+						start = i;
+
+						if (start == end)
+							break;
+						tr->reset();
 					}
-
-					// Clear the range we are about to set.
-					// If start == 0 then use fileBegin for the start of the range, else data[start]
-					// If iend == end then use fileEnd for the end of the range, else data[iend]
-					state KeyRange trRange = KeyRangeRef((start == 0 ) ? fileRange.begin : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())
-													   , (iend == end) ? fileRange.end   : data[iend ].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-
-					tr->clear(trRange);
-
-					for(; i < iend; ++i) {
-						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-						tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()), data[i].value);
-					}
-
-					// Add to bytes written count
-					restore.bytesWritten().atomicOp(tr, txBytes, MutationRef::Type::AddValue);
-
-					state Future<Void> checkLock = checkDatabaseLock(tr, restore.getUid());
-
-					wait(taskBucket->keepRunning(tr, task));
-
-					wait( checkLock );
-
-					wait(tr->commit());
-
-					TraceEvent("FileRestoreCommittedRange")
-						.suppressFor(60)
-						.detail("RestoreUID", restore.getUid())
-						.detail("FileName", rangeFile.fileName)
-						.detail("FileVersion", rangeFile.version)
-						.detail("FileSize", rangeFile.fileSize)
-						.detail("ReadOffset", readOffset)
-						.detail("ReadLen", readLen)
-						.detail("CommitVersion", tr->getCommittedVersion())
-						.detail("BeginRange", printable(trRange.begin))
-						.detail("EndRange", printable(trRange.end))
-						.detail("StartIndex", start)
-						.detail("EndIndex", i)
-						.detail("DataSize", data.size())
-						.detail("Bytes", txBytes)
-						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", THIS_ADDR);
-
-					// Commit succeeded, so advance starting point
-					start = i;
-
-					if(start == end)
-						return Void();
-					tr->reset();
-				} catch(Error &e) {
-					if(e.code() == error_code_transaction_too_large)
+					catch (Error &e) {
+					if (e.code() == error_code_transaction_too_large)
 						dataSizeLimit /= 2;
 					else
 						wait(tr->onError(e));
+					}
 				}
 			}
+			if (!originalFileRanges.empty()) {
+				if (BUGGIFY && restoreRanges.get().size() == 1) {
+					Params.originalFileRange().set(task, originalFileRanges[0]);
+				}
+				else {
+					Params.originalFileRanges().set(task, originalFileRanges);
+				}
+			}
+			return Void();
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
@@ -2640,15 +2687,16 @@ namespace fileBackup {
 			restore.fileBlocksFinished().atomicOp(tr, 1, MutationRef::Type::AddValue);
 
 			// Update the KV range map if originalFileRange is set
-			Future<Void> updateMap = Void();
-			if(Params.originalFileRange().exists(task)) {
+			std::vector<Future<Void>> updateMap;
+			std::vector<KeyRange> ranges = Params.getOriginalFileRanges(task);
+			for (auto &range : ranges) {
 				Value versionEncoded = BinaryWriter::toValue(Params.inputFile().get(task).version, Unversioned());
-				updateMap = krmSetRange(tr, restore.applyMutationsMapPrefix(), Params.originalFileRange().get(task), versionEncoded);
+				updateMap.push_back(krmSetRange(tr, restore.applyMutationsMapPrefix(), range, versionEncoded));
 			}
 
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			wait(taskFuture->set(tr, taskBucket) &&
-					        taskBucket->finish(tr, task) && updateMap);
+					        taskBucket->finish(tr, task) && waitForAll(updateMap));
 
 			return Void();
 		}
@@ -3555,8 +3603,20 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> submitRestore(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL, Version restoreVersion, Key addPrefix, Key removePrefix, KeyRange restoreRange, bool lockDB, UID uid) {
-		ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
+	ACTOR static Future<Void> submitRestore(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL, Standalone<VectorRef<KeyRangeRef>> ranges, Version restoreVersion, Key addPrefix, Key removePrefix, bool lockDB, UID uid) {
+		KeyRangeMap<int> restoreRangeSet;
+		for (auto& range : ranges) {
+			restoreRangeSet.insert(range, 1);
+		}
+		restoreRangeSet.coalesce(allKeys);
+		state std::vector<KeyRange> restoreRanges;
+		for (auto& restoreRange : restoreRangeSet.ranges()) {
+			if (restoreRange.value()) {
+				restoreRanges.push_back(KeyRange(KeyRangeRef(restoreRange.range().begin, restoreRange.range().end)));
+			}
+		}
+		for (auto &restoreRange : restoreRanges)
+			ASSERT(restoreRange.contains(removePrefix) || removePrefix.size() == 0);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3586,13 +3646,14 @@ public:
 			// Clear the old restore config
 			oldRestore.clear(tr);
 		}
-		
-		KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
-		Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
-		if (existingRows.size() > 0) {
-			throw restore_destination_not_empty();
-		}
 
+		for (auto &restoreRange : restoreRanges) {
+			KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
+			if (existingRows.size() > 0) {
+				throw restore_destination_not_empty();
+			}
+		}
 		// Make new restore config
 		state RestoreConfig restore(uid);
 
@@ -3606,7 +3667,12 @@ public:
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
-		restore.restoreRange().set(tr, restoreRange);
+		if (BUGGIFY && restoreRanges.size() == 1) {
+			restore.restoreRange().set(tr, restoreRanges[0]);
+		}
+		else {
+			restore.restoreRanges().set(tr, restoreRanges);
+		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix);
 
@@ -3917,7 +3983,7 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Key tagName, Key url, bool waitForComplete, Version targetVersion, bool verbose, KeyRange range, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
@@ -3945,7 +4011,7 @@ public:
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(submitRestore(backupAgent, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid));
+				wait(submitRestore(backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, randomUid));
 				wait(tr->commit());
 				break;
 			} catch(Error &e) {
@@ -3966,7 +4032,7 @@ public:
 
 	//used for correctness only, locks the database before discontinuing the backup and that same lock is then used while doing the restore.
 	//the tagname of the backup must be the same as the restore.
-	ACTOR static Future<Version> atomicRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, KeyRange range, Key addPrefix, Key removePrefix) {
+	ACTOR static Future<Version> atomicRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
 		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
 		loop {
@@ -4045,9 +4111,11 @@ public:
 		loop {
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);	
-				ryw_tr->addReadConflictRange(range);
-				ryw_tr->clear(range);
+				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (auto &range : ranges) {
+					ryw_tr->addReadConflictRange(range);
+					ryw_tr->clear(range);
+				}
 				wait( ryw_tr->commit() );
 				TraceEvent("AS_ClearedRange");
 				break;
@@ -4059,7 +4127,7 @@ public:
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
 		TraceEvent("AS_StartRestore");
-		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(bc->getURL()), true, -1, true, range, addPrefix, removePrefix, true, randomUid) );
+		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}
 };
@@ -4068,12 +4136,12 @@ const std::string BackupAgentBase::defaultTagName = "default";
 const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
-Future<Version> FileBackupAgent::restore(Database cx, Key tagName, Key url, bool waitForComplete, Version targetVersion, bool verbose, KeyRange range, Key addPrefix, Key removePrefix, bool lockDB) {
-	return FileBackupAgentImpl::restore(this, cx, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix, lockDB, g_random->randomUniqueID());
+Future<Version> FileBackupAgent::restore(Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
+	return FileBackupAgentImpl::restore(this, cx, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, g_random->randomUniqueID());
 }
 
-Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, KeyRange range, Key addPrefix, Key removePrefix) {
-	return FileBackupAgentImpl::atomicRestore(this, cx, tagName, range, addPrefix, removePrefix);
+Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+	return FileBackupAgentImpl::atomicRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
 }
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {

@@ -233,9 +233,18 @@ public:
 	//   - submit a restore on the given tagName
 	//   - Optionally wait for the restore's completion.  Will restore_error if restore fails or is aborted.
 	// restore() will return the targetVersion which will be either the valid version passed in or the max restorable version for the given url.
-	Future<Version> restore(Database cx, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
-	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key());
-
+	Future<Version> restore(Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
+	Future<Version> restore(Database cx, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRef;
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+		return restore(cx, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB);
+	}
+	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix = Key(), Key removePrefix = Key());
+	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key()) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRef;
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+		return atomicRestore(cx, tagName, rangeRef, addPrefix, removePrefix);
+	}
 	// Tries to abort the restore for a tag.  Returns the final (stable) state of the tag.
 	Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
