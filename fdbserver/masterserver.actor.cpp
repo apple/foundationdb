@@ -26,7 +26,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
 #include <iterator>
 #include "fdbserver/WaitFailure.h"

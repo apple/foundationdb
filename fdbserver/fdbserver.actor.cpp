@@ -38,7 +38,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/IKeyValueStore.h"
 #include <algorithm>
