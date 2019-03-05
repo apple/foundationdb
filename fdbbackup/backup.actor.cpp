@@ -802,7 +802,7 @@ static void printBackupUsage(bool devhelp) {
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  -d, --destcontainer URL\n"
-	       "                 The Backup container URL for start, describe, expire, and delete operations.\n");
+	       "                 The Backup container URL for start, modify, describe, expire, and delete operations.\n");
 	printBackupContainerInfo();
 	printf("  -b, --base_url BASEURL\n"
 		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
@@ -827,7 +827,11 @@ static void printBackupUsage(bool devhelp) {
 	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
 	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
-	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	       "                 For start or modify operations, specifies the backup's default target snapshot interval as DURATION seconds.  Defaults to %d for start operations.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf("  -as, --active_snapshot_interval DURATION\n"
+	       "                 For modify operations, sets the desired interval for the backup's currently active snapshot, relative to the start of the snapshot.\n");
+	printf("  --verify_uid UID\n"
+	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");

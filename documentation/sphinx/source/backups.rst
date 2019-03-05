@@ -39,7 +39,7 @@ Tools
 There are 5 command line tools for working with Backup and DR operations:
 
 ``fdbbackup``
-    This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can ``start`` or ``abort`` a backup, ``discontinue`` a continuous backup, get the ``status`` of an ongoing backup, or ``wait`` for a backup to complete.  It can also ``describe``, ``delete``, ``expire`` data in a backup, or ``list`` the backups at a destination folder URL.
+    This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can ``start``, ``modify`` or ``abort`` a backup, ``discontinue`` a continuous backup, get the ``status`` of an ongoing backup, or ``wait`` for a backup to complete.  It can also ``describe``, ``delete``, ``expire`` data in a backup, or ``list`` the backups at a destination folder URL.
 
 ``fdbrestore``
     This command line tool is used to control (but not execute) restore jobs.  It can ``start`` or ``abort`` a restore, get the ``status`` of current and recent restore tasks, or ``wait`` for a restore task to complete while printing ongoing progress details.
@@ -234,6 +234,29 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
 
      user@host$ fdbbackup start -k 'apple bananna' -k 'mango pineapple' -d <BACKUP_URL>
      user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&0 p^n3app!e' -d <BACKUP_URL>
+
+.. program:: fdbbackup modify
+
+``modify``
+---------
+
+The ``modify`` subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.
+
+::
+
+   user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [-as <DURATION>] [--verify_uid <UID>]
+
+``-d <BACKUP_URL>``
+  Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.
+
+``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
+  Sets a new duration for backup snapshots, in seconds.
+
+``-as <DURATION>`` or ``--active_snapshot_interval <DURATION>``  
+  Sets new duration for the backup's currently active snapshot, in seconds, relative to the start of the snapshot.
+
+``--verify_uid <UID>``
+  Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters.
 
 .. program:: fdbbackup abort
 

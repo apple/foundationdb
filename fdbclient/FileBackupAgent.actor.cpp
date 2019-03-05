@@ -3803,6 +3803,8 @@ public:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";
 							break;
 					}
+					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
+					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
 
 					if(snapshotProgress) {
 						state int64_t snapshotInterval;
