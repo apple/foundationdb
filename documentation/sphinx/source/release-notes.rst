@@ -12,6 +12,13 @@ Fixes
 * The ``include`` command in fdbcli would falsly include all machines with IP addresses that
   have the included IP address as a prefix (for example ``include 1.0.0.1`` would also include
   ``1.0.0.10``). `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
+* Restore could crash when reading a file that ends on a block boundary (1MB default). `(PR #1205) <https://github.com/apple/foundationdb/pull/1205>`_
+
+Features
+--------
+
+* Added ``modify`` command to fdbbackup for modifying parameters of a running backup. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
+* Added 'header' parameter to blobstore backup URLs for setting custom HTTP headers. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 
 6.0.18
 ======

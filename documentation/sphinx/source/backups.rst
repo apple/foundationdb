@@ -256,7 +256,7 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
   Sets new duration for the backup's currently active snapshot, in seconds, relative to the start of the snapshot.
 
 ``--verify_uid <UID>``
-  Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters.
+  Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters (if the UID matches).
 
 .. program:: fdbbackup abort
 

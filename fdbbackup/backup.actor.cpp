@@ -831,7 +831,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -as, --active_snapshot_interval DURATION\n"
 	       "                 For modify operations, sets the desired interval for the backup's currently active snapshot, relative to the start of the snapshot.\n");
 	printf("  --verify_uid UID\n"
-	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters.\n");
+	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction\n"
+	       "                 which sets the new backup parameters (if the UID matches).\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
