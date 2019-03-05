@@ -421,20 +421,20 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							// Remove the backup name from the range
 							logRangeMap.erase(logDestination);
 						}
-					}
 
-					bool foundKey = false;
-					for(auto &it : vecBackupKeys->intersectingRanges(normalKeys)) {
-						if(it.value().count(logDestination) > 0) {
-							foundKey = true;
-							break;
+						bool foundKey = false;
+						for(auto &it : vecBackupKeys->intersectingRanges(normalKeys)) {
+							if(it.value().count(logDestination) > 0) {
+								foundKey = true;
+								break;
+							}
 						}
-					}
-					if(!foundKey) {
-						auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
-						for (auto logRange : logRanges) {
-							auto &logRangeMap = logRange->value();
-							logRangeMap.erase(logDestination);
+						if(!foundKey) {
+							auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
+							for (auto logRange : logRanges) {
+								auto &logRangeMap = logRange->value();
+								logRangeMap.erase(logDestination);
+							}
 						}
 					}
 
