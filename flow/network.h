@@ -25,6 +25,7 @@
 #include <array>
 #include <string>
 #include <stdint.h>
+#include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 
@@ -80,7 +81,9 @@ struct IPAddress {
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
 	// only the first 32bits are relevant and rest are initialized to
 	// 0.
-	typedef std::array<uint8_t, 16> IPAddressStore;
+	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
+	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
+	              "IPAddressStore must be std::array<uint8_t, 16>");
 
 	IPAddress();
 	explicit IPAddress(const IPAddressStore& v6addr);
