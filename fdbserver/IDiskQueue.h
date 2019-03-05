@@ -44,6 +44,10 @@ public:
 			if (hi>r.hi) return false;
 			return lo < r.lo;
 		}
+
+		bool operator == (const location& r) const {
+			return hi == r.hi && lo == r.lo;
+		}
 	};
 
 	//! Find the first and last pages in the disk queue, and initialize invariants.

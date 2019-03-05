@@ -466,30 +466,44 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
-ACTOR static Future<Void> updateHealthMetricsActor(DatabaseContext *cx) {
-	state bool sendDetailedHealthMetrics = networkOptions.sendDetailedHealthMetrics;
-	state double lastDetailed = 0;
+ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bool detailed) {
+	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
+		if (detailed) {
+			return cx->healthMetrics;
+		}
+		else {
+			HealthMetrics result;
+			result.update(cx->healthMetrics, false, false);
+			return result;
+		}
+	}
+	state bool sendDetailedRequest = detailed && now() - cx->detailedHealthMetricsLastUpdated >
+		CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
 	loop {
-		wait( delay(CLIENT_KNOBS->UPDATE_HEALTH_METRICS_INTERVAL) );
-		state bool sendDetailed = networkOptions.sendDetailedHealthMetrics && now() - lastDetailed > CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL;
-		loop {
-			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
-				when(state GetHealthMetricsReply rep =
-					 wait(cx->getMasterProxies().isValid() && cx->getMasterProxies()->size() ?
-						  loadBalance(cx->getMasterProxies(),
-                                      &MasterProxyInterface::getHealthMetrics,
-                                      GetHealthMetricsRequest(sendDetailed)) :
-						  Never())) {
-						cx->healthMetrics.update(rep.healthMetrics, sendDetailed, true);
-						break;
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(GetHealthMetricsReply rep =
+				 wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::getHealthMetrics,
+							 GetHealthMetricsRequest(sendDetailedRequest)))) {
+				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
+				if (detailed) {
+					cx->healthMetricsLastUpdated = now();
+					cx->detailedHealthMetricsLastUpdated = now();
+					return cx->healthMetrics;
+				}
+				else {
+					cx->healthMetricsLastUpdated = now();
+					HealthMetrics result;
+					result.update(cx->healthMetrics, false, false);
+					return result;
 				}
 			}
 		}
-		if(sendDetailed) {
-			lastDetailed = now();
-		}
 	}
+}
+
+Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
+	return getHealthMetricsActor(this, detailed);
 }
 
 DatabaseContext::DatabaseContext(
@@ -500,7 +514,8 @@ DatabaseContext::DatabaseContext(
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
 	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0)
+	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
+	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -515,8 +530,6 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-
-	updateHealthMetrics = updateHealthMetricsActor(this);
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
@@ -938,17 +951,6 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING:
 			validateOptionValue(value, false);
 			networkOptions.slowTaskProfilingEnabled = true;
-			break;
-		case FDBNetworkOptions::SEND_DETAILED_HEALTH_METRICS:
-			validateOptionValue(value, true);
-			int sendDetailedHealthMetrics;
-			try {
-				sendDetailedHealthMetrics = std::stoi(value.get().toString());
-			} catch (...) {
-				TraceEvent(SevWarnAlways, "InvalidDetailedMetricsOptionValue").detail("Value", value.get().toString());
-				throw invalid_option_value();
-			}
-			networkOptions.sendDetailedHealthMetrics = (sendDetailedHealthMetrics > 0);
 			break;
 		default:
 			break;

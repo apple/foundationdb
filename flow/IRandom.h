@@ -76,6 +76,7 @@ public:
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric()  = 0;
 	virtual std::string randomAlphaNumeric( int length ) = 0;
+	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
 	virtual uint64_t peek() const = 0;  // returns something that is probably different for different random states.  Deterministic (and idempotent) for a deterministic generator.
 
 	// The following functions have fixed implementations for now:

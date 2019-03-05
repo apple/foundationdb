@@ -28,6 +28,20 @@
 typedef bool(*compare_pages)(void*,void*);
 typedef int64_t loc_t;
 
+// 0 -> 0
+// 1 -> 4k
+// 4k -> 4k
+int64_t pageCeiling( int64_t loc ) {
+	return (loc+_PAGE_SIZE-1)/_PAGE_SIZE*_PAGE_SIZE;
+}
+
+// 0 -> 0
+// 1 -> 0
+// 4k -> 4k
+int64_t pageFloor( int64_t loc ) {
+	return loc / _PAGE_SIZE * _PAGE_SIZE;
+}
+
 struct StringBuffer {
 	Standalone<StringRef> str;
 	int reserved;
@@ -144,11 +158,14 @@ public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
-		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
+		dbg_file0BeginSeq(0), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
+		fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES), readingBuffer( dbgid ),
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
-		if(BUGGIFY)
-			fileExtensionBytes = 8<<10;
+		if (BUGGIFY)
+			fileExtensionBytes = 1<<10 * g_random->randomSkewedUInt32( 1, 40<<10 );
+		if (BUGGIFY)
+			fileShrinkBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.
@@ -241,6 +258,7 @@ public:
 	int64_t writingPos;  // Position within files[1] that will be next written
 
 	int64_t fileExtensionBytes;
+	int64_t fileShrinkBytes;
 
 	Int64MetricHandle stallCount;
 
@@ -274,6 +292,14 @@ public:
 				std::swap(firstPages[0], firstPages[1]);
 				files[1].popped = 0;
 				writingPos = 0;
+
+				const int64_t activeDataVolume = pageCeiling(files[0].size - files[0].popped + fileExtensionBytes + fileShrinkBytes);
+				if (files[1].size > activeDataVolume) {
+					// Either shrink files[1] to the size of files[0], or chop off fileShrinkBytes
+					int64_t maxShrink = std::max( pageFloor(files[1].size - activeDataVolume), fileShrinkBytes );
+					files[1].size -= maxShrink;
+					waitfor.push_back( files[1].f->truncate( files[1].size ) );
+				}
 			} else {
 				// Extend files[1] to accomodate the new write and about 10MB or 2x current size for future writes.
 				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
@@ -942,10 +968,10 @@ private:
 				// might be a bit overly aggressive here, but it's behavior we need to tolerate.
 				throw io_error();
 			}
-			ASSERT( ((Page*)pagedData.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)pagedData.begin())->seq == pageFloor(start.lo) );
 			ASSERT(pagedData.size() == (toPage - fromPage + 1) * _PAGE_SIZE );
 
-			ASSERT( ((Page*)pagedData.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)pagedData.end() - 1)->seq == pageFloor(end.lo - 1) );
 			return pagedData;
 		} else {
 			ASSERT(fromFile == 0);
@@ -958,9 +984,9 @@ private:
 				throw io_error();
 			}
 			ASSERT(firstChunk.size() == ( ( file0size / sizeof(Page) ) - fromPage ) * _PAGE_SIZE );
-			ASSERT( ((Page*)firstChunk.begin())->seq == start.lo / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)firstChunk.begin())->seq == pageFloor(start.lo) );
 			ASSERT(secondChunk.size() == (toPage + 1) * _PAGE_SIZE);
-			ASSERT( ((Page*)secondChunk.end() - 1)->seq == (end.lo - 1) / _PAGE_SIZE * _PAGE_SIZE );
+			ASSERT( ((Page*)secondChunk.end() - 1)->seq == pageFloor(end.lo - 1) );
 			return firstChunk.withSuffix(secondChunk);
 		}
 	}
@@ -979,42 +1005,42 @@ private:
 		if (endingOffset == 0) endingOffset = sizeof(Page);
 		if (endingOffset > 0) endingOffset -= sizeof(PageHeader);
 
-		if ((end.lo-1)/sizeof(Page)*sizeof(Page) == start.lo/sizeof(Page)*sizeof(Page)) {
+		if (pageFloor(end.lo-1) == pageFloor(start.lo)) {
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
 		} else {
-			// FIXME: This allocation is excessive and unnecessary.  We know the overhead per page that
-			// we'll be stripping out (sizeof(PageHeader)), so we should be able to do a smaller
-			// allocation.  But we should be able to re-use the space allocated for pagedData, which
-			// would mean not having to allocate 2x the space for a read.
-			Standalone<StringRef> unpagedData = makeString(pagedData.size());
-			uint8_t *buf = mutateString(unpagedData);
-			memset(buf, 0, unpagedData.size());
+			// Reusing pagedData wastes # of pages * sizeof(PageHeader) bytes, but means
+			// we don't have to double allocate in a hot, memory hungry call.
+			uint8_t *buf = mutateString(pagedData);
 			const Page *data = reinterpret_cast<const Page*>(pagedData.begin());
 
 			// Only start copying from `start` in the first page.
 			if( data->payloadSize > startingOffset ) {
-				memcpy(buf, data->payload+startingOffset, data->payloadSize-startingOffset);
-				buf += data->payloadSize-startingOffset;
+				const int length = data->payloadSize-startingOffset;
+				memmove(buf, data->payload+startingOffset, length);
+				buf += length;
 			}
 			data++;
 
 			// Copy all the middle pages
-			while (data->seq != ((end.lo-1)/sizeof(Page)*sizeof(Page))) {
+			while (data->seq != pageFloor(end.lo-1)) {
 				// These pages can have varying amounts of data, as pages with partial
 				// data will be zero-filled when commit is called.
-				memcpy(buf, data->payload, data->payloadSize);
-				buf += data->payloadSize;
+				const int length = data->payloadSize;
+				memmove(buf, data->payload, length);
+				buf += length;
 				data++;
 			}
 
 			// Copy only until `end` in the last page.
-			memcpy(buf, data->payload, std::min(endingOffset, data->payloadSize));
-			buf += std::min(endingOffset, data->payloadSize);
+			const int length = data->payloadSize;
+			memmove(buf, data->payload, std::min(endingOffset, length));
+			buf += std::min(endingOffset, length);
 
-			unpagedData.contents() = unpagedData.substr(0, buf - unpagedData.begin());
+			memset(buf, 0, pagedData.size() - (buf - pagedData.begin()));
+			Standalone<StringRef> unpagedData = pagedData.substr(0, buf - pagedData.begin());
 			return unpagedData;
 		}
 	}
@@ -1068,14 +1094,14 @@ private:
 
 			self->readBufArena = page.arena();
 			self->readBufPage = (Page*)page.begin();
-			if (!self->readBufPage->checkHash() || self->readBufPage->seq < self->nextReadLocation/sizeof(Page)*sizeof(Page)) {
+			if (!self->readBufPage->checkHash() || self->readBufPage->seq < pageFloor(self->nextReadLocation)) {
 				TraceEvent("DQRecInvalidPage", self->dbgid).detail("NextReadLocation", self->nextReadLocation).detail("HashCheck", self->readBufPage->checkHash())
-					.detail("Seq", self->readBufPage->seq).detail("Expect", self->nextReadLocation/sizeof(Page)*sizeof(Page)).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+					.detail("Seq", self->readBufPage->seq).detail("Expect", pageFloor(self->nextReadLocation)).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 				wait( self->rawQueue->truncateBeforeLastReadPage() );
 				break;
 			}
 			//TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
-			ASSERT( self->readBufPage->seq == self->nextReadLocation/sizeof(Page)*sizeof(Page) );
+			ASSERT( self->readBufPage->seq == pageFloor(self->nextReadLocation) );
 			self->lastPoppedSeq = self->readBufPage->popped;
 		}
 
@@ -1084,10 +1110,10 @@ private:
 		int f; int64_t p;
 		TEST( self->lastPoppedSeq/sizeof(Page) != self->poppedSeq/sizeof(Page) );  // DiskQueue: Recovery popped position not fully durable
 		self->findPhysicalLocation( self->lastPoppedSeq, &f, &p, "lastPoppedSeq" );
-		wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
+		wait(self->rawQueue->setPoppedPage( f, p, pageFloor(self->lastPoppedSeq) ));
 
 		// Writes go at the end of our reads (but on the next page)
-		self->nextPageSeq = self->nextReadLocation/sizeof(Page)*sizeof(Page);
+		self->nextPageSeq = pageFloor(self->nextReadLocation);
 		if (self->nextReadLocation % sizeof(Page) > sizeof(PageHeader)) self->nextPageSeq += sizeof(Page);
 
 		TraceEvent("DQRecovered", self->dbgid).detail("LastPoppedSeq", self->lastPoppedSeq).detail("PoppedSeq", self->poppedSeq).detail("NextPageSeq", self->nextPageSeq).detail("File0Name", self->rawQueue->files[0].dbgFilename);
