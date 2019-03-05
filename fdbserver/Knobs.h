@@ -57,6 +57,7 @@ public:
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
 	int64_t UPDATE_STORAGE_BYTE_LIMIT;
+	int64_t REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
 	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
@@ -73,6 +74,9 @@ public:
 	int CONCURRENT_LOG_ROUTER_READS;
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
+	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
+	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
+	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
