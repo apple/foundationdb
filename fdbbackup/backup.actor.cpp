@@ -1917,14 +1917,14 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 			throw restore_error();
 		}
 
-		state Database origDb = wait(Cluster::createCluster(originalClusterFile, Cluster::API_VERSION_LATEST)->createDatabase(LiteralStringRef("DB")));
+		state Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb));
 		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
 		targetVersion = v;
 	}
 
 	try {
-		state Database db = wait(Cluster::createCluster(destClusterFile, Cluster::API_VERSION_LATEST)->createDatabase(LiteralStringRef("DB")));
+		state Database db = Database::createDatabase(destClusterFile, Database::API_VERSION_LATEST);
 		state FileBackupAgent backupAgent;
 
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
