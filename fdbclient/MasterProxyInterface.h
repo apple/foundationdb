@@ -71,14 +71,15 @@ struct MasterProxyInterface {
 struct CommitID {
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
+	Optional<Value> metadataVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId);
+		serializer(ar, version, txnBatchId, metadataVersion);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId ) : version(version), txnBatchId(txnBatchId) {}
+	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {

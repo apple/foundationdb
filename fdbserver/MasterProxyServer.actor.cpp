@@ -980,7 +980,7 @@ ACTOR Future<Void> commitBatch(
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
-			trs[t].reply.send(CommitID(commitVersion, t));
+			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
