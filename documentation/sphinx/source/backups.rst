@@ -376,11 +376,13 @@ The following options apply to all commands:
 
   .. warning:: If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.
 
-``-C <CLUSTER_FILE>``
-  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
-
 ``--blob_credentials <FILE>``
   Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
+
+The following options apply to all commands except ``start``:
+
+``-C <CLUSTER_FILE>``
+  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
 .. _restore-start:
 
@@ -394,6 +396,10 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``-r <BACKUP_URL>``
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
+
+``--dest_cluster_file <CONNFILE>``
+  Required.  The backup data will be restored into this cluster.
+
 
 ``-w``
   Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
@@ -412,6 +418,12 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``-v <VERSION>``
   Instead of the latest version the backup can be restored to, restore to VERSION.
+
+``--timestamp <YYYY-MM-DD.HH:MI:SS>``
+  Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.
+
+``--orig_cluster_file <CONNFILE>``
+  The cluster file for the original database from which the backup was created.  The original database is only needed to convert a --timestamp argument to a database version.
 
 .. program:: fdbrestore abort
 
