@@ -109,14 +109,15 @@ struct ThrottlingWorkload : KVWorkload {
 
 		loop {
 			wait(delay(self->healthMetricsCheckInterval));
-			if (healthMetrics == cx->healthMetrics)
+			HealthMetrics newHealthMetrics = wait(cx->getHealthMetrics(self->sendDetailedHealthMetrics));
+			if (healthMetrics == newHealthMetrics)
 			{
 				if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
 					self->healthMetricsStoppedUpdating = true;
 			}
 			else
 				repeated = 0;
-			healthMetrics = cx->healthMetrics;
+			healthMetrics = newHealthMetrics;
 
 			self->tokenBucket.transactionRate = healthMetrics.tpsLimit * self->throttlingMultiplier / self->clientCount;
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
@@ -179,11 +180,9 @@ struct ThrottlingWorkload : KVWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, ThrottlingWorkload* self) {
-		Standalone<StringRef> value(format("%d", self->sendDetailedHealthMetrics ? 1 : 0));
-		setNetworkOption(FDBNetworkOptions::SEND_DETAILED_HEALTH_METRICS, Optional<StringRef>(value));
 		if (!self->sendDetailedHealthMetrics) {
 			// Clear detailed health metrics that are already populated
-			wait(delay(2 * CLIENT_KNOBS->UPDATE_DETAILED_HEALTH_METRICS_INTERVAL));
+			wait(delay(2 * CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
 			cx->healthMetrics.storageStats.clear();
 			cx->healthMetrics.tLogQueue.clear();
 		}
