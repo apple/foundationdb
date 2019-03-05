@@ -793,7 +793,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 
 		const NetworkAddress& currentPublicAddress = publicNetworkAddresses.back();
 		if (!currentPublicAddress.isValid()) {
-			fprintf(stderr, "ERROR: %s is not valid a public ip address\n");
+			fprintf(stderr, "ERROR: %s is not a valid IP address\n", currentPublicAddress.toString().c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
