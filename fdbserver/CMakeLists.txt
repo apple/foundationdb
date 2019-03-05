@@ -10,7 +10,7 @@ set(FDBSERVER_SRCS
   CoroFlow.actor.cpp
   CoroFlow.h
   DataDistribution.actor.cpp
-  DataDistribution.h
+  DataDistribution.actor.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
