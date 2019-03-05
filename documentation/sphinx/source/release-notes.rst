@@ -18,6 +18,8 @@ Improved replication mechanism, a new hierarchical replication technique that fu
 Performance
 -----------
 
+* Java: Succesful commits and range reads no longer create ``FDBException`` objects to reduce memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
+
 Fixes
 -----
 
