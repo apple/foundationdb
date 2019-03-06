@@ -10,7 +10,7 @@ set(FDBSERVER_SRCS
   CoroFlow.actor.cpp
   CoroFlow.h
   DataDistribution.actor.cpp
-  DataDistribution.h
+  DataDistribution.actor.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
@@ -162,6 +162,7 @@ set(FDBSERVER_SRCS
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
+  workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
   workloads/UnitPerf.actor.cpp

@@ -20,6 +20,16 @@ testTitle=BackupAndRestore
     clearAfterTest=false
 	keyPrefix=m
 
+    testName=ReadWrite
+    testDuration=30.0
+    transactionsPerSecond=10
+    writesPerTransactionA=10
+    readsPerTransactionA=0
+    writesPerTransactionB=10
+    readsPerTransactionB=0
+    alpha=1.0
+    setup=false
+
     testName=BackupAndRestoreCorrectness
 	backupTag=backup1
     backupAfter=10.0
@@ -37,6 +47,7 @@ testTitle=BackupAndRestore
     clearAfterTest=false
     simBackupAgents=BackupToFile
     allowPauses=false
+    prefixesMandatory=a,A,m
 
     testName=BackupAndRestoreCorrectness
 	backupTag=backup3

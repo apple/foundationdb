@@ -80,6 +80,9 @@
     <ActorCompiler Include="workloads\ConflictRange.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\Throttling.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\Throughput.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -306,7 +309,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
-    <ClInclude Include="DataDistribution.h" />
+    <ClInclude Include="DataDistribution.actor.h" />
     <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />

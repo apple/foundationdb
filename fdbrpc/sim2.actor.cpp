@@ -135,28 +135,29 @@ struct SimClogging {
 		return t - tnow;
 	}
 
-	void clogPairFor( uint32_t from, uint32_t to, double t ) {
+	void clogPairFor(const IPAddress& from, const IPAddress& to, double t) {
 		auto& u = clogPairUntil[ std::make_pair( from, to ) ];
 		u = std::max(u, now() + t);
 	}
-	void clogSendFor( uint32_t from, double t ) {
+	void clogSendFor(const IPAddress& from, double t) {
 		auto& u = clogSendUntil[from];
 		u = std::max(u, now() + t);
 	}
-	void clogRecvFor( uint32_t from, double t ) {
+	void clogRecvFor(const IPAddress& from, double t) {
 		auto& u = clogRecvUntil[from];
 		u = std::max(u, now() + t);
 	}
-	double setPairLatencyIfNotSet( uint32_t from, uint32_t to, double t ) {
+	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
 		auto i = clogPairLatency.find( std::make_pair(from,to) );
 		if (i == clogPairLatency.end())
 			i = clogPairLatency.insert( std::make_pair( std::make_pair(from,to), t ) ).first;
 		return i->second;
 	}
+
 private:
-	std::map< uint32_t, double > clogSendUntil, clogRecvUntil;
-	std::map< std::pair<uint32_t, uint32_t>, double > clogPairUntil;
-	std::map< std::pair<uint32_t, uint32_t>, double > clogPairLatency;
+	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
+	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
+	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
 	double halfLatency() {
 		double a = g_random->random01();
 		const double pFast = 0.999;
@@ -790,8 +791,16 @@ public:
 		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
 
 		myc->connect(peerc, toAddr);
-		peerc->connect(myc, NetworkAddress( getCurrentProcess()->address.ip + g_random->randomInt(0,256),
-											g_random->randomInt(40000, 60000) ));
+		IPAddress localIp;
+		if (getCurrentProcess()->address.ip.isV6()) {
+			IPAddress::IPAddressStore store = getCurrentProcess()->address.ip.toV6();
+			uint16_t* ipParts = (uint16_t*)store.data();
+			ipParts[7] += g_random->randomInt(0, 256);
+			localIp = IPAddress(store);
+		} else {
+			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + g_random->randomInt(0, 256));
+		}
+		peerc->connect(myc, NetworkAddress(localIp, g_random->randomInt(40000, 60000)));
 
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*g_random->random01()), myc );
@@ -966,17 +975,21 @@ public:
 	virtual void run() {
 		_run(this);
 	}
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess,
-		LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) {
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+	                                const char* coordinationFolder) {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
 		for( int i = 0; i < machine.processes.size(); i++ ) {
 			if( machine.processes[i]->locality.machineId() != locality.machineId() ) { // SOMEDAY: compute ip from locality to avoid this check
-				TraceEvent("Sim2Mismatch").detail("IP", format("%x", ip))
-						.detailext("MachineId", locality.machineId()).detail("NewName", name)
-						.detailext("ExistingMachineId", machine.processes[i]->locality.machineId()).detail("ExistingName", machine.processes[i]->name);
+				TraceEvent("Sim2Mismatch")
+				    .detail("IP", format("%s", ip.toString().c_str()))
+				    .detailext("MachineId", locality.machineId())
+				    .detail("NewName", name)
+				    .detailext("ExistingMachineId", machine.processes[i]->locality.machineId())
+				    .detail("ExistingName", machine.processes[i]->name);
 				ASSERT( false );
 			}
 			ASSERT( machine.processes[i]->address.port != port );
@@ -1499,22 +1512,24 @@ public:
 
 		return (kt == ktMin);
 	}
-	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) {
+	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) {
 		if (mode == ClogDefault) {
 			double a = g_random->random01();
 			if ( a < 0.3 ) mode = ClogSend;
 			else if (a < 0.6 ) mode = ClogReceive;
 			else mode = ClogAll;
 		}
-		TraceEvent("ClogInterface").detail("IP", toIPString(ip)).detail("Delay", seconds)
-			.detail("Queue", mode==ClogSend?"Send":mode==ClogReceive?"Receive":"All");
+		TraceEvent("ClogInterface")
+		    .detail("IP", ip.toString())
+		    .detail("Delay", seconds)
+		    .detail("Queue", mode == ClogSend ? "Send" : mode == ClogReceive ? "Receive" : "All");
 
 		if (mode == ClogSend || mode==ClogAll)
 			g_clogging.clogSendFor( ip, seconds );
 		if (mode == ClogReceive || mode==ClogAll)
 			g_clogging.clogRecvFor( ip, seconds );
 	}
-	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) {
+	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) {
 		g_clogging.clogPairFor( from, to, seconds );
 	}
 	virtual std::vector<ProcessInfo*> getAllProcesses() const {
@@ -1569,10 +1584,10 @@ public:
 		Promise<Void> action;
 		Task( double time, int taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action ) : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
 		Task( double time, int taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future ) : time(time), taskID(taskID), stable(stable), machine(machine) { future = action.getFuture(); }
-		Task(Task&& rhs) noexcept(true) : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), action(std::move(rhs.action)) {}
+		Task(Task&& rhs) BOOST_NOEXCEPT : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), action(std::move(rhs.action)) {}
 		void operator= ( Task const& rhs ) { taskID = rhs.taskID; time = rhs.time; stable = rhs.stable; machine = rhs.machine; action = rhs.action; }
 		Task( Task const& rhs ) : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
-		void operator= (Task&& rhs) noexcept(true) { time = rhs.time; taskID = rhs.taskID; stable = rhs.stable; machine = rhs.machine; action = std::move(rhs.action); }
+		void operator= (Task&& rhs) BOOST_NOEXCEPT { time = rhs.time; taskID = rhs.taskID; stable = rhs.stable; machine = rhs.machine; action = std::move(rhs.action); }
 
 		bool operator < (Task const& rhs) const {
 			// Ordering is reversed for priority_queue
@@ -1653,7 +1668,7 @@ public:
 	INetwork *net2;
 
 	//Map from machine IP -> machine disk space info
-	std::map<uint32_t, SimDiskSpace> diskSpaceMap;
+	std::map<IPAddress, SimDiskSpace> diskSpaceMap;
 
 	//Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;

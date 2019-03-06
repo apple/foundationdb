@@ -114,8 +114,12 @@ public:
 
 		std::string toString() const {
 			const NetworkAddress& address = addresses[0];
-			return format("name: %s address: %d.%d.%d.%d:%d zone: %s datahall: %s class: %s excluded: %d cleared: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), excluded, cleared);
+			return format(
+			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
+			    formatIpPort(address.ip, address.port).c_str(),
+			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
+			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
+			    startingClass.toString().c_str(), excluded, cleared);
 		}
 
 		// Members not for external use
@@ -138,7 +142,9 @@ public:
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, uint32_t ip, uint16_t port, uint16_t listenPerProcess, LocalityData locality, ProcessClass startingClass, const char* dataFolder, const char* coordinationFolder) = 0;
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+	                                const char* coordinationFolder) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
@@ -256,8 +262,8 @@ public:
 		allSwapsDisabled = true;
 	}
 
-	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) = 0;
-	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) = 0;
+	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
+	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;

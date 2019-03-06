@@ -96,6 +96,9 @@ struct ReadWriteWorkload : KVWorkload {
 	bool useRYW;
 	bool rampTransactionType;
 	bool rampUpConcurrency;
+	bool batchPriority;
+
+	Standalone<StringRef> descriptionString;
 
 	Int64MetricHandle totalReadsMetric;
 	Int64MetricHandle totalRetriesMetric;
@@ -174,6 +177,8 @@ struct ReadWriteWorkload : KVWorkload {
 		rampTransactionType = getOption(options, LiteralStringRef("rampTransactionType"), false);
 		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		doSetup = getOption(options, LiteralStringRef("setup"), true);
+		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
+		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
 
 		if (rampUpConcurrency) ASSERT( rampSweepCount == 2 );  // Implementation is hard coded to ramp up and down
 
@@ -213,7 +218,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual std::string description() { return "ReadWrite"; }
+	virtual std::string description() { return descriptionString.toString(); }
 	virtual Future<Void> setup( Database const& cx ) { return _setup( cx, this ); }
 	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
 
@@ -304,6 +309,13 @@ struct ReadWriteWorkload : KVWorkload {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
 	} 
 
+	template <class Trans>
+	void setupTransaction(Trans *tr) {
+		if(batchPriority) {
+			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+	}
+
 	ACTOR static Future<Void> tracePeriodically( ReadWriteWorkload *self ) {
 		state double start = now();
 		state double elapsed = 0.0;
@@ -313,10 +325,10 @@ struct ReadWriteWorkload : KVWorkload {
 			elapsed += self->periodicLoggingInterval;
 			wait( delayUntil(start + elapsed) );
 
-			TraceEvent("RW_RowReadLatency").detail("Mean", self->readLatencies.mean()).detail("Median", self->readLatencies.median()).detail("Percentile5", self->readLatencies.percentile(.05)).detail("Percentile95", self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
-			TraceEvent("RW_GRVLatency").detail("Mean", self->GRVLatencies.mean()).detail("Median", self->GRVLatencies.median()).detail("Percentile5", self->GRVLatencies.percentile(.05)).detail("Percentile95", self->GRVLatencies.percentile(.95));
-			TraceEvent("RW_CommitLatency").detail("Mean", self->commitLatencies.mean()).detail("Median", self->commitLatencies.median()).detail("Percentile5", self->commitLatencies.percentile(.05)).detail("Percentile95", self->commitLatencies.percentile(.95));
-			TraceEvent("RW_TotalLatency").detail("Mean", self->latencies.mean()).detail("Median", self->latencies.median()).detail("Percentile5", self->latencies.percentile(.05)).detail("Percentile95", self->latencies.percentile(.95));
+			TraceEvent((self->description() + "_RowReadLatency").c_str()).detail("Mean", self->readLatencies.mean()).detail("Median", self->readLatencies.median()).detail("Percentile5", self->readLatencies.percentile(.05)).detail("Percentile95", self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
+			TraceEvent((self->description() + "_GRVLatency").c_str()).detail("Mean", self->GRVLatencies.mean()).detail("Median", self->GRVLatencies.median()).detail("Percentile5", self->GRVLatencies.percentile(.05)).detail("Percentile95", self->GRVLatencies.percentile(.95));
+			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->commitLatencies.mean()).detail("Median", self->commitLatencies.median()).detail("Percentile5", self->commitLatencies.percentile(.05)).detail("Percentile95", self->commitLatencies.percentile(.95));
+			TraceEvent((self->description() + "_TotalLatency").c_str()).detail("Mean", self->latencies.mean()).detail("Median", self->latencies.median()).detail("Percentile5", self->latencies.percentile(.05)).detail("Percentile95", self->latencies.percentile(.95));
 
 			int64_t ops = (self->aTransactions.getValue() * (self->readsPerTransactionA+self->writesPerTransactionA)) + 
 						  (self->bTransactions.getValue() * (self->readsPerTransactionB+self->writesPerTransactionB));
@@ -456,7 +468,9 @@ struct ReadWriteWorkload : KVWorkload {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
+
 			try {
+				self->setupTransaction(&tr);
 				wait( self->readOp( &tr, keys, self, false ) );
 				wait( tr.warmRange( cx, allKeys ) );
 				break;
@@ -564,6 +578,7 @@ struct ReadWriteWorkload : KVWorkload {
 					extra_ranges.push_back(singleKeyRange( g_random->randomUniqueID().toString() ));
 
 				state Trans tr(cx);
+
 				if(tstart - self->clientBegin > self->debugTime && tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
 					debugID = g_random->randomUniqueID();
 					tr.debugTransaction(debugID);
@@ -578,6 +593,8 @@ struct ReadWriteWorkload : KVWorkload {
 
 				loop{
 					try {
+						self->setupTransaction(&tr);
+
 						GRVStartTime = now();
 						self->transactionFailureMetric->startLatency = -1;
 

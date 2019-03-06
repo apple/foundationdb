@@ -199,7 +199,7 @@ struct DirectoryTesterData {
 
 struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 	FDB::API *api;
-	Reference<FDB::DatabaseContext> db;
+	Reference<FDB::Database> db;
 	Standalone<FDB::RangeResultRef> instructions;
 	Standalone<StringRef> trName;
 	FlowTesterStack stack;

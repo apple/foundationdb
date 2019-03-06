@@ -65,6 +65,7 @@ public:
 	Reference<ProxyInfo> getMasterProxies();
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
 	Future<Void> onMasterProxiesChanged();
+	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
 	void addWatch();
@@ -159,6 +160,10 @@ public:
 	Reference<Cluster> cluster;
 
 	int apiVersion;
+
+	HealthMetrics healthMetrics;
+	double healthMetricsLastUpdated;
+	double detailedHealthMetricsLastUpdated;
 };
 
 #endif

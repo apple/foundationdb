@@ -499,7 +499,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 }
 
 #ifdef __unixish__
-const char* getInterfaceName(uint32_t _ip) {
+const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT( platform_error, "getInterfaceName" );
 	static char iname[20];
 
@@ -514,9 +514,15 @@ const char* getInterfaceName(uint32_t _ip) {
 	for (struct ifaddrs* iter = interfaces; iter; iter = iter->ifa_next) {
 		if(!iter->ifa_addr)
 			continue;
-		if (iter->ifa_addr->sa_family == AF_INET) {
+		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
 			uint32_t ip = ntohl(((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr);
-			if (ip == _ip) {
+			if (ip == _ip.toV4()) {
+				ifa_name = iter->ifa_name;
+				break;
+			}
+		} else if (iter->ifa_addr->sa_family == AF_INET6 && _ip.isV6()) {
+			struct sockaddr_in6* ifa_addr = (struct sockaddr_in6*)iter->ifa_addr;
+			if (memcmp(_ip.toV6().data(), &ifa_addr->sin6_addr, 16) == 0) {
 				ifa_name = iter->ifa_name;
 				break;
 			}
@@ -538,8 +544,8 @@ const char* getInterfaceName(uint32_t _ip) {
 #endif
 
 #if defined(__linux__)
-void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
-					   uint64_t& outSegs, uint64_t& retransSegs) {
+void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+                       uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	const char* ifa_name = nullptr;
 	try {
@@ -746,8 +752,8 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #ifdef __APPLE__
-void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
-					   uint64_t& outSegs, uint64_t& retransSegs) {
+void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+                       uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
 
 	const char* ifa_name = nullptr;
@@ -1095,7 +1101,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, SystemStatisticsState **statState) {
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState) {
 	if( (*statState) == NULL )
 		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
@@ -1189,7 +1195,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, System
 	uint64_t machineOutSegs = (*statState)->machineLastOutSegs;
 	uint64_t machineRetransSegs = (*statState)->machineLastRetransSegs;
 
-	getNetworkTraffic(ip, machineNowSent, machineNowReceived, machineOutSegs, machineRetransSegs);
+	getNetworkTraffic(*ip, machineNowSent, machineNowReceived, machineOutSegs, machineRetransSegs);
 	if( returnStats.initialized ) {
 		returnStats.machineMegabitsSent = ((machineNowSent - (*statState)->machineLastSent) * 8e-6);
 		returnStats.machineMegabitsReceived = ((machineNowReceived - (*statState)->machineLastReceived) * 8e-6);

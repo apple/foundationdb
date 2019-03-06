@@ -27,7 +27,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include <time.h>
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
@@ -209,37 +209,6 @@ protected:
 	int64_t counter;
 };
 
-static double parseDouble(std::string const& s, bool permissive = false) {
-	double d = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lf%n", &d, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive))
-		return d;
-	throw attribute_not_found();
-}
-
-static int parseInt(std::string const& s, bool permissive = false) {
-	long long int iLong = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lld%n", &iLong, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive)){
-		if (std::numeric_limits<int>::min() <= iLong && iLong <= std::numeric_limits<int>::max())
-			return (int)iLong;  // Downcast definitely safe
-		else
-			throw attribute_too_large();
-	}
-	throw attribute_not_found();
-}
-
-static int64_t parseInt64(std::string const& s, bool permissive = false) {
-	long long int i = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lld%n", &i, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive))
-		return i;
-	throw attribute_not_found();
-}
-
 static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
 	JsonBuilderObject localityObj;
 
@@ -320,7 +289,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 		const TraceEventFields& event = it->second;
 
 		try {
-			std::string address = toIPString(it->first.ip);
+			std::string address = it->first.ip.toString();
 			// We will use the "physical" caluculated machine ID here to limit exposure to machineID repurposing
 			std::string machineId = event.getValue("MachineID");
 
@@ -345,8 +314,8 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 				statusObj["memory"] = memoryObj;
 
 				JsonBuilderObject cpuObj;
-				double cpu_seconds = parseDouble(event.getValue("CPUSeconds"));
-				double elapsed = parseDouble(event.getValue("Elapsed"));
+				double cpu_seconds = event.getDouble("CPUSeconds");
+				double elapsed = event.getDouble("Elapsed");
 				if (elapsed > 0){
 					cpuObj["logical_core_utilization"] = std::max(0.0, std::min(cpu_seconds / elapsed, 1.0));
 				}
@@ -356,7 +325,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 				networkObj["megabits_sent"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsSent"));
 				networkObj["megabits_received"] = JsonBuilderObject().setKeyRawNumber("hz", event.getValue("MbpsReceived"));
 
-				metric = parseDouble(event.getValue("RetransSegs"));
+				metric = event.getDouble("RetransSegs");
 				JsonBuilderObject retransSegsObj;
 				if (elapsed > 0){
 					retransSegsObj["hz"] = metric / elapsed;
@@ -460,13 +429,13 @@ struct RolesInfo {
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 
-			Version version = parseInt64(storageMetrics.getValue("Version"));
-			Version durableVersion = parseInt64(storageMetrics.getValue("DurableVersion"));
+			Version version = storageMetrics.getInt64("Version");
+			Version durableVersion = storageMetrics.getInt64("DurableVersion");
 
 			obj["data_version"] = version;
 			obj["durable_version"] = durableVersion;
 
-			int64_t versionLag = parseInt64(storageMetrics.getValue("VersionLag"));
+			int64_t versionLag = storageMetrics.getInt64("VersionLag");
 			if(maxTLogVersion > 0) {
 				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be aware of how far behind it is.
 				// To account for that, we also compute the version difference between each storage server and the tlog with the largest version.
@@ -522,7 +491,7 @@ struct RolesInfo {
 			obj.setKeyRawNumber("queue_disk_total_bytes", tlogMetrics.getValue("QueueDiskBytesTotal"));
 			obj["input_bytes"] = StatusCounter(tlogMetrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(tlogMetrics.getValue("BytesDurable")).getStatus();
-			metricVersion = parseInt64(tlogMetrics.getValue("Version"));
+			metricVersion = tlogMetrics.getInt64("Version");
 			obj["data_version"] = metricVersion;
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
@@ -622,7 +591,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 			if(memInfo->second.valid()) {
 				if(processMetrics.size() > 0) {
-					memInfo->second.memoryUsage += parseDouble(processMetrics.getValue("Memory"));
+					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
 					++memInfo->second.numProcesses;
 				}
 				else
@@ -697,11 +666,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj.setKeyRawNumber("uptime_seconds",event.getValue("UptimeSeconds"));
 
 				// rates are calculated over the last elapsed seconds
-				double elapsed = parseDouble(event.getValue("Elapsed"));;
-				double cpu_seconds = parseDouble(event.getValue("CPUSeconds"));
-				double diskIdleSeconds = parseDouble(event.getValue("DiskIdleSeconds"));
-				double diskReads = parseDouble(event.getValue("DiskReads"));
-				double diskWrites = parseDouble(event.getValue("DiskWrites"));
+				double elapsed = event.getDouble("Elapsed");
+				double cpu_seconds = event.getDouble("CPUSeconds");
+				double diskIdleSeconds = event.getDouble("DiskIdleSeconds");
+				double diskReads = event.getDouble("DiskReads");
+				double diskWrites = event.getDouble("DiskWrites");
 
 				JsonBuilderObject diskObj;
 				if (elapsed > 0){
@@ -779,7 +748,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			// if this process address is in the machine metrics
 			if (mMetrics.count(address) && mMetrics[address].size()){
 				double availableMemory;
-				availableMemory = parseDouble(mMetrics[address].getValue("AvailableMemory"));
+				availableMemory = mMetrics[address].getDouble("AvailableMemory");
 
 				auto machineMemInfo = machineMemoryUsage[workerItr->first.locality.machineId()];
 				if (machineMemInfo.valid()) {
@@ -886,7 +855,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(std::pair<Work
 
 	try {
 		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
-		state int mStatusCode = parseInt( md.getValue("StatusCode") );
+		state int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
@@ -1165,9 +1134,9 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 		// If we have a MovingData message, parse it.
 		if (md.size())
 		{
-			int64_t partitionsInQueue = parseInt64(md.getValue("InQueue"));
-			int64_t partitionsInFlight = parseInt64(md.getValue("InFlight"));
-			int64_t averagePartitionSize = parseInt64(md.getValue("AverageShardSize"));
+			int64_t partitionsInQueue = md.getInt64("InQueue");
+			int64_t partitionsInFlight = md.getInt64("InFlight");
+			int64_t averagePartitionSize = md.getInt64("AverageShardSize");
 
 			if( averagePartitionSize >= 0 ) {
 				JsonBuilderObject moving_data;
@@ -1195,8 +1164,8 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 				continue;
 			}
 
-			bool primary = parseInt(inFlight.getValue("Primary"));
-			int highestPriority = parseInt(inFlight.getValue("HighestPriority"));
+			bool primary = inFlight.getInt("Primary");
+			int highestPriority = inFlight.getInt("HighestPriority");
 
 			JsonBuilderObject team_tracker;
 			team_tracker["primary"] = primary;
@@ -1288,9 +1257,15 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			return (na.ip << 16) + na.port;
-		}
-	};
+		    int result = 0;
+		    if (na.ip.isV6()) {
+			    result = hashlittle(na.ip.toV6().data(), 16, 0);
+		    } else {
+			    result = na.ip.toV4();
+		    }
+		    return (result << 16) + na.port;
+	    }
+    };
 }
 
 ACTOR template <class iface>
@@ -1391,6 +1366,30 @@ static int getExtraTLogEligibleMachines(const vector<std::pair<WorkerInterface, 
 	return extraTlogEligibleMachines;
 }
 
+JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transPerSec, double tpsLimit) {
+	int reason = ratekeeper.getInt("Reason");
+	JsonBuilderObject perfLimit;
+
+	if (transPerSec > tpsLimit * 0.8) {
+		// If reason is known, set qos.performance_limited_by, otherwise omit
+		if (reason >= 0 && reason < limitReasonEnd) {
+			perfLimit = JsonString::makeMessage(limitReasonName[reason], limitReasonDesc[reason]);
+			std::string reason_server_id = ratekeeper.getValue("ReasonServerID");
+			if (!reason_server_id.empty())
+				perfLimit["reason_server_id"] = reason_server_id;
+		}
+	}
+	else {
+		perfLimit = JsonString::makeMessage("workload", "The database is not being saturated by the workload.");
+	}
+
+	if(!perfLimit.empty()) {
+		perfLimit["reason_id"] = reason;
+	}
+
+	return perfLimit;
+}
+
 ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, std::pair<WorkerInterface, ProcessClass> ddWorker,
 	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
 {
@@ -1443,49 +1442,45 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Transactions
 	try {
-		TraceEventFields md = wait( timeoutError(ddWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
-		double tpsLimit = parseDouble(md.getValue("TPSLimit"));
-		double transPerSec = parseDouble(md.getValue("ReleasedTPS"));
-		int ssCount = parseInt(md.getValue("StorageServers"));
-		int tlogCount = parseInt(md.getValue("TLogs"));
-		int64_t worstFreeSpaceStorageServer = parseInt64(md.getValue("WorstFreeSpaceStorageServer"));
-		int64_t worstFreeSpaceTLog = parseInt64(md.getValue("WorstFreeSpaceTLog"));
-		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",md.getValue("TotalDiskUsageBytes"));
+		state TraceEventFields ratekeeper = wait( timeoutError(ddWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
+		TraceEventFields batchRatekeeper = wait( timeoutError(ddWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
+
+		double tpsLimit = ratekeeper.getDouble("TPSLimit");
+		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
+		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
+		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
+		int ssCount = ratekeeper.getInt("StorageServers");
+		int tlogCount = ratekeeper.getInt("TLogs");
+		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
+		int64_t worstFreeSpaceTLog = ratekeeper.getInt64("WorstFreeSpaceTLog");
+		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",ratekeeper.getValue("TotalDiskUsageBytes"));
 
 		if(ssCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
-			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server",md.getValue("WorstStorageServerQueue"));
-			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server",md.getValue("LimitingStorageServerQueue"));
-			(*qos).setKeyRawNumber("worst_version_lag_storage_server",md.getValue("WorstStorageServerVersionLag"));
-			(*qos).setKeyRawNumber("limiting_version_lag_storage_server",md.getValue("LimitingStorageServerVersionLag"));
+			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
+			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
+			(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
+			(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
 		}
 
 		if(tlogCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_log_server"] = std::max(worstFreeSpaceTLog, (int64_t)0);
-			(*qos).setKeyRawNumber("worst_queue_bytes_log_server",md.getValue("WorstTLogQueue"));
+			(*qos).setKeyRawNumber("worst_queue_bytes_log_server", ratekeeper.getValue("WorstTLogQueue"));
 		}
 
 		(*qos)["transactions_per_second_limit"] = tpsLimit;
+		(*qos)["batch_transactions_per_second_limit"] = batchTpsLimit;
 		(*qos)["released_transactions_per_second"] = transPerSec;
+		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
 
-		int reason = parseInt(md.getValue("Reason"));
-		JsonBuilderObject perfLimit;
-		if (transPerSec > tpsLimit * 0.8) {
-			// If reason is known, set qos.performance_limited_by, otherwise omit
-			if (reason >= 0 && reason < limitReasonEnd) {
-				perfLimit = JsonString::makeMessage(limitReasonName[reason], limitReasonDesc[reason]);
-				std::string reason_server_id = md.getValue("ReasonServerID");
-				if (!reason_server_id.empty())
-					perfLimit["reason_server_id"] = reason_server_id;
-			}
-		}
-		else {
-			perfLimit = JsonString::makeMessage("workload", "The database is not being saturated by the workload.");
-		}
-
+		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if(!perfLimit.empty()) {
-			perfLimit["reason_id"] = reason;
 			(*qos)["performance_limited_by"] = perfLimit;
+		}
+
+		JsonBuilderObject batchPerfLimit = getPerfLimit(batchRatekeeper, transPerSec, batchTpsLimit);
+		if(!batchPerfLimit.empty()) {
+			(*qos)["batch_performance_limited_by"] = batchPerfLimit;
 		}
 	} catch (Error &e){
 		if (e.code() == error_code_actor_cancelled)
@@ -1681,7 +1676,7 @@ static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issu
 		std::map<std::string, std::vector<std::string>> deduplicatedIssues;
 
 		for(auto i : issues) {
-			deduplicatedIssues[i.second.first].push_back(format("%s:%d", toIPString(i.first.ip).c_str(), i.first.port));
+			deduplicatedIssues[i.second.first].push_back(formatIpPort(i.first.ip, i.first.port));
 		}
 
 		for (auto i : deduplicatedIssues) {

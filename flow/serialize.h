@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <array>
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
@@ -150,6 +151,20 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 	ASSERT( ar.protocolVersion() != 0 );
 }
 
+template <class Archive, class T, size_t N>
+inline void save( Archive& ar, const std::array<T, N>& value ) {
+	for(int ii = 0; ii < N; ++ii)
+		ar << value[ii];
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class T, size_t N>
+inline void load( Archive& ar, std::array<T, N>& value ) {
+	for (int ii = 0; ii < N; ii++) {
+		ar >> value[ii];
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
 template <class Archive, class T>
 inline void save( Archive& ar, const std::set<T>& value ) {
 	ar << (int)value.size();
@@ -166,6 +181,27 @@ inline void load( Archive& ar, std::set<T>& value ) {
 	for (int i = 0; i < s; i++) {
 		ar >> currentValue;
 		value.insert(currentValue);
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
+template <class Archive, class K, class V>
+inline void save( Archive& ar, const std::map<K, V>& value ) {
+	ar << (int)value.size();
+	for (const auto &it : value) {
+		ar << it.first << it.second;
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class K, class V>
+inline void load( Archive& ar, std::map<K, V>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	for (int i = 0; i < s; ++i) {
+		std::pair<K, V> p;
+		ar >> p.first >> p.second;
+		value.emplace(p);
 	}
 	ASSERT( ar.protocolVersion() != 0 );
 }

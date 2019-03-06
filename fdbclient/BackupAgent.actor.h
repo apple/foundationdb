@@ -199,14 +199,14 @@ class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
 
-	FileBackupAgent( FileBackupAgent&& r ) noexcept(true) :
+	FileBackupAgent( FileBackupAgent&& r ) BOOST_NOEXCEPT :
 		subspace( std::move(r.subspace) ),
 		config( std::move(r.config) ),
 		lastRestorable( std::move(r.lastRestorable) ),
 		taskBucket( std::move(r.taskBucket) ),
 		futureBucket( std::move(r.futureBucket) ) {}
 
-	void operator=( FileBackupAgent&& r ) noexcept(true) {
+	void operator=( FileBackupAgent&& r ) BOOST_NOEXCEPT {
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
 		lastRestorable = std::move(r.lastRestorable),
@@ -233,9 +233,18 @@ public:
 	//   - submit a restore on the given tagName
 	//   - Optionally wait for the restore's completion.  Will restore_error if restore fails or is aborted.
 	// restore() will return the targetVersion which will be either the valid version passed in or the max restorable version for the given url.
-	Future<Version> restore(Database cx, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
-	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key());
-
+	Future<Version> restore(Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
+	Future<Version> restore(Database cx, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRef;
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+		return restore(cx, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB);
+	}
+	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix = Key(), Key removePrefix = Key());
+	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key()) {
+		Standalone<VectorRef<KeyRangeRef>> rangeRef;
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+		return atomicRestore(cx, tagName, rangeRef, addPrefix, removePrefix);
+	}
 	// Tries to abort the restore for a tag.  Returns the final (stable) state of the tag.
 	Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
@@ -306,7 +315,7 @@ public:
 	DatabaseBackupAgent();
 	explicit DatabaseBackupAgent(Database src);
 
-	DatabaseBackupAgent( DatabaseBackupAgent&& r ) noexcept(true) :
+	DatabaseBackupAgent( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT :
 		subspace( std::move(r.subspace) ),
 		states( std::move(r.states) ),
 		config( std::move(r.config) ),
@@ -318,7 +327,7 @@ public:
 		sourceStates( std::move(r.sourceStates) ),
 		sourceTagNames( std::move(r.sourceTagNames) ) {}
 
-	void operator=( DatabaseBackupAgent&& r ) noexcept(true) {
+	void operator=( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT {
 		subspace = std::move(r.subspace);
 		states = std::move(r.states);
 		config = std::move(r.config);
@@ -335,7 +344,7 @@ public:
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
-	Future<Void> atomicSwitchover(Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix);
+	Future<Void> atomicSwitchover(Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix, bool forceAction=false);
 	
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {

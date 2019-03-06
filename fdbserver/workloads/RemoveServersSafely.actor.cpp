@@ -65,7 +65,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		std::map<Optional<Standalone<StringRef>>, AddressExclusion> machinesMap; // Locality Zone Id -> ip address
 		std::vector<AddressExclusion> processAddrs;	// IF (killProcesses) THEN ip:port ELSE ip addresses   unique list of the machines
-		std::map<uint32_t, Optional<Standalone<StringRef>>> ip_dcid;
+		std::map<IPAddress, Optional<Standalone<StringRef>>> ip_dcid;
 		auto processes = getServers();
 		for(auto& it : processes) {
 			AddressExclusion machineIp(it->address.ip);

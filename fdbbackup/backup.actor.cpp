@@ -657,6 +657,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_FORCE,           "-f",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
@@ -1394,8 +1395,8 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 	}
 }
 
-ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database() ) {
-	state std::string id = g_nondeterministic_random->randomUniqueID().toString();
+ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
+										std::string id = g_nondeterministic_random->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	state std::string instanceKey = rootKey + "/" + "agent-" + id;
@@ -1451,8 +1452,9 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 
 ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 	state double pollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest);
-	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest);
+	std::string id = g_nondeterministic_random->randomUniqueID().toString();
+	state Future<Void> status = statusUpdateActor(src, "dr_backup", EXE_DR_AGENT, &pollDelay, dest, id);
+	state Future<Void> status_other = statusUpdateActor(dest, "dr_backup_dest", EXE_DR_AGENT, &pollDelay, dest, id);
 
 	state DatabaseBackupAgent backupAgent(src);
 
@@ -1639,7 +1641,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 	return Void();
 }
 
-ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName) {
+ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool forceAction) {
 	try
 	{
 		state DatabaseBackupAgent backupAgent(src);
@@ -1650,7 +1652,7 @@ ACTOR Future<Void> switchDBBackup(Database src, Database dest, Standalone<Vector
 		}
 
 
-		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef()));
+		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
 	}
 
@@ -1871,13 +1873,6 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 	{
 		state FileBackupAgent backupAgent;
 
-		if(ranges.size() > 1) {
-			fprintf(stderr, "Currently only a single restore range is supported!\n");
-			throw restore_error();
-		}
-
-		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
-
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
 
 		// If targetVersion is unset then use the maximum restorable version from the backup description
@@ -1899,7 +1894,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, targetVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3060,7 +3055,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			try {
-				sourceDb = Database::createDatabase(ccf, -1, localities);
+				sourceDb = Database::createDatabase(sourceCcf, -1, localities);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
@@ -3221,7 +3216,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( statusDBBackup(sourceDb, db, tagName, maxErrors) );
 				break;
 			case DB_SWITCH:
-				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName) );
+				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName, forceAction) );
 				break;
 			case DB_ABORT:
 				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial) );

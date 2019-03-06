@@ -466,6 +466,46 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bool detailed) {
+	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
+		if (detailed) {
+			return cx->healthMetrics;
+		}
+		else {
+			HealthMetrics result;
+			result.update(cx->healthMetrics, false, false);
+			return result;
+		}
+	}
+	state bool sendDetailedRequest = detailed && now() - cx->detailedHealthMetricsLastUpdated >
+		CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(GetHealthMetricsReply rep =
+				 wait(loadBalance(cx->getMasterProxies(), &MasterProxyInterface::getHealthMetrics,
+							 GetHealthMetricsRequest(sendDetailedRequest)))) {
+				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
+				if (detailed) {
+					cx->healthMetricsLastUpdated = now();
+					cx->detailedHealthMetricsLastUpdated = now();
+					return cx->healthMetrics;
+				}
+				else {
+					cx->healthMetricsLastUpdated = now();
+					HealthMetrics result;
+					result.update(cx->healthMetrics, false, false);
+					return result;
+				}
+			}
+		}
+	}
+}
+
+Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
+	return getHealthMetricsActor(this, detailed);
+}
+
 DatabaseContext::DatabaseContext(
 	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, 
 	int taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, int apiVersion ) 
@@ -474,7 +514,8 @@ DatabaseContext::DatabaseContext(
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
 	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000)
+	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
@@ -727,7 +768,7 @@ Database Database::createDatabase( std::string connFileName, int apiVersion, Loc
 	return Database::createDatabase(rccf, apiVersion, clientLocality);
 }
 
-extern uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs );
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion )
 	: clusterInterface(new AsyncVar<Optional<ClusterInterface>>())
@@ -769,7 +810,7 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 				.detailf("ImageOffset", "%p", platform::getImageOffset())
 				.trackLatest("ClientStart");
 
-			initializeSystemMonitorMachineState(SystemMonitorMachineState(publicIP));
+			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
 
 			systemMonitor();
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
@@ -1033,24 +1074,27 @@ bool GetRangeLimits::hasSatisfiedMinRows() {
 	return hasByteLimit() && minRows == 0;
 }
 
-
 AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 	//Must not change: serialized to the database!
-	std::string s = key.toString();
-	int a,b,c,d,port,count=-1;
-	if (sscanf(s.c_str(), "%d.%d.%d.%d%n", &a,&b,&c,&d, &count)<4) {
+	auto parsedIp = IPAddress::parse(key.toString());
+	if (parsedIp.present()) {
+		return AddressExclusion(parsedIp.get());
+	}
+
+	// Not a whole machine, includes `port'.
+	try {
+		auto addr = NetworkAddress::parse(key.toString());
+		if (addr.isTLS()) {
+			TraceEvent(SevWarnAlways, "AddressExclusionParseError")
+				.detail("String", printable(key))
+				.detail("Description", "Address inclusion string should not include `:tls' suffix.");
+			return AddressExclusion();
+		}
+		return AddressExclusion(addr.ip, addr.port);
+	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
 		return AddressExclusion();
 	}
-	s = s.substr(count);
-	uint32_t ip = (a<<24)+(b<<16)+(c<<8)+d;
-	if (!s.size())
-		return AddressExclusion( ip );
-	if (sscanf( s.c_str(), ":%d%n", &port, &count ) < 1 || count != s.size()) {
-		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
-		return AddressExclusion();
-	}
-	return AddressExclusion( ip, port );
 }
 
 Future<Standalone<RangeResultRef>> getRange(
@@ -1891,7 +1935,7 @@ Transaction::~Transaction() {
 	cancelWatches();
 }
 
-void Transaction::operator=(Transaction&& r) noexcept(true) {
+void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	flushTrLogsIfEnabled();
 	cx = std::move(r.cx);
 	tr = std::move(r.tr);
@@ -2005,7 +2049,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 
 	Standalone<VectorRef<const char*>> addresses;
 	for (auto i : ssi) {
-		std::string ipString = toIPString(i.address().ip);
+		std::string ipString = i.address().ip.toString();
 		char* c_string = new (addresses.arena()) char[ipString.length()+1];
 		strcpy(c_string, ipString.c_str());
 		addresses.push_back(addresses.arena(), c_string);

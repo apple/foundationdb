@@ -1,5 +1,5 @@
 /*
- * DataDistribution.h
+ * DataDistribution.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,10 +18,17 @@
  * limitations under the License.
  */
 
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H)
+#define FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H
+#include "fdbserver/DataDistribution.actor.g.h"
+#elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
+#define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RelocateShard {
 	KeyRange keys;
@@ -244,5 +251,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 int64_t getMaxShardSize( double dbSizeEstimate );
 
 class DDTeamCollection;
-Future<Void> teamRemover(DDTeamCollection* const& self);
-Future<Void> teamRemoverPeriodic(DDTeamCollection* const& self);
+ACTOR Future<Void> teamRemover(DDTeamCollection* self);
+ACTOR Future<Void> teamRemoverPeriodic(DDTeamCollection* self);
+
+#endif
