@@ -1730,7 +1730,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.locality.set(LiteralStringRef("rack"), StringRef(rack));
 		data.locality.set(LiteralStringRef("zoneid"), StringRef(rack));
 		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
-		data.address.ip = i;
+		data.address.ip = IPAddress(i);
 
 		workers.push_back(data);
 	}
@@ -1749,8 +1749,8 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		LiteralStringRef("machineid")
 	});
 	for(auto worker = chosen.begin(); worker != chosen.end(); worker++) {
-		ASSERT(worker->ip < workers.size());
-		LocalityData data = workers[worker->ip].locality;
+		ASSERT(worker->ip.toV4() < workers.size());
+		LocalityData data = workers[worker->ip.toV4()].locality;
 		for(auto field = fields.begin(); field != fields.end(); field++) {
 			chosenValues[*field].insert(data.get(*field).get());
 		}

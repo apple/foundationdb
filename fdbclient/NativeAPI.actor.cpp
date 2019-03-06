@@ -762,7 +762,7 @@ Database Database::createDatabase( std::string connFileName, int apiVersion, Loc
 	return Database::createDatabase(rccf, apiVersion, clientLocality);
 }
 
-extern uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs );
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 Cluster::Cluster( Reference<ClusterConnectionFile> connFile, int apiVersion ) 
 	: clusterInterface(new AsyncVar<Optional<ClusterInterface>>())
@@ -804,7 +804,7 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 				.detailf("ImageOffset", "%p", platform::getImageOffset())
 				.trackLatest("ClientStart");
 
-			initializeSystemMonitorMachineState(SystemMonitorMachineState(publicIP));
+			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
 
 			systemMonitor();
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
@@ -1068,24 +1068,27 @@ bool GetRangeLimits::hasSatisfiedMinRows() {
 	return hasByteLimit() && minRows == 0;
 }
 
-
 AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 	//Must not change: serialized to the database!
-	std::string s = key.toString();
-	int a,b,c,d,port,count=-1;
-	if (sscanf(s.c_str(), "%d.%d.%d.%d%n", &a,&b,&c,&d, &count)<4) {
+	auto parsedIp = IPAddress::parse(key.toString());
+	if (parsedIp.present()) {
+		return AddressExclusion(parsedIp.get());
+	}
+
+	// Not a whole machine, includes `port'.
+	try {
+		auto addr = NetworkAddress::parse(key.toString());
+		if (addr.isTLS()) {
+			TraceEvent(SevWarnAlways, "AddressExclusionParseError")
+				.detail("String", printable(key))
+				.detail("Description", "Address inclusion string should not include `:tls' suffix.");
+			return AddressExclusion();
+		}
+		return AddressExclusion(addr.ip, addr.port);
+	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
 		return AddressExclusion();
 	}
-	s = s.substr(count);
-	uint32_t ip = (a<<24)+(b<<16)+(c<<8)+d;
-	if (!s.size())
-		return AddressExclusion( ip );
-	if (sscanf( s.c_str(), ":%d%n", &port, &count ) < 1 || count != s.size()) {
-		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
-		return AddressExclusion();
-	}
-	return AddressExclusion( ip, port );
 }
 
 Future<Standalone<RangeResultRef>> getRange(
@@ -2040,7 +2043,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 
 	Standalone<VectorRef<const char*>> addresses;
 	for (auto i : ssi) {
-		std::string ipString = toIPString(i.address().ip);
+		std::string ipString = i.address().ip.toString();
 		char* c_string = new (addresses.arena()) char[ipString.length()+1];
 		strcpy(c_string, ipString.c_str());
 		addresses.push_back(addresses.arena(), c_string);

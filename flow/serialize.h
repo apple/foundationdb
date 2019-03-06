@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <array>
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
@@ -146,6 +147,20 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 	for (int i = 0; i < s; i++) {
 		value.push_back(T());
 		ar >> value[i];
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
+template <class Archive, class T, size_t N>
+inline void save( Archive& ar, const std::array<T, N>& value ) {
+	for(int ii = 0; ii < N; ++ii)
+		ar << value[ii];
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class T, size_t N>
+inline void load( Archive& ar, std::array<T, N>& value ) {
+	for (int ii = 0; ii < N; ii++) {
+		ar >> value[ii];
 	}
 	ASSERT( ar.protocolVersion() != 0 );
 }

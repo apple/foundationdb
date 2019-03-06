@@ -61,6 +61,8 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_52_0
+  CXXFLAGS += -D BOOST_ASIO_HAS_STD_ARRAY # TODO: Remove this after Boost upgrades to 1.67
+
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib

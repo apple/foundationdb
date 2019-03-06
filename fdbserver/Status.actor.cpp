@@ -289,7 +289,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 		const TraceEventFields& event = it->second;
 
 		try {
-			std::string address = toIPString(it->first.ip);
+			std::string address = it->first.ip.toString();
 			// We will use the "physical" caluculated machine ID here to limit exposure to machineID repurposing
 			std::string machineId = event.getValue("MachineID");
 
@@ -1254,9 +1254,15 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			return (na.ip << 16) + na.port;
-		}
-	};
+		    int result = 0;
+		    if (na.ip.isV6()) {
+			    result = hashlittle(na.ip.toV6().data(), 16, 0);
+		    } else {
+			    result = na.ip.toV4();
+		    }
+		    return (result << 16) + na.port;
+	    }
+    };
 }
 
 ACTOR template <class iface>
@@ -1667,7 +1673,7 @@ static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issu
 		std::map<std::string, std::vector<std::string>> deduplicatedIssues;
 
 		for(auto i : issues) {
-			deduplicatedIssues[i.second.first].push_back(format("%s:%d", toIPString(i.first.ip).c_str(), i.first.port));
+			deduplicatedIssues[i.second.first].push_back(formatIpPort(i.first.ip, i.first.port));
 		}
 
 		for (auto i : deduplicatedIssues) {
