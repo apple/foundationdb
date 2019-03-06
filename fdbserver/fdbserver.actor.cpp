@@ -759,13 +759,6 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 
 	const NetworkAddressList& coordinators = connectionFile.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
-	bool clusterIsTLS = coordinators[0].isTLS();
-	for (int ii = 1; ii < coordinators.size(); ++ii) {
-		if (coordinators[ii].isTLS() != clusterIsTLS) {
-			fprintf(stderr, "ERROR: coordinators cannot have mixed TLS state.\n");
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-	}
 
 	int numTLSAddress = 0;
 
