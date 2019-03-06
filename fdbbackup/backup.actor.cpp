@@ -2120,6 +2120,12 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+
+			if(!uidFlag.present()) {
+				fprintf(stderr, "No backup exists on tag '%s'\n", tagName.c_str());
+				throw backup_error();
+			}
+
 			if(uidFlag.get().second) {
 				fprintf(stderr, "Cannot modify aborted backup on tag '%s'\n", tagName.c_str());
 				throw backup_error();
