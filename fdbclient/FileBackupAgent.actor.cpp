@@ -3983,10 +3983,13 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+
 		state BackupDescription desc = wait(bc->describeBackup());
-		wait(desc.resolveVersionTimes(cx));
+		if(cxOrig.present()) {
+			wait(desc.resolveVersionTimes(cxOrig.get()));
+		}
 
 		printf("Backup Description\n%s", desc.toString().c_str());
 		if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
@@ -4127,7 +4130,7 @@ public:
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
 		TraceEvent("AS_StartRestore");
-		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
+		Version ver = wait( restore(backupAgent, cx, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}
 };
@@ -4136,8 +4139,8 @@ const std::string BackupAgentBase::defaultTagName = "default";
 const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
-Future<Version> FileBackupAgent::restore(Database cx, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
-	return FileBackupAgentImpl::restore(this, cx, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, g_random->randomUniqueID());
+Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
+	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, g_random->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {

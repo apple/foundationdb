@@ -1910,9 +1910,16 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 	}
 
 	if(destClusterFile.empty()) {
-		fprintf(stderr, "Restore cluster file must be specified explicitly.\n");
+		fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
 		throw restore_error();
 	}
+
+	if(!fileExists(destClusterFile)) {
+		fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", destClusterFile.c_str());
+		throw restore_error();
+	}
+
+	state Optional<Database> origDb;
 
 	// Resolve targetTimestamp if given
 	if(!targetTimestamp.empty()) {
@@ -1921,8 +1928,13 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 			throw restore_error();
 		}
 
-		state Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
-		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb));
+		if(!fileExists(originalClusterFile)) {
+			fprintf(stderr, "Original source database cluster file '%s' does not exist.\n", originalClusterFile.c_str());
+			throw restore_error();
+		}
+
+		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
 		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
 		targetVersion = v;
 	}
@@ -1952,7 +1964,7 @@ ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalC
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
