@@ -310,12 +310,12 @@ ACTOR Future<Void> monitorServerListChange(
 					serverListAndProcessClasses = Never();
 
 					std::map<UID, StorageServerInterface> newServers;
-					for( int i = 0; i < results.size(); i++ ) {
-						UID serverId = results[i].first.id();
-						StorageServerInterface const& ssi = results[i].first;
+					for (int i = 0; i < results.size(); i++) {
+						const StorageServerInterface& ssi = results[i].first;
+						const UID serverId = ssi.id();
 						newServers[serverId] = ssi;
 
-						if ( oldServers.count( serverId ) ) {
+						if (oldServers.count(serverId)) {
 							if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
 								serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
 							}
@@ -325,7 +325,7 @@ ACTOR Future<Void> monitorServerListChange(
 						}
 					}
 
-					for (auto it : oldServers) {
+					for (const auto& it : oldServers) {
 						serverChanges.send( std::make_pair(it.first, Optional<StorageServerInterface>()) );
 					}
 
@@ -342,7 +342,7 @@ ACTOR Future<Void> monitorServerListChange(
 	}
 }
 
-void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -350,7 +350,7 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back up from this value
 	actualTps = std::max( std::max( 1.0, actualTps ), self->smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT );
 
-	limits.tpsLimit = std::numeric_limits<double>::infinity();
+	limits->tpsLimit = std::numeric_limits<double>::infinity();
 	UID reasonID = UID();
 	limitReason_t limitReason = limitReason_t::unlimited;
 
@@ -376,9 +376,9 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 
 		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
-		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits.storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(1, std::min(limits.storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
-		if (targetBytes != limits.storageTargetBytes) {
+		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
+		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		if (targetBytes != limits->storageTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
 				ssLimitReason = limitReason_t::storage_server_min_free_space;
 			} else {
@@ -442,9 +442,9 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 
 		storageTpsLimitReverseIndex.insert(std::make_pair(limitTps, &ss));
 
-		if(limitTps < limits.tpsLimit && (ssLimitReason == limitReason_t::storage_server_min_free_space || ssLimitReason == limitReason_t::storage_server_min_free_space_ratio)) {
+		if (limitTps < limits->tpsLimit && (ssLimitReason == limitReason_t::storage_server_min_free_space || ssLimitReason == limitReason_t::storage_server_min_free_space_ratio)) {
 			reasonID = ss.id;
-			limits.tpsLimit = limitTps;
+			limits->tpsLimit = limitTps;
 			limitReason = ssLimitReason;
 		}
 
@@ -455,19 +455,19 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
-	for(auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits.tpsLimit; ++ss) {
-		if(ignoredMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
+	for (auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit; ++ss) {
+		if (ignoredMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredMachines.insert(ss->second->locality.zoneId());
 			continue;
 		}
-		if(ignoredMachines.count(ss->second->locality.zoneId()) > 0) {
+		if (ignoredMachines.count(ss->second->locality.zoneId()) > 0) {
 			continue;
 		}
 
 		limitingStorageQueueStorageServer = ss->second->lastReply.bytesInput - ss->second->smoothDurableBytes.smoothTotal();
-		limits.tpsLimit = ss->first;
-		limitReason = ssReasons[storageTpsLimitReverseIndex.begin()->second->id];
+		limits->tpsLimit = ss->first;
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst SS, we still report it as the limiting process
+		limitReason = ssReasons[reasonID];
 
 		break;
 	}
@@ -479,27 +479,27 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 	{
 		Version minSSVer = std::numeric_limits<Version>::max();
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
-		for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
-			auto& ss = i->value;
+		for (const auto& it : self->storageQueueInfo) {
+			auto& ss = it.value;
 			if (!ss.valid) continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
 			// Machines that ratekeeper isn't controlling can fall arbitrarily far behind
-			if(ignoredMachines.count(i->value.locality.zoneId()) == 0) {
+			if (ignoredMachines.count(it.value.locality.zoneId()) == 0) {
 				minLimitingSSVer = std::min(minLimitingSSVer, ss.lastReply.version);
 			}
 		}
 
 		Version maxTLVer = std::numeric_limits<Version>::min();
-		for(auto i = self->tlogQueueInfo.begin(); i != self->tlogQueueInfo.end(); ++i) {
-			auto& tl = i->value;
+		for(const auto& it : self->tlogQueueInfo) {
+			auto& tl = it.value;
 			if (!tl.valid) continue;
 			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
 		}
 
 		// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
-		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits.maxVersionDifference/2) / (limits.maxVersionDifference/4);
+		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference/2) / (limits->maxVersionDifference/4);
 		worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
 		limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
 	}
@@ -507,8 +507,8 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueTLog = 0;
 	int tlcount = 0;
-	for(auto i = self->tlogQueueInfo.begin(); i != self->tlogQueueInfo.end(); ++i) {
-		auto& tl = i->value;
+	for (auto& it : self->tlogQueueInfo) {
+		auto& tl = it.value;
 		if (!tl.valid) continue;
 		++tlcount;
 
@@ -518,9 +518,9 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
-		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits.logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(1, std::min(limits.logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
-		if (targetBytes != limits.logTargetBytes) {
+		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
+		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		if (targetBytes != limits->logTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
 			} else {
@@ -540,7 +540,7 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
-			limits.tpsLimit = 0.0;
+			limits->tpsLimit = 0.0;
 		}
 
 		double targetRateRatio = std::min( ( b + springBytes ) / (double)springBytes, 2.0 );
@@ -558,8 +558,8 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 			if (targetRateRatio < .75)  //< FIXME: KNOB for 2.0
 				x = std::max(x, 0.95);
 			double lim = actualTps * x;
-			if (lim < limits.tpsLimit){
-				limits.tpsLimit = lim;
+			if (lim < limits->tpsLimit){
+				limits->tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = tlogLimitReason;
 			}
@@ -568,8 +568,8 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 			// Don't let any tlogs use up its target bytes faster than its MVCC window!
 			double x = ((targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0)) / inputRate;
 			double lim = actualTps * x;
-			if (lim < limits.tpsLimit){
-				limits.tpsLimit = lim;
+			if (lim < limits->tpsLimit){
+				limits->tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = limitReason_t::log_server_mvcc_write_bandwidth;
 			}
@@ -578,10 +578,10 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 
 	self->healthMetrics.worstTLogQueue = worstStorageQueueTLog;
 
-	limits.tpsLimit = std::max(limits.tpsLimit, 0.0);
+	limits->tpsLimit = std::max(limits->tpsLimit, 0.0);
 
 	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
-		limits.tpsLimit = std::max(limits.tpsLimit, 100.0);
+		limits->tpsLimit = std::max(limits->tpsLimit, 100.0);
 	}
 
 	int64_t totalDiskUsageBytes = 0;
@@ -592,13 +592,13 @@ void updateRate( RatekeeperData* self, RatekeeperLimits &limits ) {
 		if (s.value.valid)
 			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
 
-	limits.tpsLimitMetric = std::min(limits.tpsLimit, 1e6);
-	limits.reasonMetric = limitReason;
+	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
+	limits->reasonMetric = limitReason;
 
 	if (g_random->random01() < 0.1) {
-		std::string name = "RkUpdate" + limits.context;
+		std::string name = "RkUpdate" + limits->context;
 		TraceEvent(name.c_str())
-			.detail("TPSLimit", limits.tpsLimit)
+			.detail("TPSLimit", limits->tpsLimit)
 			.detail("Reason", limitReason)
 			.detail("ReasonServerID", reasonID)
 			.detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
@@ -673,8 +673,8 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	try {
 		loop choose {
 			when (wait( timeout )) {
-				updateRate(&self, self.normalLimits);
-				updateRate(&self, self.batchLimits);
+				updateRate(&self, &self.normalLimits);
+				updateRate(&self, &self.batchLimits);
 
 				double tooOld = now() - 1.0;
 				for(auto p=self.proxy_transactionCounts.begin(); p!=self.proxy_transactionCounts.end(); ) {
