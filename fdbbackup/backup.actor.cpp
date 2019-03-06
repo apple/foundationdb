@@ -2082,14 +2082,35 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 struct BackupModifyOptions {
 	Optional<std::string> verifyUID;
 	Optional<std::string> destURL;
-	Optional<int> snapshotInterval;
-	Optional<int> activeSnapshotInterval;
+	Optional<int> snapshotIntervalSeconds;
+	Optional<int> activeSnapshotIntervalSeconds;
+	bool hasChanges() const {
+		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
+	}
 };
 
 ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions options) {
+	if(!options.hasChanges()) {
+		fprintf(stderr, "No changes were specified, nothing to do!\n");
+		throw backup_error();
+	}
+
 	state KeyBackedTag tag = makeBackupTag(tagName);
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction());
+	state Reference<IBackupContainer> bc;
+	if(options.destURL.present()) {
+		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get());
+		try {
+			Void _ = wait(timeoutError(bc->create(), 30));
+		} catch(Error &e) {
+			if(e.code() == error_code_actor_cancelled)
+				throw;
+			fprintf(stderr, "ERROR: Could not create backup container at '%s': %s\n", options.destURL.get().c_str(), e.what());
+			throw backup_error();
+		}
+	}
+	
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2113,17 +2134,16 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 				throw backup_error();
 			}
 
-			if(options.snapshotInterval.present()) {
-				config.snapshotIntervalSeconds().set(tr, options.snapshotInterval.get());
+			if(options.snapshotIntervalSeconds.present()) {
+				config.snapshotIntervalSeconds().set(tr, options.snapshotIntervalSeconds.get());
 			}
 
-			if(options.activeSnapshotInterval.present()) {
+			if(options.activeSnapshotIntervalSeconds.present()) {
 				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, false, backup_error()));
-				config.snapshotTargetEndVersion().set(tr, begin);
+				config.snapshotTargetEndVersion().set(tr, begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			}
 
 			if(options.destURL.present()) {
-				Reference<IBackupContainer> bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get());
 				config.backupContainer().set(tr, bc);
 			}
 
@@ -2720,10 +2740,10 @@ int main(int argc, char* argv[]) {
 					}
 					if(optId == OPT_SNAPSHOTINTERVAL) {
 						snapshotIntervalSeconds = seconds;
-						modifyOptions.snapshotInterval = seconds;
+						modifyOptions.snapshotIntervalSeconds = seconds;
 					}
 					else if(optId == OPT_MOD_ACTIVE_INTERVAL) {
-						modifyOptions.activeSnapshotInterval = seconds;
+						modifyOptions.activeSnapshotIntervalSeconds = seconds;
 					}
 					break;
 				}

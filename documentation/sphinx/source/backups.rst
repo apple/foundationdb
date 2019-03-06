@@ -197,7 +197,7 @@ The following options apply to most subcommands:
   Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
 ``-d <BACKUP_URL>``
-  The Backup URL which the subcommand should read, write, or modify.  For ``start`` operations, the Backup URL must be accessible by the ``backup_agent`` processes.
+  The Backup URL which the subcommand should read, write, or modify.  For ``start`` and ``modify`` operations, the Backup URL must be accessible by the ``backup_agent`` processes.
 
 ``-t <TAG>``
   A "tag" is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name "default" is used.
