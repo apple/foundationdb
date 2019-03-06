@@ -73,7 +73,10 @@ type Tuple []TupleElement
 // an instance of this type.
 type UUID [16]byte
 
-// Versionstamp .
+// Versionstamp is struct for a FoundationDB verionstamp. Versionstamps are
+// 12 bytes long composed of a 10 byte transaction version and a 2 byte user
+// version. The transaction version is filled in at commit time and the user
+// version is provided by your layer during a transaction.
 type Versionstamp struct {
 	TransactionVersion [10]byte
 	UserVersion        uint16
@@ -83,7 +86,8 @@ var incompleteTransactionVersion = [10]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
 
 const versionstampLength = 12
 
-// IncompleteVersionstamp .
+// IncompleteVersionstamp is the constructor you should use to make
+// an incomplete versionstamp to use in a tuple.
 func IncompleteVersionstamp(userVersion uint16) Versionstamp {
 	return Versionstamp{
 		TransactionVersion: incompleteTransactionVersion,
@@ -91,15 +95,13 @@ func IncompleteVersionstamp(userVersion uint16) Versionstamp {
 	}
 }
 
-// Bytes .
+// Bytes converts a Versionstamp struct to a byte slice for encoding in a tuple.
 func (v Versionstamp) Bytes() []byte {
-	var scratch [12]byte
+	var scratch [versionstampLength]byte
 
 	copy(scratch[:], v.TransactionVersion[:])
 
 	binary.BigEndian.PutUint16(scratch[10:], v.UserVersion)
-
-	fmt.Println(scratch)
 
 	return scratch[:]
 }
@@ -293,8 +295,8 @@ func (p *packer) encodeUUID(u UUID) {
 func (p *packer) encodeVersionstamp(v Versionstamp) {
 	p.putByte(versionstampCode)
 
-	if p.versionstampPos != 0 && v.TransactionVersion == incompleteTransactionVersion {
-		panic(fmt.Sprintf("Tuple can only contain one unbound versionstamp"))
+	if p.versionstampPos != -1 && v.TransactionVersion == incompleteTransactionVersion {
+		panic(fmt.Sprintf("Tuple can only contain one incomplete versionstamp"))
 	} else {
 		p.versionstampPos = int32(len(p.buf))
 	}
@@ -368,49 +370,93 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 // Tuple satisfies the fdb.KeyConvertible interface, so it is not necessary to
 // call Pack when using a Tuple with a FoundationDB API function that requires a
 // key.
+//
+// This method will panic if it contains an incomplete Versionstamp. Use
+// PackWithVersionstamp instead.
+//
 func (t Tuple) Pack() []byte {
 	p := newPacker()
 	p.encodeTuple(t, false)
 	return p.buf
 }
 
-// PackWithVersionstamp packs the specified tuple into a key for versionstamp operations
-func (t Tuple) PackWithVersionstamp() ([]byte, error) {
+// PackWithVersionstamp packs the specified tuple into a key for versionstamp
+// operations. See Pack for more information. This function will return an error
+// if you attempt to pack a tuple with more than one versionstamp. This function will
+// return an error if you attempt to pack a tuple with a versionstamp position larger
+// than an uint16 on apiVersion < 520.
+func (t Tuple) PackWithVersionstamp(prefix []byte) ([]byte, error) {
 	hasVersionstamp, err := t.HasIncompleteVersionstamp()
 	if err != nil {
 		return nil, err
 	}
 
+	if hasVersionstamp == false {
+		return nil, errors.New("No incomplete versionstamp included in tuple pack with versionstamp")
+	}
+
 	p := newPacker()
+
+	prefixLength := int32(0)
+	if prefix != nil {
+		prefixLength = int32(len(prefix))
+		p.putBytes(prefix)
+	}
+
 	p.encodeTuple(t, false)
 
 	if hasVersionstamp {
 		var scratch [4]byte
-		binary.LittleEndian.PutUint32(scratch[:], uint32(p.versionstampPos))
-		p.putBytes(scratch[:])
+		var offsetIndex int
+
+		apiVersion := fdb.MustGetAPIVersion()
+		if apiVersion < 520 {
+			if p.versionstampPos > math.MaxUint16 {
+				return nil, errors.New("Versionstamp position too large")
+			}
+
+			offsetIndex = 1
+			binary.LittleEndian.PutUint16(scratch[:], uint16(prefixLength+p.versionstampPos))
+		} else {
+			offsetIndex = 3
+			binary.LittleEndian.PutUint32(scratch[:], uint32(prefixLength+p.versionstampPos))
+		}
+
+		p.putBytes(scratch[0:offsetIndex])
 	}
 
 	return p.buf, nil
 }
 
-// HasIncompleteVersionstamp determines if there is at least one incomplete versionstamp in a tuple
+// HasIncompleteVersionstamp determines if there is at least one incomplete
+// versionstamp in a tuple. This function will return an error this tuple has
+// more than one versionstamp.
 func (t Tuple) HasIncompleteVersionstamp() (bool, error) {
+	incompleteCount := t.countIncompleteVersionstamps()
+
+	var err error
+	if incompleteCount > 1 {
+		err = errors.New("Tuple can only contain one incomplete versionstamp")
+	}
+
+	return incompleteCount == 1, err
+}
+
+func (t Tuple) countIncompleteVersionstamps() int {
 	incompleteCount := 0
+
 	for _, el := range t {
 		switch e := el.(type) {
 		case Versionstamp:
 			if e.TransactionVersion == incompleteTransactionVersion {
 				incompleteCount++
 			}
+		case Tuple:
+			incompleteCount += e.countIncompleteVersionstamps()
 		}
 	}
 
-	var err error
-	if incompleteCount > 1 {
-		err = errors.New("Tuple can only contain one unbound versionstamp")
-	}
-
-	return incompleteCount == 1, err
+	return incompleteCount
 }
 
 func findTerminator(b []byte) int {

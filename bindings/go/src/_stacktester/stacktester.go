@@ -105,7 +105,7 @@ func (sm *StackMachine) waitAndPop() (ret stackEntry) {
 	switch el := ret.item.(type) {
 	case []byte:
 		ret.item = el
-	case int64, uint64, *big.Int, string, bool, tuple.UUID, float32, float64, tuple.Tuple:
+	case int64, uint64, *big.Int, string, bool, tuple.UUID, float32, float64, tuple.Tuple, tuple.Versionstamp:
 		ret.item = el
 	case fdb.Key:
 		ret.item = []byte(el)
@@ -662,20 +662,21 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			t = append(t, sm.waitAndPop().item)
 		}
 		sm.store(idx, []byte(t.Pack()))
-	case op == "TUPLE_PACK_VERSIONSTAMP":
+	case op == "TUPLE_PACK_WITH_VERSIONSTAMP":
 		var t tuple.Tuple
-		count := sm.waitAndPop().item.(int64)
-		for i := 0; i < int(count); i++ {
+
+		prefix := sm.waitAndPop().item.([]byte)
+		c := sm.waitAndPop().item.(int64)
+		for i := 0; i < int(c); i++ {
 			t = append(t, sm.waitAndPop().item)
 		}
 
-		incomplete, err := t.HasIncompleteVersionstamp()
-		if incomplete == false {
+		packed, err := t.PackWithVersionstamp(prefix)
+		if err != nil && strings.Contains(err.Error(), "No incomplete") {
 			sm.store(idx, []byte("ERROR: NONE"))
 		} else if err != nil {
 			sm.store(idx, []byte("ERROR: MULTIPLE"))
 		} else {
-			packed := t.Pack()
 			sm.store(idx, []byte("OK"))
 			sm.store(idx, packed)
 		}
@@ -911,7 +912,7 @@ func main() {
 		log.Fatal("API version not equal to value selected")
 	}
 
-	db, e = fdb.OpenDatabase(clusterFile)
+	db, e = fdb.Open(clusterFile, []byte("DB"))
 	if e != nil {
 		log.Fatal(e)
 	}
