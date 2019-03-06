@@ -47,12 +47,6 @@
 
 #include <boost/version.hpp>
 
-#if BOOST_VERSION == 105200
-#error Boost is still 1.52.0
-#elif BOOST_VERSION != 106700
-#error Boost is not 1.67.0
-#endif
-
 using namespace std::rel_ops;
 
 #define TEST( condition ) if (!(condition)); else { static TraceEvent* __test = &(TraceEvent("CodeCoverage").detail("File", __FILE__).detail("Line",__LINE__).detail("Condition", #condition)); }
