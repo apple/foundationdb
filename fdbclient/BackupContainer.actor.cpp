@@ -1360,7 +1360,7 @@ public:
 		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(bucket, basePath));
 		std::vector<std::string> results;
 		for(auto &f : contents.objects) {
-			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size())));
+			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
 		}
 		return results;
 	}

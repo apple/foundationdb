@@ -133,8 +133,8 @@ public:
 	// the unconsumed parameters will be added to it.
 	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr, ParametersT *ignored_parameters = nullptr);
 
-	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters.
-	std::string getResourceURL(std::string resource);
+	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters in addition to the passed params string
+	std::string getResourceURL(std::string resource, std::string params);
 
 	struct ReusableConnection {
 		Reference<IConnection> conn;

@@ -147,10 +147,11 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef prefix = t.eat("://");
 		if(prefix != LiteralStringRef("blobstore"))
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
-		StringRef cred   =   t.eat("@");
-		StringRef hostPort = t.eatAny("?/");
+		StringRef cred = t.eat("@");
+		uint8_t foundSeparator = 0;
+		StringRef hostPort = t.eatAny("/?", &foundSeparator);
 		StringRef resource;
-		if(t[-1] == '/') {
+		if(foundSeparator == '/') {
 			 resource = t.eat("?");
 		}
 
@@ -228,7 +229,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	}
 }
 
-std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
+std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) {
 	std::string hostPort = host;
 	if(!service.empty()) {
 		hostPort.append(":");
@@ -241,20 +242,28 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 		s = std::string(":") + secret;
 
 	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
-	std::string p = knobs.getURLParameters();
 
-	for(auto &kv : extraHeaders) {
-		if(!p.empty()) {
-			p.append("&");
+	// Get params that are deviations from knob defaults
+	std::string knobParams = knobs.getURLParameters();
+	if(!knobParams.empty()) {
+		if(!params.empty()) {
+			params.append("&");
 		}
-		p.append("header=");
-		p.append(HTTP::urlEncode(kv.first));
-		p.append(":");
-		p.append(HTTP::urlEncode(kv.second));
+		params.append(knobParams);
 	}
 
-	if(!p.empty())
-		r.append("?").append(p);
+	for(auto &kv : extraHeaders) {
+		if(!params.empty()) {
+			params.append("&");
+		}
+		params.append("header=");
+		params.append(HTTP::urlEncode(kv.first));
+		params.append(":");
+		params.append(HTTP::urlEncode(kv.second));
+	}
+
+	if(!params.empty())
+		r.append("?").append(params);
 
 	return r;
 }
