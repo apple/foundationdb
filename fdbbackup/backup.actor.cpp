@@ -506,7 +506,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #endif
 	{ OPT_RESTORE_CLUSTERFILE_DEST,     "--dest_cluster_file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_ORIG,     "--orig_cluster_file", SO_REQ_SEP },
-	{ OPT_RESTORE_TIMESTAMP,             "--restore_datetime", SO_REQ_SEP },
+	{ OPT_RESTORE_TIMESTAMP,            "--timestamp",         SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_RESTORECONTAINER,"-r",               SO_REQ_SEP },
 	{ OPT_PREFIX_ADD,      "-add_prefix",      SO_REQ_SEP },
