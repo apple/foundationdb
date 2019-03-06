@@ -1010,6 +1010,9 @@ enumProgramExe	getProgramType(std::string programExe)
 		}
 	}
 #endif
+	// For debugging convenience, remove .debug suffix if present.
+	if(StringRef(programExe).endsWith(LiteralStringRef(".debug")))
+		programExe = programExe.substr(0, programExe.size() - 6);
 
 	// Check if backup agent
 	if ((programExe.length() >= exeAgent.size())																		&&
