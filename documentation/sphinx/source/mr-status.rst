@@ -81,7 +81,7 @@ The following format informally describes the JSON containing the status data. T
               {
                 "address": "127.0.0.1:1234",
                 "log_group": "default"
-                "tls_configured": true
+                "connected_coordinators": 2
               }
             ],
             "count": 1,

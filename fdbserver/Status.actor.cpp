@@ -864,12 +864,9 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
 		for(auto client : cv.second) {
 			JsonBuilderObject cli;
 			cli["address"] = client.toString();
+			ASSERT(clientStatusInfoMap.find(client) != clientStatusInfoMap.end());
 			cli["log_group"] = clientStatusInfoMap[client].traceLogGroup;
-			int connectedCoordinatorsNum = 0;
-			if (clientStatusInfoMap.find(client) != clientStatusInfoMap.end()) {
-				connectedCoordinatorsNum = clientStatusInfoMap[client].connectedCoordinatorsNum;
-			}
-			cli["connected_coordinators"] = (int)connectedCoordinatorsNum;
+			cli["connected_coordinators"]  = (int) clientStatusInfoMap[client].connectedCoordinatorsNum;
 			clients.push_back(cli);
 		}
 

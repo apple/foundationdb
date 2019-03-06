@@ -1215,7 +1215,7 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
-		Reference<AsyncVar<int>> unused(new AsyncVar<int>);
+		Reference<AsyncVar<int>> unused(new AsyncVar<int>(0));
 		Promise<Void> recoveredDiskFiles;
 
 		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));

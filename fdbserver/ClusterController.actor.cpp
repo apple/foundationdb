@@ -93,7 +93,6 @@ public:
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
 		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
-		int connectedCoordinatorsNum; // Number of connected coordinators
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
