@@ -192,6 +192,7 @@ that Visual Studio is used to compile.
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
 1. Set `JAVA_HOME` to the unpacked location and JAVA_COMPILE to
    `$JAVA_HOME/bin/javac`.
+1. Install [Python](https://www.python.org/downloads/). Required to build the Python binding.
 1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
    won't build the Windows installer.
 1. Create a build directory (you can have the build directory anywhere you
