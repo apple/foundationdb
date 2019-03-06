@@ -94,7 +94,7 @@ enum {
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN, OPT_DUMP_END,
+	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -433,6 +433,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
+	{ OPT_JSON,            "--json",           SO_NONE},
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -2117,13 +2118,13 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx) {
+ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx, bool json) {
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state BackupDescription desc = wait(c->describeBackup(deep));
 		if(cx.present())
 			wait(desc.resolveVersionTimes(cx.get()));
-		printf("%s\n", desc.toString().c_str());
+		printf("%s\n", (json ? desc.toJSON() : desc.toString()).c_str());
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2547,6 +2548,7 @@ int main(int argc, char* argv[]) {
 		Version dumpEnd = std::numeric_limits<Version>::max();
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
+		bool jsonOutput = false;
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
@@ -2843,6 +2845,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_DUMP_END:
 					dumpEnd = parseVersion(args->OptionArg());
+					break;
+				case OPT_JSON:
+					jsonOutput = true;
 					break;
 			}
 		}
@@ -3200,7 +3205,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 
 				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
-				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
+				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>(), jsonOutput) );
 				break;
 
 			case BACKUP_LIST:

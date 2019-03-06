@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <time.h>
 #include "flow/actorcompiler.h" // has to be last include
+#include "JsonBuilder.h"
 
 namespace IBackupFile_impl {
 
@@ -142,8 +143,8 @@ std::string BackupDescription::toString() const {
 	};
 
 	for(const KeyspaceSnapshotFile &m : snapshots) {
-		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s\n",
-			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false"));
+		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
+			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false", m.expiredPct(expiredEndVersion)));
 	}
 
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
@@ -167,6 +168,62 @@ std::string BackupDescription::toString() const {
 		info.append("ExtendedDetail: ").append(extendedDetail);
 
 	return info;
+}
+
+std::string BackupDescription::toJSON() const {
+	JsonBuilderObject doc;
+
+	doc.setKey("URL", url.c_str());
+	doc.setKey("Restorable", maxRestorableVersion.present());
+
+	auto formatVersion = [&](Version v) {
+		JsonBuilderObject doc;
+		doc.setKey("Version", v);
+		if(!versionTimeMap.empty()) {
+			auto i = versionTimeMap.find(v);
+			if(i != versionTimeMap.end())
+				doc.setKey("Timestamp", formatTime(i->second));
+		}
+		else if(maxLogEnd.present()) {
+			double days = double(v - maxLogEnd.get()) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
+			doc.setKey("RelativeDays", days);
+		}
+		return doc;
+	};
+
+	JsonBuilderArray snapshotsArray;
+	for(const KeyspaceSnapshotFile &m : snapshots) {
+		JsonBuilderObject snapshotDoc;
+		snapshotDoc.setKey("StartVersion", formatVersion(m.beginVersion));
+		snapshotDoc.setKey("EndVersion", formatVersion(m.endVersion));
+		snapshotDoc.setKey("Restorable", m.restorable.orDefault(false));
+		snapshotDoc.setKey("TotalBytes", m.totalSize);
+		snapshotDoc.setKey("PercentageExpired", m.expiredPct(expiredEndVersion));
+		snapshotsArray.push_back(snapshotDoc);
+	}
+	doc.setKey("Snapshots", snapshotsArray);
+
+	doc.setKey("TotalSnapshotBytes", snapshotBytes);
+
+	if(expiredEndVersion.present())
+		doc.setKey("ExpiredEndVersion", formatVersion(expiredEndVersion.get()));
+	if(unreliableEndVersion.present())
+		doc.setKey("UnreliableEndVersion", formatVersion(unreliableEndVersion.get()));
+	if(minLogBegin.present())
+		doc.setKey("MinLogBeginVersion", formatVersion(minLogBegin.get()));
+	if(contiguousLogEnd.present())
+		doc.setKey("ContiguousLogEndVersion", formatVersion(contiguousLogEnd.get()));
+	if(maxLogEnd.present())
+		doc.setKey("MaxLogEndVersion", formatVersion(maxLogEnd.get()));
+	if(minRestorableVersion.present())
+		doc.setKey("MinRestorableVersion", formatVersion(minRestorableVersion.get()));
+	if(maxRestorableVersion.present())
+		doc.setKey("MaxRestorableVersion", formatVersion(maxRestorableVersion.get()));
+
+	if(!extendedDetail.empty())
+		doc.setKey("ExtendedDetail", extendedDetail);
+
+	return doc.getJson();
 }
 
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
