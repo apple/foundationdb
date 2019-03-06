@@ -1900,6 +1900,10 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 }
 
 ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+	if(ranges.empty()) {
+		ranges.push_back_deep(ranges.arena(), normalKeys);
+	}
+
 	if(targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
 		throw restore_error();
