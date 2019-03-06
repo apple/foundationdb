@@ -159,7 +159,9 @@
     <ClInclude Include="CoordinatedState.h" />
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="CoroFlow.h" />
-    <ClInclude Include="DataDistribution.actor.h" />
+    <ActorCompiler Include="DataDistribution.actor.h">
+          <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="DataDistributorInterface.h" />
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />
