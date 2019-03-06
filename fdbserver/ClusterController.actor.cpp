@@ -93,6 +93,7 @@ public:
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
 		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
+		int connectedCoordinatorsNum; // Number of connected coordinators
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
@@ -1221,7 +1222,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
-	bool client_tls_configured,
+	int connectedCoordinatorsNum,
 	Standalone<StringRef> traceLogGroup,
 	ReplyPromise<ClientDBInfo> reply)
 {
@@ -1233,7 +1234,8 @@ ACTOR Future<Void> clusterOpenDatabase(
 		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
 
-	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = {traceLogGroup.toString(), client_tls_configured};
+
+	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = {traceLogGroup.toString(), connectedCoordinatorsNum};
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -2404,7 +2406,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.client_tls_configured, req.traceLogGroup, req.reply ) );
+			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.connectedCoordinatorsNum, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );

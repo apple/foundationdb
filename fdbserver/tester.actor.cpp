@@ -1121,8 +1121,9 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	state vector<TestSpec> testSpecs;
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
+	Reference<AsyncVar<int>> connectedCoordinatorsNum( new AsyncVar<int>(0) );
 	vector<Future<Void>> actors;
-	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
+	actors.push_back( reportErrors(monitorLeader( connFile, cc, connectedCoordinatorsNum ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
 	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 

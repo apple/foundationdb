@@ -279,7 +279,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      {
                          "address":"127.0.0.1:9898",
                          "log_group":"default",
-                         "tls_configured":true
+                         "connected_coordinators":2
                      }
                  ],
                  "count" : 1,

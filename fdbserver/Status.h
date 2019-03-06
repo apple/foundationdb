@@ -32,7 +32,7 @@ typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > Clie
 
 struct ClientStatusInfo {
 	std::string traceLogGroup;
-	bool clientTLSConfigured; // Does client configure its TLS options
+	int connectedCoordinatorsNum;
 };
 
 Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<std::pair<WorkerInterface, ProcessClass>> const& workers,

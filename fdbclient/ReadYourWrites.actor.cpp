@@ -1159,7 +1159,8 @@ ACTOR Future<Optional<Value>> getJSON(Reference<ClusterConnectionFile> clusterFi
 
 ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterConnectionFile> clusterFile){
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	Reference<AsyncVar<int>> unused_connectedCoordinatorsNum(new AsyncVar<int>());
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface, unused_connectedCoordinatorsNum);
 
 	loop{
 		choose {

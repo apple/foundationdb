@@ -865,11 +865,11 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
 			JsonBuilderObject cli;
 			cli["address"] = client.toString();
 			cli["log_group"] = clientStatusInfoMap[client].traceLogGroup;
-			bool client_tls_configured = false;
+			int connectedCoordinatorsNum = 0;
 			if (clientStatusInfoMap.find(client) != clientStatusInfoMap.end()) {
-				client_tls_configured = clientStatusInfoMap[client].clientTLSConfigured;
+				connectedCoordinatorsNum = clientStatusInfoMap[client].connectedCoordinatorsNum;
 			}
-			cli["tls_configured"] = client_tls_configured;
+			cli["connected_coordinators"] = (int)connectedCoordinatorsNum;
 			clients.push_back(cli);
 		}
 
