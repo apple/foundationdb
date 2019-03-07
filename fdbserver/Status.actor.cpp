@@ -1204,8 +1204,8 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterfa
 			}
 			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
 				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "removing_redundant_teams";
-				stateSectionObj["description"] = "Removing redundant machine teams";
+				stateSectionObj["name"] = "optimizing_team_collections";
+				stateSectionObj["description"] = "Optimizing team collections";
 			}
 			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
