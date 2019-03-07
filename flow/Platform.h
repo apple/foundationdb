@@ -533,7 +533,6 @@ bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
 void* loadFunction(void* lib, const char* func_name);
 
-// FIXME: sramamoorthy, clang-format fails here fix it
 // wrapper to execv
 //  takes two arguments:
 //   1. path to the binary

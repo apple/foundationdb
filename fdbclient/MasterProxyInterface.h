@@ -300,8 +300,6 @@ struct GetHealthMetricsRequest
 };
 
 struct ExecRequest {
-	// FIXME: sramamoorthy, FDB6PORT, flat-buffers related versioning disabled
-	// constexpr static flat_buffers::FileIdentifier file_identifier = 1315755287;
 	Arena arena;
 	StringRef execPayLoad;
 	ReplyPromise<Void> reply;
@@ -312,8 +310,6 @@ struct ExecRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// FIXME: sramamoorthy, FDB6PORT, flat-buffers related versioning disabled
-		// serializer(ar, v2(execPayLoad), v2(reply), v2(arena), v2(debugID));
 		serializer(ar, execPayLoad, reply, arena, debugID);
 	}
 };

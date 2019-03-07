@@ -241,8 +241,6 @@ struct TraceBatchDumpRequest {
 };
 
 struct ExecuteRequest {
-	// FIXME: sramamoorthy, FDB6port enable flat_buffers
-	// constexpr static flat_buffers::FileIdentifier file_identifier = 16478959;
 	ReplyPromise<Void> reply;
 
 	Arena arena;
@@ -254,8 +252,6 @@ struct ExecuteRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// FIXME: sramamoorthy, FDB6port enable flat_buffers
-		// serializer(ar, v2(reply), v2(execPayLoad), v2(arena));
 		serializer(ar, reply, execPayLoad, arena);
 	}
 };

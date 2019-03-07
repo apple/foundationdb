@@ -225,7 +225,6 @@ struct TLogCommitRequest {
 		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID), hasExecOp(hasExecOp){}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		// FIXME: sramamoorthy, FDB6port, flatbuffers related versioning missing
 		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID, hasExecOp);
 	}
 };

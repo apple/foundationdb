@@ -244,7 +244,7 @@ public: // workload functions
 		} else if (self->testID == 1) {
 			// create a snapshot
 			state double toDelay = fmod(g_random->randomUInt32(), self->maxSnapDelay);
-			TraceEvent("toDelay").detail("toDelay", toDelay);
+			TraceEvent("ToDelay").detail("Value", toDelay);
 			ASSERT(toDelay < self->maxSnapDelay);
 			wait(delay(toDelay));
 
