@@ -671,11 +671,13 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
 	try {
+		state bool lastLimited = false;
 		loop choose {
 			when (wait( timeout )) {
 				updateRate(&self, &self.normalLimits);
 				updateRate(&self, &self.batchLimits);
 
+				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
 				for(auto p=self.proxy_transactionCounts.begin(); p!=self.proxy_transactionCounts.end(); ) {
 					if (p->second.time < tooOld)
@@ -707,6 +709,7 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
 				reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
+				reply.healthMetrics.batchLimited = lastLimited;
 
 				req.reply.send( reply );
 			}
