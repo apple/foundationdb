@@ -7,7 +7,7 @@ Release Notes
 
 Features
 --------
-Improved replication mechanism, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`.
+* Improved replication mechanism, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`.
 
 
 * Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. `(PR #1084) <https://github.com/apple/foundationdb/pull/1084>`_
