@@ -172,7 +172,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
+	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
+		return getRestoreRangesOrDefault_impl(this, tr);
+	}
+
+	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
 		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
 		if (ranges.empty()) {
 			state KeyRange range = wait(self->restoreRange().getD(tr));
@@ -378,7 +382,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<std::vector<KeyRange>> ranges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
+	state Future<std::vector<KeyRange>> ranges = restore.getRestoreRangesOrDefault(tr);
 	state Future<Key> addPrefix = restore.addPrefix().getD(tr);
 	state Future<Key> removePrefix = restore.removePrefix().getD(tr);
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
@@ -2538,7 +2542,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 					bc = restore.sourceContainer().getOrThrow(tr);
-					restoreRanges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
+					restoreRanges = restore.getRestoreRangesOrDefault(tr);
 					addPrefix = restore.addPrefix().getD(tr);
 					removePrefix = restore.removePrefix().getD(tr);
 
