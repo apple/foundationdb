@@ -100,7 +100,7 @@ enum {
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
 
 	// Restore constants
-	OPT_RESTORECONTAINER, OPT_DBVERSION, OPT_PREFIX_ADD, OPT_PREFIX_REMOVE,
+	OPT_RESTORECONTAINER, OPT_RESTORE_VERSION, OPT_RESTORE_TIMESTAMP, OPT_PREFIX_ADD, OPT_PREFIX_REMOVE, OPT_RESTORE_CLUSTERFILE_DEST, OPT_RESTORE_CLUSTERFILE_ORIG,
 
 	// Shared constants
 	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
@@ -504,7 +504,9 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_DEST,     "--dest_cluster_file", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_ORIG,     "--orig_cluster_file", SO_REQ_SEP },
+	{ OPT_RESTORE_TIMESTAMP,            "--timestamp",         SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_RESTORECONTAINER,"-r",               SO_REQ_SEP },
 	{ OPT_PREFIX_ADD,      "-add_prefix",      SO_REQ_SEP },
@@ -513,11 +515,10 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
-	{ OPT_WAITFORDONE,      "-w",              SO_NONE },
-	{ OPT_WAITFORDONE,      "--waitfordone",   SO_NONE },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
-	{ OPT_DBVERSION,       "--version",        SO_REQ_SEP },
-	{ OPT_DBVERSION,       "-v",               SO_REQ_SEP },
+	{ OPT_WAITFORDONE,     "-w",               SO_NONE },
+	{ OPT_WAITFORDONE,     "--waitfordone",    SO_NONE },
+	{ OPT_RESTORE_VERSION, "--version",        SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
@@ -891,25 +892,30 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("Usage: %s (start | status | abort | wait) [OPTIONS]\n\n", exeRestore.toString().c_str());
 	//printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("Options for all commands:\n\n");
-	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
-	printf("  -t TAGNAME     The restore tag to act on.  Default is 'default'\n");
-	printf("    --tagname TAGNAME\n\n");
-	printf(" Options for start:\n\n");
+	printf("  --dest_cluster_file CONNFILE\n");
+	printf("                 The cluster file to restore data into.\n");
+	printf("  -t, --tagname TAGNAME\n");
+	printf("                 The restore tag to act on.  Default is 'default'\n");
+	printf("Options for start:\n\n");
 	printf("  -r URL         The Backup URL for the restore to read from.\n");
 	printBackupContainerInfo();
-	printf("  -w             Wait for the restore to complete before exiting.  Prints progress updates.\n");
-	printf("    --waitfordone\n");
-	printf("  -k KEYS        List of key ranges from the backup to restore\n");
-	printf("  --remove_prefix PREFIX   prefix to remove from the restored keys\n");
-	printf("  --add_prefix PREFIX      prefix to add to the restored keys\n");
-	printf("  -n, --dryrun  Perform a trial run with no changes made.\n");
+	printf("  -w, --waitfordone\n");
+	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
+	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
+	printf("  --remove_prefix PREFIX\n");
+	printf("                 Prefix to remove from the restored keys.\n");
+	printf("  --add_prefix PREFIX\n");
+	printf("                 Prefix to add to the restored keys\n");
+	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
+	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in YYYY-MM-DD.HH:MI:SS format (UTC)\n");
+	printf("                 and it will be converted to a version from that time using metadata in orig_cluster_file.\n");
+	printf("  --orig_cluster_file CONNFILE\n");
+	printf("                 The cluster file for the original database from which the backup was created.  The original database\n");
+	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if( devhelp ) {
@@ -1868,9 +1874,73 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
-	try
-	{
+Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
+	// Error, if no dest container was specified
+	if (destinationContainer.empty()) {
+		fprintf(stderr, "ERROR: No backup destination was specified.\n");
+		printHelpTeaser(name);
+		throw backup_error();
+	}
+
+	Reference<IBackupContainer> c;
+	try {
+		c = IBackupContainer::openContainer(destinationContainer);
+	}
+	catch (Error& e) {
+		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
+		if(e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
+			msg += format(": %s", IBackupContainer::lastOpenError.c_str());
+		}
+		fprintf(stderr, "%s\n", msg.c_str());
+		printHelpTeaser(name);
+		throw;
+	}
+
+	return c;
+}
+
+ACTOR Future<Void> runRestore(std::string destClusterFile, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+	if(ranges.empty()) {
+		ranges.push_back_deep(ranges.arena(), normalKeys);
+	}
+
+	if(targetVersion != invalidVersion && !targetTimestamp.empty()) {
+		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
+		throw restore_error();
+	}
+
+	if(destClusterFile.empty()) {
+		fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+		throw restore_error();
+	}
+
+	if(!fileExists(destClusterFile)) {
+		fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n", destClusterFile.c_str());
+		throw restore_error();
+	}
+
+	state Optional<Database> origDb;
+
+	// Resolve targetTimestamp if given
+	if(!targetTimestamp.empty()) {
+		if(originalClusterFile.empty()) {
+			fprintf(stderr, "An original cluster file must be given in order to resolve restore target timestamp '%s'\n", targetTimestamp.c_str());
+			throw restore_error();
+		}
+
+		if(!fileExists(originalClusterFile)) {
+			fprintf(stderr, "Original source database cluster file '%s' does not exist.\n", originalClusterFile.c_str());
+			throw restore_error();
+		}
+
+		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
+		printf("Timestamp '%s' resolves to version %lld\n", targetTimestamp.c_str(), v);
+		targetVersion = v;
+	}
+
+	try {
+		state Database db = Database::createDatabase(destClusterFile, Database::API_VERSION_LATEST);
 		state FileBackupAgent backupAgent;
 
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
@@ -1894,7 +1964,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -1921,30 +1991,6 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 	}
 
 	return Void();
-}
-
-Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
-	// Error, if no dest container was specified
-	if (destinationContainer.empty()) {
-		fprintf(stderr, "ERROR: No backup destination was specified.\n");
-		printHelpTeaser(name);
-		throw backup_error();
-	}
-
-	std::string error;
-	Reference<IBackupContainer> c;
-	try {
-		c = IBackupContainer::openContainer(destinationContainer);
-	}
-	catch (Error& e) {
-		if(!error.empty())
-			error = std::string("[") + error + "]";
-		fprintf(stderr, "ERROR (%s) on %s %s\n", e.what(), destinationContainer.c_str(), error.c_str());
-		printHelpTeaser(name);
-		throw;
-	}
-
-	return c;
 }
 
 ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationContainer, Version beginVersion, Version endVersion) {
@@ -2478,7 +2524,8 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
-		Version dbVersion = invalidVersion;
+		Version restoreVersion = invalidVersion;
+		std::string restoreTimestamp;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool forceAction = false;
@@ -2498,6 +2545,8 @@ int main(int argc, char* argv[]) {
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
 		Version dumpBegin = 0;
 		Version dumpEnd = std::numeric_limits<Version>::max();
+		std::string restoreClusterFileDest;
+		std::string restoreClusterFileOrig;
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
@@ -2634,8 +2683,17 @@ int main(int argc, char* argv[]) {
 						expireRestorableAfterVersion = ver;
 					break;
 				}
+				case OPT_RESTORE_TIMESTAMP:
+					restoreTimestamp = args->OptionArg();
+					break;
 				case OPT_BASEURL:
 					baseUrl = args->OptionArg();
+					break;
+				case OPT_RESTORE_CLUSTERFILE_DEST:
+					restoreClusterFileDest = args->OptionArg();
+					break;
+				case OPT_RESTORE_CLUSTERFILE_ORIG:
+					restoreClusterFileOrig = args->OptionArg();
 					break;
 				case OPT_CLUSTERFILE:
 					clusterFile = args->OptionArg();
@@ -2716,15 +2774,15 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				}
-				case OPT_DBVERSION: {
+				case OPT_RESTORE_VERSION: {
 					const char* a = args->OptionArg();
-					long long dbVersionValue = 0;
-					if (!sscanf(a, "%lld", &dbVersionValue)) {
+					long long ver = 0;
+					if (!sscanf(a, "%lld", &ver)) {
 						fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
-					dbVersion = dbVersionValue;
+					restoreVersion = ver;
 					break;
 				}
 	#ifdef _WIN32
@@ -3168,13 +3226,13 @@ int main(int argc, char* argv[]) {
 			if(dryRun) {
 				initTraceFile();
 			}
-			else if(!initCluster()) {
+			else if(restoreType != RESTORE_START && !initCluster()) {
 				return FDB_EXIT_ERROR;
 			}
 
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
+					f = stopAfter( runRestore(restoreClusterFileDest, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
 					break;
 				case RESTORE_WAIT:
 					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
@@ -3186,7 +3244,6 @@ int main(int argc, char* argv[]) {
 					}) );
 					break;
 				case RESTORE_STATUS:
-
 					// If no tag is specifically provided then print all tag status, don't just use "default"
 					if(tagProvided)
 						tag = tagName;
