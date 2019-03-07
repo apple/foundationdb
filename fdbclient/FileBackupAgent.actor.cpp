@@ -3648,8 +3648,7 @@ public:
 		}
 		state int i;
 		for (i = 0; i < restoreRanges.size(); i++) {
-			auto &restoreRange = restoreRanges[i];
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[i].begin, restoreRanges[i].end).removePrefix(removePrefix).withPrefix(addPrefix);
 			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
 			if (existingRows.size() > 0) {
 				throw restore_destination_not_empty();
