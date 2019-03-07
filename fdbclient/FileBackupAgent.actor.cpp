@@ -34,6 +34,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
+#include "JsonBuilder.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -3813,6 +3814,165 @@ public:
 		return Void();
 	}
 
+	struct TimestampedVersion {
+		Optional<Version> version;
+		Optional<int64_t> epochs;
+
+		bool present() const {
+			return version.present();
+		}
+
+		JsonBuilderObject toJSON() const {
+			JsonBuilderObject doc;
+			if(version.present()) {
+				doc.setKey("Version", version.get());
+				if(epochs.present()) {
+					doc.setKey("Epochs", epochs.get());
+					doc.setKey("Timestamp", timeStampToString(epochs));
+				}
+			}
+			return doc;
+		}
+	};
+
+	// Helper actor for generating status
+	// If f is present, lookup epochs using timekeeper and tr, return TimestampedVersion
+	ACTOR static Future<TimestampedVersion> getTimestampedVersion(Reference<ReadYourWritesTransaction> tr, Future<Optional<Version>> f) {
+		state TimestampedVersion tv;
+		wait(store(tv.version, f));
+		if(tv.version.present()) {
+			wait(store(tv.epochs, timeKeeperEpochsFromVersion(tv.version.get(), tr)));
+		}
+		return tv;
+	}
+
+	ACTOR static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state JsonBuilderObject doc;
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state KeyBackedTag tag = makeBackupTag(tagName);
+				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag;
+				state Optional<Value> paused;
+				state Version recentReadVersion;
+
+				wait( store(paused, tr->get(backupAgent->taskBucket->getPauseKey())) && store(uidAndAbortedFlag, tag.get(tr)) && store(recentReadVersion, tr->getReadVersion()) );
+
+				doc.setKey("AllBackupsPaused", paused.present());
+				doc.setKey("Tag", tag.tagName);
+
+				if(uidAndAbortedFlag.present()) {
+					state BackupConfig config(uidAndAbortedFlag.get().first);
+
+					state EBackupState backupState = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+					JsonBuilderObject statusDoc;
+					statusDoc.setKey("Enum", (int)backupState);
+					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
+					doc.setKey("Status", statusDoc);
+
+					state Future<Void> done = Void();
+
+					if(backupState != BackupAgentBase::STATE_NEVERRAN) {
+						state Reference<IBackupContainer> bc;
+						state TimestampedVersion latestRestorable;
+
+						wait( store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr)))
+							&& store(bc, config.backupContainer().getOrThrow(tr))
+						);
+
+						doc.setKey("Restorable", latestRestorable.present());
+
+						if(latestRestorable.present() && backupState != BackupAgentBase::STATE_COMPLETED) {
+							JsonBuilderObject o = latestRestorable.toJSON();
+							o.setKey("LagSeconds", (recentReadVersion - latestRestorable.version.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+							doc.setKey("LatestRestorablePoint", o);
+						}
+						doc.setKey("DestinationURL", bc->getURL());
+
+						if(backupState == BackupAgentBase::STATE_COMPLETED) {
+							doc.setKey("Completed", latestRestorable.toJSON());
+						}
+					}
+
+					if(backupState == BackupAgentBase::STATE_DIFFERENTIAL || backupState == BackupAgentBase::STATE_BACKUP) {
+						state int64_t snapshotInterval;
+						state int64_t logBytesWritten;
+						state int64_t rangeBytesWritten;
+						state bool stopWhenDone;
+						state TimestampedVersion snapshotBegin;
+						state TimestampedVersion snapshotTargetEnd;
+						state TimestampedVersion latestLogEnd;
+						state TimestampedVersion latestSnapshotEnd;
+
+						wait(  store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr))
+							&& store(logBytesWritten, config.logBytesWritten().getD(tr))
+							&& store(rangeBytesWritten, config.rangeBytesWritten().getD(tr))
+							&& store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) 
+							&& store(snapshotBegin,      getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr)))
+							&& store(snapshotTargetEnd,  getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr)))
+							&& store(latestLogEnd,       getTimestampedVersion(tr, config.latestLogEndVersion().get(tr)))
+							&& store(latestSnapshotEnd,  getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr)))
+						);
+
+						doc.setKey("StopAfterSnapshot", stopWhenDone);
+						doc.setKey("SnapshotIntervalSeconds", snapshotInterval);
+						doc.setKey("LogBytesWritten", logBytesWritten);
+						doc.setKey("RangeBytesWritten", rangeBytesWritten);
+
+						if(latestLogEnd.present()) {
+							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
+						}
+
+						if(latestSnapshotEnd.present()) {
+							doc.setKey("LatestSnapshotEnd", latestSnapshotEnd.toJSON());
+						}
+
+						JsonBuilderObject snapshot;
+
+						if(snapshotBegin.present()) {
+							snapshot.setKey("Begin", snapshotBegin.toJSON());
+
+							if(snapshotTargetEnd.present()) {
+								snapshot.setKey("EndTarget", snapshotTargetEnd.toJSON());
+
+								Version interval = snapshotTargetEnd.version.get() - snapshotBegin.version.get();
+								snapshot.setKey("IntervalSeconds", interval / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+								Version elapsed = recentReadVersion - snapshotBegin.version.get();
+								double progress = (interval > 0) ? (100.0 * elapsed / interval) : 100;
+								snapshot.setKey("ExpectedProgress", progress);
+							}
+						}
+
+						doc.setKey("CurrentSnapshot", snapshot);
+					}
+
+					KeyBackedMap<int64_t, std::pair<std::string, Version>>::PairsType errors = wait(config.lastErrorPerType().getRange(tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
+					JsonBuilderArray errorList;
+					for(auto &e : errors) {
+						std::string msg = e.second.first;
+						Version ver = e.second.second;
+
+						JsonBuilderObject errDoc;
+						errDoc.setKey("Message", msg.c_str());
+						errDoc.setKey("RelativeSeconds", (ver - recentReadVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+					}
+					doc.setKey("Errors", errorList);
+				}
+				break;
+			}
+			catch (Error &e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		return doc.getJson();
+	}
+
 	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, bool showErrors, std::string tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state std::string statusText;
@@ -4177,6 +4337,10 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, bool showErrors, std::string tagName) {
 	return FileBackupAgentImpl::getStatus(this, cx, showErrors, tagName);
+}
+
+Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName) {
+	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
 Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {

@@ -283,6 +283,7 @@ public:
 	}
 
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
+	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);

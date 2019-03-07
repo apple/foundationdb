@@ -214,6 +214,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_JSON,            "--json",           SO_NONE},
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1703,12 +1704,12 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 	return Void();
 }
 
-ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors) {
+ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors, bool json) {
 	try
 	{
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, showErrors, tagName));
+		std::string statusText = wait(json ? backupAgent.getStatusJSON(db, tagName) : backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	}
 	catch (Error& e) {
@@ -3150,7 +3151,7 @@ int main(int argc, char* argv[]) {
 			case BACKUP_STATUS:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter( statusBackup(db, tagName, true) );
+				f = stopAfter( statusBackup(db, tagName, true, jsonOutput) );
 				break;
 
 			case BACKUP_ABORT:
