@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
@@ -33,7 +35,6 @@
 #include <algorithm>
 #include <time.h>
 #include "flow/actorcompiler.h" // has to be last include
-#include "JsonBuilder.h"
 
 namespace IBackupFile_impl {
 
@@ -67,15 +68,6 @@ void BackupFileList::toStream(FILE *fout) const {
 	for(const KeyspaceSnapshotFile &f : snapshots) {
 		fprintf(fout, "snapshotManifest %lld %s\n", f.totalSize, f.fileName.c_str());
 	}
-}
-
-std::string formatTime(int64_t t) {
-	time_t curTime = (time_t)t;
-	char buffer[128];
-	struct tm timeinfo;
-	getLocalTime(&curTime, &timeinfo);
-	strftime(buffer, 128, "%Y-%m-%d %H:%M:%S", &timeinfo);
-	return buffer;
 }
 
 Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Version, int64_t> *pVersionTimeMap) {
@@ -128,7 +120,7 @@ std::string BackupDescription::toString() const {
 		if(!versionTimeMap.empty()) {
 			auto i = versionTimeMap.find(v);
 			if(i != versionTimeMap.end())
-				s = format("%lld (%s)", v, formatTime(i->second).c_str());
+				s = format("%lld (%s)", v, BackupAgentBase::formatTime(i->second).c_str());
 			else
 				s = format("%lld (unknown)", v);
 		}
@@ -181,8 +173,10 @@ std::string BackupDescription::toJSON() const {
 		doc.setKey("Version", v);
 		if(!versionTimeMap.empty()) {
 			auto i = versionTimeMap.find(v);
-			if(i != versionTimeMap.end())
-				doc.setKey("Timestamp", formatTime(i->second));
+			if(i != versionTimeMap.end()) {
+				doc.setKey("Timestamp", BackupAgentBase::formatTime(i->second));
+				doc.setKey("Epochs", i->second);
+			}
 		}
 		else if(maxLogEnd.present()) {
 			double days = double(v - maxLogEnd.get()) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
@@ -194,8 +188,8 @@ std::string BackupDescription::toJSON() const {
 	JsonBuilderArray snapshotsArray;
 	for(const KeyspaceSnapshotFile &m : snapshots) {
 		JsonBuilderObject snapshotDoc;
-		snapshotDoc.setKey("StartVersion", formatVersion(m.beginVersion));
-		snapshotDoc.setKey("EndVersion", formatVersion(m.endVersion));
+		snapshotDoc.setKey("Start", formatVersion(m.beginVersion));
+		snapshotDoc.setKey("End", formatVersion(m.endVersion));
 		snapshotDoc.setKey("Restorable", m.restorable.orDefault(false));
 		snapshotDoc.setKey("TotalBytes", m.totalSize);
 		snapshotDoc.setKey("PercentageExpired", m.expiredPct(expiredEndVersion));
@@ -206,19 +200,19 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("TotalSnapshotBytes", snapshotBytes);
 
 	if(expiredEndVersion.present())
-		doc.setKey("ExpiredEndVersion", formatVersion(expiredEndVersion.get()));
+		doc.setKey("ExpiredEnd", formatVersion(expiredEndVersion.get()));
 	if(unreliableEndVersion.present())
-		doc.setKey("UnreliableEndVersion", formatVersion(unreliableEndVersion.get()));
+		doc.setKey("UnreliableEnd", formatVersion(unreliableEndVersion.get()));
 	if(minLogBegin.present())
-		doc.setKey("MinLogBeginVersion", formatVersion(minLogBegin.get()));
+		doc.setKey("MinLogBegin", formatVersion(minLogBegin.get()));
 	if(contiguousLogEnd.present())
-		doc.setKey("ContiguousLogEndVersion", formatVersion(contiguousLogEnd.get()));
+		doc.setKey("ContiguousLogEnd", formatVersion(contiguousLogEnd.get()));
 	if(maxLogEnd.present())
-		doc.setKey("MaxLogEndVersion", formatVersion(maxLogEnd.get()));
+		doc.setKey("MaxLogEnd", formatVersion(maxLogEnd.get()));
 	if(minRestorableVersion.present())
-		doc.setKey("MinRestorableVersion", formatVersion(minRestorableVersion.get()));
+		doc.setKey("MinRestorablePoint", formatVersion(minRestorableVersion.get()));
 	if(maxRestorableVersion.present())
-		doc.setKey("MaxRestorableVersion", formatVersion(maxRestorableVersion.get()));
+		doc.setKey("MaxRestorablePoint", formatVersion(maxRestorableVersion.get()));
 
 	if(!extendedDetail.empty())
 		doc.setKey("ExtendedDetail", extendedDetail);

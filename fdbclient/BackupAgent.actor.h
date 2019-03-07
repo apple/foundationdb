@@ -38,6 +38,16 @@
 
 class BackupAgentBase : NonCopyable {
 public:
+	// Time formatter for anything backup or restore related
+	static std::string formatTime(int64_t epochs) {
+		time_t curTime = (time_t)epochs;
+		char buffer[128];
+		struct tm timeinfo;
+		getLocalTime(&curTime, &timeinfo);
+		strftime(buffer, 128, "%Y/%m/%d %H:%M:%S", &timeinfo);
+		return buffer;
+	}
+
 	// Type of program being executed
 	enum enumActionResult {
 		RESULT_SUCCESSFUL = 0, RESULT_ERRORED = 1, RESULT_DUPLICATE = 2, RESULT_UNNEEDED = 3
@@ -179,6 +189,7 @@ public:
 		return defaultTagName;
 	}
 
+	// This is only used for automatic backup name generation
 	static Standalone<StringRef> getCurrentTime() {
 		double t = now();
 		time_t curTime = t;

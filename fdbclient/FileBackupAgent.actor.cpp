@@ -24,6 +24,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/JsonBuilder.h"
 
 #include <ctime>
 #include <climits>
@@ -34,7 +35,6 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
-#include "JsonBuilder.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -47,15 +47,10 @@ static std::string versionToString(Optional<Version> version) {
 		return "N/A";
 }
 
-static std::string timeStampToString(Optional<int64_t> ts) {
-	if (!ts.present())
+static std::string timeStampToString(Optional<int64_t> epochs) {
+	if (!epochs.present())
 		return "N/A";
-	time_t curTs = ts.get();
-	char buffer[128];
-	struct tm* timeinfo;
-	timeinfo = localtime(&curTs);
-	strftime(buffer, 128, "%D %T", timeinfo);
-	return std::string(buffer);
+	return BackupAgentBase::formatTime(epochs.get());
 }
 
 static Future<Optional<int64_t>> getTimestampFromVersion(Optional<Version> ver, Reference<ReadYourWritesTransaction> tr) {
