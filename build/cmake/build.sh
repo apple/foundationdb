@@ -38,7 +38,7 @@ configure() {
     local __res=0
     for _ in 1
     do
-        cmake ../foundationdb
+        cmake ../foundationdb ${CMAKE_EXTRA_ARGS}
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -122,7 +122,7 @@ rpm() {
     local __res=0
     for _ in 1
     do
-        cmake ../foundationdb
+        configure
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -149,7 +149,7 @@ deb() {
     local __res=0
     for _ in 1
     do
-        cmake ../foundationdb
+        configure
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -175,7 +175,7 @@ test-fast() {
     local __res=0
     for _ in 1
     do
-        ctest -j`nproc`
+        ctest -j`nproc` ${CTEST_EXTRA_ARGS}
         __res=$?
         if [ ${__res} -ne 0 ]
         then
