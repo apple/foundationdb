@@ -1863,7 +1863,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		std::string cmd = m.param1.toString();
 		int len = m.param2.size();
 		if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
-			TraceEvent("IgnoreNonSnapCommands").detail("execCommand", cmd);
+			TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
 			return;
 		}
 		ExecCmdValueString execArg(m.param2.toString());
@@ -1895,9 +1895,9 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		} else {
 			// copy the files
 			TraceEvent("ExecTraceStorage")
-			    .detail("storageFolder", data->folder)
-			    .detail("localMachineId", data->thisServerID.toString())
-			    .detail("durableVersion", data->durableVersion.get());
+			    .detail("StorageFolder", data->folder)
+			    .detail("LocalMachineId", data->thisServerID.toString())
+			    .detail("DurableVersion", data->durableVersion.get());
 
 			std::string folder = abspath(data->folder);
 
@@ -1908,8 +1908,8 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 			std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
 
 			TraceEvent("ExecTraceStorageSnapcommands")
-			    .detail("folderToCreateCmd", folderToCreateCmd)
-			    .detail("folderCopyCmd", folderCopyCmd);
+			    .detail("FolderToCreateCmd", folderToCreateCmd)
+			    .detail("FolderCopyCmd", folderCopyCmd);
 
 			vector<std::string> paramList;
 			std::string cpBin = "/bin/cp";
@@ -1918,7 +1918,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 			paramList.push_back(mkdirBin);
 			paramList.push_back(folderTo);
 			err = fdbFork(mkdirBin, paramList);
-			TraceEvent("mkdirStatus").detail("errno", err);
+			TraceEvent("MkdirStatus").detail("Errno", err);
 
 			if (err == 0) {
 				paramList.clear();
@@ -1929,19 +1929,18 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 				err = fdbFork(cpBin, paramList);
 			}
 		}
-		// FIXME, sramamoorthy, print for non execSnap commands too
+		auto tokenStr = "ExecTrace/storage/" + uidStr;
+		TraceEvent te = TraceEvent("ExecTraceStorage");
+		te.detail("Uid", uidStr);
+		te.detail("Status", err);
+		te.detail("Role", "storage");
+		te.detail("Version", ver);
+		te.detail("Mutation", m.toString());
+		te.detail("Mid", data->thisServerID.toString());
+		te.detail("DurableVersion", data->durableVersion.get());
+		te.detail("DataVersion", data->version.get());
+		te.detail("Tag", data->tag.toString());
 		if (cmd == execSnap) {
-			auto tokenStr = "ExecTrace/storage/" + uidStr;
-			TraceEvent te = TraceEvent("ExecTraceStorage");
-			te.detail("uid", uidStr);
-			te.detail("status", err);
-			te.detail("role", "storage");
-			te.detail("version", ver);
-			te.detail("mutation", m.toString());
-			te.detail("mid", data->thisServerID.toString());
-			te.detail("durableVersion", data->durableVersion.get());
-			te.detail("data_version", data->version.get());
-			te.detail("tag", data->tag.toString());
 			te.trackLatest(tokenStr.c_str());
 		}
 	} else

@@ -87,14 +87,14 @@ void ExecCmdValueString::parseCmdValue() {
 }
 
 void ExecCmdValueString::dbgPrint() {
-	auto te = TraceEvent("execCmdValueString");
+	auto te = TraceEvent("ExecCmdValueString");
 
-	te.detail("cmdValueString", cmdValueString);
-	te.detail("binaryPath", binaryPath);
+	te.detail("CmdValueString", cmdValueString);
+	te.detail("BinaryPath", binaryPath);
 
 	int i = 0;
 	for (auto elem : binaryArgs) {
-		te.detail(format("arg{}", ++i).c_str(), elem);
+		te.detail(format("Arg", ++i).c_str(), elem);
 	}
 	return;
 }

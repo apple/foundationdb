@@ -2692,35 +2692,31 @@ fdbFork(const std::string& path, const std::vector<std::string>& args)
     }
     paramList.push_back(nullptr);
 
-	// FIXME: sramamoorthy, FDB6port, dynamic content fails
-	auto te = TraceEvent("fdbFork");
-    te.detail("cmd", path);
-	// for (int i = 0; i < args.size(); i++) {
-	//    te.detail("args", args[i]);
-	//}
+	auto te = TraceEvent("FdbFork");
+	te.detail("Cmd", path);
+	for (int i = 0; i < args.size(); i++) {
+		te.detail("Args", args[i]);
+	}
 
 	pid_t pid = fork();
     if (pid == -1) {
-        TraceEvent(SevWarnAlways, "Command failed to spawn")
-            .detail("cmd", path);
-        throw platform_error();
-    } else if (pid > 0) {
+		TraceEvent(SevWarnAlways, "CommandFailedToSpawn").detail("Cmd", path);
+		throw platform_error();
+	} else if (pid > 0) {
         int status;
         waitpid(pid, &status, 0);
         if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-            TraceEvent(SevWarnAlways, "Command failed")
-                .detail("cmd", path)
-                .detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-            return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-        }
-        TraceEvent("Command status")
-            .detail("cmd", path)
-            .detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
-    } else {
-        execv(const_cast<char*>(path.c_str()), &paramList[0]);
+			TraceEvent(SevWarnAlways, "CommandFailed")
+			    .detail("Cmd", path)
+			    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+			return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+		}
+		TraceEvent("CommandStatus").detail("Cmd", path).detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+	} else {
+		execv(const_cast<char*>(path.c_str()), &paramList[0]);
         _exit(EXIT_FAILURE);
-    }
-    return 0;
+	}
+	return 0;
 }
 
 

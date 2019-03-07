@@ -763,15 +763,14 @@ ACTOR Future<Void> commitBatch(
 					te1.detail("To", "all sources");
 					te1.detail("Mutation", m.toString());
 					te1.detail("Version", commitVersion);
-					te1.detail("numTags", allSources.size());
+					te1.detail("NumTags", allSources.size());
 					if (m.param1 == execSnap) {
 						te1.trackLatest(tokenStr.c_str());
 					}
-					// FIXME: sramamoorthy, FDB6port - dynamic tracing not supported?
-					// auto te = TraceEvent(SevDebug, "tagInfo");
+					auto te = TraceEvent(SevDebug, "TagInfo");
 					int i = 0;
 					for (auto& tag : allSources) {
-						//	te.detail(format("tagId{}", ++i).c_str(), tag.toString());
+						te.detail(format("TagId", ++i).c_str(), tag.toString());
 						toCommit.addTag(tag);
 					}
 					toCommit.addTypedMessage(m);
@@ -1572,7 +1571,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				                      "MasterProxyServer.masterProxyServerCore."
 				                      "ExecRequest");
 
-			TraceEvent("ExecRequest").detail("payload", execReq.execPayLoad.toString());
+			TraceEvent("ExecRequest").detail("Payload", execReq.execPayLoad.toString());
 
 			// get the list of coordinators
 			state Optional<Value> coordinators = commitData.txnStateStore->readValue(coordinatorsKey).get();

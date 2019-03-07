@@ -3317,10 +3317,10 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 	// remember the client ID before the snap operation
 	state UID preSnapClientUID = cx->clientInfo->get().id;
 
-	TraceEvent("snapCreate")
-	    .detail("snapCmd", snapCmd.toString())
-	    .detail("snapCreateEnter", snapUID)
-	    .detail("preSnapClientUID", preSnapClientUID);
+	TraceEvent("SnapCreateEnter")
+	    .detail("SnapCmd", snapCmd.toString())
+	    .detail("UID", snapUID)
+	    .detail("PreSnapClientUID", preSnapClientUID);
 
 	tr.debugTransaction(snapUID);
 	std::string snapString = "empty-binary:uid=" + snapUID.toString();
@@ -3339,12 +3339,12 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 		}
 	}
 
-	TraceEvent("snapCreate").detail("snapCreate.After.LockingTLogs", snapUID);
+	TraceEvent("SnapCreateAfterLockingTLogs").detail("UID", snapUID);
 
 	int p = snapCmd.toString().find_first_of(':', 0);
 	state std::string snapPayLoad;
 
-	TraceEvent("snapCmd").detail("snapCmd", snapCmd.toString());
+	TraceEvent("SnapCmd").detail("Command", snapCmd.toString());
 	if (p == snapCmd.toString().npos) {
 		snapPayLoad = snapCmd.toString() + ":uid=" + snapUID.toString();
 	} else {
@@ -3364,11 +3364,11 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 		tr.execute(execSnap, snapPayLoadRef);
 		wait(tr.commit());
 	} catch (Error& e) {
-		TraceEvent("snapCreate").detail("snapCreateErrorSnapTLogStorage", e.what());
+		TraceEvent("SnapCreateErroSnapTLogStorage").detail("Error", e.what());
 		throw;
 	}
 
-	TraceEvent("snapCreate").detail("snapCreate.After.SnappingTLogsStorage", snapUID);
+	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
 
 	// enable popping of the TLog
 	loop {
@@ -3382,28 +3382,28 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 		}
 	}
 
-	TraceEvent("snapCreate").detail("snapCreate.After.UnlockingTLogs", snapUID);
+	TraceEvent("SnapCreateAfterUnlockingTLogs").detail("UID", snapUID);
 
 	// snap the coordinators
 	try {
 		Future<Void> exec = executeCoordinators(cx, snapPayLoad, snapUID);
 		wait(exec);
 	} catch (Error& e) {
-		TraceEvent("snapCreate").detail("snapCreateErrorSnapCoordinators", e.what());
+		TraceEvent("SnapCreateErrorSnapCoords").detail("Error", e.what());
 		throw;
 	}
 
-	TraceEvent("snapCreate").detail("snapCreate.After.SnappingCoords", snapUID);
+	TraceEvent("SnapCreateAfterSnappingCoords").detail("UID", snapUID);
 
 	// if the client IDs did not change then we have a clean snapshot
 	UID postSnapClientUID = cx->clientInfo->get().id;
 	if (preSnapClientUID != postSnapClientUID) {
 		TraceEvent("UID mismatch")
-		    .detail("preSnapClientUID", preSnapClientUID)
-		    .detail("postSnapClientUID", postSnapClientUID);
+		    .detail("SnapPreSnapClientUID", preSnapClientUID)
+		    .detail("SnapPostSnapClientUID", postSnapClientUID);
 		throw coordinators_changed();
 	}
 
-	TraceEvent("snapCreate").detail("snapCreate.Complete", snapUID);
+	TraceEvent("SnapCreateComplete").detail("UID", snapUID);
 	return Void();
 }

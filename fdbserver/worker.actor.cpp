@@ -1219,8 +1219,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
 
 					TraceEvent("ExecTraceCoordSnapcommands")
-					    .detail("folderToCreateCmd", folderToCreateCmd)
-					    .detail("folderCopyCmd", folderCopyCmd);
+					    .detail("FolderToCreateCmd", folderToCreateCmd)
+					    .detail("FolderCopyCmd", folderCopyCmd);
 
 					vector<std::string> paramList;
 					std::string cpBin = "/bin/cp";
@@ -1229,7 +1229,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					paramList.push_back(mkdirBin);
 					paramList.push_back(folderTo);
 					err = fdbFork(mkdirBin, paramList);
-					TraceEvent("mkdirStatus").detail("errno", err);
+					TraceEvent("MkdirStatus").detail("Errno", err);
 
 					if (err == 0) {
 						paramList.clear();
@@ -1243,11 +1243,11 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 				auto tokenStr = "ExecTrace/Coordinators/" + uidStr;
 				auto te = TraceEvent("ExecTraceCoordinators");
-				te.detail("uid", uidStr);
-				te.detail("status", err);
-				te.detail("role", "coordinator");
-				te.detail("value", coordFolder);
-				te.detail("execPayLoad", req.execPayLoad.toString());
+				te.detail("Uid", uidStr);
+				te.detail("Status", err);
+				te.detail("Role", "coordinator");
+				te.detail("Value", coordFolder);
+				te.detail("ExecPayLoad", req.execPayLoad.toString());
 				te.trackLatest(tokenStr.c_str());
 				req.reply.send(Void());
 			}
