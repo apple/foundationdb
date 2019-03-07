@@ -130,6 +130,7 @@ set(FDBSERVER_SRCS
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
   workloads/KVStoreTest.actor.cpp
+  workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
