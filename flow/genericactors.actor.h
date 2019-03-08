@@ -1218,7 +1218,6 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	explicit FlowLock(int64_t permits) : permits(permits), active(0) {}
 
 	Future<Void> take(int taskID = TaskDefaultYield, int64_t amount = 1) {
-		ASSERT(amount <= permits || active == 0);
 		if (active + amount <= permits || active == 0) {
 			active += amount;
 			return safeYieldActor(this, taskID, amount);
