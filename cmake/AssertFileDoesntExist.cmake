@@ -6,6 +6,4 @@ set(error_msg
 if(EXISTS "${FILE}")
   list(JOIN error_msg " " err)
   message(FATAL_ERROR "${err}")
-else()
-  message(STATUS "${FILE} does not exist")
 endif()
