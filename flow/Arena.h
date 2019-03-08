@@ -88,9 +88,9 @@ class NonCopyable
 
 inline int alignment_for(int size) {
 	if (size == 1) {
-		return size;
+		return 1;
 	} else if (size <= 4) {
-		return size;
+		return 4;
 	}
 	return 8;
 }
