@@ -224,7 +224,8 @@ static int64_t getSizeCode(int i) {
 		case 1024: return 7;
 		case 2048: return 8;
 		case 4096: return 9;
-		default: return 10;
+		case 8192: return 10;
+		default: return 11;
 	}
 }
 
@@ -476,6 +477,7 @@ void releaseAllThreadMagazines() {
 	FastAllocator<1024>::releaseThreadMagazines();
 	FastAllocator<2048>::releaseThreadMagazines();
 	FastAllocator<4096>::releaseThreadMagazines();
+	FastAllocator<8192>::releaseThreadMagazines();
 }
 
 int64_t getTotalUnusedAllocatedMemory() {
@@ -490,6 +492,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
 
 	return unusedMemory;
 }
@@ -503,4 +506,5 @@ template class FastAllocator<512>;
 template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
+template class FastAllocator<8192>;
 
