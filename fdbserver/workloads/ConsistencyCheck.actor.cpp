@@ -1089,26 +1089,26 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Returns false if any worker that should have a storage server does not have one
 	ACTOR Future<bool> checkForStorage(Database cx, DatabaseConfiguration configuration, ConsistencyCheckWorkload *self)
 	{
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( !configuration.isExcludedServer(workers[i].first.address()) &&
-				( workers[i].second == ProcessClass::StorageClass || workers[i].second == ProcessClass::UnsetClass ) ) {
+			if( !configuration.isExcludedServer(workers[i].interf.address()) &&
+				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].address() == workers[i].first.address() ) {
+					if( storageServers[j].address() == workers[i].interf.address() ) {
 						found = true;
 						break;
 					}
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage")
-					    .detail("Address", workers[i].first.address())
+					    .detail("Address", workers[i].interf.address())
 					    .detail("ProcessClassEqualToStorageClass",
-					            (int)(workers[i].second == ProcessClass::StorageClass));
-					missingStorage.insert(workers[i].first.locality.dcId());
+					            (int)(workers[i].processClass == ProcessClass::StorageClass));
+					missingStorage.insert(workers[i].interf.locality.dcId());
 				}
 			}
 		}
@@ -1125,12 +1125,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 	}
 
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload *self) {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		auto& db = self->dbInfo->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
 
-		state std::vector<std::pair<WorkerInterface, ProcessClass>>::iterator itr;
+		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
 
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
@@ -1142,19 +1142,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
-			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->first.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
+			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->interf.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
 			if(stores.isError()) {
-				TraceEvent("ConsistencyCheck_GetDataStoreFailure").error(stores.getError()).detail("Address", itr->first.address());
+				TraceEvent("ConsistencyCheck_GetDataStoreFailure").error(stores.getError()).detail("Address", itr->interf.address());
 				self->testFailure("Failed to get data stores");
 				return false;
 			}
 
 			for(auto id : stores.get()) {
-				if(!statefulProcesses[itr->first.address()].count(id)) {
-					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->first.address()).detail("DataStoreID", id);
+				if(!statefulProcesses[itr->interf.address()].count(id)) {
+					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->first.address()).detail("DataStoreID", id);
-						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->first.address()), ISimulator::RebootProcess);
+						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id);
+						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->interf.address()), ISimulator::RebootProcess);
 					}
 
 					foundExtraDataStore = true;
@@ -1172,17 +1172,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	//Returns true if the worker at the given address has the specified machineClass or has an unset class
 	//The interfaceType paramater is used in a TraceEvent, should be something like (Master, MasterProxy, StorageServer, ...)
-	bool workerHasClass(vector<std::pair<WorkerInterface, ProcessClass>> workers, NetworkAddress address, ProcessClass::ClassType machineClass, std::string interfaceType)
+	bool workerHasClass(vector<WorkerDetails> workers, NetworkAddress address, ProcessClass::ClassType machineClass, std::string interfaceType)
 	{
 		//Search all workers until the correct one is found
 		for(int i = 0; i < workers.size(); i++)
 		{
-			if(workers[i].first.address() == address)
+			if(workers[i].interf.address() == address)
 			{
-				if(workers[i].second == machineClass || workers[i].second == ProcessClass::UnsetClass)
+				if(workers[i].processClass == machineClass || workers[i].processClass == ProcessClass::UnsetClass)
 					return true;
 
-				TraceEvent("ConsistencyCheck_InvalidClassType").detail("RequestedClass", workers[i].second.toString())
+				TraceEvent("ConsistencyCheck_InvalidClassType").detail("RequestedClass", workers[i].processClass.toString())
 					.detail("ActualClass", ProcessClass(machineClass, ProcessClass::CommandLineSource).toString()).detail("InterfaceType", interfaceType);
 
 				return false;
@@ -1200,16 +1200,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 		if(g_simulator.extraDB)
 			return true;
 
-		vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		std::set<NetworkAddress> workerAddresses;
 
 		for( auto it : workers ) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.first.address());
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
 			if(!info || info->failed) {
-				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.first.address());
+				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.first.address().ip, it.first.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
@@ -1281,34 +1281,33 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	typedef std::pair<WorkerInterface, ProcessClass> WorkerClassPair;
 	//Returns true if all machines in the cluster that specified a desired class are operating in that class
 	ACTOR Future<bool> checkUsingDesiredClasses(Database cx, ConsistencyCheckWorkload *self) {
 		state Optional<Key> expectedPrimaryDcId;
 		state Optional<Key> expectedRemoteDcId;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		state vector<WorkerClassPair> allWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerClassPair> nonExcludedWorkers = wait(getWorkers(self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
+		state vector<WorkerDetails> allWorkers = wait(getWorkers(self->dbInfo));
+		state vector<WorkerDetails> nonExcludedWorkers = wait(getWorkers(self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
 		auto& db = self->dbInfo->get();
 
-		std::map<NetworkAddress, WorkerClassPair> allWorkerProcessMap;
+		std::map<NetworkAddress, WorkerDetails> allWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
 		for (auto worker : allWorkers) {
-			allWorkerProcessMap[worker.first.address()] = worker;
-			Optional<Key> dc = worker.first.locality._data[LocalityData::keyDcId];
+			allWorkerProcessMap[worker.interf.address()] = worker;
+			Optional<Key> dc = worker.interf.locality._data[LocalityData::keyDcId];
 			if (!dcToAllClassTypes.count(dc))
 				dcToAllClassTypes.insert({});
-			dcToAllClassTypes[dc].push_back(worker.second.classType());
+			dcToAllClassTypes[dc].push_back(worker.processClass.classType());
 		}
 
-		std::map<NetworkAddress, WorkerClassPair> nonExcludedWorkerProcessMap;
+		std::map<NetworkAddress, WorkerDetails> nonExcludedWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
 		for (auto worker : nonExcludedWorkers) {
-			nonExcludedWorkerProcessMap[worker.first.address()] = worker;
-			Optional<Key> dc = worker.first.locality._data[LocalityData::keyDcId];
+			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
+			Optional<Key> dc = worker.interf.locality._data[LocalityData::keyDcId];
 			if (!dcToNonExcludedClassTypes.count(dc))
 				dcToNonExcludedClassTypes.insert({});
-			dcToNonExcludedClassTypes[dc].push_back(worker.second.classType());
+			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
 		}
 
 		if (!allWorkerProcessMap.count(db.clusterInterface.clientInterface.address())) {
@@ -1320,8 +1319,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].first.locality._data[LocalityData::keyDcId];
-		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].first.locality._data[LocalityData::keyDcId];
+		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].interf.locality._data[LocalityData::keyDcId];
+		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].interf.locality._data[LocalityData::keyDcId];
 
 		if (ccDcId != masterDcId) {
 			TraceEvent("ConsistencyCheck_CCAndMasterNotInSameDC").detail("ClusterControllerDcId", getOptionalString(ccDcId)).detail("MasterDcId", getOptionalString(masterDcId));
@@ -1351,8 +1350,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		// Check CC
 		ProcessClass::Fitness bestClusterControllerFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[ccDcId], ProcessClass::ClusterController);
-		if (!nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) || nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].second.machineClassFitness(ProcessClass::ClusterController) != bestClusterControllerFitness) {
-			TraceEvent("ConsistencyCheck_ClusterControllerNotBest").detail("BestClusterControllerFitness", bestClusterControllerFitness).detail("ExistingClusterControllerFit", nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].second.machineClassFitness(ProcessClass::ClusterController) : -1);
+		if (!nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) || nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass.machineClassFitness(ProcessClass::ClusterController) != bestClusterControllerFitness) {
+			TraceEvent("ConsistencyCheck_ClusterControllerNotBest").detail("BestClusterControllerFitness", bestClusterControllerFitness).detail("ExistingClusterControllerFit", nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass.machineClassFitness(ProcessClass::ClusterController) : -1);
 			return false;
 		}
 
@@ -1365,16 +1364,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
-		if ((!nonExcludedWorkerProcessMap.count(db.master.address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.address()].second.machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
-			TraceEvent("ConsistencyCheck_MasterNotBest").detail("BestMasterFitness", bestMasterFitness).detail("ExistingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].second.machineClassFitness(ProcessClass::Master) : -1);
+		if ((!nonExcludedWorkerProcessMap.count(db.master.address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
+			TraceEvent("ConsistencyCheck_MasterNotBest").detail("BestMasterFitness", bestMasterFitness).detail("ExistingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) : -1);
 			return false;
 		}
 
 		// Check proxy
 		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
 		for (auto masterProxy : db.client.proxies) {
-			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].second.machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestMasterProxyFitness", bestMasterProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].second.machineClassFitness(ProcessClass::Proxy) : -1);
+			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestMasterProxyFitness", bestMasterProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
@@ -1382,8 +1381,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 		// Check resolver
 		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Resolver);
 		for (auto resolver : db.resolvers) {
-			if (!nonExcludedWorkerProcessMap.count(resolver.address()) || nonExcludedWorkerProcessMap[resolver.address()].second.machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
-				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("BestResolverFitness", bestResolverFitness).detail("ExistingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].second.machineClassFitness(ProcessClass::Resolver) : -1);
+			if (!nonExcludedWorkerProcessMap.count(resolver.address()) || nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
+				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("BestResolverFitness", bestResolverFitness).detail("ExistingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(ProcessClass::Resolver) : -1);
 				return false;
 			}
 		}

@@ -72,6 +72,20 @@ struct WorkerInterface {
 	}
 };
 
+struct WorkerDetails {
+	WorkerInterface interf;
+	ProcessClass processClass;
+	bool degraded;
+
+	WorkerDetails() : degraded(false) {}
+	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded) : interf(interf), processClass(processClass), degraded(degraded) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, processClass, degraded);
+	}
+};
+
 struct InitializeTLogRequest {
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;

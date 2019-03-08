@@ -225,11 +225,11 @@ struct ReadWriteWorkload : KVWorkload {
 	ACTOR static Future<bool> traceDumpWorkers( Reference<AsyncVar<ServerDBInfo>> db ) {
 		try {
 			loop {
-				ErrorOr<vector<std::pair<WorkerInterface, ProcessClass>>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
+				ErrorOr<vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
 				if( workerList.present() ) {
 					std::vector<Future<ErrorOr<Void>>> dumpRequests;
 					for( int i = 0; i < workerList.get().size(); i++)
-						dumpRequests.push_back( workerList.get()[i].first.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
+						dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
 					wait( waitForAll( dumpRequests ) );
 					return true;
 				}
