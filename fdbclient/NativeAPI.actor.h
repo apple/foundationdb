@@ -126,7 +126,7 @@ public:
 	Future<Void> onConnected();
 
 private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoornidatorsNum, int apiVersion=Database::API_VERSION_LATEST);
+	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<ClusterConnectionFile> connectionFile;
