@@ -77,6 +77,8 @@ public:
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
+	int TLOG_DEGRADED_DELAY_COUNT;
+	double TLOG_DEGRADED_DURATION;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

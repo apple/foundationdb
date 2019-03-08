@@ -366,7 +366,7 @@ ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMaste
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -387,7 +387,7 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered);
+                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded);
 }
 
 typedef decltype(&tLog) TLogFn;
