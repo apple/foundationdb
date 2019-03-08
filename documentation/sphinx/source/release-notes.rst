@@ -13,6 +13,7 @@ Fixes
   have the included IP address as a prefix (for example ``include 1.0.0.1`` would also include
   ``1.0.0.10``). `(PR #1121) <https://github.com/apple/foundationdb/pull/1121>`_
 * Restore could crash when reading a file that ends on a block boundary (1MB default). `(PR #1205) <https://github.com/apple/foundationdb/pull/1205>`_
+* Java: Succesful commits and range reads no longer create ``FDBException`` objects to reduce memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
 
 Features
 --------
