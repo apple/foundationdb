@@ -86,6 +86,15 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+inline int alignment_for(int size) {
+	if (size == 1) {
+		return size;
+	} else if (size <= 4) {
+		return size;
+	}
+	return 8;
+}
+
 class Arena {
 public:
 	inline Arena();
@@ -136,8 +145,51 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	int size() const { if (isTiny()) return tinySize; else return bigSize; }
 	int used() const { if (isTiny()) return tinyUsed; else return bigUsed; }
 	inline int unused() const { if (isTiny()) return tinySize-tinyUsed; else return bigSize-bigUsed; }
+	int alignment(int bytes) const {
+		if (bytes == 0) return 0;
+		auto self = reinterpret_cast<uintptr_t>(this);
+		auto a = alignment_for(bytes);
+		auto off = int((self + used()) % a);
+		if (off == 0) {
+			return 0;
+		}
+		return a - off;
+	}
+	void* alignedPtr(int alignment) {
+		auto ptr = reinterpret_cast<uintptr_t>(this);
+		auto res = reinterpret_cast<uint8_t*>(this);
+		if (ptr % alignment != 0) {
+			return res + alignment - (ptr % alignment);
+		}
+		return res;
+	}
+	const void* alignedPtr(int alignment) const {
+		return const_cast<ArenaBlock*>(this)->alignedPtr(alignment);
+	}
+	uint8_t* end() {
+		return reinterpret_cast<uint8_t*>(this) + size();
+	}
+	const uint8_t* end() const {
+		return const_cast<ArenaBlock*>(this)->end();
+	}
+	inline bool canAlloc(int bytes) const {
+		if (bytes == 0) return true;
+		auto self = reinterpret_cast<const uint8_t*>(this);
+		return self + bytes + alignment(bytes) > end();
+	}
 	const void* getData() const { return this; }
 	const void* getNextData() const { return (const uint8_t*)getData() + used(); }
+	static int sizeWithOffset(int bytes, int offset) {
+		if (bytes == 0) {
+			return 0;
+		}
+		auto a = alignment_for(bytes);
+		auto off = offset % a;
+		if (off == 0) {
+			return bytes;
+		}
+		return a - off + bytes;
+	}
 	size_t totalSize() {
 		if (isTiny()) return size();
 
@@ -194,22 +246,26 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 
 	static inline void* allocate( Reference<ArenaBlock>& self, int bytes ) {
 		ArenaBlock* b = self.getPtr();
-		if (!self || self->unused() < bytes)
+		if (!self || !self->canAlloc(bytes)) {
 			b = create( bytes, self );
+		}
 
-		return (char*)b->getData() + b->addUsed(bytes);
+		auto a = b->alignment(bytes);
+		return (char*)b->getData() + a + b->addUsed(bytes + a);
 	}
 
 	// Return an appropriately-sized ArenaBlock to store the given data
 	static ArenaBlock* create( int dataSize, Reference<ArenaBlock>& next ) {
 		ArenaBlock* b;
-		if (dataSize <= SMALL-TINY_HEADER && !next) {
-			if (dataSize <= 16-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<16>::allocate(); b->tinySize = 16; INSTRUMENT_ALLOCATE("Arena16"); }
-			else if (dataSize <= 32-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<32>::allocate(); b->tinySize = 32; INSTRUMENT_ALLOCATE("Arena32"); }
+		auto tinyBytes = sizeWithOffset(dataSize, TINY_HEADER);
+		if (tinyBytes <= SMALL-TINY_HEADER && !next) {
+			if (tinyBytes <= 16-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<16>::allocate(); b->tinySize = 16; INSTRUMENT_ALLOCATE("Arena16"); }
+			else if (tinyBytes <= 32-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<32>::allocate(); b->tinySize = 32; INSTRUMENT_ALLOCATE("Arena32"); }
 			else { b = (ArenaBlock*)FastAllocator<64>::allocate(); b->tinySize=64; INSTRUMENT_ALLOCATE("Arena64"); }
 			b->tinyUsed = TINY_HEADER;
 
 		} else {
+			dataSize = sizeWithOffset(dataSize, sizeof(ArenaBlock));
 			int reqSize = dataSize + sizeof(ArenaBlock);
 			if (next) reqSize += sizeof(ArenaBlockRef);
 
