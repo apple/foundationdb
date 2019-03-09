@@ -76,7 +76,7 @@ type UUID [16]byte
 // Versionstamp is struct for a FoundationDB verionstamp. Versionstamps are
 // 12 bytes long composed of a 10 byte transaction version and a 2 byte user
 // version. The transaction version is filled in at commit time and the user
-// version is provided by your layer during a transaction.
+// version is provided by the application to order results within a transaction.
 type Versionstamp struct {
 	TransactionVersion [10]byte
 	UserVersion        uint16
@@ -295,9 +295,12 @@ func (p *packer) encodeUUID(u UUID) {
 func (p *packer) encodeVersionstamp(v Versionstamp) {
 	p.putByte(versionstampCode)
 
-	if p.versionstampPos != -1 && v.TransactionVersion == incompleteTransactionVersion {
-		panic(fmt.Sprintf("Tuple can only contain one incomplete versionstamp"))
-	} else {
+	isIncomplete := v.TransactionVersion == incompleteTransactionVersion
+	if isIncomplete {
+		if p.versionstampPos != -1 {
+			panic(fmt.Sprintf("Tuple can only contain one incomplete versionstamp"))
+		}
+
 		p.versionstampPos = int32(len(p.buf))
 	}
 
@@ -363,9 +366,9 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 // Pack returns a new byte slice encoding the provided tuple. Pack will panic if
 // the tuple contains an element of any type other than []byte,
 // fdb.KeyConvertible, string, int64, int, uint64, uint, *big.Int, big.Int, float32,
-// float64, bool, tuple.UUID, nil, or a Tuple with elements of valid types. It will
-// also panic if an integer is specified with a value outside the range
-// [-2**2040+1, 2**2040-1]
+// float64, bool, tuple.UUID, tuple.Versionstamp, nil, or a Tuple with elements of
+// valid types. It will also panic if an integer is specified with a value outside
+// the range [-2**2040+1, 2**2040-1]
 //
 // Tuple satisfies the fdb.KeyConvertible interface, so it is not necessary to
 // call Pack when using a Tuple with a FoundationDB API function that requires a
@@ -384,9 +387,14 @@ func (t Tuple) Pack() []byte {
 // operations. See Pack for more information. This function will return an error
 // if you attempt to pack a tuple with more than one versionstamp. This function will
 // return an error if you attempt to pack a tuple with a versionstamp position larger
-// than an uint16 on apiVersion < 520.
+// than an uint16 if the API version is less than 520.
 func (t Tuple) PackWithVersionstamp(prefix []byte) ([]byte, error) {
 	hasVersionstamp, err := t.HasIncompleteVersionstamp()
+	if err != nil {
+		return nil, err
+	}
+
+	apiVersion, err := fdb.GetAPIVersion()
 	if err != nil {
 		return nil, err
 	}
@@ -397,9 +405,7 @@ func (t Tuple) PackWithVersionstamp(prefix []byte) ([]byte, error) {
 
 	p := newPacker()
 
-	prefixLength := int32(0)
 	if prefix != nil {
-		prefixLength = int32(len(prefix))
 		p.putBytes(prefix)
 	}
 
@@ -408,18 +414,16 @@ func (t Tuple) PackWithVersionstamp(prefix []byte) ([]byte, error) {
 	if hasVersionstamp {
 		var scratch [4]byte
 		var offsetIndex int
-
-		apiVersion := fdb.MustGetAPIVersion()
 		if apiVersion < 520 {
 			if p.versionstampPos > math.MaxUint16 {
 				return nil, errors.New("Versionstamp position too large")
 			}
 
-			offsetIndex = 1
-			binary.LittleEndian.PutUint16(scratch[:], uint16(prefixLength+p.versionstampPos))
+			offsetIndex = 2
+			binary.LittleEndian.PutUint16(scratch[:], uint16(p.versionstampPos))
 		} else {
-			offsetIndex = 3
-			binary.LittleEndian.PutUint32(scratch[:], uint32(prefixLength+p.versionstampPos))
+			offsetIndex = 4
+			binary.LittleEndian.PutUint32(scratch[:], uint32(p.versionstampPos))
 		}
 
 		p.putBytes(scratch[0:offsetIndex])
@@ -439,7 +443,7 @@ func (t Tuple) HasIncompleteVersionstamp() (bool, error) {
 		err = errors.New("Tuple can only contain one incomplete versionstamp")
 	}
 
-	return incompleteCount == 1, err
+	return incompleteCount >= 1, err
 }
 
 func (t Tuple) countIncompleteVersionstamps() int {
