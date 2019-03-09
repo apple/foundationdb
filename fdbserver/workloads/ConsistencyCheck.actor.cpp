@@ -28,7 +28,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"

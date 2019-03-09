@@ -38,7 +38,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/IKeyValueStore.h"
 #include <algorithm>
@@ -1749,7 +1749,8 @@ int main(int argc, char* argv[]) {
 				<< FastAllocator<512>::pageCount << " "
 				<< FastAllocator<1024>::pageCount << " "
 				<< FastAllocator<2048>::pageCount << " "
-				<< FastAllocator<4096>::pageCount << std::endl;
+				<< FastAllocator<4096>::pageCount << " "
+				<< FastAllocator<8192>::pageCount << std::endl;
 
 			vector< std::pair<std::string, const char*> > typeNames;
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {

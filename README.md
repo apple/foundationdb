@@ -37,7 +37,7 @@ become the only build system available.
 
 1. Check out this repo on your Mac.
 1. Install the Xcode command-line tools.
-1. Download version 1.52 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/).
+1. Download version 1.67.0 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/).
 1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
 1. Install [Mono](http://www.mono-project.com/download/stable/).
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
@@ -192,6 +192,7 @@ that Visual Studio is used to compile.
 1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
 1. Set `JAVA_HOME` to the unpacked location and JAVA_COMPILE to
    `$JAVA_HOME/bin/javac`.
+1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio.
 1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
    won't build the Windows installer.
 1. Create a build directory (you can have the build directory anywhere you

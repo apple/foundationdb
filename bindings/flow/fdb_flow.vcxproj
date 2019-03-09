@@ -79,11 +79,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>..\..\;C:\Program Files\boost_1_52_0;$(IncludePath)</IncludePath>
+    <IncludePath>..\..\;C:\Program Files\boost_1_67_0;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>..\..\;C:\Program Files\boost_1_52_0;$(IncludePath)</IncludePath>
+    <IncludePath>..\..\;C:\Program Files\boost_1_67_0;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <ClCompile>

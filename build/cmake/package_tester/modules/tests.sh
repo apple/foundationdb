@@ -28,10 +28,6 @@
 # build directory can be found in `/build`, the
 # source code will be located in `/foundationdb`
 
-declare -A test_start_state
-declare -A test_exit_state
-declare -a tests
-
 if [ -z "${tests_sh_included}" ]
 then
    tests_sh_included=1
@@ -106,13 +102,23 @@ then
 
        uninstall
        # make sure config didn't get deleted
-       if [ ! -f /etc/foundationdb/fdb.cluster ] || [ ! -f /etc/foundationdb/foundationdb.conf ]
+       # RPM, however, renames the file on remove, so we need to check for this
+       conffile="/etc/foundationdb/foundationdb.conf${conf_save_extension}"
+       if [ ! -f /etc/foundationdb/fdb.cluster ] || [ ! -f "${conffile}" ]
        then
           fail "Uninstall removed configuration"
        fi
+       differences="$(diff /tmp/foundationdb.conf ${conffile})"
+       if [ -n "${differences}" ]
+       then
+          fail "${conffile} changed during remove"
+       fi
+       differences="$(diff /tmp/fdb.cluster /etc/foundationdb/fdb.cluster)"
+       if [ -n "${differences}" ]
+       then
+          fail "/etc/foundationdb/fdb.cluster changed during remove"
+       fi
 
-       rm /tmp/fdb.cluster
-       rm /tmp/foundationdb.conf
        return 0
    }
 fi

@@ -6,11 +6,13 @@ then
 
    source ${source_dir}/modules/util.sh
 
+   conf_save_extension=".rpmsave"
+
    install() {
        local __res=0
        enterfun
-       cd /build
-       declare -ga package_names
+       cd /build/packages
+       package_names=()
        for f in "${package_files[@]}"
        do
            package_names+=( "$(rpm -qp ${f})" )

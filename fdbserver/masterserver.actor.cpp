@@ -26,7 +26,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
 #include <iterator>
 #include "fdbserver/WaitFailure.h"
@@ -53,8 +53,8 @@ struct ProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
 
-	ProxyVersionReplies(ProxyVersionReplies&& r) noexcept(true)  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(ProxyVersionReplies&& r) noexcept(true) { replies = std::move(r.replies); latestRequestNum = std::move(r.latestRequestNum); }
+	ProxyVersionReplies(ProxyVersionReplies&& r) BOOST_NOEXCEPT  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+	void operator=(ProxyVersionReplies&& r) BOOST_NOEXCEPT { replies = std::move(r.replies); latestRequestNum = std::move(r.latestRequestNum); }
 
 	ProxyVersionReplies() : latestRequestNum(0) {}
 };

@@ -27,7 +27,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include <time.h>
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
@@ -1204,8 +1204,8 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			}
 			else if (highestPriority >= PRIORITY_TEAM_REDUNDANT) {
 				stateSectionObj["healthy"] = true;
-				stateSectionObj["name"] = "removing_redundant_teams";
-				stateSectionObj["description"] = "Removing redundant machine teams";
+				stateSectionObj["name"] = "optimizing_team_collections";
+				stateSectionObj["description"] = "Optimizing team collections";
 			}
 			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;

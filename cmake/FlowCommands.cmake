@@ -68,6 +68,24 @@ function(generate_coverage_xml)
   add_dependencies(${target_name} coverage_${target_name})
 endfunction()
 
+# This function asserts that `versions.h` does not exist in the source
+# directory. It does this in the prebuild phase of the target.
+# This is an ugly hack that should make sure that cmake isn't used with
+# a source directory in which FDB was previously built with `make`.
+function(assert_no_version_h target)
+
+  message(STATUS "Check versions.h on ${target}")
+  set(target_name "${target}_versions_h_check")
+  add_custom_target("${target_name}"
+    COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+                               -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+    COMMAND echo
+    "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
+                               -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
+    COMMENT "Check old build system wasn't used in source dir")
+  add_dependencies(${target} ${target_name})
+endfunction()
+
 function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY
     DYNAMIC_LIBRARY)
@@ -138,6 +156,7 @@ function(add_flow_target)
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
     add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
+    assert_no_version_h(${AFT_NAME}_actors)
     generate_coverage_xml(${AFT_NAME})
   endif()
   target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
