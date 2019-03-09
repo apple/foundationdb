@@ -458,13 +458,13 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
 	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
+	double localRatekeeperMin = 1.0;
 	{
-		double readLimit = 1.0;
 		for(const auto& localLimits : storageRateLimits) {
-			readLimit = std::min(readLimit, localLimits.second);
+			localRatekeeperMin = std::min(localRatekeeperMin, localLimits.second);
 		}
-		if (readLimit < 0.99) {
-			auto limit = double(self->actualTpsMetric) * readLimit;
+		if (localRatekeeperMin < 0.99) {
+			auto limit = double(self->actualTpsMetric) * localRatekeeperMin;
 			if (limit < limits.tpsLimit) {
 				limits.tpsLimit = limit;
 				limitReason = limitReason_t::storage_server_read_load;
@@ -633,6 +633,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
+			.detail("LocalRatekeeperMin", localRatekeeperMin)
 			.trackLatest(name.c_str());
 	}
 }

@@ -355,7 +355,7 @@ struct StorageQueuingMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage, localRateLimit);
 	}
 };
 
