@@ -307,7 +307,7 @@ func (p *packer) encodeVersionstamp(v Versionstamp) {
 	p.putBytes(v.Bytes())
 }
 
-func (p *packer) encodeTuple(t Tuple, nested bool) {
+func (p *packer) encodeTuple(t Tuple, nested bool, versionstamps bool) {
 	if nested {
 		p.putByte(nestedCode)
 	}
@@ -315,7 +315,7 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 	for i, e := range t {
 		switch e := e.(type) {
 		case Tuple:
-			p.encodeTuple(e, true)
+			p.encodeTuple(e, true, versionstamps)
 		case nil:
 			p.putByte(nilCode)
 			if nested {
@@ -352,6 +352,10 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 		case UUID:
 			p.encodeUUID(e)
 		case Versionstamp:
+			if versionstamps == false && e.TransactionVersion == incompleteTransactionVersion {
+				panic(fmt.Sprintf("Incomplete Versionstamp included in vanilla tuple pack"))
+			}
+
 			p.encodeVersionstamp(e)
 		default:
 			panic(fmt.Sprintf("unencodable element at index %d (%v, type %T)", i, t[i], t[i]))
@@ -379,7 +383,7 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 //
 func (t Tuple) Pack() []byte {
 	p := newPacker()
-	p.encodeTuple(t, false)
+	p.encodeTuple(t, false, false)
 	return p.buf
 }
 
@@ -409,7 +413,7 @@ func (t Tuple) PackWithVersionstamp(prefix []byte) ([]byte, error) {
 		p.putBytes(prefix)
 	}
 
-	p.encodeTuple(t, false)
+	p.encodeTuple(t, false, true)
 
 	if hasVersionstamp {
 		var scratch [4]byte
