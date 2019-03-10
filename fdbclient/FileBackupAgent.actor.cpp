@@ -2059,8 +2059,8 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable but the state is not differential then set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 
 			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
 			if(stopWhenDone && restorableVersion.present()) {
@@ -2295,8 +2295,8 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable and the state isn't differential the set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 
 			// Unless we are to stop, start the next snapshot using the default interval
 			Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
@@ -2376,7 +2376,7 @@ namespace fileBackup {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
 
-			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
+			config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
 			state Reference<TaskFuture>	backupFinished = futureBucket->future(tr);
 
@@ -3474,7 +3474,7 @@ public:
 				// Break, if one of the following is true
 				//  - no longer runnable
 				//  - in differential mode (restorable) and stopWhenDone is not enabled
-				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) )) {
+				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_RUNNING_DIFFERENTIAL == status) )) {
 
 					if(pContainer != nullptr) {
 						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
@@ -3822,7 +3822,7 @@ public:
 			if(version.present()) {
 				doc.setKey("Version", version.get());
 				if(epochs.present()) {
-					doc.setKey("Epochs", epochs.get());
+					doc.setKey("EpochSeconds", epochs.get());
 					doc.setKey("Timestamp", timeStampToString(epochs));
 				}
 			}
@@ -3865,8 +3865,10 @@ public:
 
 					state EBackupState backupState = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 					JsonBuilderObject statusDoc;
-					statusDoc.setKey("Enum", (int)backupState);
+					statusDoc.setKey("Name", BackupAgentBase::getStateName(backupState));
 					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
+					statusDoc.setKey("Completed", backupState == BackupAgentBase::STATE_COMPLETED);
+					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
 					state Future<Void> done = Void();
@@ -3881,19 +3883,17 @@ public:
 
 						doc.setKey("Restorable", latestRestorable.present());
 
-						if(latestRestorable.present() && backupState != BackupAgentBase::STATE_COMPLETED) {
+						if(latestRestorable.present()) {
 							JsonBuilderObject o = latestRestorable.toJSON();
-							o.setKey("LagSeconds", (recentReadVersion - latestRestorable.version.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+							if(backupState != BackupAgentBase::STATE_COMPLETED) {
+								o.setKey("LagSeconds", (recentReadVersion - latestRestorable.version.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+							}
 							doc.setKey("LatestRestorablePoint", o);
 						}
 						doc.setKey("DestinationURL", bc->getURL());
-
-						if(backupState == BackupAgentBase::STATE_COMPLETED) {
-							doc.setKey("Completed", latestRestorable.toJSON());
-						}
 					}
 
-					if(backupState == BackupAgentBase::STATE_DIFFERENTIAL || backupState == BackupAgentBase::STATE_BACKUP) {
+					if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || backupState == BackupAgentBase::STATE_RUNNING) {
 						state int64_t snapshotInterval;
 						state int64_t logBytesWritten;
 						state int64_t rangeBytesWritten;
@@ -3902,6 +3902,8 @@ public:
 						state TimestampedVersion snapshotTargetEnd;
 						state TimestampedVersion latestLogEnd;
 						state TimestampedVersion latestSnapshotEnd;
+						state TimestampedVersion snapshotLastDispatch;
+						state Optional<int64_t> snapshotLastDispatchShardsBehind;
 
 						wait(  store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr))
 							&& store(logBytesWritten, config.logBytesWritten().getD(tr))
@@ -3911,6 +3913,8 @@ public:
 							&& store(snapshotTargetEnd,  getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr)))
 							&& store(latestLogEnd,       getTimestampedVersion(tr, config.latestLogEndVersion().get(tr)))
 							&& store(latestSnapshotEnd,  getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr)))
+							&& store(snapshotLastDispatch,             getTimestampedVersion(tr, config.snapshotDispatchLastVersion().get(tr)))
+							&& store(snapshotLastDispatchShardsBehind, config.snapshotDispatchLastShardsBehind().get(tr))
 						);
 
 						doc.setKey("StopAfterSnapshot", stopWhenDone);
@@ -3941,6 +3945,12 @@ public:
 								double progress = (interval > 0) ? (100.0 * elapsed / interval) : 100;
 								snapshot.setKey("ExpectedProgress", progress);
 							}
+
+							JsonBuilderObject dispatchDoc = snapshotLastDispatch.toJSON();
+							if(snapshotLastDispatchShardsBehind.present()) {
+								dispatchDoc.setKey("ShardsBehind", snapshotLastDispatchShardsBehind.get());
+							}
+							snapshot.setKey("LastDispatch", dispatchDoc);
 						}
 
 						doc.setKey("CurrentSnapshot", snapshot);
@@ -4010,11 +4020,11 @@ public:
 						case BackupAgentBase::STATE_SUBMITTED:
 							statusText += "The backup on tag `" + tagName + "' is in progress (just started) to " + bc->getURL() + ".\n";
 							break;
-						case BackupAgentBase::STATE_BACKUP:
+						case BackupAgentBase::STATE_RUNNING:
 							statusText += "The backup on tag `" + tagName + "' is in progress to " + bc->getURL() + ".\n";
 							snapshotProgress = true;
 							break;
-						case BackupAgentBase::STATE_DIFFERENTIAL:
+						case BackupAgentBase::STATE_RUNNING_DIFFERENTIAL:
 							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + bc->getURL() + ".\n";
 							snapshotProgress = true;
 							break;
@@ -4057,7 +4067,7 @@ public:
 									);
 
 						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
-						if(backupState == BackupAgentBase::STATE_DIFFERENTIAL)
+						if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
 							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the snapshot is supposed to be done)\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
 						else
 							statusText += "The initial snapshot is still running.\n";
@@ -4202,7 +4212,7 @@ public:
 				backupConfig = BackupConfig(uidFlag.first);
 				state EBackupState status = wait(backupConfig.stateEnum().getOrThrow(ryw_tr));
 
-				if (status != BackupAgentBase::STATE_DIFFERENTIAL ) {
+				if (status != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL ) {
 					throw backup_duplicate();
 				}
 

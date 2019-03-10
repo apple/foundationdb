@@ -175,7 +175,7 @@ std::string BackupDescription::toJSON() const {
 			auto i = versionTimeMap.find(v);
 			if(i != versionTimeMap.end()) {
 				doc.setKey("Timestamp", BackupAgentBase::formatTime(i->second));
-				doc.setKey("Epochs", i->second);
+				doc.setKey("EpochSeconds", i->second);
 			}
 		}
 		else if(maxLogEnd.present()) {
@@ -1628,20 +1628,11 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
 
-	int year, month, day, hour, minute, second;
-	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
-		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
+	state int64_t time = BackupAgentBase::parseTime(datetime);
+	if(time < 0) {
+		fprintf(stderr, "ERROR: Incorrect date/time or format.  Format is %s.\n", BackupAgentBase::timeFormat().c_str());
 		throw backup_error();
 	}
-	struct tm expDateTime = {0};
-	expDateTime.tm_year = year - 1900;
-	expDateTime.tm_mon = month - 1;
-	expDateTime.tm_mday = day;
-	expDateTime.tm_hour = hour;
-	expDateTime.tm_min = minute;
-	expDateTime.tm_sec = second;
-	expDateTime.tm_isdst = -1;
-	state int64_t time = (int64_t) mktime(&expDateTime);
 
 	loop {
 		try {

@@ -840,7 +840,7 @@ static void printBackupUsage(bool devhelp) {
 		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.  See below for more details.\n");
 	printf("  --expire_before_timestamp DATETIME\n"
 		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
-		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
+		   "                 in the database to obtain a cutoff version very close to the timestamp given in %s.\n", BackupAgentBase::timeFormat().c_str());
 	printf("  --expire_before_version VERSION\n"
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
 	printf("  --delete_before_days NUM_DAYS\n"
@@ -913,7 +913,7 @@ static void printRestoreUsage(bool devhelp ) {
 	printf(TLS_HELP);
 #endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
-	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in YYYY-MM-DD.HH:MI:SS format (UTC)\n");
+	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
 	printf("                 and it will be converted to a version from that time using metadata in orig_cluster_file.\n");
 	printf("  --orig_cluster_file CONNFILE\n");
 	printf("                 The cluster file for the original database from which the backup was created.  The original database\n");
@@ -1252,8 +1252,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("current_status") = statusText;
 			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
 			tagRoot.create("last_restorable_seconds_behind") = last_restorable_seconds_behind;
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
-			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
+			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || status == BackupAgentBase::STATE_RUNNING);
+			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
@@ -1296,8 +1296,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)backupStatus[i].get();
 
 			JSONDoc tagRoot = tagsRoot.create(tagName);
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
-			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
+			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || status == BackupAgentBase::STATE_RUNNING);
+			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytesDR[i].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytesDR[i].get();
 			tagRoot.create("mutation_stream_id") = drTagUids[i].toString();
