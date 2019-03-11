@@ -25,6 +25,7 @@ Fixes
 -----
 
 * Python: Creating a ``SingleFloat`` for the tuple layer didn't work with integers. `(PR #1216) <https://github.com/apple/foundationdb/pull/1216>`_
+* Standardized datetime string format across all backup and restore command options and outputs. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 
 Status
 ------
