@@ -3747,7 +3747,7 @@ int restoreStatusIndex = 0;
 
 			break;
 		} catch( Error &e ) {
-			printf("Error when we registerStatus. Error:%s\n", e.what());
+			printf("Transaction Error when we registerStatus. Error:%s\n", e.what());
 			wait(tr->onError(e));
 		}
 	 };
