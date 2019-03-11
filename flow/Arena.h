@@ -116,7 +116,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 {
 	enum {
 		SMALL = 64,
-		LARGE = 4097 // If size == used == LARGE, then use hugeSize, hugeUsed
+		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
 	};
 
 	enum { NOT_TINY = 255, TINY_HEADER = 6 };
