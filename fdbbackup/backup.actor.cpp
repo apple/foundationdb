@@ -213,7 +213,6 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_DESTCONTAINER,    "--destcontainer", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "-s",                  SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
-	{ OPT_MOD_ACTIVE_INTERVAL, "-as",                        SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active_snapshot_interval", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
@@ -828,7 +827,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
 	       "                 For start or modify operations, specifies the backup's default target snapshot interval as DURATION seconds.  Defaults to %d for start operations.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
-	printf("  -as, --active_snapshot_interval DURATION\n"
+	printf("  --active_snapshot_interval DURATION\n"
 	       "                 For modify operations, sets the desired interval for the backup's currently active snapshot, relative to the start of the snapshot.\n");
 	printf("  --verify_uid UID\n"
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction\n"
