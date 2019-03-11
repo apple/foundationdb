@@ -81,9 +81,12 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		loop {
 			std::vector<Future<Version>> restores;
-
-			for (auto &range : self->backupRanges) {
-				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
+			if (g_random->random01() < 0.5) {
+				for (auto &range : self->backupRanges)
+					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
+			}
+			else {
+				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 			}
 			try {
 				wait(waitForAll(restores));

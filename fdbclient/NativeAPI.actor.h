@@ -74,8 +74,8 @@ public:
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
 	Database( Database const& rhs ) : db(rhs.db) {}
-	Database(Database&& r) noexcept(true) : db(std::move(r.db)) {}
-	void operator= (Database&& r) noexcept(true) { db = std::move(r.db); }
+	Database(Database&& r) BOOST_NOEXCEPT : db(std::move(r.db)) {}
+	void operator= (Database&& r) BOOST_NOEXCEPT { db = std::move(r.db); }
 
 	// For internal use by the native client:
 	explicit Database(Reference<DatabaseContext> cx) : db(cx) {}
@@ -280,7 +280,7 @@ public:
 
 	// These are to permit use as state variables in actors:
 	Transaction() : info( TaskDefaultEndpoint ) {}
-	void operator=(Transaction&& r) noexcept(true);
+	void operator=(Transaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
 	void fullReset();

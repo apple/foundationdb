@@ -245,7 +245,9 @@ struct SystemStatistics {
 
 struct SystemStatisticsState;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, SystemStatisticsState **statState);
+class IPAddress;
+
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState);
 
 double getProcessorTimeThread();
 
@@ -542,12 +544,8 @@ inline static int ctzll( uint64_t value ) {
 #define ctzll __builtin_ctzll
 #endif
 
-// MSVC not support noexcept yet
-#ifndef __GNUG__
-#ifndef VS14
-#define noexcept(enabled)
-#endif
-#endif
+#include <boost/config.hpp>
+// The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
 
 #else
 #define EXTERNC

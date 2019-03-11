@@ -9,56 +9,55 @@ then
 
     failed_tests=()
 
-    docker_threads=()
     docker_ids=()
+    docker_threads=()
+    docker_logs=()
+    docker_error_logs=()
 
     docker_wait_any() {
-        # docker wait waits on all containers (unlike what is documented)
-        # so we need to do polling
-        success=0
-        while [ "${success}" -eq 0 ]
+        local __res=0
+        enterfun
+        while [ "${#docker_threads[@]}" -gt 0 ]
         do
-            for ((i=0;i<"${#docker_ids[@]}";++i))
+            IFS=";" read -ra res <${pipe_file}
+            docker_id=${res[0]}
+            result=${res[1]}
+            i=0
+            for (( idx=0; idx<${#docker_ids[@]}; idx++ ))
             do
-                docker_id="${docker_ids[$i]}"
-                status="$(docker ps -a -f id=${docker_id} --format '{{.Status}}' | awk '{print $1;}')"
-                if [ "${status}" = "Exited" ]
+                if [ "${docker_id}" = "${docker_ids[idx]}" ]
                 then
-                    success=1
-                    ret_code="$(docker wait ${docker_id})"
-                    if [ "${ret_code}" -ne 0 ]
-                    then
-                        failed_tests+=( "${docker_threads[$i]}" )
-                        echo -e "${RED}Test failed: ${docker_threads[$i]} ${NC}"
-                    else
-                        echo -e "${GREEN}Test succeeded: ${docker_threads[$i]} ${NC}"
-                    fi
-                    # remove it
-                    n=$((i+1))
-                    docker_ids=( "${docker_ids[@]:0:$i}" "${docker_ids[@]:$n}" )
-                    docker_threads=( "${docker_threads[@]:0:$i}" "${docker_threads[@]:$n}" )
-                    # prune
-                    set -x
-                    if [ "${pruning_strategy}" = "ALL" ]
-                    then
-                        docker container rm "${docker_id}" > /dev/null
-                    elif [ "${ret_code}" -eq 0 ] && [ "${pruning_strategy}" = "SUCCEEDED" ]
-                    then
-                        docker container rm "${docker_id}" > /dev/null
-                    elif [ "${ret_code}" -ne 0 ] && [ "${pruning_strategy}" = "FAILED" ]
-                    then
-                        docker container rm "${docker_id}" > /dev/null
-                    fi
-                    set +x
+                    i=idx
+                    break
                 fi
             done
-            sleep 1
+            if [ "${result}" -eq 0 ]
+            then
+                echo -e "${GREEN}Test succeeded: ${docker_threads[$i]}"
+                echo -e "\tDocker-ID: ${docker_ids[$i]} "
+                echo -e "\tLog-File: ${docker_logs[$i]}"
+                echo -e "\tErr-File: ${docker_error_logs[$i]} ${NC}"
+            else
+                echo -e "${RED}Test FAILED: ${docker_threads[$i]}"
+                echo -e "\tDocker-ID: ${docker_ids[$i]} "
+                echo -e "\tLog-File: ${docker_logs[$i]}"
+                echo -e "\tErr-File: ${docker_error_logs[$i]} ${NC}"
+                failed_tests+=( "${docker_threads[$i]}" )
+            fi
+            n=$((i+1))
+            docker_ids=( "${docker_ids[@]:0:$i}" "${docker_ids[@]:$n}" )
+            docker_threads=( "${docker_threads[@]:0:$i}" "${docker_threads[@]:$n}" )
+            docker_logs=( "${docker_logs[@]:0:$i}" "${docker_logs[@]:$n}" )
+            docker_error_logs=( "${docker_error_logs[@]:0:$i}" "${docker_error_logs[@]:$n}" )
+            break
         done
+        exitfun
+        return "${__res}"
     }
 
     docker_wait_all() {
         local __res=0
-        while [ "${#docker_ids[@]}" -gt 0 ]
+        while [ "${#docker_threads[@]}" -gt 0 ]
         do
             docker_wait_any
             if [ "$?" -ne 0 ]
@@ -69,158 +68,104 @@ then
         return ${__res}
     }
 
-    docker_build_and_run() {
-        local __res=0
-        enterfun
-        for _ in 1
-        do
-            if [[ "$location" = /* ]]
-            then
-                cd "${location}"
-            else
-                cd ${source_dir}/../${location}
-            fi
-            docker_logs="${log_dir}/docker_build_${name}"
-            docker build . -t ${name} 1> "${docker_logs}.log" 2> "${docker_logs}.err"
-            successOr "Building Docker image ${name} failed - see ${docker_logs}.log and ${docker_logs}.err"
-            # we start docker in interactive mode, otherwise CTRL-C won't work
-            if [ ! -z "${tests_to_run+x}"]
-            then
-                tests=()
-                IFS=';' read -ra tests <<< "${tests_to_run}"
-            fi
-            for t in "${tests[@]}"
-            do
-                if [ "${#docker_ids[@]}" -ge "${docker_parallelism}" ]
-                then
-                    docker_wait_any
-                fi
-                echo "Starting Test ${PKG,,}_${t}"
-                docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
-                    -v "${fdb_build}:/build"\
-                    ${name}\
-                    bash /foundationdb/build/cmake/package_tester/${PKG,,}_tests.sh -n ${t} ${packages_to_test[@]} )
-                docker_ids+=( "${docker_id}" )
-                docker_threads+=( "${PKG} - ${t} (ID: ${docker_id})" )
-            done
-        done
-        exitfun
-        return ${__res}
-    }
-
-    docker_run_tests() {
-        local __res=0
-        enterfun
-        counter=1
-        while true
-        do
-            if [ -z "${ini_name[${PKG}_${counter}]+x}" ]
-            then
-                # we are done
-                break
-            fi
-            name="${ini_name[${PKG}_${counter}]}"
-            location="${ini_location[${PKG}_${counter}]}"
-            docker_build_and_run
-            __res=$?
-            counter=$((counter+1))
-            if [ ${__res} -ne 0 ]
-            then
-                break
-            fi
-        done
-        if [ ${counter} -eq 1 ]
-        then
-            echo -e "${YELLOW}WARNING: No docker config found!${NC}"
-        fi
-        exitfun
-        return ${__res}
-    }
-
-    docker_debian_tests() {
-        local __res=0
-        enterfun
-        PKG=DEB
-        packages_to_test=("${deb_packages[@]}")
-        docker_run_tests
-        __res=$?
-        exitfun
-        return ${__res}
-    }
-
-    docker_rpm_tests() {
-        local __res=0
-        enterfun
-        PKG=RPM
-        packages_to_test=("${rpm_packages[@]}")
-        docker_run_tests
-        __res=$?
-        exitfun
-        return ${__res}
-    }
-
     docker_run() {
         local __res=0
         enterfun
         for _ in 1
         do
-            log_dir="${fdb_build}/pkg_tester"
-            mkdir -p "${log_dir}"
-            # create list of package files to test
-            IFS=':' read -ra packages <<< "${fdb_packages}"
-            deb_packages=()
-            rpm_packages=()
-            for i in "${packages[@]}"
+            echo "Testing the following:"
+            echo "======================"
+            for K in "${vms[@]}"
             do
-                if [[ "${i}" =~ .*".deb" ]]
-                then
-                    if [ ${run_deb_tests} -ne 0 ]
-                    then
-                        deb_packages+=("${i}")
-                    fi
-                else
-                    if [ ${run_rpm_tests} -ne 0 ]
-                    then
-                        rpm_packages+=("${i}")
-                    fi
-                fi
-            done
-            do_deb_tests=0
-            do_rpm_tests=0
-            if [ "${#deb_packages[@]}" -gt 0 ]
-            then
-                do_deb_tests=1
-                echo "Will test the following debian packages:"
-                echo "========================================"
-                for i in "${deb_packages[@]}"
+                curr_packages=( $(cd ${fdb_build}/packages; ls | grep -P ${ini_packages[${K}]} ) )
+                echo "Will test the following ${#curr_packages[@]} packages in docker-image ${K}:"
+                for p in "${curr_packages[@]}"
                 do
-                    echo " - ${i}"
+                    echo "    ${p}"
                 done
                 echo
-            fi
-            if [ "${#rpm_packages[@]}" -gt 0 ]
+            done
+            log_dir="${fdb_build}/pkg_tester"
+            pipe_file="${fdb_build}/pkg_tester.pipe"
+            lock_file="${fdb_build}/pkg_tester.lock"
+            if [ -p "${pipe_file}" ]
             then
-                do_rpm_tests=1
-                echo "Will test the following rpm packages"
-                echo "===================================="
-                for i in "${rpm_packages[@]}"
+                rm "${pipe_file}"
+                successOr "Could not delete old pipe file"
+            fi
+            if [ -f "${lock_file}" ]
+            then
+                rm "${lock_file}"
+                successOr "Could not delete old pipe file"
+            fi
+            touch "${lock_file}"
+            successOr "Could not create lock file"
+            mkfifo "${pipe_file}"
+            successOr "Could not create pipe file"
+            mkdir -p "${log_dir}"
+            # setup the containers
+            # TODO: shall we make this parallel as well?
+            for vm in "${vms[@]}"
+            do
+                curr_name="${ini_name[$vm]}"
+                curr_location="${ini_location[$vm]}"
+                if [[ "$curr_location" = /* ]]
+                then
+                    cd "${curr_location}"
+                else
+                    cd ${source_dir}/../${curr_location}
+                fi
+                docker_buid_logs="${log_dir}/docker_build_${curr_name}"
+                docker build . -t ${curr_name} 1> "${docker_buid_logs}.log" 2> "${docker_buid_logs}.err"
+                successOr "Building Docker image ${name} failed - see ${docker_buid_logs}.log and ${docker_buid_logs}.err"
+            done
+            if [ ! -z "${tests_to_run+x}"]
+            then
+                tests=()
+                IFS=';' read -ra tests <<< "${tests_to_run}"
+            fi
+            for vm in "${vms[@]}"
+            do
+                curr_name="${ini_name[$vm]}"
+                curr_format="${ini_format[$vm]}"
+                curr_packages=( $(cd ${fdb_build}/packages; ls | grep -P ${ini_packages[${vm}]} ) )
+                for curr_test in "${tests[@]}"
                 do
-                    echo " - ${i}"
+                    if [ "${#docker_ids[@]}" -ge "${docker_parallelism}" ]
+                    then
+                        docker_wait_any
+                    fi
+                    echo "Starting Test ${curr_name}/${curr_test}"
+                    log_file="${log_dir}/${curr_name}_${curr_test}.log"
+                    err_file="${log_dir}/${curr_name}_${curr_test}.err"
+                    docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
+                        -v "${fdb_build}:/build"\
+                        ${curr_name} /sbin/init )
+                    {
+                        docker exec "${docker_id}" bash \
+                            /foundationdb/build/cmake/package_tester/${curr_format}_tests.sh -n ${curr_test} ${curr_packages[@]}\
+                            2> ${err_file} 1> ${log_file}
+                        res=$?
+                        if [ "${pruning_strategy}" = "ALL" ]
+                        then
+                            docker kill "${docker_id}" > /dev/null
+                        elif [ "${res}" -eq 0 ] && [ "${pruning_strategy}" = "SUCCEEDED" ]
+                        then
+                            docker kill "${docker_id}" > /dev/null
+                        elif [ "${res}" -ne 0 ] && [ "${pruning_strategy}" = "FAILED" ]
+                        then
+                            docker kill "${docker_id}" > /dev/null
+                        fi
+                        flock "${lock_file}" echo "${docker_id};${res}"  >> "${pipe_file}"
+                    } &
+                    docker_ids+=( "${docker_id}" )
+                    docker_threads+=( "${curr_name}/${curr_test}" )
+                    docker_logs+=( "${log_file}" )
+                    docker_error_logs+=( "${err_file}" )
                 done
-            fi
-            if [ "${do_deb_tests}" -eq 0 ] && [ "${do_rpm_tests}" -eq 0 ]
-            then
-                echo "nothing to do"
-            fi
-            if [ "${do_deb_tests}" -ne 0 ]
-            then
-                docker_debian_tests
-            fi
-            if [ "${do_rpm_tests}" -ne 0 ]
-            then
-                docker_rpm_tests
-            fi
+            done
             docker_wait_all
+            rm ${pipe_file}
             if [ "${#failed_tests[@]}" -eq 0 ]
             then
                 echo -e "${GREEN}SUCCESS${NC}"
@@ -235,6 +180,6 @@ then
             fi
         done
         exitfun
-        return ${__res}
+        return "${__res}"
     }
 fi

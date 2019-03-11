@@ -59,6 +59,10 @@ services:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh test
 
+  snowflake-ci: &snowflake-ci
+    <<: *build-setup
+    command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash ../foundationdb/build/cmake/build.sh package test-fast
+
   shell:
     <<: *build-setup
     command: scl enable devtoolset-7 rh-ruby24 rh-python36 python27 -- bash

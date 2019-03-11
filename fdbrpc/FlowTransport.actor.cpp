@@ -194,27 +194,67 @@ public:
 };
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
-#define CONNECT_PACKET_V1 0x0FDB00A446030001LL
 #define CONNECT_PACKET_V0_SIZE 14
-#define CONNECT_PACKET_V1_SIZE 22
-#define CONNECT_PACKET_V2_SIZE 26
 
 #pragma pack( push, 1 )
 struct ConnectPacket {
-	uint32_t connectPacketLength;  // sizeof(ConnectPacket)-sizeof(uint32_t), or perhaps greater in later protocol versions
+	// The value does not inclueds the size of `connectPacketLength` itself,
+	// but only the other fields of this structure.
+	uint32_t connectPacketLength;
 	uint64_t protocolVersion;      // Expect currentProtocolVersion
+
 	uint16_t canonicalRemotePort;  // Port number to reconnect to the originating process
 	uint64_t connectionId;         // Multi-version clients will use the same Id for both connections, other connections will set this to zero. Added at protocol Version 0x0FDB00A444020001.
-	uint32_t canonicalRemoteIp;    // IP Address to reconnect to the originating process
 
-	size_t minimumSize() {
-		if (protocolVersion < CONNECT_PACKET_V0) return CONNECT_PACKET_V0_SIZE;
-		if (protocolVersion < CONNECT_PACKET_V1) return CONNECT_PACKET_V1_SIZE;
-		return CONNECT_PACKET_V2_SIZE;
+	 // IP Address to reconnect to the originating process. Only one of these must be populated.
+	uint32_t canonicalRemoteIp4;
+
+	enum ConnectPacketFlags {
+		  FLAG_IPV6 = 1
+	};
+	uint16_t flags;
+	uint8_t canonicalRemoteIp6[16];
+
+	IPAddress canonicalRemoteIp() const {
+		if (isIPv6()) {
+			IPAddress::IPAddressStore store;
+			memcpy(store.data(), canonicalRemoteIp6, sizeof(canonicalRemoteIp6));
+			return IPAddress(store);
+		} else {
+			return IPAddress(canonicalRemoteIp4);
+		}
+	}
+
+	void setCanonicalRemoteIp(const IPAddress& ip) {
+		if (ip.isV6()) {
+			flags = flags | FLAG_IPV6;
+			memcpy(&canonicalRemoteIp6, ip.toV6().data(), 16);
+		} else {
+			flags = flags & ~FLAG_IPV6;
+			canonicalRemoteIp4 = ip.toV4();
+		}
+	}
+
+	bool isIPv6() const { return flags & FLAG_IPV6; }
+
+	uint32_t totalPacketSize() const { return connectPacketLength + sizeof(connectPacketLength); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, connectPacketLength);
+		ASSERT(connectPacketLength <= sizeof(ConnectPacket));
+		serializer(ar, protocolVersion, canonicalRemotePort, connectionId, canonicalRemoteIp4);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			flags = 0;
+		} else {
+			// We can send everything in serialized packet, since the current version of ConnectPacket
+			// is backward compatible with CONNECT_PACKET_V0.
+			serializer(ar, flags);
+			ar.serializeBytes(&canonicalRemoteIp6, sizeof(canonicalRemoteIp6));
+		}
 	}
 };
 
-static_assert( sizeof(ConnectPacket) == CONNECT_PACKET_V2_SIZE, "ConnectPacket packed incorrectly" );
 #pragma pack( pop )
 
 ACTOR static Future<Void> connectionReader(TransportData* transport, Reference<IConnection> conn, Peer* peer,
@@ -256,23 +296,23 @@ struct Peer : NonCopyable {
 		for(auto& addr : transport->localAddresses) {
 			if(addr.isTLS() == destination.isTLS()) {
 				pkt.canonicalRemotePort = addr.port;
-				pkt.canonicalRemoteIp = addr.ip;
+				pkt.setCanonicalRemoteIp(addr.ip);
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
 			pkt.canonicalRemotePort = 0;   // a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
-			pkt.canonicalRemoteIp = 0;
+			pkt.setCanonicalRemoteIp(IPAddress(0));
 		}
 
-		pkt.connectPacketLength = sizeof(pkt)-sizeof(pkt.connectPacketLength);
+		pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
 		pkt.protocolVersion = currentProtocolVersion;
 		pkt.connectionId = transport->transportId;
 
 		PacketBuffer* pb_first = new PacketBuffer;
 		PacketWriter wr( pb_first, NULL, Unversioned() );
-		wr.serializeBinaryItem(pkt);
+		pkt.serialize(wr);
 		unsent.prependWriteBuffer(pb_first, wr.finish());
 	}
 
@@ -647,29 +687,31 @@ ACTOR static Future<Void> connectionReader(
 
 				if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
-					ConnectPacket* p = (ConnectPacket*)unprocessed_begin;
-
-					uint64_t connectionId = 0;
-					int32_t connectPacketSize = p->minimumSize();
+					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
 					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
-						if(p->protocolVersion >= 0x0FDB00A444020001) {
-							connectionId = p->connectionId;
-						}
+						uint64_t protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
+						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));
+						ConnectPacket pkt;
+						serializer(pktReader, pkt);
 
-						if( (p->protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
-							incompatibleProtocolVersionNewer = p->protocolVersion > currentProtocolVersion;
-							NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
+						uint64_t connectionId = pkt.connectionId;
+						if( (pkt.protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
+							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
+							NetworkAddress addr = pkt.canonicalRemotePort
+							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
+							                          : conn->getPeerAddress();
 							if(connectionId != 1) addr.port = 0;
 
 							if(!transport->multiVersionConnections.count(connectionId)) {
 								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
-										.detail("Reason", "IncompatibleProtocolVersion")
-										.detail("LocalVersion", currentProtocolVersion)
-										.detail("RejectedVersion", p->protocolVersion)
-										.detail("VersionMask", compatibleProtocolVersionMask)
-										.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress())
-										.detail("ConnectionId", connectionId);
+									    .detail("Reason", "IncompatibleProtocolVersion")
+									    .detail("LocalVersion", currentProtocolVersion)
+									    .detail("RejectedVersion", pkt.protocolVersion)
+									    .detail("VersionMask", compatibleProtocolVersionMask)
+									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
+									                                            : conn->getPeerAddress())
+									    .detail("ConnectionId", connectionId);
 									transport->lastIncompatibleMessage = now();
 								}
 								if(!transport->incompatiblePeers.count(addr)) {
@@ -680,7 +722,7 @@ ACTOR static Future<Void> connectionReader(
 							}
 
 							compatible = false;
-							if(p->protocolVersion < 0x0FDB00A551000000LL) {
+							if(protocolVersion < 0x0FDB00A551000000LL) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}
@@ -699,20 +741,23 @@ ACTOR static Future<Void> connectionReader(
 						unprocessed_begin += connectPacketSize;
 						expectConnectPacket = false;
 
-						peerProtocolVersion = p->protocolVersion;
+						peerProtocolVersion = protocolVersion;
 						if (peer != nullptr) {
 							// Outgoing connection; port information should be what we expect
-							TraceEvent("ConnectedOutgoing").suppressFor(1.0).detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
+							TraceEvent("ConnectedOutgoing")
+							    .suppressFor(1.0)
+							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
 							}
-							ASSERT( p->canonicalRemotePort == peerAddress.port );
+							ASSERT( pkt.canonicalRemotePort == peerAddress.port );
 						} else {
-							if (p->canonicalRemotePort) {
-								peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
+							if (pkt.canonicalRemotePort) {
+								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
+								                             peerAddress.isTLS());
 							}
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;

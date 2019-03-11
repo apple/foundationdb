@@ -17,10 +17,8 @@ then
             fi
             # parse the ini file and read it into an
             # associative array
-            declare -gA ini_name
-            declare -gA ini_location
-
-            eval "$(awk -F ' *= *' '{ if ($1 ~ /^\[/) section=$1; else if ($1 !~ /^$/) print "ini_" $1 section "=" "\"" $2 "\"" }' ${docker_file})"
+            eval "$(awk -F ' *= *' '{ if ($1 ~ /^\[/) section=$1; else if ($1 !~ /^$/) printf "ini_%s%s=\47%s\47\n", $1, section, $2  }' ${docker_file})"
+            vms=( "${!ini_name[@]}" )
             if [ $? -ne 0 ]
             then
                 echo "ERROR: Could not parse config-file ${docker_file}"
@@ -111,15 +109,6 @@ then
             if [ ${__res} -ne 0 ]
             then
                 break
-            fi
-            if [ -z ${fdb_packages+x} ]
-            then
-                config_find_packages
-                if [ $? -ne 0 ]
-                then
-                    __res=1
-                    break
-                fi
             fi
             config_load_vms
             __res=$?

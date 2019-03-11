@@ -323,8 +323,8 @@ namespace oldTLog_4_6 {
 
 			TagData( Version popped, bool nothing_persistent, bool popped_recently, OldTag tag ) : nothing_persistent(nothing_persistent), popped(popped), popped_recently(popped_recently), update_version_sizes(tag != txsTagOld) {}
 
-			TagData(TagData&& r) noexcept(true) : version_messages(std::move(r.version_messages)), nothing_persistent(r.nothing_persistent), popped_recently(r.popped_recently), popped(r.popped), update_version_sizes(r.update_version_sizes) {}
-			void operator= (TagData&& r) noexcept(true) {
+			TagData(TagData&& r) BOOST_NOEXCEPT : version_messages(std::move(r.version_messages)), nothing_persistent(r.nothing_persistent), popped_recently(r.popped_recently), popped(r.popped), update_version_sizes(r.update_version_sizes) {}
+			void operator= (TagData&& r) BOOST_NOEXCEPT {
 				version_messages = std::move(r.version_messages);
 				nothing_persistent = r.nothing_persistent;
 				popped_recently = r.popped_recently;

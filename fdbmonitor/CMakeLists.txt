@@ -1,6 +1,7 @@
 set(FDBMONITOR_SRCS ConvertUTF.h SimpleIni.h fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
+assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)
     target_link_libraries(fdbmonitor rt)
 endif()
@@ -8,6 +9,4 @@ endif()
 # as soon as we get rid of the old build system
 target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
 
-if(NOT OPEN_FOR_IDE)
-  install(TARGETS fdbmonitor DESTINATION "${FDBMONITOR_INSTALL_LOCATION}" COMPONENT server)
-endif()
+fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)

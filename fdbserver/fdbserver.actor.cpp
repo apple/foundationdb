@@ -38,7 +38,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/IKeyValueStore.h"
 #include <algorithm>
@@ -170,7 +170,7 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
-extern uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs );
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 extern const char* getHGVersion();
 
@@ -776,7 +776,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				uint32_t publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
 				publicNetworkAddresses.emplace_back(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
@@ -793,7 +793,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 
 		const NetworkAddress& currentPublicAddress = publicNetworkAddresses.back();
 		if (!currentPublicAddress.isValid()) {
-			fprintf(stderr, "ERROR: %s is not valid a public ip address\n");
+			fprintf(stderr, "ERROR: %s is not a valid IP address\n", currentPublicAddress.toString().c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1749,7 +1749,8 @@ int main(int argc, char* argv[]) {
 				<< FastAllocator<512>::pageCount << " "
 				<< FastAllocator<1024>::pageCount << " "
 				<< FastAllocator<2048>::pageCount << " "
-				<< FastAllocator<4096>::pageCount << std::endl;
+				<< FastAllocator<4096>::pageCount << " "
+				<< FastAllocator<8192>::pageCount << std::endl;
 
 			vector< std::pair<std::string, const char*> > typeNames;
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {

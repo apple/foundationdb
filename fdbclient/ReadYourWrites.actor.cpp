@@ -1818,7 +1818,7 @@ void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option,
 	tr.setOption( option, value );
 }
 
-void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcept(true) {
+void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT {
 	cache = std::move( r.cache );
 	writes = std::move( r.writes );
 	arena = std::move( r.arena );
@@ -1839,7 +1839,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	writes.arena = &arena;
 }
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept(true) :
+ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
 	cache( std::move(r.cache) ),
 	writes( std::move(r.writes) ), 
 	arena( std::move(r.arena) ), 

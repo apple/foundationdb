@@ -112,7 +112,7 @@ public:
 	bool isValid() const { return sav != NULL; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	ReplyPromise(ReplyPromise&& rhs) noexcept(true) : sav(rhs.sav) { rhs.sav = 0; }
+	ReplyPromise(ReplyPromise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
@@ -123,7 +123,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(ReplyPromise && rhs) noexcept(true) {
+	void operator=(ReplyPromise && rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -323,13 +323,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
 	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) noexcept(true) : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(RequestStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(RequestStream&& rhs) noexcept(true) {
+	void operator=(RequestStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;

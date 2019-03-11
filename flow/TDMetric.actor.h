@@ -183,8 +183,7 @@ public:
 		// Get and store the local address in the metric collection, but only if it is not 0.0.0.0:0
 		if( address.size() == 0 ) {
 			NetworkAddress addr = g_network->getLocalAddress();
-			if(addr.ip != 0 && addr.port != 0)
-				address = StringRef(addr.toString());
+			if (addr.ip.isValid() && addr.port != 0) address = StringRef(addr.toString());
 		}
 		return address.size() != 0;
 	}
@@ -217,14 +216,14 @@ struct MetricData {
 		appendStart(appendStart) {
 	}
 
-	MetricData( MetricData&& r ) noexcept(true) :
+	MetricData( MetricData&& r ) BOOST_NOEXCEPT :
 		start(r.start),
 		rollTime(r.rollTime),
 		appendStart(r.appendStart),
 		writer(std::move(r.writer)) {
 	}
 
-	void operator=( MetricData&& r ) noexcept(true) {
+	void operator=( MetricData&& r ) BOOST_NOEXCEPT {
 		start = r.start; rollTime = r.rollTime; appendStart = r.appendStart; writer = std::move(r.writer);
 	}
 
@@ -627,9 +626,9 @@ template <class T, class Descriptor = NullDescriptor, class FieldLevelType = Fie
 struct EventField : public Descriptor {
 	std::vector<FieldLevelType> levels;
 
-	EventField( EventField&& r ) noexcept(true) : Descriptor(r), levels(std::move(r.levels)) {}
+	EventField( EventField&& r ) BOOST_NOEXCEPT : Descriptor(r), levels(std::move(r.levels)) {}
 
-	void operator=( EventField&& r ) noexcept(true) {
+	void operator=( EventField&& r ) BOOST_NOEXCEPT {
 		levels = std::move(r.levels);
 	}
 

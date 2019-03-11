@@ -37,7 +37,7 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	protected RangeResultInfo getIfDone_internal(long cPtr) throws FDBException {
 		FDBException err = Future_getError(cPtr);
 
-		if(!err.isSuccess()) {
+		if(err != null && !err.isSuccess()) {
 			throw err;
 		}
 

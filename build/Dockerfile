@@ -10,12 +10,11 @@ RUN adduser --disabled-password --gecos '' fdb && chown -R fdb /opt && chmod -R 
 USER fdb
 
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
-RUN cd /opt/ && wget http://downloads.sourceforge.net/project/boost/boost/1.52.0/boost_1_52_0.tar.bz2 &&\
+RUN cd /opt/ &&\
     wget --local-encoding=UTF-8 https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 &&\
     echo '2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba boost_1_67_0.tar.bz2' | sha256sum -c - &&\
-    tar -xjf boost_1_52_0.tar.bz2 &&\
     tar -xjf boost_1_67_0.tar.bz2 &&\
-    rm boost_1_52_0.tar.bz2 boost_1_67_0.tar.bz2
+    rm boost_1_67_0.tar.bz2
 
 USER root
 
