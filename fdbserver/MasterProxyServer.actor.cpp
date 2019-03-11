@@ -767,13 +767,14 @@ ACTOR Future<Void> commitBatch(
 					if (m.param1 == execSnap) {
 						te1.trackLatest(tokenStr.c_str());
 					}
-					auto te = TraceEvent(SevDebug, "TagInfo");
 					int i = 0;
+					std::string allTagString;
 					for (auto& tag : allSources) {
-						te.detail(format("TagId", ++i).c_str(), tag.toString());
+						allTagString += tag.toString() + ",";
 						toCommit.addTag(tag);
 					}
-					toCommit.addTypedMessage(m);
+					TraceEvent(SevDebug, "TagInfo").detail("Tags", allTagString);
+					toCommit.addTypedMessage(m, true /* allLocations */);
 					toCommit.setHasExecOp();
 				} else
 					UNREACHABLE();

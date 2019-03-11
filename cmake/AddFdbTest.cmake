@@ -54,7 +54,7 @@ endfunction()
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
 function(add_fdb_test)
-  set(options UNIT IGNORE)
+  set(options UNIT IGNORE RESTORE)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -74,6 +74,10 @@ function(add_fdb_test)
   endif()
   if(ADD_FDB_TEST_UNIT)
     set(test_type "test")
+  endif()
+  set(TEST_RESTORING "NO")
+  if (ADD_FDB_TEST_RESTORE)
+    set(TEST_RESTORING "YES")
   endif()
   list(GET ADD_FDB_TEST_TEST_FILES 0 first_file)
   string(REGEX REPLACE "^(.*)\\.txt$" "\\1" test_name ${first_file})
@@ -117,6 +121,7 @@ function(add_fdb_test)
     --log-format ${TEST_LOG_FORMAT}
     --keep-logs ${TEST_KEEP_LOGS}
     --keep-simdirs ${TEST_KEEP_SIMDIR}
+    --restoring ${TEST_RESTORING}
     --seed ${SEED}
     --test-number ${assigned_id}
     ${BUGGIFY_OPTION}

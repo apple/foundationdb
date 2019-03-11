@@ -2692,11 +2692,11 @@ fdbFork(const std::string& path, const std::vector<std::string>& args)
     }
     paramList.push_back(nullptr);
 
-	auto te = TraceEvent("FdbFork");
-	te.detail("Cmd", path);
+	std::string argsString;
 	for (int i = 0; i < args.size(); i++) {
-		te.detail("Args", args[i]);
+		argsString += args[i] + ",";
 	}
+	TraceEvent("FdbFork").detail("Cmd", path).detail("Args", argsString);
 
 	pid_t pid = fork();
     if (pid == -1) {
