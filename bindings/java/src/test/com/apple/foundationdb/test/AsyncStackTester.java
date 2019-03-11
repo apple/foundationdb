@@ -482,7 +482,8 @@ public class AsyncStackTester {
 				tr.options().setRetryLimit(50);
 				tr.options().setMaxRetryDelay(100);
 				tr.options().setUsedDuringCommitProtectionDisable();
-				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setDebugTransactionIdentifier("my_transaction");
+				tr.options().setLogTransaction();
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
 

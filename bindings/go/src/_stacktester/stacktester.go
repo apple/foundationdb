@@ -831,7 +831,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetRetryLimit(50)
 			tr.Options().SetMaxRetryDelay(100)
 			tr.Options().SetUsedDuringCommitProtectionDisable()
-			tr.Options().SetTransactionLoggingEnable("my_transaction")
+			tr.Options().SetDebugTransactionIdentifier("my_transaction")
+			tr.Options().SetLogTransaction()
 			tr.Options().SetReadLockAware()
 			tr.Options().SetLockAware()
 
