@@ -38,7 +38,7 @@ configure() {
     local __res=0
     for _ in 1
     do
-        cmake ../foundationdb
+        cmake ../foundationdb ${CMAKE_EXTRA_ARGS}
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -87,6 +87,8 @@ package_fast() {
     for _ in 1
     do
         make -j`nproc` packages
+        cpack
+        cpack -G RPM -D GENERATE_EL6=ON
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -100,7 +102,7 @@ package() {
     local __res=0
     for _ in 1
     do
-        configure
+        build
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -120,7 +122,7 @@ rpm() {
     local __res=0
     for _ in 1
     do
-        cmake -DINSTALL_LAYOUT=RPM ../foundationdb
+        configure
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -132,7 +134,8 @@ rpm() {
         then
             break
         fi
-        fakeroot cpack
+        fakeroot cpack -G RPM -D GENERATE_EL6=ON
+        fakeroot cpack -G RPM
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -146,7 +149,7 @@ deb() {
     local __res=0
     for _ in 1
     do
-        cmake -DINSTALL_LAYOUT=DEB ../foundationdb
+        configure
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -158,7 +161,7 @@ deb() {
         then
             break
         fi
-        fakeroot cpack
+        fakeroot cpack -G DEB
         __res=$?
         if [ ${__res} -ne 0 ]
         then
@@ -172,7 +175,7 @@ test-fast() {
     local __res=0
     for _ in 1
     do
-        ctest -j`nproc`
+        ctest -j`nproc` ${CTEST_EXTRA_ARGS}
         __res=$?
         if [ ${__res} -ne 0 ]
         then

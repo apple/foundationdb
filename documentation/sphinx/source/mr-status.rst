@@ -128,7 +128,7 @@ The following format informally describes the JSON containing the status data. T
           "name": <  "initializing"
                    | "missing_data"
                    | "healing"
-                   | "removing_redundant_teams"
+                   | "optimizing_team_collections"
                    | "healthy_repartitioning"
                    | "healthy_removing_server"
                    | "healthy_rebalancing"

@@ -2,6 +2,7 @@
 
 source_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
+source ${source_dir}/modules/globals.sh
 source ${source_dir}/modules/config.sh
 source ${source_dir}/modules/util.sh
 source ${source_dir}/modules/arguments.sh
