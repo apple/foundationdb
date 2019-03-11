@@ -1678,7 +1678,7 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if( options.readYourWritesDisabled )
 		return watches_disabled();
 
-	if(key >= allKeys.end || (key >= getMaxReadKey() && tr.apiVersionAtLeast(300)))
+	if(key >= allKeys.end || (key >= getMaxReadKey() && key != metadataVersionKey && tr.apiVersionAtLeast(300)))
 		return key_outside_legal_range();
 
 	if (key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
