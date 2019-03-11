@@ -142,10 +142,10 @@
     A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.
 
 .. |atomic-versionstamps-tuple-warning-key| replace::
-    At this time, versionstamped keys are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.
+    At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.
 
 .. |atomic-versionstamps-tuple-warning-value| replace::
-    At this time, versionstamped values are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
+    At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
 .. |api-version| replace:: 610
 
