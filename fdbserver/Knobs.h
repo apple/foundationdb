@@ -79,6 +79,7 @@ public:
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
+	double TLOG_DEGRADED_RESET_INTERVAL;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

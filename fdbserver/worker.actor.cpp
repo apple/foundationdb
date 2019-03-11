@@ -646,6 +646,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		}
 	}
 
+	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->TLOG_DEGRADED_RESET_INTERVAL, false));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
