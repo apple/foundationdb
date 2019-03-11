@@ -244,7 +244,7 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
 
 ::
 
-   user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [-as <DURATION>] [--verify_uid <UID>]
+   user@host$ fdbbackup modify [-t <TAG>] [-d <BACKUP_URL>] [-s <DURATION>] [--active_snapshot_interval <DURATION>] [--verify_uid <UID>]
 
 ``-d <BACKUP_URL>``
   Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.
@@ -252,7 +252,7 @@ The ``modify`` subcommand is used to modify parameters of a running backup.  All
 ``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
   Sets a new duration for backup snapshots, in seconds.
 
-``-as <DURATION>`` or ``--active_snapshot_interval <DURATION>``  
+``--active_snapshot_interval <DURATION>``  
   Sets new duration for the backup's currently active snapshot, in seconds, relative to the start of the snapshot.
 
 ``--verify_uid <UID>``
