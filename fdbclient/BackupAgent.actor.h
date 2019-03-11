@@ -742,7 +742,7 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	KeyBackedBinaryValue<int64_t> snapshotDispatchLastShardsBehind() {
+	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
