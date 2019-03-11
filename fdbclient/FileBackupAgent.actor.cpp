@@ -3885,7 +3885,7 @@ public:
 
 				wait( store(paused, tr->get(backupAgent->taskBucket->getPauseKey())) && store(uidAndAbortedFlag, tag.get(tr)) && store(recentReadVersion, tr->getReadVersion()) );
 
-				doc.setKey("AllBackupsPaused", paused.present());
+				doc.setKey("BackupAgentsPaused", paused.present());
 				doc.setKey("Tag", tag.tagName);
 
 				if(uidAndAbortedFlag.present()) {
