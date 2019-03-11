@@ -702,11 +702,6 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	// Get the backup container URL only without creating a backup container instance.
-	KeyBackedProperty<Reference<IBackupContainer>> backupContainerURL() {
-		return configSpace.pack(LiteralStringRef("backupContainer"));
-	}
-
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));

@@ -76,7 +76,7 @@ enum enumProgramExe {
 };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP
+	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP
 };
 
 enum enumDBType {
@@ -98,6 +98,9 @@ enum {
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
+
+	// Backup Modify
+	OPT_MOD_ACTIVE_INTERVAL, OPT_MOD_VERIFY_UID,
 
 	// Restore constants
 	OPT_RESTORECONTAINER, OPT_DBVERSION, OPT_PREFIX_ADD, OPT_PREFIX_REMOVE,
@@ -177,6 +180,40 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+
+	SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+#endif
+	{ OPT_TRACE,           "--log",            SO_NONE },
+	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
+	{ OPT_QUIET,           "-q",               SO_NONE },
+	{ OPT_QUIET,           "--quiet",          SO_NONE },
+	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_VERSION,         "--version",        SO_NONE },
+	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
+	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
+	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
+	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
+	{ OPT_MOD_VERIFY_UID,  "--verify_uid",     SO_REQ_SEP },
+	{ OPT_DESTCONTAINER,    "-d",              SO_REQ_SEP },
+	{ OPT_DESTCONTAINER,    "--destcontainer", SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "-s",                  SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
+	{ OPT_MOD_ACTIVE_INTERVAL, "--active_snapshot_interval", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -764,7 +801,7 @@ static void printBackupUsage(bool devhelp) {
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  -d, --destcontainer URL\n"
-	       "                 The Backup container URL for start, describe, expire, and delete operations.\n");
+	       "                 The Backup container URL for start, modify, describe, expire, and delete operations.\n");
 	printBackupContainerInfo();
 	printf("  -b, --base_url BASEURL\n"
 		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
@@ -789,7 +826,12 @@ static void printBackupUsage(bool devhelp) {
 	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
 	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
-	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	       "                 For start or modify operations, specifies the backup's default target snapshot interval as DURATION seconds.  Defaults to %d for start operations.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf("  --active_snapshot_interval DURATION\n"
+	       "                 For modify operations, sets the desired interval for the backup's currently active snapshot, relative to the start of the snapshot.\n");
+	printf("  --verify_uid UID\n"
+	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction\n"
+	       "                 which sets the new backup parameters (if the UID matches).\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
@@ -967,6 +1009,9 @@ enumProgramExe	getProgramType(std::string programExe)
 		}
 	}
 #endif
+	// For debugging convenience, remove .debug suffix if present.
+	if(StringRef(programExe).endsWith(LiteralStringRef(".debug")))
+		programExe = programExe.substr(0, programExe.size() - 6);
 
 	// Check if backup agent
 	if ((programExe.length() >= exeAgent.size())																		&&
@@ -1027,6 +1072,7 @@ enumBackupType	getBackupType(std::string backupType)
 		values["describe"] = BACKUP_DESCRIBE;
 		values["list"] = BACKUP_LIST;
 		values["dump"] = BACKUP_DUMP;
+		values["modify"] = BACKUP_MODIFY;
 	}
 
 	auto i = values.find(backupType);
@@ -1787,6 +1833,31 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
+Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
+	// Error, if no dest container was specified
+	if (destinationContainer.empty()) {
+		fprintf(stderr, "ERROR: No backup destination was specified.\n");
+		printHelpTeaser(name);
+		throw backup_error();
+	}
+
+	Reference<IBackupContainer> c;
+	try {
+		c = IBackupContainer::openContainer(destinationContainer);
+	}
+	catch (Error& e) {
+		std::string msg = format("ERROR: '%s' on URL '%s'", e.what(), destinationContainer.c_str());
+		if(e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
+			msg += format(": %s", IBackupContainer::lastOpenError.c_str());
+		}
+		fprintf(stderr, "%s\n", msg.c_str());
+		printHelpTeaser(name);
+		throw;
+	}
+
+	return c;
+}
+
 ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
 	try
 	{
@@ -1799,7 +1870,7 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 
 		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
+		state Reference<IBackupContainer> bc = openBackupContainer(exeRestore.toString().c_str(), container);
 
 		// If targetVersion is unset then use the maximum restorable version from the backup description
 		if(targetVersion == invalidVersion) {
@@ -1847,30 +1918,6 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 	}
 
 	return Void();
-}
-
-Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
-	// Error, if no dest container was specified
-	if (destinationContainer.empty()) {
-		fprintf(stderr, "ERROR: No backup destination was specified.\n");
-		printHelpTeaser(name);
-		throw backup_error();
-	}
-
-	std::string error;
-	Reference<IBackupContainer> c;
-	try {
-		c = IBackupContainer::openContainer(destinationContainer);
-	}
-	catch (Error& e) {
-		if(!error.empty())
-			error = std::string("[") + error + "]";
-		fprintf(stderr, "ERROR (%s) on %s %s\n", e.what(), destinationContainer.c_str(), error.c_str());
-		printHelpTeaser(name);
-		throw;
-	}
-
-	return c;
 }
 
 ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationContainer, Version beginVersion, Version endVersion) {
@@ -2023,8 +2070,97 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 		}
 	}
 	catch (Error& e) {
-		fprintf(stderr, "ERROR: %s\n", e.what());
+		std::string msg = format("ERROR: %s", e.what());
+		if(e.code() == error_code_backup_invalid_url && !IBackupContainer::lastOpenError.empty()) {
+			msg += format(": %s", IBackupContainer::lastOpenError.c_str());
+		}
+		fprintf(stderr, "%s\n", msg.c_str());
 		throw;
+	}
+
+	return Void();
+}
+
+struct BackupModifyOptions {
+	Optional<std::string> verifyUID;
+	Optional<std::string> destURL;
+	Optional<int> snapshotIntervalSeconds;
+	Optional<int> activeSnapshotIntervalSeconds;
+	bool hasChanges() const {
+		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
+	}
+};
+
+ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions options) {
+	if(!options.hasChanges()) {
+		fprintf(stderr, "No changes were specified, nothing to do!\n");
+		throw backup_error();
+	}
+
+	state KeyBackedTag tag = makeBackupTag(tagName);
+
+	state Reference<IBackupContainer> bc;
+	if(options.destURL.present()) {
+		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get());
+		try {
+			Void _ = wait(timeoutError(bc->create(), 30));
+		} catch(Error &e) {
+			if(e.code() == error_code_actor_cancelled)
+				throw;
+			fprintf(stderr, "ERROR: Could not create backup container at '%s': %s\n", options.destURL.get().c_str(), e.what());
+			throw backup_error();
+		}
+	}
+	
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+
+			if(!uidFlag.present()) {
+				fprintf(stderr, "No backup exists on tag '%s'\n", tagName.c_str());
+				throw backup_error();
+			}
+
+			if(uidFlag.get().second) {
+				fprintf(stderr, "Cannot modify aborted backup on tag '%s'\n", tagName.c_str());
+				throw backup_error();
+			}
+
+			state BackupConfig config(uidFlag.get().first);
+			EBackupState s = wait(config.stateEnum().getOrThrow(tr, false, backup_invalid_info()));
+			if(!FileBackupAgent::isRunnable(s)) {
+				fprintf(stderr, "Backup on tag '%s' is not runnable.\n", tagName.c_str());
+				throw backup_error();
+			}
+
+			if(options.verifyUID.present() && options.verifyUID.get() != uidFlag.get().first.toString()) {
+				fprintf(stderr, "UID verification failed, backup on tag '%s' is '%s' but '%s' was specified.\n", tagName.c_str(), uidFlag.get().first.toString().c_str(), options.verifyUID.get().c_str());
+				throw backup_error();
+			}
+
+			if(options.snapshotIntervalSeconds.present()) {
+				config.snapshotIntervalSeconds().set(tr, options.snapshotIntervalSeconds.get());
+			}
+
+			if(options.activeSnapshotIntervalSeconds.present()) {
+				Version begin = wait(config.snapshotBeginVersion().getOrThrow(tr, false, backup_error()));
+				config.snapshotTargetEndVersion().set(tr, begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			}
+
+			if(options.destURL.present()) {
+				config.backupContainer().set(tr, bc);
+			}
+
+			Void _ = wait(tr->commit());
+			break;
+		}
+		catch (Error& e) {
+			Void _ = wait(tr->onError(e));
+		}
 	}
 
 	return Void();
@@ -2287,6 +2423,9 @@ int main(int argc, char* argv[]) {
 				case BACKUP_LIST:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
 					break;
+				case BACKUP_MODIFY:
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT);
+					break;
 				case BACKUP_UNDEFINED:
 				default:
 					// Display help, if requested
@@ -2423,6 +2562,8 @@ int main(int argc, char* argv[]) {
 		std::vector<std::string> blobCredentials;
 		Version dumpBegin = 0;
 		Version dumpEnd = std::numeric_limits<Version>::max();
+
+		BackupModifyOptions modifyOptions;
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
@@ -2593,16 +2734,30 @@ int main(int argc, char* argv[]) {
 					// If the url starts with '/' then prepend "file://" for backwards compatibility
 					if(StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
 						destinationContainer = std::string("file://") + destinationContainer;
+					modifyOptions.destURL = destinationContainer;
 					break;
-				case OPT_SNAPSHOTINTERVAL: {
+				case OPT_SNAPSHOTINTERVAL:
+				case OPT_MOD_ACTIVE_INTERVAL:
+				{
 					const char* a = args->OptionArg();
-					if (!sscanf(a, "%d", &snapshotIntervalSeconds)) {
+					int seconds;
+					if (!sscanf(a, "%d", &seconds)) {
 						fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
+					if(optId == OPT_SNAPSHOTINTERVAL) {
+						snapshotIntervalSeconds = seconds;
+						modifyOptions.snapshotIntervalSeconds = seconds;
+					}
+					else if(optId == OPT_MOD_ACTIVE_INTERVAL) {
+						modifyOptions.activeSnapshotIntervalSeconds = seconds;
+					}
 					break;
 				}
+				case OPT_MOD_VERIFY_UID:
+					modifyOptions.verifyUID = args->OptionArg();
+					break;
 				case OPT_WAITFORDONE:
 					waitForDone = true;
 					break;
@@ -2944,6 +3099,15 @@ int main(int argc, char* argv[]) {
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
 				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
+				break;
+			}
+
+			case BACKUP_MODIFY:
+			{
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
+
+				f = stopAfter( modifyBackup(db, tagName, modifyOptions) );
 				break;
 			}
 
