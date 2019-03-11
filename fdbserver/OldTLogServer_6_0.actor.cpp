@@ -33,6 +33,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
@@ -1097,6 +1098,7 @@ ACTOR Future<Void> watchDegraded(TLogData* self) {
 		loopCount++;
 	}
 	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid);
+	TEST(true); //6.0 TLog degraded
 	self->degraded->set(true);
 	return Void();
 }
@@ -1114,6 +1116,9 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 
 	state Future<Void> degraded = watchDegraded(self);
 	wait(c);
+	if(g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
+		wait(delay(6.0));
+	}
 	degraded.cancel();
 	wait(self->queueCommitEnd.whenAtLeast(commitNumber-1));
 
