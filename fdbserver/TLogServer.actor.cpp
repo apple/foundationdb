@@ -1178,7 +1178,6 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskTLogPop));
 		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
 	}
-
 	req.reply.send(Void());
 	return Void();
 }
@@ -1642,6 +1641,7 @@ ACTOR Future<Void> tLogCommit(
     state TLogQueueEntryRef qe;
     state StringRef execCmd;
     state StringRef param2;
+	state vector<Tag> execTags;
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		if(req.debugID.present())
@@ -1669,6 +1669,7 @@ ACTOR Future<Void> tLogCommit(
 					rd >> messageLength >> sub >> tagCount;
 					for(int i = 0; i < tagCount; i++) {
 						rd >> tmpTag;
+						execTags.push_back(tmpTag);
 					}
 					rd >> type;
 					if (type == MutationRef::Exec) {
@@ -1698,10 +1699,10 @@ ACTOR Future<Void> tLogCommit(
 						std::string reason;
 						if (!self->ignorePopRequest) {
 							execVersion = invalidVersion;
-							reason = "snapFailIgnorePopNotSet";
+							reason = "SnapFailIgnorePopNotSet";
 						} else if (uidStr != self->ignorePopUid) {
 							execVersion = invalidVersion;
-							reason = "snapFailedDisableTLogUidMismatch";
+							reason = "SnapFailedDisableTLogUidMismatch";
 						}
 
 						if (execVersion == invalidVersion) {
@@ -1740,7 +1741,7 @@ ACTOR Future<Void> tLogCommit(
 						    .detail("IgnorePopUid", self->ignorePopUid)
 						    .detail("IgnporePopRequest", self->ignorePopRequest)
 						    .detail("IgnporePopDeadline", self->ignorePopDeadline)
-						    .trackLatest("disablePopTLog");
+						    .trackLatest("DisablePopTLog");
 					}
 					if (execCmd == execEnableTLogPop) {
 						execVersion = invalidVersion;
@@ -1759,7 +1760,7 @@ ACTOR Future<Void> tLogCommit(
 						    .detail("IgnorePopUid", self->ignorePopUid)
 						    .detail("IgnporePopRequest", self->ignorePopRequest)
 						    .detail("IgnporePopDeadline", self->ignorePopDeadline)
-						    .trackLatest("enablePopTLog");
+						    .trackLatest("EnablePopTLog");
 					}
 				}
             }
@@ -1787,7 +1788,7 @@ ACTOR Future<Void> tLogCommit(
 	state Future<Void> stopped = logData->stopCommit.onTrigger();
 	wait( timeoutWarning( logData->queueCommittedVersion.whenAtLeast( req.version ) || stopped, 0.1, warningCollectorInput ) );
 
-    if ((execVersion != invalidVersion) &&
+	if ((execVersion != invalidVersion) &&
         execVersion <= logData->queueCommittedVersion.get()) {
         int err = 0;
         auto uidStr = execArg.getBinaryArgValue("uid");
@@ -1848,17 +1849,20 @@ ACTOR Future<Void> tLogCommit(
 		    .detail("UidStr", uidStr)
 		    .detail("Status", err)
 		    .detail("Tag", logData->allTags.begin()->toString())
+		    .detail("TagSize", logData->allTags.size())
 		    .detail("Role", "TLog");
 
 		// print the status message
-		for (auto it = logData->allTags.begin(); it != logData->allTags.end(); it++) {
-            Version poppedTagVersion = -1;
-			auto tagv = logData->getTagData(*it);
+		for (int i = 0; i < execTags.size(); i++) {
+			Version poppedTagVersion = -1;
+			auto tagv = logData->getTagData(execTags[i]);
+			if (!tagv) {
+				continue;
+			}
 			poppedTagVersion = tagv->popped;
 
 			int len = param2.size();
-			state std::string message =
-                "ExecTrace/TLog/" + it->toString() + "/" + uidStr;
+			state std::string message = "ExecTrace/TLog/" + tagv->tag.toString() + "/" + uidStr;
 
 			TraceEvent te = TraceEvent(SevDebug, "TLogExecTraceDetailed");
 			te.detail("Uid", uidStr);
@@ -1866,7 +1870,7 @@ ACTOR Future<Void> tLogCommit(
 			te.detail("Role", "TLog");
 			te.detail("ExecCmd", execCmd.toString());
 			te.detail("Param2", param2.toString());
-			te.detail("Tag", it->toString());
+			te.detail("Tag", tagv->tag.toString());
 			te.detail("Version", qe.version);
 			te.detail("PoppedTagVersion", poppedTagVersion);
 			te.detail("PersistentDataVersion", logData->persistentDataVersion);
@@ -1877,7 +1881,7 @@ ACTOR Future<Void> tLogCommit(
 				te.trackLatest(message.c_str());
 			}
 		}
-        execVersion = invalidVersion;
+		execVersion = invalidVersion;
     }
 
 	if(stopped.isReady()) {
@@ -2065,21 +2069,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			logData->addActor.send( tLogPeekMessages( self, req, logData ) );
 		}
 		when( TLogPopRequest req = waitNext( tli.popMessages.getFuture() ) ) {
-			if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
-				self->ignorePopRequest = false;
-				self->ignorePopUid = "";
-				self->ignorePopDeadline = 0.0;
-				TraceEvent("ResetIgnorePopRequest")
-				    .detail("Now", g_network->now())
-				    .detail("IgnorePopRequest", self->ignorePopRequest)
-				    .detail("IgnorePopDeadline", self->ignorePopDeadline)
-				    .trackLatest("disableTLogPopTimedOut");
-			}
-			if (!self->ignorePopRequest) {
-				logData->addActor.send(tLogPop(self, req, logData));
-			} else {
-				TraceEvent("IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
-			}
+			logData->addActor.send(tLogPop(self, req, logData));
 		}
 		when( TLogCommitRequest req = waitNext( tli.commit.getFuture() ) ) {
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());

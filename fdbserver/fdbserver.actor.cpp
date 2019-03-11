@@ -61,6 +61,8 @@
 #include "versions.h"
 #endif
 
+#include "fdbmonitor/SimpleIni.h"
+
 #ifdef  __linux__
 #include <execinfo.h>
 #include <signal.h>
@@ -79,7 +81,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
 	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -118,6 +120,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
 	{ OPT_RESTARTING,            "-R",                          SO_NONE },
 	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
+	{ OPT_RESTORING,            "--restoring",                 SO_NONE },
 	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
 	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
 	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
@@ -932,6 +935,7 @@ int main(int argc, char* argv[]) {
 		LocalityData localities;
 		int minTesterCount = 1;
 		bool testOnServers = false;
+		bool restoring = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
@@ -1193,7 +1197,11 @@ int main(int argc, char* argv[]) {
 				case OPT_RESTARTING:
 					restarting = true;
 					break;
-				case OPT_RANDOMSEED: {
+			    case OPT_RESTORING: {
+				    restoring = true;
+				    break;
+			    }
+			    case OPT_RANDOMSEED: {
 					char* end;
 					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
 					if( *end ) {
@@ -1641,7 +1649,8 @@ int main(int argc, char* argv[]) {
 
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
-				if( directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." && directories[i] != "backups") {
+				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
 					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
@@ -1661,6 +1670,62 @@ int main(int argc, char* argv[]) {
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
+			} else if (restoring) {
+				std::vector<std::string> returnList;
+				std::string ext = "";
+				std::string tmpFolder = abspath(dataFolder);
+				returnList = platform::listDirectories(tmpFolder);
+				TraceEvent("RestoringDataFolder").detail("DataFolder", tmpFolder);
+
+				CSimpleIni ini;
+				ini.SetUnicode();
+				ini.LoadFile(joinPath(tmpFolder, "restartInfo.ini").c_str());
+				std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
+				TraceEvent("RestoreSnapUID").detail("UID", snapStr);
+
+				// delete all files (except fdb.cluster) in non-snap directories
+				for (int i = 0; i < returnList.size(); i++) {
+					if (returnList[i] == "." || returnList[i] == "..") {
+						continue;
+					}
+					if (returnList[i].find(snapStr) != std::string::npos) {
+						continue;
+					}
+
+					std::string childf = tmpFolder + "/" + returnList[i];
+					std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+					for (int j = 0; j < returnFiles.size(); j++) {
+						fprintf(stderr, "file : %s\n", returnFiles[j].c_str());
+						if (returnFiles[j] != "fdb.cluster") {
+							TraceEvent("DeletingNonSnapfiles")
+							    .detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
+							deleteFile(childf + "/" + returnFiles[j]);
+						}
+					}
+				}
+				// move the contents from snap folder to the original folder,
+				// delete snap folders
+				for (int i = 0; i < returnList.size(); i++) {
+					fprintf(stderr, "Dir : %s\n", returnList[i].c_str());
+					if (returnList[i] == "." || returnList[i] == "..") {
+						continue;
+					}
+					if (returnList[i].find(snapStr) == std::string::npos) {
+						if (returnList[i].find("snap") != std::string::npos) {
+							platform::eraseDirectoryRecursive(tmpFolder + returnList[i]);
+						}
+						continue;
+					}
+					std::string origDir = returnList[i].substr(0, 32);
+					std::string dirToRemove = tmpFolder + "/" + origDir;
+					std::string dirSrc = tmpFolder + "/" + returnList[i];
+					TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
+					platform::eraseDirectoryRecursive(dirToRemove);
+					renameFile(dirSrc, dirToRemove);
+					TraceEvent("RenamingSnapToOriginalDirectory")
+					    .detail("Oldname", dirSrc)
+					    .detail("Newname", dirToRemove);
+				}
 			}
 
 			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
