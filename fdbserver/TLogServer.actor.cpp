@@ -1372,6 +1372,7 @@ ACTOR Future<Void> watchDegraded(TLogData* self) {
 		wait(delay(SERVER_KNOBS->TLOG_DEGRADED_DURATION/SERVER_KNOBS->TLOG_DEGRADED_DELAY_COUNT, TaskLowPriority));
 		loopCount++;
 	}
+	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid);
 	self->degraded->set(true);
 	return Void();
 }

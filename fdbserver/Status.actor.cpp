@@ -796,7 +796,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 			statusObj["class_type"] = workerItr->processClass.toString();
 			statusObj["class_source"] = workerItr->processClass.sourceString();
-
+			if(workerItr->degraded) {
+				statusObj["degraded"] = true;
+			}
 		}
 		catch (Error& e){
 			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be returned.
@@ -2032,6 +2034,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
+
+		int totalDegraded = 0;
+		for(auto& it : workers) {
+			if(it.degraded) {
+				totalDegraded++;
+			}
+		}
+		statusObj["degraded_processes"] = totalDegraded;
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
