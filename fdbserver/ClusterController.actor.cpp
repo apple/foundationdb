@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -110,17 +111,28 @@ public:
 		{
 		}
 
-		void setDistributor(const DataDistributorInterface& distributorInterf) {
+		void setDistributor(const DataDistributorInterface& interf) {
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
-			newInfo.distributor = distributorInterf;
+			newInfo.distributor = interf;
 			serverInfo->set( newInfo );
 		}
 
-		void clearDistributor() {
+		void setRatekeeper(const RatekeeperInterface& interf) {
 			ServerDBInfo newInfo = serverInfo->get();
 			newInfo.id = g_random->randomUniqueID();
-			newInfo.distributor = Optional<DataDistributorInterface>();
+			newInfo.ratekeeper = interf;
+			serverInfo->set( newInfo );
+		}
+
+		void clearInterf(ProcessClass::ClassType t) {
+			ServerDBInfo newInfo = serverInfo->get();
+			newInfo.id = g_random->randomUniqueID();
+			if (t == ProcessClass::DataDistributorClass) {
+				newInfo.distributor = Optional<DataDistributorInterface>();
+			} else if (t == ProcessClass::RateKeeperClass) {
+				newInfo.ratekeeper = Optional<RatekeeperInterface>();
+			}
 			serverInfo->set( newInfo );
 		}
 	};
@@ -524,6 +536,9 @@ public:
 		if (db.serverInfo->get().distributor.present()) {
 			(*id_used)[db.serverInfo->get().distributor.get().locality.processId()]++;
 		}
+		if (db.serverInfo->get().ratekeeper.present()) {
+			(*id_used)[db.serverInfo->get().ratekeeper.get().locality.processId()]++;
+		}
 	}
 
 	RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration( RecruitRemoteFromConfigurationRequest const& req ) {
@@ -921,6 +936,9 @@ public:
 		if (db.serverInfo->get().distributor.present()) {
 			id_used[db.serverInfo->get().distributor.get().locality.processId()]++;
 		}
+		if (db.serverInfo->get().ratekeeper.present()) {
+			id_used[db.serverInfo->get().ratekeeper.get().locality.processId()]++;
+		}
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 
 		if ( oldMasterFit < mworker.fitness )
@@ -1106,6 +1124,9 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			if (cluster->db.serverInfo->get().distributor.present()) {
 				id_used[cluster->db.serverInfo->get().distributor.get().locality.processId()]++;
 			}
+			if (cluster->db.serverInfo->get().ratekeeper.present()) {
+				id_used[cluster->db.serverInfo->get().ratekeeper.get().locality.processId()]++;
+			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.first.locality.processId() == cluster->clusterControllerProcessId )
 				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
@@ -1141,6 +1162,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().distributor;
+				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( dbInfo );
@@ -1752,7 +1774,12 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if ( req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() ) {
 		const DataDistributorInterface& di = req.distributorInterf.get();
 		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
-		self->db.setDistributor( di );
+		self->db.setDistributor(di);
+	}
+	if ( req.ratekeeperInterf.present() && !self->db.serverInfo->get().ratekeeper.present() ) {
+		const RatekeeperInterface& rki = req.ratekeeperInterf.get();
+		TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
+		self->db.setRatekeeper(rki);
 	}
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo );
@@ -2308,8 +2335,6 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 }
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
-	state Optional<Key> dcId = self->clusterControllerDcId;
-	state InitializeDataDistributorRequest req;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
@@ -2321,18 +2346,18 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
-			req.reqId = g_random->randomUniqueID();
-			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
+			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			state InitializeDataDistributorRequest req(g_random->randomUniqueID());
+			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", data_distributor.worker.first.address());
 
 			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
 			if (distributor.present()) {
-				TraceEvent("ClusterController_DataDistributorRecruited", req.reqId).detail("Addr", data_distributor.worker.first.address());
+				TraceEvent("ClusterController_DataDistributorRecruited", self->id).detail("Addr", data_distributor.worker.first.address());
 				return distributor.get();
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_DataDistributorRecruitError", req.reqId).error(e);
+			TraceEvent("ClusterController_DataDistributorRecruitError", self->id).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
@@ -2341,7 +2366,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 	}
 }
 
-ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterControllerFullInterface *clusterInterface ) {
+ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY);
 
 	// wait for a while to see if existing data distributor will join.
@@ -2361,10 +2386,66 @@ ACTOR Future<Void> waitDDRejoinOrStartDD( ClusterControllerData *self, ClusterCo
 			wait( waitFailureClient( self->db.serverInfo->get().distributor.get().waitFailure, SERVER_KNOBS->DD_FAILURE_TIME ) );
 			TraceEvent("ClusterController", self->id)
 			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.get().id());
-			self->db.clearDistributor();
+			self->db.clearInterf(ProcessClass::DataDistributorClass);
 		} else {
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
-			self->db.setDistributor( distributorInterf );
+			self->db.setDistributor(distributorInterf);
+		}
+	}
+}
+
+ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
+	loop {
+		try {
+			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
+				wait( self->db.serverInfo->onChange() );
+			}
+
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
+			state InitializeRatekeeperRequest req(g_random->randomUniqueID());
+			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", rkWorker.worker.first.address());
+
+			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.first.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
+			if (interf.present()) {
+				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", rkWorker.worker.first.address());
+				return interf.get();
+			}
+		}
+		catch (Error& e) {
+			TraceEvent("ClusterController_RatekeeperRecruitError", self->id).error(e);
+			if ( e.code() != error_code_no_more_servers ) {
+				throw;
+			}
+		}
+		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+	}
+}
+
+ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
+	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY);
+
+	// wait for a while to see if an existing ratekeeper will join.
+	loop choose {
+		when ( wait(initialDelay) ) { break; }
+		when ( wait(self->db.serverInfo->onChange()) ) {  // Rejoins via worker registration
+			if ( self->db.serverInfo->get().ratekeeper.present() ) {
+				TraceEvent("ClusterController_GotRateKeeper", self->id)
+				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+				break;
+			}
+		}
+	}
+
+	loop {
+		if ( self->db.serverInfo->get().ratekeeper.present() ) {
+			wait( waitFailureClient( self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME ) );
+			TraceEvent("ClusterController_RateKeeperDied", self->id)
+			.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+			self->db.clearInterf(ProcessClass::RateKeeperClass);
+		} else {
+			RatekeeperInterface rkInterf = wait( startRatekeeper(self) );
+			self->db.setRatekeeper(rkInterf);
 		}
 	}
 }
@@ -2385,8 +2466,9 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( updatedChangingDatacenters(&self) );
 	self.addActor.send( updatedChangedDatacenters(&self) );
 	self.addActor.send( updateDatacenterVersionDifference(&self) );
-	self.addActor.send( waitDDRejoinOrStartDD(&self, &interf) );
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
+	self.addActor.send( monitorDataDistributor(&self) );
+	self.addActor.send( monitorRatekeeper(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

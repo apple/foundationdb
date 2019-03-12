@@ -339,6 +339,7 @@ cluster.messages                      log_servers_error                     Time
 cluster.messages                      transaction_start_timeout             Unable to start transaction after __ seconds.
 cluster.messages                      unreachable_master_worker             Unable to locate the master worker.
 cluster.messages                      unreachable_dataDistributor_worker    Unable to locate the data distributor worker.
+cluster.messages                      unreachable_ratekeeper_worker         Unable to locate the ratekeeper worker.
 cluster.messages                      unreachable_processes                 The cluster has some unreachable processes.
 cluster.messages                      unreadable_configuration              Unable to read database configuration.
 cluster.messages                      layer_status_incomplete               Some or all of the layers subdocument could not be read.

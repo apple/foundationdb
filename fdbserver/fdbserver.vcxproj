@@ -191,7 +191,7 @@
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="QuietDatabase.h" />
-    <ClInclude Include="Ratekeeper.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
     <ClInclude Include="RestoreInterface.h" />
