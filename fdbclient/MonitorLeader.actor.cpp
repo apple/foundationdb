@@ -334,12 +334,12 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
 ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
+	state bool hasCounted = false;
 	loop {
-		state bool hasExisted = false;
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
-		if (li.present() && !hasExisted && connectedCoordinatorsNum.isValid()) {
+		if (li.present() && !hasCounted && connectedCoordinatorsNum.isValid()) {
 			connectedCoordinatorsNum->set(connectedCoordinatorsNum->get() + 1);
-			hasExisted = true;
+			hasCounted = true;
 		}
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
