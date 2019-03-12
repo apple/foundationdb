@@ -1542,8 +1542,7 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Key dcId ) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Reference<AsyncVar<int>> unused(new AsyncVar<int>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface, unused);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
 	loop {
 		choose {

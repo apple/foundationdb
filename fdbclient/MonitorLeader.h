@@ -30,7 +30,7 @@
 class ClientCoordinators;
 
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum );
+Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum = Reference<AsyncVar<int>>() );
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.

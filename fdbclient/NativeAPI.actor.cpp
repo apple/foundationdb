@@ -533,14 +533,14 @@ DatabaseContext::DatabaseContext(
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
+ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
 	try {
 		state Optional<double> incorrectTime;
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
-			req.connectedCoordinatorsNum = connectedCoordinatorsNum->get();
+			req.connectedCoordinatorsNum = connectedCoordinatorsNumDelayed->get();
 			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
 
 			ClusterConnectionString fileConnectionString;
@@ -571,7 +571,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 					if(clusterInterface->get().present())
 						TraceEvent("ClientInfo_CCInterfaceChange").detail("CCID", clusterInterface->get().get().id());
 				}
-				when( wait( connectedCoordinatorsNum->onChange() ) ) {}
+				when( wait( connectedCoordinatorsNumDelayed->onChange() ) ) {}
 			}
 		}
 	} catch( Error& e ) {
@@ -588,9 +588,10 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 // Notify client when cluster info (e.g., cluster controller) changes
 Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality) {
 	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0));
+	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
 	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface, connectedCoordinatorsNum));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNum);
+	Future<Void> clientInfoMonitor = monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNumDelayed) || delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, 1.0);
 
 	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false));
 }
@@ -756,9 +757,10 @@ Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 
 Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality ) {
 	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0)); // Number of connected coordinators for the client
-	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNum, apiVersion));
+	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
+	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNumDelayed, apiVersion));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo, connectedCoordinatorsNum);
+	Future<Void> clientInfoMonitor = monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo, connectedCoordinatorsNumDelayed) || delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, 1.0);
 
 	return Database( new DatabaseContext( cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false, apiVersion ) );
 }

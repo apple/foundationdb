@@ -1234,7 +1234,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	}
 
 
-	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = {traceLogGroup.toString(), connectedCoordinatorsNum};
+	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(traceLogGroup.toString(), connectedCoordinatorsNum);
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {

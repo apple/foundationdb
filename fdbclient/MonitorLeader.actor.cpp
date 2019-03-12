@@ -335,9 +335,11 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // is a nominee)
 ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
 	loop {
+		state bool hasExisted = false;
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
-		if (li.present()) {
+		if (li.present() && !hasExisted && connectedCoordinatorsNum.isValid()) {
 			connectedCoordinatorsNum->set(connectedCoordinatorsNum->get() + 1);
+			hasExisted = true;
 		}
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
@@ -460,7 +462,7 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 	state MonitorLeaderInfo info(connFile);
 	loop {
 		// set the AsyncVar to 0
-		connectedCoordinatorsNum->set(0);
+		if (connectedCoordinatorsNum.isValid()) connectedCoordinatorsNum->set(0);
 		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info, connectedCoordinatorsNum) );
 		info = _info;
 		info.generation++;

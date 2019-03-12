@@ -33,6 +33,9 @@ typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > Clie
 struct ClientStatusInfo {
 	std::string traceLogGroup;
 	int connectedCoordinatorsNum;
+
+	ClientStatusInfo() : connectedCoordinatorsNum(0) {}
+	ClientStatusInfo(std::string const& traceLogGroup, int const connectedCoordinatorsNum) : traceLogGroup(traceLogGroup), connectedCoordinatorsNum(connectedCoordinatorsNum) {}
 };
 
 Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<std::pair<WorkerInterface, ProcessClass>> const& workers,
