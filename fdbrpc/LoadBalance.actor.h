@@ -67,11 +67,12 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 
 struct LoadBalancedReply {
 	double penalty;
+	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
 
 	template <class Ar>
 	void serialize(Ar &ar) {
-		serializer(ar, penalty);
+		serializer(ar, penalty, error);
 	}
 };
 
@@ -94,6 +95,10 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+
+	if (loadBalancedReply.present() && loadBalancedReply.get().error.present()) {
+		throw loadBalancedReply.get().error.get();
+	}
 	
 	if(result.present()) {
 		return true;
