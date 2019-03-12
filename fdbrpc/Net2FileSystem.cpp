@@ -58,7 +58,12 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 
 	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
-	if ( (flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) )
+	// In the vast majority of cases, we wish to use Kernel AIO. However, some systems
+	// dont properly support don’t properly support kernel async I/O without O_DIRECT
+	// or AIO at all. In such cases, DISABLE_POSIX_KERNEL_AIO knob can be enabled to fallback to
+	// EIO instead of Kernel AIO.
+	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) &&
+	    !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
 		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
 	else
 #endif
