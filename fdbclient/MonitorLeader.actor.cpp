@@ -176,12 +176,6 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 	coord = NetworkAddress::parseList(addrs);
 	ASSERT( coord.size() > 0 );  // parseList() always returns at least one address if it doesn't throw
 
-	bool isTLS = coord[0].isTLS();
-	for( auto const& server : coord ) {
-		if( server.isTLS() != isTLS )
-			throw connection_string_invalid();
-	}
-
 	std::sort( coord.begin(), coord.end() );
 	// Check that there are no duplicate addresses
 	if ( std::unique( coord.begin(), coord.end() ) != coord.end() )
