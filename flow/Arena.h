@@ -92,9 +92,9 @@ public:
 	inline explicit Arena( size_t reservedSize );
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) noexcept(true);
+	Arena(Arena && r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) noexcept(true);
+	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
 	inline void dependsOn( const Arena& p );
 	inline size_t getSize() const;
@@ -116,7 +116,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 {
 	enum {
 		SMALL = 64,
-		LARGE = 4097 // If size == used == LARGE, then use hugeSize, hugeUsed
+		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
 	};
 
 	enum { NOT_TINY = 255, TINY_HEADER = 6 };
@@ -227,7 +227,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				else if (reqSize <= 512) { b = (ArenaBlock*)FastAllocator<512>::allocate(); b->bigSize = 512; INSTRUMENT_ALLOCATE("Arena512"); }
 				else if (reqSize <= 1024) { b = (ArenaBlock*)FastAllocator<1024>::allocate(); b->bigSize = 1024; INSTRUMENT_ALLOCATE("Arena1024"); }
 				else if (reqSize <= 2048) { b = (ArenaBlock*)FastAllocator<2048>::allocate(); b->bigSize = 2048; INSTRUMENT_ALLOCATE("Arena2048"); }
-				else { b = (ArenaBlock*)FastAllocator<4096>::allocate(); b->bigSize = 4096; INSTRUMENT_ALLOCATE("Arena4096"); }
+				else if (reqSize <= 4096) { b = (ArenaBlock*)FastAllocator<4096>::allocate(); b->bigSize = 4096; INSTRUMENT_ALLOCATE("Arena4096"); }
+				else { b = (ArenaBlock*)FastAllocator<8192>::allocate(); b->bigSize = 8192; INSTRUMENT_ALLOCATE("Arena8192"); }
 				b->tinySize = b->tinyUsed = NOT_TINY;
 				b->bigUsed = sizeof(ArenaBlock);
 			} else {
@@ -269,6 +270,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 			else if (bigSize <= 1024) { FastAllocator<1024>::release(this); INSTRUMENT_RELEASE("Arena1024"); }
 			else if (bigSize <= 2048) { FastAllocator<2048>::release(this); INSTRUMENT_RELEASE("Arena2048"); }
 			else if (bigSize <= 4096) { FastAllocator<4096>::release(this); INSTRUMENT_RELEASE("Arena4096"); }
+			else if (bigSize <= 8192) { FastAllocator<8192>::release(this); INSTRUMENT_RELEASE("Arena8192"); }
 			else {
 				#ifdef ALLOC_INSTRUMENTATION
 					allocInstr[ "ArenaHugeKB" ].dealloc( (bigSize+1023)>>10 );
@@ -288,12 +290,12 @@ inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
 		ArenaBlock::create((int)reservedSize,impl);
 }
 inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) noexcept(true) : impl(std::move(r.impl)) {}
+inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
 inline Arena& Arena::operator=(const Arena& r) {
 	impl = r.impl;
 	return *this;
 }
-inline Arena& Arena::operator=(Arena&& r) noexcept(true) {
+inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
 	impl = std::move(r.impl);
 	return *this;
 }

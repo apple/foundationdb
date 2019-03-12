@@ -44,7 +44,11 @@ set(CMAKE_REQUIRED_LIBRARIES c)
 
 
 if(WIN32)
-  add_compile_options(/W3 /EHsc /std:c++14 /bigobj)
+  # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
+  # this sets the windows target version to Windows 7
+  set(WINDOWS_TARGET 0x0601)
+  add_compile_options(/W3 /EHsc /std:c++14 /bigobj $<$<CONFIG:Release>:/Zi>)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
   if(USE_GOLD_LINKER)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")

@@ -333,7 +333,7 @@ public:
 
 	void annotateEvent( TraceEventFields &fields ) {
 		if(localAddress.present()) {
-			fields.addField("Machine", format("%d.%d.%d.%d:%d", (localAddress.get().ip>>24)&0xff, (localAddress.get().ip>>16)&0xff, (localAddress.get().ip>>8)&0xff, localAddress.get().ip&0xff, localAddress.get().port));
+			fields.addField("Machine", formatIpPort(localAddress.get().ip, localAddress.get().port));
 		}
 
 		fields.addField("LogGroup", logGroup);
@@ -624,7 +624,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string baseName = format("%s.%03d.%03d.%03d.%03d.%d", baseOfBase.c_str(), (na.ip>>24)&0xff, (na.ip>>16)&0xff, (na.ip>>8)&0xff, na.ip&0xff, na.port);
+	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), na.ip.toString().c_str(), na.port);
 	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskFlushTrace));
@@ -716,7 +716,7 @@ bool TraceEvent::init() {
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
-			detailf("Machine", "%d.%d.%d.%d:%d", (local.ip>>24)&0xff, (local.ip>>16)&0xff, (local.ip>>8)&0xff, local.ip&0xff, local.port);
+			detail("Machine", formatIpPort(local.ip, local.port));
 		}
 		detail("ID", id);
 		if(err.isValid()) {
@@ -825,6 +825,9 @@ TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) 
 	return detailfNoMetric( std::move(key), "%llu", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, const NetworkAddress& value ) {
+	return detailImpl( std::move(key), value.toString() );
+}
+TraceEvent& TraceEvent::detail( std::string key, const IPAddress& value ) {
 	return detailImpl( std::move(key), value.toString() );
 }
 TraceEvent& TraceEvent::detail( std::string key, const UID& value ) {
@@ -1015,7 +1018,7 @@ void TraceBatch::dump() {
 	std::string machine;
 	if(g_network->isSimulated()) {
 		NetworkAddress local = g_network->getLocalAddress();
-		machine = format("%d.%d.%d.%d:%d", (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port);
+		machine = formatIpPort(local.ip, local.port);
 	}
 
 	for(int i = 0; i < attachBatch.size(); i++) {

@@ -45,7 +45,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <IncludePath>..\..\;C:\Program Files\Java\jdk6\include\win32;C:\Program Files\Java\jdk6\include;C:\Program Files\boost_1_52_0;$(IncludePath)</IncludePath>
+    <IncludePath>..\..\;C:\Program Files\Java\jdk6\include\win32;C:\Program Files\Java\jdk6\include;C:\Program Files\boost_1_67_0;$(IncludePath)</IncludePath>
     <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
     <IntDir>$(SystemDrive)\temp\msvcfdb\$(Platform)$(Configuration)\$(MSBuildProjectName)\</IntDir>
   </PropertyGroup>
@@ -60,7 +60,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(SolutionDir)bindings\c</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;BOOST_ALL_NO_LIB;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalOptions>/bigobj "@$(SolutionDir)flow/no_intellisense.opt" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -75,7 +75,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(SolutionDir)bindings\c</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=_WIN32_WINNT_WS03;BOOST_ALL_NO_LIB;WINVER=_WIN32_WINNT_WS03;NTDDI_VERSION=NTDDI_WS03;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/bigobj "@$(SolutionDir)flow/no_intellisense.opt" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>

@@ -59,18 +59,16 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
 endif()
 
-if(NOT OPEN_FOR_IDE)
-  # TODO: re-enable once the old vcxproj-based build system is removed.
-  #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
-  #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
-  install(TARGETS fdb_c
-    EXPORT fdbc
-    DESTINATION ${FDB_LIB_DIR}
-    COMPONENT clients)
-  install(
-    FILES foundationdb/fdb_c.h
-    ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
-    ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-    DESTINATION ${FDB_INCLUDE_INSTALL_DIR}/foundationdb COMPONENT clients)
-  #install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
-endif()
+# TODO: re-enable once the old vcxproj-based build system is removed.
+#generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
+#  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
+fdb_install(TARGETS fdb_c
+  EXPORT fdbc
+  DESTINATION lib
+  COMPONENT clients)
+fdb_install(
+  FILES foundationdb/fdb_c.h
+  ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
+  ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  DESTINATION include COMPONENT clients)
+#install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)

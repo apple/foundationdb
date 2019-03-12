@@ -5,21 +5,29 @@ add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 if(NOT OPEN_FOR_IDE)
-  install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
+  fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
   install_symlink(
-    TO /${FDB_BIN_DIR}/fdbbackup
-    DESTINATION ${FDB_LIB_DIR}/foundationdb/backup_agent/backup_agent
-    COMPONENT clients)
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR fdbmonitor
+    FILE_NAME fdbbackup
+    LINK_NAME backup_agent/backup_agent)
   install_symlink(
-    TO /${FDB_BIN_DIR}/fdbbackup
-    DESTINATION ${FDB_BIN_DIR}/fdbrestore
-    COMPONENT clients)
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME fdbrestore)
   install_symlink(
-    TO /${FDB_BIN_DIR}/fdbbackup
-    DESTINATION ${FDB_BIN_DIR}/dr_agent
-    COMPONENT clients)
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME dr_agent)
   install_symlink(
-    TO /${FDB_BIN_DIR}/fdbbackup
-    DESTINATION ${FDB_BIN_DIR}/fdbdr
-    COMPONENT clients)
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME fdbdr)
 endif()

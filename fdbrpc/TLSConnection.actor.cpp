@@ -177,7 +177,7 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 		// addresses against certificates, so we have our own peer verifying logic
 		// to use. For FDB<->external system connections, we can use the standard
 		// hostname-based certificate verification logic.
-		if (host.empty() || host == toIPString(toAddr.ip))
+		if (host.empty() || host == toAddr.ip.toString())
 			return wrap(options->get_policy(TLSOptions::POLICY_VERIFY_PEERS), true, network->connect(clearAddr), std::string(""));
 		else
 			return wrap( options->get_policy(TLSOptions::POLICY_NO_VERIFY_PEERS), true, network->connect( clearAddr ), host );

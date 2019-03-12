@@ -242,7 +242,7 @@ def get_traces(d, log_format):
     return traces
 
 
-def process_traces(basedir, testname, path, out, aggregationPolicy, log_format, return_codes):
+def process_traces(basedir, testname, path, out, aggregationPolicy, log_format, return_codes, cmake_seed):
     res = True
     backtraces = []
     parser = None
@@ -261,6 +261,7 @@ def process_traces(basedir, testname, path, out, aggregationPolicy, log_format, 
             parser.fail()
         parser.processTraces()
         res = res and parser.result
+    parser.writeObject({'CMakeSEED': str(cmake_seed)})
     return res
 
 def run_simulation_test(basedir, options):
@@ -314,14 +315,14 @@ def run_simulation_test(basedir, options):
     if options.aggregate_traces == 'NONE':
         res = process_traces(basedir, options.name,
                              wd, None, 'NONE',
-                             options.log_format, return_codes)
+                             options.log_format, return_codes, options.seed)
     else:
         with open(outfile, 'a') as f:
             os.lockf(f.fileno(), os.F_LOCK, 0)
             pos = f.tell()
             res = process_traces(basedir, options.name,
                                  wd, f, options.aggregate_traces,
-                                 options.log_format, return_codes)
+                                 options.log_format, return_codes, options.seed)
             f.seek(pos)
             os.lockf(f.fileno(), os.F_ULOCK, 0)
     if options.keep_logs == 'NONE' or options.keep_logs == 'FAILED' and res:

@@ -91,13 +91,15 @@ struct SaveAndKillWorkload : TestWorkload {
 					ini.SetValue(machineIdString, "dcUID", (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
 					ini.SetValue(machineIdString, "zoneId", (process->locality.zoneId().present()) ? process->locality.zoneId().get().printable().c_str() : "");
 					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port-1).c_str(), format("%d", process->address.ip).c_str());
+					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					             process->address.ip.toString().c_str());
 					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
 					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
 					j++;
 				}
 				else {
-					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port-1).c_str(), format("%d", process->address.ip).c_str());
+					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					             process->address.ip.toString().c_str());
 					int oldValue = machines.find(machineId)->second;
 					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
 					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);

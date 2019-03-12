@@ -25,11 +25,12 @@ EOF
         do
             case ${opt} in
                 h )
-                    arguments_usage
+                    test_args_usage
                     __res=2
                     break
                     ;;
                 n )
+                    echo "test_name=${OPTARG}"
                     test_name="${OPTARG}"
                     ;;
                 \? )

@@ -158,6 +158,7 @@ struct TraceEvent {
 	TraceEvent& detail( std::string key, int value );
 	TraceEvent& detail( std::string key, unsigned value );
 	TraceEvent& detail( std::string key, const struct NetworkAddress& value );
+	TraceEvent& detail( std::string key, const IPAddress& value );
 	TraceEvent& detailf( std::string key, const char* valueFormat, ... );
 	TraceEvent& detailext( std::string key, const StringRef& value );
 	TraceEvent& detailext( std::string key, const Optional<Standalone<StringRef>>& value );

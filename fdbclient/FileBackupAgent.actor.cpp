@@ -168,7 +168,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
+	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
+		return getRestoreRangesOrDefault_impl(this, tr);
+	}
+
+	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig *self, Reference<ReadYourWritesTransaction> tr) {
 		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
 		if (ranges.empty()) {
 			state KeyRange range = wait(self->restoreRange().getD(tr));
@@ -374,7 +378,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<std::vector<KeyRange>> ranges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
+	state Future<std::vector<KeyRange>> ranges = restore.getRestoreRangesOrDefault(tr);
 	state Future<Key> addPrefix = restore.addPrefix().getD(tr);
 	state Future<Key> removePrefix = restore.removePrefix().getD(tr);
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
@@ -2572,7 +2576,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 					bc = restore.sourceContainer().getOrThrow(tr);
-					restoreRanges = RestoreConfig::getRestoreRangesOrDefault(&restore, tr);
+					restoreRanges = restore.getRestoreRangesOrDefault(tr);
 					addPrefix = restore.addPrefix().getD(tr);
 					removePrefix = restore.removePrefix().getD(tr);
 
@@ -3681,8 +3685,9 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		for (auto &restoreRange : restoreRanges) {
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRange.begin, restoreRange.end).removePrefix(removePrefix).withPrefix(addPrefix);
+		state int index;
+		for (index = 0; index < restoreRanges.size(); index++) {
+			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end).removePrefix(removePrefix).withPrefix(addPrefix);
 			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
 			if (existingRows.size() > 0) {
 				throw restore_destination_not_empty();

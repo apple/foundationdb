@@ -32,7 +32,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * <br>
  * <b>Note:</b> Client must call {@link Transaction#commit()} and wait on the result on all transactions,
  *  even ones that only read. This is done automatically when using the retry loops from
- *  {@link Database#run(Function)}. This is explained more in the intro to {@link Transaction}.
+ *  {@link Database#run(java.util.function.Function)}. This is explained more in the intro to {@link Transaction}.
  *
  * @see Transaction
  */
@@ -44,10 +44,71 @@ public interface ReadTransaction extends ReadTransactionContext {
 	int ROW_LIMIT_UNLIMITED = 0;
 
 	/**
+	 * Gets whether this transaction is a snapshot view of the database. In other words, this returns
+	 *  whether read conflict ranges are omitted for any reads done through this {@code ReadTransaction}.
+	 * <br>
+	 * For more information about how to use snapshot reads correctly, see
+	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 *
+	 * @return whether this is a snapshot view of the database with relaxed isolation properties
+	 * @see #snapshot()
+	 */
+	boolean isSnapshot();
+
+	/**
+	 * Return a special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
+	 *  Snapshot reads selectively relax FoundationDB's isolation property, reducing
+	 *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+	 *  but making reasoning about concurrency harder.<br>
+	 * <br>
+	 * For more information about how to use snapshot reads correctly, see
+	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 *
+	 * @return a read-only view of this {@code ReadTransaction} with relaxed isolation properties
+	 */
+	ReadTransaction snapshot();
+
+	/**
 	 * Gets the version at which the reads for this {@code Transaction} will access the database.
 	 * @return the version for database reads
 	 */
 	CompletableFuture<Long> getReadVersion();
+
+	/**
+	 * Directly sets the version of the database at which to execute reads.  The
+	 *  normal operation of a transaction is to determine an appropriately recent
+	 *  version; this call overrides that behavior.  If the version is set too
+	 *  far in the past, {@code past_version} errors will be thrown from read operations.
+	 *  <i>Infrequently used.</i>
+	 *
+	 * @param version the version at which to read from the database
+	 */
+	void setReadVersion(long version);
+
+	/**
+	 * Adds the read conflict range that this {@code ReadTransaction} would have added as if it had read
+	 *  the given key range. If this is a {@linkplain #snapshot() snapshot} view of the database, this will
+	 *  not add the conflict range. This mirrors how reading a range through a snapshot view
+	 *  of the database does not add a conflict range for the read keys.
+	 *
+	 * @param keyBegin the first key in the range (inclusive)
+	 * @param keyEnd the last key in the range (exclusive)
+	 * @return {@code true} if the read conflict range was added and {@code false} otherwise
+	 * @see Transaction#addReadConflictRange(byte[], byte[])
+	 */
+	boolean addReadConflictRangeIfNotSnapshot(byte[] keyBegin, byte[] keyEnd);
+
+	/**
+	 * Adds the read conflict range that this {@code ReadTransaction} would have added as if it had read
+	 *  the given key. If this is a {@linkplain #snapshot() snapshot} view of the database, this will
+	 *  not add the conflict range. This mirrors how reading a key through a snapshot view
+	 *  of the database does not add a conflict range for the read key.
+	 *
+	 * @param key the key to add to the read conflict range set (it this is not a snapshot view of the database)
+	 * @return {@code true} if the read conflict key was added and {@code false} otherwise
+	 * @see Transaction#addReadConflictKey(byte[])
+	 */
+	boolean addReadConflictKeyIfNotSnapshot(byte[] key);
 
 	/**
 	 * Gets a value from the database. The call will return {@code null} if the key is not

@@ -22,6 +22,7 @@
 
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h" // This must be the last include
 
 struct TokenBucket {
 	static constexpr const double addTokensInterval = 0.1;
