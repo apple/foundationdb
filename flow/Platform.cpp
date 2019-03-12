@@ -47,7 +47,6 @@
 #include "flow/FaultInjection.h"
 
 #ifdef _WIN32
-#include <winioctl.h>
 #define NOMINMAX
 #include <windows.h>
 #include <winioctl.h>
