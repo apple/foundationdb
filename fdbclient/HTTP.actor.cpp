@@ -31,7 +31,7 @@ namespace HTTP {
 		o.reserve(s.size() * 3);
 		char buf[4];
 		for(auto c : s)
-			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.')
+			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 				o.append(&c, 1);
 			else {
 				sprintf(buf, "%%%.02X", c);
@@ -394,8 +394,15 @@ namespace HTTP {
 				event.detail("RequestIDReceived", responseID);
 				if(requestID != responseID) {
 					err = http_bad_request_id();
+
 					// Log a non-debug a error
-					TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
+					Severity sev = SevError;
+					// If the response code is 5xx (server error) and the responseID is empty then just warn
+					if(responseID.empty() && r->code >= 500 && r->code < 600) {
+						sev = SevWarnAlways;
+					}
+
+					TraceEvent(sev, "HTTPRequestFailedIDMismatch")
 						.detail("DebugID", conn->getDebugID())
 						.detail("RemoteAddress", conn->getPeerAddress())
 						.detail("Verb", verb)

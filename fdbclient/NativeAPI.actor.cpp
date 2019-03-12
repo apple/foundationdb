@@ -514,9 +514,10 @@ DatabaseContext::DatabaseContext(
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
 	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
+	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
 	logger = databaseLogger( this );
@@ -1942,6 +1943,7 @@ void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
 	cx = std::move(r.cx);
 	tr = std::move(r.tr);
 	readVersion = std::move(r.readVersion);
+	metadataVersion = std::move(r.metadataVersion);
 	extraConflictRanges = std::move(r.extraConflictRanges);
 	commitResult = std::move(r.commitResult);
 	committing = std::move(r.committing);
@@ -1987,6 +1989,36 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 
 	if( !snapshot )
 		tr.transaction.read_conflict_ranges.push_back(tr.arena, singleKeyRange(key, tr.arena));
+
+	if(key == metadataVersionKey) {
+		if(!ver.isReady() || metadataVersion.isSet()) {
+			return metadataVersion.getFuture();
+		} else {
+			if(ver.isError()) return ver.getError();
+			if(ver.get() == cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+				return cx->metadataVersionCache[cx->mvCacheInsertLocation].second;
+			}
+
+			Version v = ver.get();
+			int hi = cx->mvCacheInsertLocation;
+			int lo = (cx->mvCacheInsertLocation+1)%cx->metadataVersionCache.size();
+
+			while(hi!=lo) {
+				int cu = hi > lo ? (hi + lo)/2 : ((hi + cx->metadataVersionCache.size() + lo)/2)%cx->metadataVersionCache.size();
+				if(v == cx->metadataVersionCache[cu].first) {
+					return cx->metadataVersionCache[cu].second;
+				}
+				if(cu == lo) {
+					break;
+				}
+				if(v < cx->metadataVersionCache[cu].first) {
+					hi = cu;
+				} else {
+					lo = (cu+1)%cx->metadataVersionCache.size();
+				}
+			}
+		}
+	}
 
 	return getValue( ver, key, cx, info, trLogInfo );
 }
@@ -2293,6 +2325,7 @@ double Transaction::getBackoff(int errCode) {
 void Transaction::reset() {
 	tr = CommitTransactionRequest();
 	readVersion = Future<Version>();
+	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
 	versionstampPromise = Promise<Standalone<StringRef>>();
 	commitResult = Promise<Void>();
@@ -2508,6 +2541,10 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
+					if(v > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+						cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+						cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(v, ci.metadataVersion);
+					}
 
 					Standalone<StringRef> ret = makeString(10);
 					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
@@ -2882,7 +2919,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime) {
+ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion) {
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -2891,6 +2928,12 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<Transact
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
+	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
+	}
+
+	metadataVersion.send(rep.metadataVersion);
 	return rep.version;
 }
 
@@ -2906,7 +2949,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), trLogInfo, p.getFuture(), options.lockAware, startTime);
+		readVersion = extractReadVersion( cx.getPtr(), trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion);
 	}
 	return readVersion;
 }

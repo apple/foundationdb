@@ -527,6 +527,25 @@ public:
 	StringRef eat(const char *sep) {
 		return eat(StringRef((const uint8_t *)sep, strlen(sep)));
 	}
+	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
+	// and remove that sequence (including the sep byte) from *this
+	// Returns and removes all bytes from *this if no bytes within sep were found
+	StringRef eatAny(StringRef sep, uint8_t *foundSeparator) {
+		auto iSep = std::find_first_of(begin(), end(), sep.begin(), sep.end());
+		if(iSep != end()) {
+			if(foundSeparator != nullptr) {
+				*foundSeparator = *iSep;
+			}
+			const int i = iSep - begin();
+			StringRef token = substr(0, i);
+			*this = substr(i + 1);
+			return token;
+		}
+		return eat();
+	}
+	StringRef eatAny(const char *sep, uint8_t *foundSeparator) {
+		return eatAny(StringRef((const uint8_t *)sep, strlen(sep)), foundSeparator);
+	}
 
 private:
 	// Unimplemented; blocks conversion through std::string

@@ -317,6 +317,7 @@ private:
 	Version committedVersion;
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
+	Promise<Optional<Value>> metadataVersion;
 	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;

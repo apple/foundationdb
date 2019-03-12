@@ -222,6 +222,7 @@ struct ProxyCommitData {
 	bool firstProxy;
 	double lastCoalesceTime;
 	bool locked;
+	Optional<Value> metadataVersion;
 	double commitBatchInterval;
 
 	int64_t localCommitBatchesStarted;
@@ -658,6 +659,8 @@ ACTOR Future<Void> commitBatch(
 	lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 	state bool lockedAfter = lockedKey.present() && lockedKey.get().size();
 
+	state Optional<Value> metadataVersionAfter = self->txnStateStore->readValue(metadataVersionKey).get();
+
 	auto fcm = self->logAdapter->getCommitMessage();
 	storeCommits.push_back(std::make_pair(fcm, self->txnStateStore->commit()));
 	self->version = commitVersion;
@@ -764,54 +767,36 @@ ACTOR Future<Void> commitBatch(
 				else
 					UNREACHABLE();
 
-				// Check on backing up key, if backup ranges are defined and a normal key
-				if  ((self->vecBackupKeys.size() > 1) && normalKeys.contains(m.param1)) {
 
-					if (isAtomicOp((MutationRef::Type)m.type)) {
+
+				// Check on backing up key, if backup ranges are defined and a normal key
+				if (self->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey)) {
+					if (m.type != MutationRef::Type::ClearRange) {
 						// Add the mutation to the relevant backup tag
 						for (auto backupName : self->vecBackupKeys[m.param1]) {
 							logRangeMutations[backupName].push_back_deep(logRangeMutationsArena, m);
 						}
 					}
 					else {
-						switch (m.type)
+						KeyRangeRef mutationRange(m.param1, m.param2);
+						KeyRangeRef intersectionRange;
+
+						// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
+						for (auto backupRange : self->vecBackupKeys.intersectingRanges(mutationRange))
 						{
-							// Backup the mutation, if within a backup range
-						case MutationRef::Type::SetValue:
+							// Get the backup sub range
+							const auto&		backupSubrange = backupRange.range();
+
+							// Determine the intersecting range
+							intersectionRange = mutationRange & backupSubrange;
+
+							// Create the custom mutation for the specific backup tag
+							MutationRef		backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
 							// Add the mutation to the relevant backup tag
-							for (auto backupName : self->vecBackupKeys[m.param1]) {
-								logRangeMutations[backupName].push_back_deep(logRangeMutationsArena, m);
+							for (auto backupName : backupRange.value()) {
+								logRangeMutations[backupName].push_back_deep(logRangeMutationsArena, backupMutation);
 							}
-							break;
-
-						case MutationRef::Type::ClearRange:
-							{
-								KeyRangeRef mutationRange(m.param1, m.param2);
-								KeyRangeRef intersectionRange;
-
-								// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
-								for (auto backupRange : self->vecBackupKeys.intersectingRanges(mutationRange))
-								{
-									// Get the backup sub range
-									const auto&		backupSubrange = backupRange.range();
-
-									// Determine the intersecting range
-									intersectionRange = mutationRange & backupSubrange;
-
-									// Create the custom mutation for the specific backup tag
-									MutationRef		backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
-
-									// Add the mutation to the relevant backup tag
-									for (auto backupName : backupRange.value()) {
-										logRangeMutations[backupName].push_back_deep(logRangeMutationsArena, backupMutation);
-									}
-								}
-							}
-							break;
-
-						default:
-							UNREACHABLE();
-							break;
 						}
 					}
 				}
@@ -896,6 +881,7 @@ ACTOR Future<Void> commitBatch(
 			when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 				if(v.version > self->committedVersion.get()) {
 					self->locked = v.locked;
+					self->metadataVersion = v.metadataVersion;
 					self->committedVersion.set(v.version);
 				}
 				
@@ -980,6 +966,7 @@ ACTOR Future<Void> commitBatch(
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if( commitVersion > self->committedVersion.get() ) {
 		self->locked = lockedAfter;
+		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
 	}
 
@@ -993,7 +980,7 @@ ACTOR Future<Void> commitBatch(
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
-			trs[t].reply.send(CommitID(commitVersion, t));
+			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
@@ -1068,7 +1055,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	GetReadVersionReply rep;
 	rep.version = commitData->committedVersion.get();
 	rep.locked = commitData->locked;
-	
+	rep.metadataVersion = commitData->metadataVersion;
+
 	for (auto v : versions) {
 		if(v.version > rep.version) {
 			rep = v;
@@ -1565,6 +1553,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion");
 			GetReadVersionReply rep;
 			rep.locked = commitData.locked;
+			rep.metadataVersion = commitData.metadataVersion;
 			rep.version = commitData.committedVersion.get();
 			req.reply.send(rep);
 		}
@@ -1647,6 +1636,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
+					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
 
 					commitData.txnStateStore->enableSnapshot();
 				}
