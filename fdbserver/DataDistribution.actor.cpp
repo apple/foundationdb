@@ -3455,8 +3455,30 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo>> const& db, UID id) : dbInfo(db), ddId(id) {}
 };
 
-ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, double* lastLimited)
+ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {
+	loop {
+		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
+
+		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies, db->get().myLocality));
+
+		choose {
+			when (wait(db->onChange())) {}
+			when (GetHealthMetricsReply reply = wait(proxies->size() ?
+					loadBalance(proxies, &MasterProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
+					: Never())) {
+				if (reply.healthMetrics.batchLimited) {
+					*lastLimited = now();
+				}
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 {
+	state double lastLimited = 0;
+	self->addActor.send( monitorBatchLimitedTime(self->dbInfo, &lastLimited) );
+
 	state Database cx = openDBOnServer(self->dbInfo, TaskDataDistributionLaunch, true, true);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
@@ -3612,7 +3634,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, double*
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
@@ -3654,36 +3676,14 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
-ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db, double* lastLimited) {
-	loop {
-		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
-		while (db->get().client.proxies.size() == 0) {
-			wait(db->onChange());
-		}
-
-		state int idx = g_random->randomInt(0, db->get().client.proxies.size());
-		choose {
-			when (wait(db->onChange())) {}
-			when (ErrorOr<GetHealthMetricsReply> reply = wait(
-					db->get().client.proxies[idx].getHealthMetrics.getReplyUnlessFailedFor(GetHealthMetricsRequest(false), 1.0, 0))) {
-				if (reply.present() && reply.get().healthMetrics.batchLimited) {
-					*lastLimited = now();
-				}
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
-	state double lastLimited = 0;
 
 	try {
 		TraceEvent("DataDistributor_Running", di.id());
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
-		self->addActor.send( monitorBatchLimitedTime(db, &lastLimited) );
-		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self, &lastLimited), "DataDistribution", di.id(), &normalDataDistributorErrors() );
+		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
 		wait( distributor || collection );
 	}

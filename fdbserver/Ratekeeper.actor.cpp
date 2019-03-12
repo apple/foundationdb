@@ -294,50 +294,38 @@ ACTOR Future<Void> monitorServerListChange(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
 	state Database db = openDBOnServer(dbInfo, TaskRateKeeper, true, true);
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
-	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state std::map<UID, StorageServerInterface> oldServers;
 	state Transaction tr(db);
 
 	loop {
 		try {
-			choose {
-				when ( wait( checkSignal ) ) {
-					checkSignal = Never();
-					serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
-				}
-				when ( vector<std::pair<StorageServerInterface, ProcessClass>> results = wait( serverListAndProcessClasses ) ) {
-					serverListAndProcessClasses = Never();
+			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
 
-					std::map<UID, StorageServerInterface> newServers;
-					for (int i = 0; i < results.size(); i++) {
-						const StorageServerInterface& ssi = results[i].first;
-						const UID serverId = ssi.id();
-						newServers[serverId] = ssi;
+			std::map<UID, StorageServerInterface> newServers;
+			for (int i = 0; i < results.size(); i++) {
+				const StorageServerInterface& ssi = results[i].first;
+				const UID serverId = ssi.id();
+				newServers[serverId] = ssi;
 
-						if (oldServers.count(serverId)) {
-							if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
-								serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
-							}
-							oldServers.erase(serverId);
-						} else {
-							serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
-						}
+				if (oldServers.count(serverId)) {
+					if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
+						serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
 					}
-
-					for (const auto& it : oldServers) {
-						serverChanges.send( std::make_pair(it.first, Optional<StorageServerInterface>()) );
-					}
-
-					oldServers.swap(newServers);
-					tr = Transaction(db);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+					oldServers.erase(serverId);
+				} else {
+					serverChanges.send( std::make_pair(serverId, Optional<StorageServerInterface>(ssi)) );
 				}
 			}
+
+			for (const auto& it : oldServers) {
+				serverChanges.send( std::make_pair(it.first, Optional<StorageServerInterface>()) );
+			}
+
+			oldServers.swap(newServers);
+			tr = Transaction(db);
+			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 		} catch(Error& e) {
 			wait( tr.onError(e) );
-			serverListAndProcessClasses = Never();
-			checkSignal = Void();
 		}
 	}
 }

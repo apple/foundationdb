@@ -2335,12 +2335,10 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 }
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
-	state Optional<Key> dcId = self->clusterControllerDcId;
 	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
-	state UID reqId;
 	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
@@ -2348,19 +2346,18 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
-			reqId = g_random->randomUniqueID();
-			state InitializeDataDistributorRequest req(reqId);
-			TraceEvent("ClusterController_DataDistributorRecruit", req.reqId).detail("Addr", data_distributor.worker.first.address());
+			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			state InitializeDataDistributorRequest req(g_random->randomUniqueID());
+			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", data_distributor.worker.first.address());
 
 			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.first.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
 			if (distributor.present()) {
-				TraceEvent("ClusterController_DataDistributorRecruited", req.reqId).detail("Addr", data_distributor.worker.first.address());
+				TraceEvent("ClusterController_DataDistributorRecruited", self->id).detail("Addr", data_distributor.worker.first.address());
 				return distributor.get();
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_DataDistributorRecruitError", reqId).error(e);
+			TraceEvent("ClusterController_DataDistributorRecruitError", self->id).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}
@@ -2398,7 +2395,6 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 }
 
 ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
-	state UID reqId;
 	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
@@ -2406,20 +2402,18 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			Optional<Key> dcId = self->clusterControllerDcId;
-			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(dcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
-			reqId = g_random->randomUniqueID();
-			state InitializeRatekeeperRequest req(reqId);
-			TraceEvent("ClusterController_RecruitRatekeeper", req.reqId).detail("Addr", rkWorker.worker.first.address());
+			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
+			state InitializeRatekeeperRequest req(g_random->randomUniqueID());
+			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", rkWorker.worker.first.address());
 
 			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.first.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
 			if (interf.present()) {
-				TraceEvent("ClusterController_RatekeeperRecruited", req.reqId).detail("Addr", rkWorker.worker.first.address());
+				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", rkWorker.worker.first.address());
 				return interf.get();
 			}
 		}
 		catch (Error& e) {
-			TraceEvent("ClusterController_RatekeeperRecruitError", reqId).error(e);
+			TraceEvent("ClusterController_RatekeeperRecruitError", self->id).error(e);
 			if ( e.code() != error_code_no_more_servers ) {
 				throw;
 			}

@@ -832,6 +832,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					TEST(true);  // Recruited while already a data distributor.
 				} else {
 					startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
+					DUMPTOKEN( recruited.waitFailure );
 
 					Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), setWhenDoneOrError( dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>() ) ) );
@@ -849,6 +850,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					TEST(true);  // Recruited while already a ratekeeper.
 				} else {
 					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
+					DUMPTOKEN( recruited.waitFailure );
+					DUMPTOKEN( recruited.getRateInfo );
+
 					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
