@@ -2430,6 +2430,7 @@ namespace fileBackup {
 
 			state RestoreConfig restore(task);
 			restore.stateEnum().set(tr, ERestoreState::COMPLETED);
+			tr->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
 			// Clear the file map now since it could be huge.
 			restore.fileSet().clear(tr);
 
@@ -3324,6 +3325,25 @@ namespace fileBackup {
 					wait(tr->commit());
 					break;
 				} catch(Error &e) {
+					wait(tr->onError(e));
+				}
+			}
+
+			tr->reset();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					Version destVersion = wait(tr->getReadVersion());
+					TraceEvent("FileRestoreVersionUpgrade").detail("RestoreVersion", restoreVersion).detail("Dest", destVersion);
+					if (destVersion <= restoreVersion) {
+						TEST(true);  // Forcing restored cluster to higher version
+						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion+1, Unversioned()));
+						wait(tr->commit());
+					} else {
+						break;
+					}
+				} catch( Error &e ) {
 					wait(tr->onError(e));
 				}
 			}

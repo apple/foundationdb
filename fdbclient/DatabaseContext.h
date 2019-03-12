@@ -161,6 +161,9 @@ public:
 
 	int apiVersion;
 
+	int mvCacheInsertLocation;
+	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
+
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
