@@ -1559,7 +1559,17 @@ namespace fileBackup {
 			// Calculate the number of shards that would have been dispatched by a normal (on-schedule) BackupSnapshotDispatchTask given
 			// the dispatch window and the start and expected-end versions of the current snapshot.
 			int64_t dispatchWindow = nextDispatchVersion - recentReadVersion;
-			int countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
+
+			// If the scheduled snapshot interval is 0 (such as for initial, as-fast-as-possible snapshot) then all shards are considered late
+			int countShardsExpectedPerNormalWindow;
+			if(snapshotScheduledVersionInterval == 0) {
+				countShardsExpectedPerNormalWindow = 0;
+			}
+			else {
+				// A dispatchWindow of 0 means the target end version is <= now which also results in all shards being considered late
+				countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
+			}
+
 			// countShardsThisDispatch is how many total shards are to be dispatched by this dispatch cycle.
 			// Since this dispatch cycle can span many incrementally progressing separate executions of the BackupSnapshotDispatchTask
 			// instance, this is calculated as the number of shards dispatched so far in the dispatch batch plus the number of shards
