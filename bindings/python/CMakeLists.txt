@@ -62,7 +62,7 @@ endif()
 set(package_file_name foundationdb-${FDB_VERSION}.tar.gz)
 set(package_file ${CMAKE_BINARY_DIR}/packages/${package_file_name})
 add_custom_command(OUTPUT ${package_file}
-  COMMAND $<TARGET_FILE:Python::Interpreter> setup.py sdist &&
+  COMMAND $<TARGET_FILE:Python::Interpreter> setup.py sdist --formats=gztar &&
           ${CMAKE_COMMAND} -E copy dist/${package_file_name} ${package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMENT "Create Python sdist package")
