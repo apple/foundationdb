@@ -20,6 +20,9 @@ Features
 * Restore target version can now be specified by timestamp if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Separate data distribution out from master as a new role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
 * Separate rate keeper out from data distribution as a new role. `(PR ##1176) <https://github.com/apple/foundationdb/pull/1176>`_
+* Added a new atomic op `CompareAndClear`. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
+* Added support for IPv6. `(PR #1176) https://github.com/apple/foundationdb/pull/1178`_
+* FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to TLS. `(PR #1157) https://github.com/apple/foundationdb/pull/1157`_
 
 Performance
 -----------
@@ -30,6 +33,7 @@ Fixes
 -----
 
 * Python: Creating a ``SingleFloat`` for the tuple layer didn't work with integers. `(PR #1216) <https://github.com/apple/foundationdb/pull/1216>`_
+* Added `USE_EIO_FILE` knob to fallback to  libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) https://github.com/apple/foundationdb/pull/1283`_
 
 Status
 ------
@@ -57,6 +61,8 @@ Bindings
 
 Other Changes
 -------------
+
+* Migrated  to Boost 1.67. `(PR #1242) https://github.com/apple/foundationdb/pull/1242`_
 
 Earlier release notes
 ---------------------
