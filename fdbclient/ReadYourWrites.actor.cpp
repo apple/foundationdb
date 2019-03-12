@@ -1222,7 +1222,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
 	
-	if(key >= getMaxReadKey() && (!tr.apiVersionAtLeast(610) || key != metadataVersionKey))
+	if(key >= getMaxReadKey() && key != metadataVersionKey)
 		return key_outside_legal_range();
 
 	//There are no keys in the database with size greater than KEY_SIZE_LIMIT
@@ -1500,10 +1500,6 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if (key == metadataVersionKey) {
-		if(!tr.apiVersionAtLeast(610) && key >= getMaxWriteKey()) {
-			throw key_outside_legal_range();
-		}
-
 		if(operationType != MutationRef::SetVersionstampedValue || operand != metadataVersionRequiredValue) {
 			throw client_invalid_operation();
 		}
