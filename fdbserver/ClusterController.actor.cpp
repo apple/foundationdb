@@ -290,13 +290,13 @@ public:
 			auto fitnessEnum = (ProcessClass::Fitness) fitness;
 			for(int addingDegraded = 0; addingDegraded < 2; addingDegraded++) {
 				auto workerItr = fitness_workers.find(std::make_pair(fitnessEnum,(bool)addingDegraded));
-				if (workerItr == fitness_workers.end()) {
-					continue;
+				if (workerItr != fitness_workers.end()) {
+					for (auto& worker : workerItr->second ) {
+						logServerMap->add(worker.interf.locality, &worker);
+					}
 				}
-				for (auto& worker : workerItr->second ) {
-					logServerMap->add(worker.interf.locality, &worker);
-				}
-				if (logServerSet->size() < required) {
+				
+				if (logServerSet->size() < (addingDegraded == 0 ? desired : required)) {
 					TraceEvent(SevWarn,"GWFTADTooFew", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("TLogPolicy", policy->info()).detail("DesiredLogs", desired).detail("AddingDegraded", addingDegraded);
 				}
 				else if (logServerSet->size() == required || logServerSet->size() <= desired) {

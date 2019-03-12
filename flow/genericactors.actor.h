@@ -783,6 +783,8 @@ Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 		choose {
 			when( wait( resetDelay ) ) {
 				var->set( val );
+				isEqual = true;
+				resetDelay = Never();
 			}
 			when( wait( var->onChange() ) ) {}
 		}
