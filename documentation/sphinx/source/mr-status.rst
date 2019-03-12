@@ -80,7 +80,7 @@ The following format informally describes the JSON containing the status data. T
             "connected_clients": [
               {
                 "address": "127.0.0.1:1234",
-                "log_group": "default"
+                "log_group": "default",
                 "connected_coordinators": 2
               }
             ],
