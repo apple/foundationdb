@@ -509,14 +509,14 @@ class TupleUtil {
 			if(positive && (n < Long.BYTES || rep[start] > 0)) {
 				long res = 0L;
 				for(int i = start; i < end; i++) {
-					res = (res << 8) + (rep[i] & 0xff);
+					res = (res << 8) | (rep[i] & 0xff);
 				}
 				state.add(res, end);
 			}
 			else if(!positive && (n < Long.BYTES || rep[start] < 0)) {
 				long res = ~0L;
 				for(int i = start; i < end; i++) {
-					res = (res << 8) + (rep[i] & 0xff);
+					res = (res << 8) | (rep[i] & 0xff);
 				}
 				state.add(res + 1, end);
 			}
