@@ -12,6 +12,8 @@
 #ifndef BOOST_SYSTEM_LOCAL_FREE_ON_EXIT_HPP
 #define BOOST_SYSTEM_LOCAL_FREE_ON_EXIT_HPP
 
+#include <boost/winapi/local_memory.hpp>
+
 namespace boost {
 namespace system {
 namespace detail {
@@ -24,7 +26,7 @@ public:
 
   ~local_free_on_destruction()
   {
-    ::LocalFree(p_);
+    boost::winapi::LocalFree(p_);
   }
 
 private:
