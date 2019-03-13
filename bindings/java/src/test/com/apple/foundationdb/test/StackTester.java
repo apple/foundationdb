@@ -368,9 +368,13 @@ public class StackTester {
 			else if (op == StackOperation.TUPLE_SORT) {
 				int listSize = StackUtils.getInt(inst.popParam().join());
 				List<Object> rawElements = inst.popParams(listSize).join();
-				List<Tuple> tuples = new ArrayList<Tuple>(listSize);
+				List<Tuple> tuples = new ArrayList<>(listSize);
 				for(Object o : rawElements) {
-					tuples.add(Tuple.fromBytes((byte[])o));
+					// Unpacking a tuple keeps around the serialized representation and uses
+					// it for comparison if it's available. To test semantic comparison, recreate
+					// the tuple from the item list.
+					Tuple t = Tuple.fromBytes((byte[])o);
+					tuples.add(Tuple.fromList(t.getItems()));
 				}
 				Collections.sort(tuples);
 				for(Tuple t : tuples) {
