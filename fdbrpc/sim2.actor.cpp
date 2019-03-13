@@ -730,6 +730,8 @@ class Sim2 : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
+	struct Task;
+
 	virtual double now() { return time; }
 
 	virtual Future<class Void> delay( double seconds, int taskID ) {
@@ -939,8 +941,12 @@ public:
 		}
 	}
 
+	static constexpr double readyQueueInterval = 1e-3;
+	static constexpr double longTaskProbability = 1e-2;
+
 	ACTOR static Future<Void> runLoop(Sim2 *self) {
 		state ISimulator::ProcessInfo *callingMachine = self->currentProcess;
+		state std::vector<Task> readyTasks;
 		while ( !self->isStopped ) {
 			wait( self->net2->yield(TaskDefaultYield) );
 
@@ -951,13 +957,28 @@ public:
 			}
 			//if (!randLog/* && now() >= 32.0*/)
 			//	randLog = fopen("randLog.txt", "wt");
-			Task t = std::move( self->tasks.top() ); // Unfortunately still a copy under gcc where .top() returns const&
-			self->currentTaskID = t.taskID;
-			self->tasks.pop();
 			self->mutex.leave();
+			double endReadyInterval = std::max(self->time + readyQueueInterval, self->tasks.top().time);
+			while (!self->tasks.empty() && self->tasks.top().time <= endReadyInterval) {
+				readyTasks.push_back(std::move(self->tasks.top())); // Unfortunately still a copy under gcc where .top() returns const&
+				push_heap(readyTasks.begin(), readyTasks.end(), &Task::comparePriorities);
+				self->tasks.pop();
+			}
+			while (!readyTasks.empty()) {
+				wait(self->net2->yield(TaskDefaultYield));
+				self->mutex.enter();
+				pop_heap(readyTasks.begin(), readyTasks.end(), &Task::comparePriorities);
+				Task t = std::move(readyTasks.back());
+				self->currentTaskID = t.taskID;
+				readyTasks.pop_back();
+				self->mutex.leave();
 
-			self->execTask(t);
-			self->yielded = false;
+				self->execTask(t);
+				self->yielded = false;
+
+				if (g_random->random01() < longTaskProbability)
+					break;
+			}
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
@@ -1593,6 +1614,11 @@ public:
 			// Ordering is reversed for priority_queue
 			if (time != rhs.time) return time > rhs.time;
 			return stable > rhs.stable;
+		}
+
+		static bool comparePriorities(Task const& fst, Task const& snd) {
+			if (fst.taskID != snd.taskID) return fst.taskID < snd.taskID;
+			else return (fst < snd);
 		}
 	};
 
