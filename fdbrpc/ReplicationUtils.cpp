@@ -287,24 +287,38 @@ bool validateAllCombinations(
 	else
 	{
 		bool bIsValidGroup;
-		LocalityGroup	localityGroup;
-		std::string bitmask(nCombinationSize, 1); // K leading 1's
+		Reference<LocalitySet> localSet = Reference<LocalitySet>( new LocalityGroup() );
+		LocalityGroup* localGroup = (LocalityGroup*) localSet.getPtr();
+		localGroup->deep_copy(localitySet);
 
+		std::vector<LocalityEntry> originalEntries = localGroup->getEntries();
+
+		for (int i = 0; i < newItems.size(); ++i) {
+			localGroup->add(newItems[i]);
+		}
+		
+		std::string bitmask(nCombinationSize, 1); // K leading 1's
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
 		
+		std::vector<LocalityEntry> localityGroupEntries;
+		std::vector<LocalityEntry> resultEntries;
 		do
 		{
-			localityGroup.deep_copy(localitySet);
-
+			localityGroupEntries = originalEntries;
 			// [0..N-1] integers
-			for (int i = 0; i < newItems.size(); ++i) {
+			for (int i = 0; i < bitmask.size(); ++i) {
 				if (bitmask[i]) {
-					localityGroup.add(newItems[i]);
+					localityGroupEntries.push_back(localGroup->getEntry(originalEntries.size() + i));
 				}
 			}
 
-			// Check if the group combination passes validation
-			bIsValidGroup = localityGroup.validate(policy);
+			resultEntries.clear();
+
+			// Run the policy, assert if unable to satisfy
+			bool result = localSet->selectReplicas(policy, localityGroupEntries, resultEntries);
+			ASSERT(result);
+
+			bIsValidGroup = resultEntries.size() == 0;
 
 			if (((bCheckIfValid)	&&
 					 (!bIsValidGroup)	)			||
@@ -319,7 +333,7 @@ bool validateAllCombinations(
 				}
 				if (g_replicationdebug > 2) {
 					printf("Invalid group\n");
-					localityGroup.DisplayEntries();
+					localGroup->DisplayEntries();
 				}
 				if (g_replicationdebug > 3) {
 					printf("Full set\n");
