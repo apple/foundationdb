@@ -1817,10 +1817,6 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 			try {
 				// SOMEDAY: Check for keywords
 				auto const& addr = NetworkAddress::parse( t->toString() );
-				if (addresses.size() > 0 && addr.isTLS() != addresses.begin()->isTLS()) {
-					printf("ERROR: cannot use coordinators with different TLS states: `%s'\n", t->toString().c_str());
-					return true;
-				}
 				if (addresses.count(addr)){
 					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
 					return true;

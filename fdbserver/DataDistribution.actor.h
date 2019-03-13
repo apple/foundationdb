@@ -253,5 +253,6 @@ int64_t getMaxShardSize( double dbSizeEstimate );
 class DDTeamCollection;
 ACTOR Future<Void> teamRemover(DDTeamCollection* self);
 ACTOR Future<Void> teamRemoverPeriodic(DDTeamCollection* self);
+ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
 
 #endif

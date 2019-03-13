@@ -1389,7 +1389,7 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 	return perfLimit;
 }
 
-ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails ddWorker,
+ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails rkWorker,
 	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
 {
 	state JsonBuilderObject statusObj;
@@ -1441,8 +1441,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Transactions
 	try {
-		state TraceEventFields ratekeeper = wait( timeoutError(ddWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
-		TraceEventFields batchRatekeeper = wait( timeoutError(ddWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
+		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
+		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
 
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
@@ -1818,6 +1818,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state std::set<std::string> status_incomplete_reasons;
 	state WorkerDetails mWorker;
 	state WorkerDetails ddWorker; // DataDistributor worker
+	state WorkerDetails rkWorker; // RateKeeper worker
 
 	try {
 		// Get the master Worker interface
@@ -1837,6 +1838,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			messages.push_back(JsonString::makeMessage("unreachable_dataDistributor_worker", "Unable to locate the data distributor worker."));
 		} else {
 			ddWorker = _ddWorker.get();
+		}
+
+		// Get the RateKeeper worker interface
+		Optional<WorkerDetails> _rkWorker;
+		if (db->get().ratekeeper.present()) {
+			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );
+		}
+
+		if (!db->get().ratekeeper.present() || !_rkWorker.present()) {
+			messages.push_back(JsonString::makeMessage("unreachable_ratekeeper_worker", "Unable to locate the ratekeeper worker."));
+		} else {
+			rkWorker = _rkWorker.get();
 		}
 
 		// Get latest events for various event types from ALL workers
@@ -1942,7 +1955,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, ddWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 

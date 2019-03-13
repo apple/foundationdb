@@ -326,6 +326,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "$enum":[
                   "unreachable_master_worker",
                   "unreachable_dataDistributor_worker",
+                  "unreachable_ratekeeper_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
