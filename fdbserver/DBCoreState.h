@@ -41,7 +41,7 @@ struct CoreTLogSet {
 	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
 	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different from the current configuration
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	bool isLocal;
 	int8_t locality;
 	Version startVersion;

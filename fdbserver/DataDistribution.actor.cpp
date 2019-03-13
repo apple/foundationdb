@@ -3698,7 +3698,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	return Void();
 }
 
-DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int processCount) {
+DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database = DatabaseContext::create(
 		Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
 		Never(),
@@ -3740,7 +3740,7 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 	return collection;
 }
 
-DDTeamCollection* testMachineTeamCollection(int teamSize, IRepPolicyRef policy, int processCount) {
+DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database = DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
 	                                            Never(), LocalityData(), false);
 
@@ -3792,7 +3792,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(teamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	int result = collection->addTeamsBestOf(30, desiredTeams, maxTeams);
@@ -3812,7 +3812,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(teamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	if (collection == NULL) {
@@ -3830,7 +3830,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 }
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -3849,7 +3849,7 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 }
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -3867,7 +3867,7 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 
 TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	wait(Future<Void>(Void()));
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -3897,7 +3897,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	wait(Future<Void>(Void()));
 
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;

@@ -40,8 +40,8 @@ public:
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	TLogVersion tLogVersion;
-	IRepPolicyRef tLogPolicy;
-	LocalitySetRef logServerSet;
+	Reference<IReplicationPolicy> tLogPolicy;
+	Reference<LocalitySet> logServerSet;
 	std::vector<int> logIndexArray;
 	std::vector<LocalityEntry> logEntryArray;
 	bool isLocal;
@@ -84,7 +84,7 @@ public:
 			used_servers.insert(std::make_pair(0,i));
 		}
 
-		LocalitySetRef serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
+		Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
 		LocalityMap<std::pair<int,int>>* serverMap = (LocalityMap<std::pair<int,int>>*) serverSet.getPtr();
 		std::vector<std::pair<int,int>> resultPairs;
 		for(int loc = 0; loc < satelliteTagLocations.size(); loc++) {
@@ -189,7 +189,7 @@ public:
 	void updateLocalitySet( vector<LocalityData> const& localities ) {
 		LocalityMap<int>* logServerMap;
 
-		logServerSet = LocalitySetRef(new LocalityMap<int>());
+		logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
 		logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
 
 		logEntryArray.clear();
@@ -412,7 +412,7 @@ struct ILogSystem {
 		int tLogReplicationFactor;
 
 		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
-		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
+		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
