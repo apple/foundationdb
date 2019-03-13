@@ -959,24 +959,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		wait( quorum( alive, std::min(logSet->tLogReplicationFactor, numPresent - logSet->tLogWriteAntiQuorum) ) );
 
-		state Reference<LocalityGroup> locked(new LocalityGroup());
-		state std::vector<bool> responded(alive.size());
-		for (int i = 0; i < alive.size(); i++) {
-			responded[i] = false;
-		}
+		state std::vector<LocalityEntry> locked;
+		state std::vector<bool> responded(alive.size(), false);
 		loop {
 			for (int i = 0; i < alive.size(); i++) {
 				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-					locked->add(logSet->tLogLocalities[i]);
+					locked.push_back(logSet->logEntryArray[i]);
 					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked->validate(logSet->tLogPolicy);
-			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
-			if (logSet->tLogReplicationFactor == 1 && locked->size() > 0) {
-				ASSERT(quorum_obtained);
-			}
-			if (quorum_obtained) {
+
+			if (logSet->satisfiesPolicy(locked)) {
 				return Void();
 			}
 
