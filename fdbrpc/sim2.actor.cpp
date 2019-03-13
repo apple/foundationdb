@@ -32,6 +32,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include <cmath>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 bool simulator_should_inject_fault( const char* context, const char* file, int line, int error_code ) {
@@ -942,7 +943,25 @@ public:
 	}
 
 	static constexpr double readyQueueInterval = 1e-3;
-	static constexpr double longTaskProbability = 1e-2;
+
+	static bool checkCPU(double& poisson_sum, double y, unsigned k, double lambda) {
+		double k_factorial = 1.0;
+		for (unsigned i = 2; i <= k; ++i) {
+			k_factorial *= i;
+		}
+		// See https://en.wikipedia.org/wiki/Poisson_distribution for an explanation of this
+		// basically we assume that the number of tasks we can execute within one iteration
+		// follows a poisson distribution.
+		// Net2 counts CPU cycles to abort emptying the ready queue if this takes too long.
+		// We can not do this in the simulator as this is non-deterministic. However, a task
+		// using many CPU cycles can have many reasons (like kernel interrupts happening duing
+		// the execution).
+		// The idea here is that we generate a random number y before the task queue is emptied
+		// and then we sum the poisson-numbers for each k. As long as the random number is smaller
+		// or equal to this sum we will continue.
+		poisson_sum += exp(-lambda)*pow(lambda, k)/k_factorial;
+		return y > poisson_sum;
+	}
 
 	ACTOR static Future<Void> runLoop(Sim2 *self) {
 		state ISimulator::ProcessInfo *callingMachine = self->currentProcess;
@@ -964,6 +983,9 @@ public:
 				push_heap(readyTasks.begin(), readyTasks.end(), &Task::comparePriorities);
 				self->tasks.pop();
 			}
+			auto y_poisson = g_random->random01();
+			unsigned k = 1;
+			double poisson_sum = 0.0;
 			while (!readyTasks.empty()) {
 				wait(self->net2->yield(TaskDefaultYield));
 				self->mutex.enter();
@@ -976,8 +998,10 @@ public:
 				self->execTask(t);
 				self->yielded = false;
 
-				if (g_random->random01() < longTaskProbability)
+				if(checkCPU(poisson_sum, y_poisson, k, 8)) {
 					break;
+				}
+				++k;
 			}
 		}
 		self->currentProcess = callingMachine;
