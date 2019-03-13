@@ -586,6 +586,8 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 	state Future<Void> error = actorCollection( addActor.getFuture() );
 	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
 
+	keyVersion->insert(metadataVersionKey, 0);
+
 	try {
 		loop {
 			if(beginVersion >= *endVersion) {

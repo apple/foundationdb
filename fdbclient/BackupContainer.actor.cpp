@@ -1380,6 +1380,7 @@ public:
 				continue;
 			}
 			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", printable(kv.first)).detail("Value", printable(kv.second));
+			IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", kv.first.c_str());
 			throw backup_invalid_url();
 		}
 	}
@@ -1410,7 +1411,7 @@ public:
 		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(bucket, basePath));
 		std::vector<std::string> results;
 		for(auto &f : contents.objects) {
-			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size())));
+			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
 		}
 		return results;
 	}

@@ -1316,6 +1316,7 @@ namespace fileBackup {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 			wait(checkTaskVersion(cx, task, name, version));
 
+			state double startTime = timer();
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
 			// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN which will mean not done.
@@ -1739,7 +1740,8 @@ namespace fileBackup {
 					.detail("SnapshotBeginVersion", snapshotBeginVersion)
 					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 					.detail("CurrentVersion", recentReadVersion)
-					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds)
+					.detail("DispatchTimeSeconds", timer() - startTime);
 				Params.snapshotFinished().set(task, true);
 			}
 
@@ -2462,6 +2464,7 @@ namespace fileBackup {
 
 			state RestoreConfig restore(task);
 			restore.stateEnum().set(tr, ERestoreState::COMPLETED);
+			tr->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
 			// Clear the file map now since it could be huge.
 			restore.fileSet().clear(tr);
 
@@ -3360,6 +3363,25 @@ namespace fileBackup {
 				}
 			}
 
+			tr->reset();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					Version destVersion = wait(tr->getReadVersion());
+					TraceEvent("FileRestoreVersionUpgrade").detail("RestoreVersion", restoreVersion).detail("Dest", destVersion);
+					if (destVersion <= restoreVersion) {
+						TEST(true);  // Forcing restored cluster to higher version
+						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion+1, Unversioned()));
+						wait(tr->commit());
+					} else {
+						break;
+					}
+				} catch( Error &e ) {
+					wait(tr->onError(e));
+				}
+			}
+
 			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
 
 			if(!restorable.present())
@@ -4078,6 +4100,8 @@ public:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";
 							break;
 					}
+					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
+					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
 
 					if(snapshotProgress) {
 						state int64_t snapshotInterval;

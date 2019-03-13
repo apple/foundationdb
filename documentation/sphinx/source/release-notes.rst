@@ -7,7 +7,9 @@ Release Notes
 
 Features
 --------
-* Improved replication mechanism, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`.
+* Improved replication mechanism, a new hierarchical replication technique that further significantly reduces the frequency of data loss events even when multiple machines (e.g., fault-tolerant zones in the current code) permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`_.
+
+* Added background actor to remove redundant teams from team collection so that the healthy team number is guaranteed not exceeding the desired number. `(PR #1139) <https://github.com/apple/foundationdb/pull/1139>`_
 
 
 * Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. `(PR #1084) <https://github.com/apple/foundationdb/pull/1084>`_
@@ -17,6 +19,8 @@ Features
 * Restore now requires the destnation cluster to be specified explicitly to avoid confusion. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Restore target version can now be specified by timestamp if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Backup status and describe commands now have a --json output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
+* Separate data distribution out from master as a new role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
+* Separate rate keeper out from data distribution as a new role. `(PR ##1176) <https://github.com/apple/foundationdb/pull/1176>`_
 
 Performance
 -----------
@@ -44,7 +48,12 @@ Bindings
 * Java: Several methods relevant to read-only transactions have been moved into the ``ReadTransaction`` interface.
 * Ruby: Removed ``FDB.init``, ``FDB.create_cluster``, and ``FDB.Cluster``. ``FDB.open`` no longer accepts a ``database_name`` parameter. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
 * Golang: Deprecated ``fdb.StartNetwork``, ``fdb.Open``, ``fdb.MustOpen``, and ``fdb.CreateCluster`` and added ``fdb.OpenDatabase`` and ``fdb.MustOpenDatabase``. The preferred way to start the network and get a ``Database`` is by using ``FDB.OpenDatabase`` or ``FDB.OpenDefault``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
-* Flow: Deprecated ``API::createCluster`` and ``Cluster`` and added ``API::createDatabase``. The preferred way to get a ``Database`` is by using ``API::createDatabase``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
+* Flow: Removed ``API::createCluster`` and ``Cluster`` and added ``API::createDatabase``. The new way to get a ``Database`` is by using ``API::createDatabase``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_ `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Changed ``DatabaseContext`` to ``Database``, and ``API::createDatabase`` returns ``Reference<Database>`` instead of ``Reference<<DatabaseContext>``.  `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Converted ``Transaction`` into an interface and moved its implementation into an internal class. Transactions should now be created using ``Database::createTransaction(db)``. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Added ``ReadTransaction`` interface that allows only read operations on a transaction. The ``Transaction`` interface inherits from ``ReadTransaction`` and can be used when a ``ReadTransaction`` is required. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: Changed ``Transaction::setVersion`` to ``Transaction::setReadVersion``. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
+* Flow: On update to this version of the Flow bindings, client code will fail to build due to the changes in the API, irrespective of the API version used. Client code must be updated to use the new bindings API. These changes affect the bindings only and won't impact compatibility with different versions of the cluster. `(PR #1215) <https://github.com/apple/foundationdb/pull/1215>`_
 * Golang: Added ``fdb.Printable`` to print a human-readable string for a given byte array. Add ``Key.String()``, which converts the ``Key`` to a ``string`` using the ``Printable`` function. `(PR #1010) <https://github.com/apple/foundationdb/pull/1010>`_
 * Python: Python signal handling didn't work when waiting on a future. In particular, pressing Ctrl-C would not successfully interrupt the program. `(PR #1138) <https://github.com/apple/foundationdb/pull/1138>`_
 

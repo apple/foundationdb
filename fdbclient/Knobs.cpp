@@ -58,6 +58,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( SYSTEM_KEY_SIZE_LIMIT,                   3e4 );
 	init( VALUE_SIZE_LIMIT,                        1e5 );
 	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 ); if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - serverKeysPrefixFor(UID()).size() - 1;
+	init( METADATA_VERSION_CACHE_SIZE,            1000 );
 
 	init( MAX_BATCH_SIZE,                           20 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1; // Note that SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_SIZE is set to match this value
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -106,7 +107,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_LOCK_BYTES,                       1e8 );
 	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
-	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  60 * 60 );  // 1 hour
+	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  10 * 60 );  // 10 minutes
 	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
