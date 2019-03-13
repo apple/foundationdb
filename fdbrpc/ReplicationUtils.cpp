@@ -291,7 +291,8 @@ bool validateAllCombinations(
 		LocalityGroup* localGroup = (LocalityGroup*) localSet.getPtr();
 		localGroup->deep_copy(localitySet);
 
-		std::vector<LocalityEntry> originalEntries = localGroup->getEntries();
+		std::vector<LocalityEntry> localityGroupEntries = localGroup->getEntries();
+		int originalSize = localityGroupEntries.size();
 
 		for (int i = 0; i < newItems.size(); ++i) {
 			localGroup->add(newItems[i]);
@@ -300,15 +301,14 @@ bool validateAllCombinations(
 		std::string bitmask(nCombinationSize, 1); // K leading 1's
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
 		
-		std::vector<LocalityEntry> localityGroupEntries;
 		std::vector<LocalityEntry> resultEntries;
 		do
 		{
-			localityGroupEntries = originalEntries;
+			localityGroupEntries.resize(originalSize);
 			// [0..N-1] integers
 			for (int i = 0; i < bitmask.size(); ++i) {
 				if (bitmask[i]) {
-					localityGroupEntries.push_back(localGroup->getEntry(originalEntries.size() + i));
+					localityGroupEntries.push_back(localGroup->getEntry(originalSize + i));
 				}
 			}
 

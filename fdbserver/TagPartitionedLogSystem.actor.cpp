@@ -959,17 +959,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		wait( quorum( alive, std::min(logSet->tLogReplicationFactor, numPresent - logSet->tLogWriteAntiQuorum) ) );
 
-		state std::vector<LocalityEntry> locked;
+		state std::vector<LocalityEntry> aliveEntries;
 		state std::vector<bool> responded(alive.size(), false);
 		loop {
 			for (int i = 0; i < alive.size(); i++) {
 				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-					locked.push_back(logSet->logEntryArray[i]);
+					aliveEntries.push_back(logSet->logEntryArray[i]);
 					responded[i] = true;
 				}
 			}
 
-			if (logSet->satisfiesPolicy(locked)) {
+			if (logSet->satisfiesPolicy(aliveEntries)) {
 				return Void();
 			}
 
