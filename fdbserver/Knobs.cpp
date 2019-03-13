@@ -73,7 +73,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 	init( TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES,            2e9 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES = 2e6;
 	init( DISK_QUEUE_FILE_EXTENSION_BYTES,                    10<<20 ); // BUGGIFYd per file within the DiskQueue
-	init( DISK_QUEUE_FILE_SHRINK_BYTES,                       100<<20 ); // BUGGIFYd per file within the DiskQueue
+	init( DISK_QUEUE_FILE_SHRINK_BYTES,                      100<<20 ); // BUGGIFYd per file within the DiskQueue
+	init( TLOG_DEGRADED_DELAY_COUNT,                               5 );
+	init( TLOG_DEGRADED_DURATION,                                5.0 );
+	init( TLOG_DEGRADED_RESET_INTERVAL,                     48*60*60 ); if ( randomize && BUGGIFY ) TLOG_DEGRADED_RESET_INTERVAL = 10;
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );

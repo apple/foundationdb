@@ -30,10 +30,10 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
+ACTOR Future<vector<WorkerDetails>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {
 		choose {
-			when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( flags ) ) ) ) ) {
+			when( vector<WorkerDetails> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( flags ) ) ) ) ) {
 				return w;
 			}
 			when( wait( dbInfo->onChange() ) ) {}
@@ -46,12 +46,12 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( dbInfo ) );
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
-				return workers[i].first;
+			if( workers[i].interf.address() == dbInfo->get().master.address() ) {
+				TraceEvent("GetMasterWorker").detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].interf.id());
+				return workers[i].interf;
 			}
 		}
 
@@ -69,15 +69,15 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker( Database cx, Reference<A
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( dbInfo ) );
 		if (!dbInfo->get().distributor.present()) continue;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.address() == dbInfo->get().distributor.get().address() ) {
+			if( workers[i].interf.address() == dbInfo->get().distributor.get().address() ) {
 				TraceEvent("GetDataDistributorWorker").detail("Stage", "GotWorkers")
 				.detail("DataDistributorId", dbInfo->get().distributor.get().id())
-				.detail("WorkerId", workers[i].first.id());
-				return workers[i].first;
+				.detail("WorkerId", workers[i].interf.id());
+				return workers[i].interf;
 			}
 		}
 
@@ -128,10 +128,10 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxTLogQueueSize").detail("Stage", "ContactingLogs");
 
-	state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(getWorkers(dbInfo));
+	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 	std::map<NetworkAddress, WorkerInterface> workersMap;
 	for(auto worker : workers) {
-		workersMap[worker.first.address()] = worker.first;
+		workersMap[worker.interf.address()] = worker.interf;
 	}
 
 	state std::vector<Future<TraceEventFields>> messages;
@@ -189,14 +189,14 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
-	state Future<std::vector<std::pair<WorkerInterface, ProcessClass>>> workersFuture = getWorkers(dbInfo);
+	state Future<std::vector<WorkerDetails>> workersFuture = getWorkers(dbInfo);
 
 	state std::vector<StorageServerInterface> servers = wait(serversFuture);
-	state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(workersFuture);
+	state std::vector<WorkerDetails> workers = wait(workersFuture);
 
 	std::map<NetworkAddress, WorkerInterface> workersMap;
 	for(auto worker : workers) {
-		workersMap[worker.first.address()] = worker.first;
+		workersMap[worker.interf.address()] = worker.interf;
 	}
 
 	state std::vector<Future<TraceEventFields>> messages;

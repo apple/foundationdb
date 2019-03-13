@@ -52,6 +52,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "test"
                ]
             },
+            "degraded":true,
             "roles":[
                {
                   "query_queue_max":0,
@@ -281,6 +282,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 
       ],
       "datacenter_version_difference":0,
+      "degraded_processes":0,
       "database_available":true,
       "database_locked":false,
       "generation":2,

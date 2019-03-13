@@ -100,12 +100,12 @@ ACTOR static Future< Optional<TraceEventFields> > latestEventOnWorker(WorkerInte
 	}
 }
 
-ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestEventOnWorkers(std::vector<std::pair<WorkerInterface, ProcessClass>> workers, std::string eventName) {
+ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestEventOnWorkers(std::vector<WorkerDetails> workers, std::string eventName) {
 	try {
 		state vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		for (int c = 0; c < workers.size(); c++) {
 			EventLogRequest req = eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
-			eventTraces.push_back(errorOr(timeoutError(workers[c].first.eventLogRequest.getReply(req), 2.0)));
+			eventTraces.push_back(errorOr(timeoutError(workers[c].interf.eventLogRequest.getReply(req), 2.0)));
 		}
 
 		wait(waitForAll(eventTraces));
@@ -116,11 +116,11 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 		for (int i = 0; i < eventTraces.size(); i++) {
 			const ErrorOr<TraceEventFields>& v = eventTraces[i].get();
 			if (v.isError()){
-				failed.insert(workers[i].first.address().toString());
-				results[workers[i].first.address()] = TraceEventFields();
+				failed.insert(workers[i].interf.address().toString());
+				results[workers[i].interf.address()] = TraceEventFields();
 			}
 			else {
-				results[workers[i].first.address()] = v.get();
+				results[workers[i].interf.address()] = v.get();
 			}
 		}
 
@@ -135,26 +135,26 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 		throw;
 	}
 }
-static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestErrorOnWorkers(std::vector<std::pair<WorkerInterface, ProcessClass>> workers) {
+static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > > latestErrorOnWorkers(std::vector<WorkerDetails> workers) {
 	return latestEventOnWorkers( workers, "" );
 }
 
-static Optional<std::pair<WorkerInterface, ProcessClass>> getWorker(std::vector<std::pair<WorkerInterface, ProcessClass>> const& workers, NetworkAddress const& address) {
+static Optional<WorkerDetails> getWorker(std::vector<WorkerDetails> const& workers, NetworkAddress const& address) {
 	try {
 		for (int c = 0; c < workers.size(); c++)
-			if (address == workers[c].first.address())
+			if (address == workers[c].interf.address())
 				return workers[c];
-		return Optional<std::pair<WorkerInterface, ProcessClass>>();
+		return Optional<WorkerDetails>();
 	}
 	catch (Error &e){
-		return Optional<std::pair<WorkerInterface, ProcessClass>>();
+		return Optional<WorkerDetails>();
 	}
 }
 
-static Optional<std::pair<WorkerInterface, ProcessClass>> getWorker(std::map<NetworkAddress, std::pair<WorkerInterface, ProcessClass>> const& workersMap, NetworkAddress const& address) {
+static Optional<WorkerDetails> getWorker(std::map<NetworkAddress, WorkerDetails> const& workersMap, NetworkAddress const& address) {
 	auto itr = workersMap.find(address);
 	if(itr == workersMap.end()) {
-		return Optional<std::pair<WorkerInterface, ProcessClass>>();
+		return Optional<WorkerDetails>();
 	}
 
 	return itr->second;
@@ -261,7 +261,7 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	return statusObj;
 }
 
-static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair<WorkerInterface, ProcessClass>> workers, Optional<DatabaseConfiguration> configuration, std::set<std::string> *incomplete_reasons) {
+static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<WorkerDetails> workers, Optional<DatabaseConfiguration> configuration, std::set<std::string> *incomplete_reasons) {
 	JsonBuilderObject machineMap;
 	double metric;
 	int failed = 0;
@@ -274,9 +274,9 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<std:
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
 	for (auto const& worker : workers){
-		locality[worker.first.address()] = worker.first.locality;
-		if (worker.first.locality.dcId().present())
-			dcIds[worker.first.address()] = worker.first.locality.dcId().get().printable();
+		locality[worker.interf.address()] = worker.interf.locality;
+		if (worker.interf.locality.dcId().present())
+			dcIds[worker.interf.address()] = worker.interf.locality.dcId().get().printable();
 	}
 
 	for(auto it = mMetrics.begin(); it != mMetrics.end(); it++) {
@@ -540,7 +540,7 @@ struct RolesInfo {
 
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
-		std::vector<std::pair<WorkerInterface, ProcessClass>> workers,
+		std::vector<WorkerDetails> workers,
 		WorkerEvents pMetrics,
 		WorkerEvents mMetrics,
 		WorkerEvents errors,
@@ -581,13 +581,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	}
 
 	state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
-	state std::vector<std::pair<WorkerInterface, ProcessClass>>::iterator workerItr;
+	state std::vector<WorkerDetails>::iterator workerItr;
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		wait(yield());
-		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->first.locality.machineId(), MachineMemoryInfo())).first;
+		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->interf.locality.machineId(), MachineMemoryInfo())).first;
 		try {
-			ASSERT(pMetrics.count(workerItr->first.address()));
-			const TraceEventFields& processMetrics = pMetrics[workerItr->first.address()];
+			ASSERT(pMetrics.count(workerItr->interf.address()));
+			const TraceEventFields& processMetrics = pMetrics[workerItr->interf.address()];
 
 			if(memInfo->second.valid()) {
 				if(processMetrics.size() > 0) {
@@ -647,10 +647,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 		state JsonBuilderObject statusObj;
 		try {
-			ASSERT(pMetrics.count(workerItr->first.address()));
+			ASSERT(pMetrics.count(workerItr->interf.address()));
 
-			NetworkAddress address = workerItr->first.address();
-			const TraceEventFields& event = pMetrics[workerItr->first.address()];
+			NetworkAddress address = workerItr->interf.address();
+			const TraceEventFields& event = pMetrics[workerItr->interf.address()];
 			statusObj["address"] = address.toString();
 			JsonBuilderObject memoryObj;
 
@@ -661,7 +661,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string MachineID = event.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
 
-				statusObj["locality"] = getLocalityInfo(workerItr->first.locality);
+				statusObj["locality"] = getLocalityInfo(workerItr->interf.locality);
 
 				statusObj.setKeyRawNumber("uptime_seconds",event.getValue("UptimeSeconds"));
 
@@ -750,7 +750,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				double availableMemory;
 				availableMemory = mMetrics[address].getDouble("AvailableMemory");
 
-				auto machineMemInfo = machineMemoryUsage[workerItr->first.locality.machineId()];
+				auto machineMemInfo = machineMemoryUsage[workerItr->interf.locality.machineId()];
 				if (machineMemInfo.valid()) {
 					ASSERT(machineMemInfo.numProcesses > 0);
 					int64_t memory = (availableMemory + machineMemInfo.memoryUsage) / machineMemInfo.numProcesses;
@@ -794,16 +794,18 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["excluded"] = configuration.get().isExcludedServer(address);
 			}
 
-			statusObj["class_type"] = workerItr->second.toString();
-			statusObj["class_source"] = workerItr->second.sourceString();
-
+			statusObj["class_type"] = workerItr->processClass.toString();
+			statusObj["class_source"] = workerItr->processClass.sourceString();
+			if(workerItr->degraded) {
+				statusObj["degraded"] = true;
+			}
 		}
 		catch (Error& e){
 			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be returned.
 			incomplete_reasons->insert("Cannot retrieve all process status information.");
 		}
 
-		processMap[printable(workerItr->first.locality.processId())] = statusObj;
+		processMap[printable(workerItr->interf.locality.processId())] = statusObj;
 	}
 	return processMap;
 }
@@ -847,11 +849,11 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, 
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
 	state JsonBuilderObject message;
 
 	try {
-		TraceEventFields md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
+		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
 		state int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -1100,18 +1102,18 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> ddWorker, int *minReplicasRemaining) {
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker, int *minReplicasRemaining) {
 	state JsonBuilderObject statusObjData;
 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(ddWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
@@ -1324,16 +1326,16 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
-static int getExtraTLogEligibleMachines(const vector<std::pair<WorkerInterface, ProcessClass>>& workers, const DatabaseConfiguration& configuration) {
+static int getExtraTLogEligibleMachines(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allMachines;
 	std::map<Key,std::set<StringRef>> dcId_machine;
 	for(auto const& worker : workers) {
-		if(worker.second.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
-			&& !configuration.isExcludedServer(worker.first.address()))
+		if(worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
+			&& !configuration.isExcludedServer(worker.interf.address()))
 		{
-			allMachines.insert(worker.first.locality.zoneId().get());
-			if(worker.first.locality.dcId().present()) {
-				dcId_machine[worker.first.locality.dcId().get()].insert(worker.first.locality.zoneId().get());
+			allMachines.insert(worker.interf.locality.zoneId().get());
+			if(worker.interf.locality.dcId().present()) {
+				dcId_machine[worker.interf.locality.dcId().get()].insert(worker.interf.locality.zoneId().get());
 			}
 		}
 	}
@@ -1387,7 +1389,7 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 	return perfLimit;
 }
 
-ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, std::pair<WorkerInterface, ProcessClass> rkWorker,
+ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails rkWorker,
 	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
 {
 	state JsonBuilderObject statusObj;
@@ -1398,14 +1400,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 	// Writes and conflicts
 	try {
 		vector<Future<TraceEventFields>> proxyStatFutures;
-		std::map<NetworkAddress, std::pair<WorkerInterface, ProcessClass>> workersMap;
+		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
-			workersMap[w.first.address()] = w;
+			workersMap[w.interf.address()] = w;
 		}
 		for (auto &p : db->get().client.proxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
-				proxyStatFutures.push_back(timeoutError(worker.get().first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
+				proxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
@@ -1439,8 +1441,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Transactions
 	try {
-		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
-		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.first.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
+		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
+		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
 
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
@@ -1596,7 +1598,7 @@ static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Asyn
 	return oldTlogsArray;
 }
 
-static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
+static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
@@ -1605,7 +1607,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 
 	std::map<NetworkAddress, StringRef> workerZones;
 	for(auto& worker : workers) {
-		workerZones[worker.first.address()] = worker.first.locality.zoneId().orDefault(LiteralStringRef(""));
+		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
 	for(auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
@@ -1800,7 +1802,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<struct Se
 ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<struct ServerDBInfo>> db,
 		Database cx,
-		vector<std::pair<WorkerInterface, ProcessClass>> workers,
+		vector<WorkerDetails> workers,
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
@@ -1814,20 +1816,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	// Check if master worker is present
 	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
-	state std::pair<WorkerInterface, ProcessClass> mWorker;
-	state std::pair<WorkerInterface, ProcessClass> ddWorker; // DataDistributor worker
-	state std::pair<WorkerInterface, ProcessClass> rkWorker; // RateKeeper worker
+	state WorkerDetails mWorker;
+	state WorkerDetails ddWorker; // DataDistributor worker
+	state WorkerDetails rkWorker; // RateKeeper worker
 
 	try {
 		// Get the master Worker interface
-		Optional<std::pair<WorkerInterface, ProcessClass>> _mWorker = getWorker( workers, db->get().master.address() );
+		Optional<WorkerDetails> _mWorker = getWorker( workers, db->get().master.address() );
 		if (_mWorker.present()) {
 			mWorker = _mWorker.get();
 		} else {
 			messages.push_back(JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
 		}
 		// Get the DataDistributor worker interface
-		Optional<std::pair<WorkerInterface, ProcessClass>> _ddWorker;
+		Optional<WorkerDetails> _ddWorker;
 		if (db->get().distributor.present()) {
 			_ddWorker = getWorker( workers, db->get().distributor.get().address() );
 		}
@@ -1839,7 +1841,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// Get the RateKeeper worker interface
-		Optional<std::pair<WorkerInterface, ProcessClass>> _rkWorker;
+		Optional<WorkerDetails> _rkWorker;
 		if (db->get().ratekeeper.present()) {
 			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );
 		}
@@ -1943,7 +1945,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 			for (auto const& worker : workers) {
-				address_workers[worker.first.address()] = worker.first;
+				address_workers[worker.interf.address()] = worker.interf;
 			}
 
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
@@ -2045,6 +2047,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
+
+		int totalDegraded = 0;
+		for(auto& it : workers) {
+			if(it.degraded) {
+				totalDegraded++;
+			}
+		}
+		statusObj["degraded_processes"] = totalDegraded;
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;

@@ -61,14 +61,14 @@ struct TargetedKillWorkload : TestWorkload {
 			return Void();
 		}
 
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 
 		int killed = 0;
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].first.master.getEndpoint().getPrimaryAddress() == address ||
-				( self->killAllMachineProcesses && workers[i].first.master.getEndpoint().getPrimaryAddress().ip == address.ip && workers[i].second != ProcessClass::TesterClass ) ) {
-				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].first.id());
-				workers[i].first.clientInterface.reboot.send( RebootRequest() );
+			if( workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
+				( self->killAllMachineProcesses && workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip && workers[i].processClass != ProcessClass::TesterClass ) ) {
+				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
+				workers[i].interf.clientInterface.reboot.send( RebootRequest() );
 			}
 		}
 
