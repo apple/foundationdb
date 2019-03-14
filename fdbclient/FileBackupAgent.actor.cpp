@@ -24,6 +24,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/JsonBuilder.h"
 
 #include <ctime>
 #include <climits>
@@ -46,15 +47,10 @@ static std::string versionToString(Optional<Version> version) {
 		return "N/A";
 }
 
-static std::string timeStampToString(Optional<int64_t> ts) {
-	if (!ts.present())
+static std::string timeStampToString(Optional<int64_t> epochs) {
+	if (!epochs.present())
 		return "N/A";
-	time_t curTs = ts.get();
-	char buffer[128];
-	struct tm* timeinfo;
-	timeinfo = localtime(&curTs);
-	strftime(buffer, 128, "%D %T", timeinfo);
-	return std::string(buffer);
+	return BackupAgentBase::formatTime(epochs.get());
 }
 
 static Future<Optional<int64_t>> getTimestampFromVersion(Optional<Version> ver, Reference<ReadYourWritesTransaction> tr) {
@@ -1282,6 +1278,10 @@ namespace fileBackup {
 
 		static struct {
 			// Set by Execute, used by Finish
+			static TaskParam<int64_t> shardsBehind() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+			// Set by Execute, used by Finish
 			static TaskParam<bool> snapshotFinished() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -1378,8 +1378,11 @@ namespace fileBackup {
 								&& store(recentReadVersion, tr->getReadVersion())
 								&& taskBucket->keepRunning(tr, task));
 
-					// If the snapshot batch future key does not exist, create it, set it, and commit
-					// Also initialize the target snapshot end version if it is not yet set.
+					// If the snapshot batch future key does not exist, this is the first execution of this dispatch task so
+					//    - create and set the snapshot batch future key
+					//    - initialize the batch size to 0
+					//    - initialize the target snapshot end version if it is not yet set
+					//    - commit
 					if(!snapshotBatchFutureKey.present()) {
 						snapshotBatchFuture = futureBucket->future(tr);
 						config.snapshotBatchFuture().set(tr, snapshotBatchFuture->pack());
@@ -1549,13 +1552,37 @@ namespace fileBackup {
 			// Calculate number of shards that should be done before the next interval end
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 			double timeElapsed;
+			Version snapshotScheduledVersionInterval = snapshotTargetEndVersion - snapshotBeginVersion;
 			if(snapshotTargetEndVersion > snapshotBeginVersion)
-				timeElapsed = std::min(1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion));
+				timeElapsed = std::min(1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotScheduledVersionInterval));
 			else
 				timeElapsed = 1.0;
 
 			state int countExpectedShardsDone = countAllShards * timeElapsed;
 			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
+
+			// Calculate the number of shards that would have been dispatched by a normal (on-schedule) BackupSnapshotDispatchTask given
+			// the dispatch window and the start and expected-end versions of the current snapshot.
+			int64_t dispatchWindow = nextDispatchVersion - recentReadVersion;
+
+			// If the scheduled snapshot interval is 0 (such as for initial, as-fast-as-possible snapshot) then all shards are considered late
+			int countShardsExpectedPerNormalWindow;
+			if(snapshotScheduledVersionInterval == 0) {
+				countShardsExpectedPerNormalWindow = 0;
+			}
+			else {
+				// A dispatchWindow of 0 means the target end version is <= now which also results in all shards being considered late
+				countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
+			}
+
+			// countShardsThisDispatch is how many total shards are to be dispatched by this dispatch cycle.
+			// Since this dispatch cycle can span many incrementally progressing separate executions of the BackupSnapshotDispatchTask
+			// instance, this is calculated as the number of shards dispatched so far in the dispatch batch plus the number of shards
+			// the current execution is going to attempt to do.
+			int countShardsThisDispatch = countShardsToDispatch + snapshotBatchSize.get();
+			// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are being dispatched, if any.
+			int countShardsBehind = std::max<int64_t>(0, countShardsToDispatch + snapshotBatchSize.get() - countShardsExpectedPerNormalWindow); 
+			Params.shardsBehind().set(task, countShardsBehind);
 
 			TraceEvent("FileBackupSnapshotDispatchStats")
 				.detail("BackupUID", config.getUid())
@@ -1564,6 +1591,7 @@ namespace fileBackup {
 				.detail("ShardsNotDone", countShardsNotDone)
 				.detail("ExpectedShardsDone", countExpectedShardsDone)
 				.detail("ShardsToDispatch", countShardsToDispatch)
+				.detail("ShardsBehind", countShardsBehind)
 				.detail("SnapshotBeginVersion", snapshotBeginVersion)
 				.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 				.detail("NextDispatchVersion", nextDispatchVersion)
@@ -1636,6 +1664,8 @@ namespace fileBackup {
 							ASSERT(snapshotBatchSize.get() == oldBatchSize);
 							config.snapshotBatchSize().set(tr, newBatchSize);
 							snapshotBatchSize = newBatchSize;
+							config.snapshotDispatchLastShardsBehind().set(tr, Params.shardsBehind().get(task));
+							config.snapshotDispatchLastVersion().set(tr, tr->getReadVersion().get());
 						}
 
 						state std::vector<Future<Void>> addTaskFutures;
@@ -1738,6 +1768,10 @@ namespace fileBackup {
 			config.snapshotBatchFuture().clear(tr);
 			config.snapshotBatchDispatchDoneKey().clear(tr);
 			config.snapshotBatchSize().clear(tr);
+
+			// Update shardsBehind here again in case the execute phase did not actually have to create any shard tasks
+			config.snapshotDispatchLastShardsBehind().set(tr, Params.shardsBehind().getOrDefault(task, 0));
+			config.snapshotDispatchLastVersion().set(tr, tr->getReadVersion().get());
 
 			state Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
 
@@ -2069,8 +2103,8 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable but the state is not differential then set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 
 			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
 			if(stopWhenDone && restorableVersion.present()) {
@@ -2305,8 +2339,8 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable and the state isn't differential the set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 
 			// Unless we are to stop, start the next snapshot using the default interval
 			Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
@@ -2386,7 +2420,7 @@ namespace fileBackup {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
 
-			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
+			config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
 			state Reference<TaskFuture>	backupFinished = futureBucket->future(tr);
 
@@ -3504,7 +3538,7 @@ public:
 				// Break, if one of the following is true
 				//  - no longer runnable
 				//  - in differential mode (restorable) and stopWhenDone is not enabled
-				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status) )) {
+				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_RUNNING_DIFFERENTIAL == status) )) {
 
 					if(pContainer != nullptr) {
 						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
@@ -3840,6 +3874,176 @@ public:
 		return Void();
 	}
 
+	struct TimestampedVersion {
+		Optional<Version> version;
+		Optional<int64_t> epochs;
+
+		bool present() const {
+			return version.present();
+		}
+
+		JsonBuilderObject toJSON() const {
+			JsonBuilderObject doc;
+			if(version.present()) {
+				doc.setKey("Version", version.get());
+				if(epochs.present()) {
+					doc.setKey("EpochSeconds", epochs.get());
+					doc.setKey("Timestamp", timeStampToString(epochs));
+				}
+			}
+			return doc;
+		}
+	};
+
+	// Helper actor for generating status
+	// If f is present, lookup epochs using timekeeper and tr, return TimestampedVersion
+	ACTOR static Future<TimestampedVersion> getTimestampedVersion(Reference<ReadYourWritesTransaction> tr, Future<Optional<Version>> f) {
+		state TimestampedVersion tv;
+		wait(store(tv.version, f));
+		if(tv.version.present()) {
+			wait(store(tv.epochs, timeKeeperEpochsFromVersion(tv.version.get(), tr)));
+		}
+		return tv;
+	}
+
+	ACTOR static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+		loop {
+			try {
+				state JsonBuilderObject doc;
+				doc.setKey("SchemaVersion", "1.0.0");
+
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state KeyBackedTag tag = makeBackupTag(tagName);
+				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag;
+				state Optional<Value> paused;
+				state Version recentReadVersion;
+
+				wait( store(paused, tr->get(backupAgent->taskBucket->getPauseKey())) && store(uidAndAbortedFlag, tag.get(tr)) && store(recentReadVersion, tr->getReadVersion()) );
+
+				doc.setKey("BackupAgentsPaused", paused.present());
+				doc.setKey("Tag", tag.tagName);
+
+				if(uidAndAbortedFlag.present()) {
+					state BackupConfig config(uidAndAbortedFlag.get().first);
+
+					state EBackupState backupState = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+					JsonBuilderObject statusDoc;
+					statusDoc.setKey("Name", BackupAgentBase::getStateName(backupState));
+					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
+					statusDoc.setKey("Completed", backupState == BackupAgentBase::STATE_COMPLETED);
+					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
+					doc.setKey("Status", statusDoc);
+
+					state Future<Void> done = Void();
+
+					if(backupState != BackupAgentBase::STATE_NEVERRAN) {
+						state Reference<IBackupContainer> bc;
+						state TimestampedVersion latestRestorable;
+
+						wait( store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr)))
+							&& store(bc, config.backupContainer().getOrThrow(tr))
+						);
+
+						doc.setKey("Restorable", latestRestorable.present());
+
+						if(latestRestorable.present()) {
+							JsonBuilderObject o = latestRestorable.toJSON();
+							if(backupState != BackupAgentBase::STATE_COMPLETED) {
+								o.setKey("LagSeconds", (recentReadVersion - latestRestorable.version.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+							}
+							doc.setKey("LatestRestorablePoint", o);
+						}
+						doc.setKey("DestinationURL", bc->getURL());
+					}
+
+					if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || backupState == BackupAgentBase::STATE_RUNNING) {
+						state int64_t snapshotInterval;
+						state int64_t logBytesWritten;
+						state int64_t rangeBytesWritten;
+						state bool stopWhenDone;
+						state TimestampedVersion snapshotBegin;
+						state TimestampedVersion snapshotTargetEnd;
+						state TimestampedVersion latestLogEnd;
+						state TimestampedVersion latestSnapshotEnd;
+						state TimestampedVersion snapshotLastDispatch;
+						state Optional<int64_t> snapshotLastDispatchShardsBehind;
+
+						wait(  store(snapshotInterval, config.snapshotIntervalSeconds().getOrThrow(tr))
+							&& store(logBytesWritten, config.logBytesWritten().getD(tr))
+							&& store(rangeBytesWritten, config.rangeBytesWritten().getD(tr))
+							&& store(stopWhenDone, config.stopWhenDone().getOrThrow(tr)) 
+							&& store(snapshotBegin,      getTimestampedVersion(tr, config.snapshotBeginVersion().get(tr)))
+							&& store(snapshotTargetEnd,  getTimestampedVersion(tr, config.snapshotTargetEndVersion().get(tr)))
+							&& store(latestLogEnd,       getTimestampedVersion(tr, config.latestLogEndVersion().get(tr)))
+							&& store(latestSnapshotEnd,  getTimestampedVersion(tr, config.latestSnapshotEndVersion().get(tr)))
+							&& store(snapshotLastDispatch,             getTimestampedVersion(tr, config.snapshotDispatchLastVersion().get(tr)))
+							&& store(snapshotLastDispatchShardsBehind, config.snapshotDispatchLastShardsBehind().get(tr))
+						);
+
+						doc.setKey("StopAfterSnapshot", stopWhenDone);
+						doc.setKey("SnapshotIntervalSeconds", snapshotInterval);
+						doc.setKey("LogBytesWritten", logBytesWritten);
+						doc.setKey("RangeBytesWritten", rangeBytesWritten);
+
+						if(latestLogEnd.present()) {
+							doc.setKey("LatestLogEnd", latestLogEnd.toJSON());
+						}
+
+						if(latestSnapshotEnd.present()) {
+							doc.setKey("LatestSnapshotEnd", latestSnapshotEnd.toJSON());
+						}
+
+						JsonBuilderObject snapshot;
+
+						if(snapshotBegin.present()) {
+							snapshot.setKey("Begin", snapshotBegin.toJSON());
+
+							if(snapshotTargetEnd.present()) {
+								snapshot.setKey("EndTarget", snapshotTargetEnd.toJSON());
+
+								Version interval = snapshotTargetEnd.version.get() - snapshotBegin.version.get();
+								snapshot.setKey("IntervalSeconds", interval / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+								Version elapsed = recentReadVersion - snapshotBegin.version.get();
+								double progress = (interval > 0) ? (100.0 * elapsed / interval) : 100;
+								snapshot.setKey("ExpectedProgress", progress);
+							}
+
+							JsonBuilderObject dispatchDoc = snapshotLastDispatch.toJSON();
+							if(snapshotLastDispatchShardsBehind.present()) {
+								dispatchDoc.setKey("ShardsBehind", snapshotLastDispatchShardsBehind.get());
+							}
+							snapshot.setKey("LastDispatch", dispatchDoc);
+						}
+
+						doc.setKey("CurrentSnapshot", snapshot);
+					}
+
+					KeyBackedMap<int64_t, std::pair<std::string, Version>>::PairsType errors = wait(config.lastErrorPerType().getRange(tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
+					JsonBuilderArray errorList;
+					for(auto &e : errors) {
+						std::string msg = e.second.first;
+						Version ver = e.second.second;
+
+						JsonBuilderObject errDoc;
+						errDoc.setKey("Message", msg.c_str());
+						errDoc.setKey("RelativeSeconds", (ver - recentReadVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+					}
+					doc.setKey("Errors", errorList);
+				}
+
+				return doc.getJson();
+			}
+			catch (Error &e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, bool showErrors, std::string tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state std::string statusText;
@@ -3882,11 +4086,11 @@ public:
 						case BackupAgentBase::STATE_SUBMITTED:
 							statusText += "The backup on tag `" + tagName + "' is in progress (just started) to " + bc->getURL() + ".\n";
 							break;
-						case BackupAgentBase::STATE_BACKUP:
+						case BackupAgentBase::STATE_RUNNING:
 							statusText += "The backup on tag `" + tagName + "' is in progress to " + bc->getURL() + ".\n";
 							snapshotProgress = true;
 							break;
-						case BackupAgentBase::STATE_DIFFERENTIAL:
+						case BackupAgentBase::STATE_RUNNING_DIFFERENTIAL:
 							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + bc->getURL() + ".\n";
 							snapshotProgress = true;
 							break;
@@ -3931,7 +4135,7 @@ public:
 									);
 
 						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
-						if(backupState == BackupAgentBase::STATE_DIFFERENTIAL)
+						if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
 							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the snapshot is supposed to be done)\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
 						else
 							statusText += "The initial snapshot is still running.\n";
@@ -4076,7 +4280,7 @@ public:
 				backupConfig = BackupConfig(uidFlag.first);
 				state EBackupState status = wait(backupConfig.stateEnum().getOrThrow(ryw_tr));
 
-				if (status != BackupAgentBase::STATE_DIFFERENTIAL ) {
+				if (status != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL ) {
 					throw backup_duplicate();
 				}
 
@@ -4206,6 +4410,10 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, bool showErrors, std::string tagName) {
 	return FileBackupAgentImpl::getStatus(this, cx, showErrors, tagName);
+}
+
+Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagName) {
+	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
 Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {
