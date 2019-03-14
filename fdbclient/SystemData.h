@@ -286,7 +286,7 @@ const Key restoreRequestKeyFor( int const& index );
 const Value restoreRequestValue( RestoreRequest const& server );
 RestoreRequest decodeRestoreRequestValue( ValueRef const& value );
 
-const  Key restoreStatusKeyFor(std::string const statusType);
+const  Key restoreStatusKeyFor( StringRef statusType);
 const Value restoreStatusValue( double const& val );
 
 #endif

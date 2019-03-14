@@ -682,7 +682,7 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	}
 
 	void resetPerVersionBatch() {
-		printf("[INFO][Node] resetPerVersionBatch: NodeID:%s\n", localNodeStatus.nodeID.toString().c_str());
+		printf("[INFO]Node:%s resetPerVersionBatch\n", localNodeStatus.nodeID.toString().c_str());
 		range2Applier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;
@@ -1786,8 +1786,8 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 			printf("[INFO] Wait for %d applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
 			std::vector<RestoreCommandReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] Get restoreCommandReply value:%s for Assign_Applier_KeyRange\n",
-						reps[i].id.toString().c_str());
+				printf("[INFO] Get reply:%s for Assign_Applier_KeyRange\n",
+						reps[i].toString().c_str());
 			}
 
 			cmdReplies.clear();
@@ -1803,8 +1803,8 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 			}
 			std::vector<RestoreCommandReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout)  );
 			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] Assign_Applier_KeyRange_Done: Get restoreCommandReply value:%s\n",
-						reps[i].id.toString().c_str());
+				printf("[INFO] Assign_Applier_KeyRange_Done: Get reply:%s\n",
+						reps[i].toString().c_str());
 			}
 
 			break;
@@ -1891,8 +1891,8 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 			printf("[INFO] Wait for %d loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
 			std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] Get reply from Notify_Loader_ApplierKeyRange cmd for node:%s\n",
-						reps[i].id.toString().c_str());
+				printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
+						reps[i].toString().c_str());
 			}
 
 			cmdReplies.clear();
@@ -2601,8 +2601,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
-					printf("[Sampling] Get restoreCommandReply value:%s for  Sample_Range_File or Sample_Log_File\n",
-							reps[i].id.toString().c_str());
+					printf("[Sampling] Get reply:%s for  Sample_Range_File or Sample_Log_File\n",
+							reps[i].toString().c_str());
 					finishedLoaderIDs.push_back(reps[i].id);
 					//int64_t repLoadingCmdIndex = reps[i].cmdIndex;
 				}
@@ -2648,8 +2648,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
 
 				for (int i = 0; i < reps.size(); ++i) {
-					printf("[Sampling] Get restoreCommandReply value:%s for Sample_File_Done\n",
-							reps[i].id.toString().c_str());
+					printf("[Sampling] Get reply:%s for Sample_File_Done\n",
+							reps[i].toString().c_str());
 				}
 			}
 
@@ -2913,8 +2913,8 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 
 				finishedLoaderIDs.clear();
 				for (int i = 0; i < reps.size(); ++i) {
-					printf("[INFO] Get Ack from node:%s for Assign_Loader_File\n",
-							reps[i].id.toString().c_str());
+					printf("[INFO] Get Ack reply:%s for Assign_Loader_File\n",
+							reps[i].toString().c_str());
 					finishedLoaderIDs.push_back(reps[i].id);
 					//int64_t repLoadingCmdIndex = reps[i].cmdIndex;
 					//rd->loadingStatus[repLoadingCmdIndex].state = LoadingState::Assigned;
@@ -2955,9 +2955,9 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 		}
 		std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] Node:%s CMDUID:%s Get restoreCommandReply value:%s for Assign_Loader_File_Done\n",
+			printf("[INFO] Node:%s CMDUID:%s Get reply:%s for Assign_Loader_File_Done\n",
 					rd->describeNode().c_str(), reps[i].cmdId.toString().c_str(),
-					reps[i].id.toString().c_str());
+					reps[i].toString().c_str());
 		}
 
 
@@ -2975,9 +2975,9 @@ ACTOR static Future<Void> distributeWorkload(RestoreCommandInterface interf, Ref
 		}
 		std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
 		for (int i = 0; i < reps.size(); ++i) {
-			printf("[INFO] Node:%s CMDUID:%s Get restoreCommandReply value:%s for Loader_Send_Mutations_To_Applier_Done\n",
+			printf("[INFO] Node:%s CMDUID:%s Get reply:%s for Loader_Send_Mutations_To_Applier_Done\n",
 					rd->describeNode().c_str(), reps[i].cmdId.toString().c_str(),
-					reps[i].id.toString().c_str());
+					reps[i].toString().c_str());
 		}
 
 		// Notify the applier to applly mutation to DB
@@ -3542,12 +3542,12 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			rd->resetPerVersionBatch();
 			if ( rd->localNodeStatus.role == RestoreRole::Applier ) {
 				if ( rd->masterApplier.toString() == rd->localNodeStatus.nodeID.toString() ) {
-					printf("[Batch:%d][INFO][Master Applier] Node:%s Waits for the mutations from the sampled backup data\n", rd->describeNode().c_str(), restoreBatch);
+					printf("[Batch:%d][INFO][Master Applier] Node:%s Waits for the mutations from the sampled backup data\n", restoreBatch, rd->describeNode().c_str(), restoreBatch);
 					wait(receiveSampledMutations(rd, interf));
 					wait(calculateApplierKeyRange(rd, interf));
 				}
 
-				printf("[Batch:%d][INFO][Applier] Node:%s Waits for the assignment of key range\n", rd->describeNode().c_str(), restoreBatch);
+				printf("[Batch:%d][INFO][Applier] Node:%s Waits for the assignment of key range\n", restoreBatch, rd->describeNode().c_str(), restoreBatch);
 				wait( assignKeyRangeToAppliersHandler(rd, interf) );
 
 				printf("[Batch:%d][INFO][Applier] Waits for the mutations parsed from loaders\n", restoreBatch);
@@ -3570,7 +3570,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 				//printf("[INFO][Loader] Waits for the command to ask applier to apply mutations to DB\n");
 				//wait( applyToDBHandler(rd, interf, leaderInterf.get()) );
 			} else {
-				printf("[Batch:%d][ERROR][Worker] In an invalid role:%d\n", rd->localNodeStatus.role, restoreBatch);
+				printf("[Batch:%d][ERROR][Worker] In an invalid role:%d\n", restoreBatch, rd->localNodeStatus.role);
 			}
 
 			restoreBatch++;
@@ -3734,13 +3734,13 @@ int restoreStatusIndex = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			tr->set(restoreStatusKeyFor("curWorkload" + restoreStatusIndex), restoreStatusValue(status.curWorkloadSize));
-			tr->set(restoreStatusKeyFor("curRunningTime" + restoreStatusIndex), restoreStatusValue(status.curRunningTime));
-			tr->set(restoreStatusKeyFor("curSpeed" + restoreStatusIndex), restoreStatusValue(status.curSpeed));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("curWorkload") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curWorkloadSize));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("curRunningTime") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curRunningTime));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("curSpeed") + std::to_string(restoreStatusIndex))), restoreStatusValue(status.curSpeed));
 
-			tr->set(restoreStatusKeyFor("totalWorkload"), restoreStatusValue(status.totalWorkloadSize));
-			tr->set(restoreStatusKeyFor("totalRunningTime"), restoreStatusValue(status.totalRunningTime));
-			tr->set(restoreStatusKeyFor("totalSpeed"), restoreStatusValue(status.totalSpeed));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("totalWorkload"))), restoreStatusValue(status.totalWorkloadSize));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("totalRunningTime"))), restoreStatusValue(status.totalRunningTime));
+			tr->set(restoreStatusKeyFor(StringRef(std::string("totalSpeed"))), restoreStatusValue(status.totalSpeed));
 
 			wait( tr->commit() );
 			restoreStatusIndex++;
@@ -3869,7 +3869,7 @@ ACTOR static Future<Version> restoreMX(RestoreCommandInterface interf, Reference
 					status.totalWorkloadSize = totalWorkloadSize;
 					status.totalSpeed = totalWorkloadSize / totalRunningTime;
 
-					printf("------[Progress] restoreBatchIndex:%d, curWorkloadSize:%.2f, curWorkload:%.2f curRunningtime:%.2f curSpeed:%.2f totalWorkload:%.2f totalRunningTime:%.2f totalSpeed:%.2f\n",
+					printf("------[Progress] restoreBatchIndex:%d, curWorkloadSize:%.2f B, curWorkload:%.2f B curRunningtime:%.2f s curSpeed:%.2f B/s  totalWorkload:%.2f B totalRunningTime:%.2f s totalSpeed:%.2f B/s\n",
 							restoreBatchIndex-1, curWorkloadSize,
 							status.curWorkloadSize, status.curRunningTime, status.curSpeed, status.totalWorkloadSize, status.totalRunningTime, status.totalSpeed);
 

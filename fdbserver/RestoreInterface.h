@@ -170,7 +170,7 @@ struct RestoreCommand {
 	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id): cmd(cmd), cmdId(cmdId), id(id) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role) : cmd(cmd), cmdId(cmdId), id(id), role(role) {}
 	// Set_Role
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role, int nodeIndex, UID masterApplier) : cmd(cmd), cmdId(cmdId), id(id), role(role), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role, int nodeIndex, UID masterApplier) : cmd(cmd), cmdId(cmdId), id(id), role(role), nodeIndex(nodeIndex), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
 	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, KeyRange keyRange): cmd(cmd), cmdId(cmdId), id(id), keyRange(keyRange) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, LoadingParam loadingParam): cmd(cmd), cmdId(cmdId), id(id), loadingParam(loadingParam) {};
 	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, int keyRangeIndex): cmd(cmd), cmdId(cmdId), id(id), keyRangeIndex(keyRangeIndex) {};
@@ -198,6 +198,12 @@ struct RestoreCommandReply {
 	explicit RestoreCommandReply(UID id, CMDUID cmdId) : id(id), cmdId(cmdId) {}
 	explicit RestoreCommandReply(UID id, CMDUID cmdId, int num) : id(id), cmdId(cmdId), num(num) {}
 	explicit RestoreCommandReply(UID id, CMDUID cmdId, KeyRef lowerBound) : id(id), cmdId(cmdId), lowerBound(lowerBound) {}
+
+	std::string toString() const {
+		std::stringstream ret;
+		ret << "ServerNodeID:" + id.toString() + " CMDID:" + cmdId.toString() + " num:" + std::to_string(num) + " lowerBound:" + lowerBound.toHexString();
+		return ret.str();
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

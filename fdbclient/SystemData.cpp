@@ -678,7 +678,7 @@ RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
 }
 
 // restoreStatus key
-const Key restoreStatusKeyFor (std::string const statusType) {
+const Key restoreStatusKeyFor ( StringRef statusType) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreStatusKey);
 	wr << statusType;
