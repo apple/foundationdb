@@ -67,6 +67,7 @@ enum {
 	TaskUnknownEndpoint = 4000,
 	TaskMoveKeys = 3550,
 	TaskDataDistributionLaunch = 3530,
+	TaskRateKeeper = 3510,
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,

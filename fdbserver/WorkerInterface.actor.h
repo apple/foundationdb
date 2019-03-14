@@ -28,6 +28,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -46,6 +47,7 @@ struct WorkerInterface {
 	RequestStream< struct RecruitMasterRequest > master;
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
+	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
@@ -68,7 +70,21 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+	}
+};
+
+struct WorkerDetails {
+	WorkerInterface interf;
+	ProcessClass processClass;
+	bool degraded;
+
+	WorkerDetails() : degraded(false) {}
+	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded) : interf(interf), processClass(processClass), degraded(degraded) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, processClass, degraded);
 	}
 };
 
@@ -104,7 +120,7 @@ struct InitializeLogRouterRequest {
 	Tag routerTag;
 	Version startVersion;
 	std::vector<LocalityData> tLogLocalities;
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -145,8 +161,22 @@ struct InitializeDataDistributorRequest {
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
+	InitializeDataDistributorRequest() {}
+	explicit InitializeDataDistributorRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
+		serializer(ar, reqId, reply);
+	}
+};
+
+struct InitializeRatekeeperRequest {
+	UID reqId;
+	ReplyPromise<RatekeeperInterface> reply;
+
+	InitializeRatekeeperRequest() {}
+	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
 	}
 };
@@ -300,6 +330,7 @@ struct Role {
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
+	static const Role RATE_KEEPER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -352,7 +383,7 @@ ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMaste
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -361,6 +392,7 @@ ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest i
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> rateKeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
@@ -373,7 +405,7 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered);
+                        Promise<Void> oldLog, Promise<Void> recovered, Reference<AsyncVar<bool>> degraded);
 }
 
 typedef decltype(&tLog) TLogFn;

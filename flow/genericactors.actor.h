@@ -776,6 +776,30 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 }
 
 ACTOR template <class T>
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+	state bool isEqual = var->get() == val;
+	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
+	loop {
+		choose {
+			when( wait( resetDelay ) ) {
+				var->set( val );
+				isEqual = true;
+				resetDelay = Never();
+			}
+			when( wait( var->onChange() ) ) {}
+		}
+		if( isEqual && var->get() != val ) {
+			isEqual = false;
+			resetDelay = delay(time);
+		}
+		if( !isEqual && var->get() == val ) {
+			isEqual = true;
+			resetDelay = Never();
+		}
+	}
+}
+
+ACTOR template <class T>
 Future<Void> setWhenDoneOrError( Future<Void> condition, Reference<AsyncVar<T>> var, T val ) {
 	try {
 		wait( condition );

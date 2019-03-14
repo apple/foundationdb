@@ -54,12 +54,12 @@ struct LogMetricsWorkload : TestWorkload {
 	ACTOR Future<Void> setSystemRate( LogMetricsWorkload *self, Database cx, uint32_t rate ) {
 		// set worker interval and ss interval
 		state BinaryWriter br(Unversioned());
-		vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		//vector<Future<Void>> replies;
 		TraceEvent("RateChangeTrigger");
 		SetMetricsLogRateRequest req(rate);
 		for(int i = 0; i < workers.size(); i++) {
-			workers[i].first.setMetricsRate.send( req );
+			workers[i].interf.setMetricsRate.send( req );
 		}
 		//wait( waitForAll( replies ) );
 

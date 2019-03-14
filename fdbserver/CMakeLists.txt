@@ -56,7 +56,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.actor.cpp
   QuietDatabase.h
   Ratekeeper.actor.cpp
-  Ratekeeper.h
+  RatekeeperInterface.h
   RecoveryState.h
   Restore.actor.cpp
   RestoreInterface.h

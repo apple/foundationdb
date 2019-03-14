@@ -99,6 +99,7 @@ public:
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
+				case ProcessClass::RateKeeperClass: return false;
 				default: return false;
 			}
 		}
@@ -279,11 +280,11 @@ public:
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	class ClusterConnectionString* extraDB;
-	IRepPolicyRef storagePolicy;
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> storagePolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
 	Optional<Standalone<StringRef>> primaryDcId;
-	IRepPolicyRef remoteTLogPolicy;
+	Reference<IReplicationPolicy> remoteTLogPolicy;
 	int32_t usableRegions;
 	std::string disablePrimary;
 	std::string disableRemote;
@@ -291,8 +292,8 @@ public:
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
-	IRepPolicyRef satelliteTLogPolicy;
-	IRepPolicyRef satelliteTLogPolicyFallback;
+	Reference<IReplicationPolicy> satelliteTLogPolicy;
+	Reference<IReplicationPolicy> satelliteTLogPolicyFallback;
 	int32_t satelliteTLogWriteAntiQuorum;
 	int32_t satelliteTLogWriteAntiQuorumFallback;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;

@@ -737,6 +737,7 @@ struct HealthMetrics {
 	int64_t worstStorageDurabilityLag;
 	int64_t worstTLogQueue;
 	double tpsLimit;
+	bool batchLimited;
 	std::map<UID, StorageStats> storageStats;
 	std::map<UID, int64_t> tLogQueue;
 
@@ -745,6 +746,7 @@ struct HealthMetrics {
 		, worstStorageDurabilityLag(0)
 		, worstTLogQueue(0)
 		, tpsLimit(0.0)
+		, batchLimited(false)
 	{}
 
 	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
@@ -753,6 +755,7 @@ struct HealthMetrics {
 		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
 		worstTLogQueue = hm.worstTLogQueue;
 		tpsLimit = hm.tpsLimit;
+		batchLimited = hm.batchLimited;
 
 		if (!detailedOutput) {
 			storageStats.clear();
@@ -769,13 +772,14 @@ struct HealthMetrics {
 			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
 			worstTLogQueue == r.worstTLogQueue &&
 			storageStats == r.storageStats &&
-			tLogQueue == r.tLogQueue
+			tLogQueue == r.tLogQueue &&
+			batchLimited == r.batchLimited
 		);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, storageStats, tLogQueue);
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
 	}
 };
 
