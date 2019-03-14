@@ -25,6 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -615,7 +616,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
@@ -700,6 +701,11 @@ ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.healthMetrics.batchLimited = lastLimited;
 
 				req.reply.send( reply );
+			}
+			when (HaltRatekeeperRequest req = waitNext(rkInterf.haltRatekeeper.getFuture())) {
+				req.reply.send(Void());
+				TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
+				break;
 			}
 			when (wait(err.getFuture())) {}
 			when (wait(dbInfo->onChange())) {

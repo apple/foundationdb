@@ -856,6 +856,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
+					DUMPTOKEN( recruited.haltRatekeeper );
 
 					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );

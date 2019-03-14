@@ -26,6 +26,7 @@
 
 struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
 
 	DataDistributorInterface() {}
@@ -43,7 +44,20 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, locality);
+		serializer(ar, waitFailure, haltDataDistributor, locality);
+	}
+};
+
+struct HaltDataDistributorRequest {
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	HaltDataDistributorRequest() {}
+	explicit HaltDataDistributorRequest(UID uid) : requesterID(uid) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply);
 	}
 };
 

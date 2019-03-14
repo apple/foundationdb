@@ -259,6 +259,7 @@ public:
 	int64_t MAX_VERSION_DIFFERENCE;
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double STATELESS_SERVER_FITNESS_CHECK_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)

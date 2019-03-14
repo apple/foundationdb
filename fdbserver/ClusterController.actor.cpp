@@ -2461,6 +2461,49 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
+	state std::map<Optional<Standalone<StringRef>>, WorkerInfo>::iterator masterWorker;
+	state std::map<Optional<Standalone<StringRef>>, ProcessClass>::iterator masterClassIter;
+
+	loop {
+		if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			wait(self->db.serverInfo->onChange());
+			continue;
+		}
+
+		state ServerDBInfo db = self->db.serverInfo->get();
+		masterWorker = self->id_worker.find(db.master.locality.processId());
+		masterClassIter = self->id_class.find(db.master.locality.processId());
+		if (masterWorker == self->id_worker.end() || masterClassIter == self->id_class.end()) {
+			wait(self->db.serverInfo->onChange());
+			continue;
+		}
+		auto masterFitness = masterClassIter->second.machineClassFitness(ProcessClass::Master);
+
+		if (db.ratekeeper.present()) {
+			auto rkClassIter = self->id_class.find(db.ratekeeper.get().locality.processId());
+			auto rkFitness = (rkClassIter != self->id_class.end())
+				? rkClassIter->second.machineClassFitness(ProcessClass::RateKeeper)
+				: ProcessClass::BestFit;
+			if (rkFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+				db.ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
+			}
+		}
+
+		if (db.distributor.present()) {
+			auto ddClassIter = self->id_class.find(db.distributor.get().locality.processId());
+			auto ddFitness = (ddClassIter != self->id_class.end())
+				? ddClassIter->second.machineClassFitness(ProcessClass::DataDistributor)
+				: ProcessClass::BestFit;
+			if (ddFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+				db.distributor.get().haltDataDistributor.send(HaltDataDistributorRequest(self->id));
+			}
+		}
+
+		wait(delay(SERVER_KNOBS->STATELESS_SERVER_FITNESS_CHECK_INTERVAL));
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -2480,6 +2523,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
+	self.addActor.send( monitorBetterDDOrRK(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {
