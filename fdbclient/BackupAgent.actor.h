@@ -38,13 +38,35 @@
 
 class BackupAgentBase : NonCopyable {
 public:
+	// Time formatter for anything backup or restore related
+	static std::string formatTime(int64_t epochs) {
+		time_t curTime = (time_t)epochs;
+		char buffer[128];
+		struct tm timeinfo;
+		getLocalTime(&curTime, &timeinfo);
+		strftime(buffer, 128, "%Y/%m/%d.%H:%M:%S%z", &timeinfo);
+		return buffer;
+	}
+
+	static std::string timeFormat() {
+		return "YYYY/MM/DD.HH:MI:SS[+/-]HHMM";
+	}
+
+	static int64_t parseTime(std::string timestamp) {
+		struct tm out;
+		if (strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
+			return -1;
+		}
+		return (int64_t) mktime(&out);
+	}
+
 	// Type of program being executed
 	enum enumActionResult {
 		RESULT_SUCCESSFUL = 0, RESULT_ERRORED = 1, RESULT_DUPLICATE = 2, RESULT_UNNEEDED = 3
 	};
 
 	enum enumState {
-		STATE_ERRORED = 0, STATE_SUBMITTED = 1, STATE_BACKUP = 2, STATE_DIFFERENTIAL = 3, STATE_COMPLETED = 4, STATE_NEVERRAN = 5, STATE_ABORTED = 6, STATE_PARTIALLY_ABORTED = 7
+		STATE_ERRORED = 0, STATE_SUBMITTED = 1, STATE_RUNNING = 2, STATE_RUNNING_DIFFERENTIAL = 3, STATE_COMPLETED = 4, STATE_NEVERRAN = 5, STATE_ABORTED = 6, STATE_PARTIALLY_ABORTED = 7
 	};
 
 	static const Key keyFolderId;
@@ -90,11 +112,11 @@ public:
 		}
 
 		else if (!stateText.compare("has been started")) {
-			enState = STATE_BACKUP;
+			enState = STATE_RUNNING;
 		}
 
 		else if (!stateText.compare("is differential")) {
-			enState = STATE_DIFFERENTIAL;
+			enState = STATE_RUNNING_DIFFERENTIAL;
 		}
 
 		else if (!stateText.compare("has been completed")) {
@@ -112,7 +134,7 @@ public:
 		return enState;
 	}
 
-	// Convert the status text to an enumerated value
+	// Convert the status enum to a text description
 	static const char* getStateText(enumState enState)
 	{
 		const char* stateText;
@@ -128,10 +150,10 @@ public:
 		case STATE_SUBMITTED:
 			stateText = "has been submitted";
 			break;
-		case STATE_BACKUP:
+		case STATE_RUNNING:
 			stateText = "has been started";
 			break;
-		case STATE_DIFFERENTIAL:
+		case STATE_RUNNING_DIFFERENTIAL:
 			stateText = "is differential";
 			break;
 		case STATE_COMPLETED:
@@ -151,6 +173,45 @@ public:
 		return stateText;
 	}
 
+	// Convert the status enum to a name
+	static const char* getStateName(enumState enState)
+	{
+		const char* s;
+
+		switch (enState)
+		{
+		case STATE_ERRORED:
+			s = "Errored";
+			break;
+		case STATE_NEVERRAN:
+			s = "NeverRan";
+			break;
+		case STATE_SUBMITTED:
+			s = "Submitted";
+			break;
+		case STATE_RUNNING:
+			s = "Running";
+			break;
+		case STATE_RUNNING_DIFFERENTIAL:
+			s = "RunningDifferentially";
+			break;
+		case STATE_COMPLETED:
+			s = "Completed";
+			break;
+		case STATE_ABORTED:
+			s = "Aborted";
+			break;
+		case STATE_PARTIALLY_ABORTED:
+			s = "Aborting";
+			break;
+		default:
+			s = "<undefined>";
+			break;
+		}
+
+		return s;
+	}
+
 	// Determine if the specified state is runnable
 	static bool isRunnable(enumState enState)
 	{
@@ -159,8 +220,8 @@ public:
 		switch (enState)
 		{
 		case STATE_SUBMITTED:
-		case STATE_BACKUP:
-		case STATE_DIFFERENTIAL:
+		case STATE_RUNNING:
+		case STATE_RUNNING_DIFFERENTIAL:
 		case STATE_PARTIALLY_ABORTED:
 			isRunnable = true;
 			break;
@@ -179,6 +240,7 @@ public:
 		return defaultTagName;
 	}
 
+	// This is only used for automatic backup name generation
 	static Standalone<StringRef> getCurrentTime() {
 		double t = now();
 		time_t curTime = t;
@@ -283,6 +345,7 @@ public:
 	}
 
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
+	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
@@ -679,6 +742,14 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<Version> snapshotDispatchLastVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	Future<Void> initNewSnapshot(Reference<ReadYourWritesTransaction> tr, int64_t intervalSeconds = -1) {
 		BackupConfig &copy = *this;  // Capture this by value instead of this ptr
 
@@ -702,6 +773,8 @@ public:
 			copy.snapshotBeginVersion().set(tr, beginVersion.get());
 			copy.snapshotTargetEndVersion().set(tr, endVersion);
 			copy.snapshotRangeFileCount().set(tr, 0);
+			copy.snapshotDispatchLastVersion().clear(tr);
+			copy.snapshotDispatchLastShardsBehind().clear(tr);
 
 			return Void();
 		});
