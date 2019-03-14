@@ -1492,7 +1492,6 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	StorageQueuingMetricsReply reply;
 	reply.localTime = now();
 	reply.instanceID = self->instanceID;
-	reply.tag = self->tag;
 	reply.bytesInput = self->counters.bytesInput.getValue();
 	reply.bytesDurable = self->counters.bytesDurable.getValue();
 
