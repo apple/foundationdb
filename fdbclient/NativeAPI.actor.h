@@ -115,8 +115,8 @@ void stopNetwork();
  */
 class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
 public:
-	Cluster(Reference<ClusterConnectionFile> connFile, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface);
+	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
+	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
 
 	~Cluster();
 
@@ -126,7 +126,7 @@ public:
 	Future<Void> onConnected();
 
 private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, int apiVersion=Database::API_VERSION_LATEST);
+	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<ClusterConnectionFile> connectionFile;

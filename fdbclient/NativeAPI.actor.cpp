@@ -534,13 +534,14 @@ DatabaseContext::DatabaseContext(
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {}
 
-ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) {
+ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo, Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed ) {
 	try {
 		state Optional<double> incorrectTime;
 		loop {
 			OpenDatabaseRequest req;
 			req.knownClientInfoID = outInfo->get().id;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
+			req.connectedCoordinatorsNum = connectedCoordinatorsNumDelayed->get();
 			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
 
 			ClusterConnectionString fileConnectionString;
@@ -571,6 +572,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 					if(clusterInterface->get().present())
 						TraceEvent("ClientInfo_CCInterfaceChange").detail("CCID", clusterInterface->get().get().id());
 				}
+				when( wait( connectedCoordinatorsNumDelayed->onChange() ) ) {}
 			}
 		}
 	} catch( Error& e ) {
@@ -583,10 +585,14 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	}
 }
 
+// Create database context and monitor the cluster status;
+// Notify client when cluster info (e.g., cluster controller) changes
 Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality) {
-	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface));
+	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0));
+	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
+	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface, connectedCoordinatorsNum));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = monitorClientInfo(clusterInterface, connFile, clientInfo);
+	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(clusterInterface, connFile, clientInfo, connectedCoordinatorsNumDelayed);
 
 	return Database(new DatabaseContext(cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, clientLocality, true, false));
 }
@@ -751,9 +757,11 @@ Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
 }
 
 Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
-	Reference<Cluster> cluster(new Cluster(connFile, apiVersion));
+	Reference<AsyncVar<int>> connectedCoordinatorsNum(new AsyncVar<int>(0)); // Number of connected coordinators for the client
+	Reference<AsyncVar<int>> connectedCoordinatorsNumDelayed(new AsyncVar<int>(0));
+	Reference<Cluster> cluster(new Cluster(connFile, connectedCoordinatorsNum, apiVersion));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Future<Void> clientInfoMonitor = monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo);
+	Future<Void> clientInfoMonitor = delayedAsyncVar(connectedCoordinatorsNum, connectedCoordinatorsNumDelayed, CLIENT_KNOBS->CHECK_CONNECTED_COORDINATOR_NUM_DELAY) || monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo, connectedCoordinatorsNumDelayed);
 
 	DatabaseContext *db;
 	if(preallocatedDb) {
@@ -773,19 +781,19 @@ Database Database::createDatabase( std::string connFileName, int apiVersion, Loc
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
-Cluster::Cluster( Reference<ClusterConnectionFile> connFile, int apiVersion ) 
+Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion )
 	: clusterInterface(new AsyncVar<Optional<ClusterInterface>>())
 {
-	init(connFile, true, apiVersion);
+	init(connFile, true, connectedCoordinatorsNum, apiVersion);
 }
 
-Cluster::Cluster( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface) 
+Cluster::Cluster( Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum)
 	: clusterInterface(clusterInterface)
 {
-	init(connFile, true);
+	init(connFile, true, connectedCoordinatorsNum);
 }
 
-void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, int apiVersion ) {
+void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion ) {
 	connectionFile = connFile;
 	connected = clusterInterface->onChange();
 
@@ -819,7 +827,7 @@ void Cluster::init( Reference<ClusterConnectionFile> connFile, bool startClientI
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskFlushTrace ) );
 		}
 
-		leaderMon = monitorLeader( connFile, clusterInterface );
+		leaderMon = monitorLeader( connFile, clusterInterface, connectedCoordinatorsNum );
 		failMon = failureMonitorClient( clusterInterface, false );
 	}
 }

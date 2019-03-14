@@ -334,7 +334,7 @@ The ``expire`` subcommand will remove data from a backup prior to some point in 
 The expiration CUTOFF must be specified by one of the two following arguments:
    
   ``--expire_before_timestamp <DATETIME>``
-    Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+    Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY/MM/DD.HH:MI:SS+hhmm", for example "2018/12/31.23:59:59-0800".
 
   ``--expire_before_version <VERSION>``
     Specifies the cutoff by a database commit version.
@@ -342,7 +342,7 @@ The expiration CUTOFF must be specified by one of the two following arguments:
 Optionally, the user can specify a minimum RESTORABILITY guarantee with one of the following options.
 
   ``--restorable_after_timestamp <DATETIME>``
-    Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+    Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY/MM/DD.HH:MI:SS+hhmm", for example "2018/12/31.23:59:59-0800".
 
   ``--restorable_after_version <VERSION>``
     Specifies that the backup must be restorable as of VERSION and later.
@@ -446,8 +446,8 @@ The ``start`` command will start a new restore on the specified (or default) tag
 ``-v <VERSION>``
   Instead of the latest version the backup can be restored to, restore to VERSION.
 
-``--timestamp <YYYY-MM-DD.HH:MI:SS>``
-  Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.
+``--timestamp <DATETIME>``
+  Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.  DATETIME must be in the form "YYYY/MM/DD.HH:MI:SS+hhmm", for example "2018/12/31.23:59:59-0800".
 
 ``--orig_cluster_file <CONNFILE>``
   The cluster file for the original database from which the backup was created.  The original database is only needed to convert a --timestamp argument to a database version.

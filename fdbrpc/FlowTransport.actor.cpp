@@ -343,6 +343,7 @@ struct Peer : NonCopyable {
 				break;
 			}
 		}
+
 		if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
 			// Keep the new connection
 			TraceEvent("IncomingConnection", conn->getDebugID())
