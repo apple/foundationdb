@@ -62,7 +62,6 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.h
   XmlTraceLogFormatter.cpp
   actorcompiler.h
-  boost.cpp
   error_definitions.h
   flow.cpp
   flow.h
