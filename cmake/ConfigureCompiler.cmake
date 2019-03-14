@@ -7,6 +7,7 @@ set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
 add_compile_options(-DCMAKE_BUILD)
+add_compile_options(-DBOOST_ERROR_CODE_HEADER_ONLY -DBOOST_SYSTEM_NO_DEPRECATED)
 
 find_package(Threads REQUIRED)
 if(ALLOC_INSTRUMENTATION)
