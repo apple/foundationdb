@@ -30,7 +30,8 @@
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
 
 ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
-	return onMainThread( [this]() -> Future<Void> {
+	DatabaseContext *db = this->db;
+	return onMainThread( [db]() -> Future<Void> {
 		db->checkDeferredError();
 		return db->onConnected();
 	} );
@@ -50,24 +51,30 @@ Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
+	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [this, option, passValue](){ db->setOption(option, passValue.contents()); }, &db->deferredError );
+	onMainThreadVoid( [db, option, passValue](){ 
+		db->checkDeferredError();
+		db->setOption(option, passValue.contents()); 
+	}, &db->deferredError );
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
-	db = NULL; // All accesses to db happen on the main thread, so this pointer will be set by the time anybody uses it
-
 	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
-	onMainThreadVoid([this, connFile, apiVersion](){ 
+
+	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
+	// but run its constructor on the main thread
+	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
+
+	onMainThreadVoid([db, connFile, apiVersion](){ 
 		try {
-			Database db = Database::createDatabase(connFile, apiVersion);
-			this->db = db.extractPtr();
+			DatabaseContext::initialize(connFile, apiVersion, db);
 		}
 		catch(Error &e) {
-			this->db = new DatabaseContext(e);
+			new (db) DatabaseContext(e);
 		}
 		catch(...) {
-			this->db = new DatabaseContext(unknown_error());
+			new (db) DatabaseContext(unknown_error());
 		}
 	}, NULL);
 }

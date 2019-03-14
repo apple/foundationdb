@@ -46,8 +46,14 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
-class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
+class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
+	static DatabaseContext* allocateOnForeignThread() {
+		return (DatabaseContext*)DatabaseContext::operator new(sizeof(DatabaseContext));
+	}
+
+	static void initialize( Reference<ClusterConnectionFile> connFile, int apiVersion, DatabaseContext *db );
+
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
@@ -97,7 +103,7 @@ public:
 		bool enableLocalityLoadBalance, bool lockAware, int apiVersion = Database::API_VERSION_LATEST );
 
 	explicit DatabaseContext( const Error &err );
-
+	
 	// Key DB-specific information
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;

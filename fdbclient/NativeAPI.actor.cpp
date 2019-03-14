@@ -583,6 +583,14 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 	}
 }
 
+void DatabaseContext::initialize( Reference<ClusterConnectionFile> connFile, int apiVersion, DatabaseContext *db ) {
+	Reference<Cluster> cluster(new Cluster(connFile, apiVersion));
+	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
+	Future<Void> clientInfoMonitor = monitorClientInfo(cluster->getClusterInterface(), connFile, clientInfo);
+
+	new (db) DatabaseContext( cluster, clientInfo, clientInfoMonitor, LiteralStringRef(""), TaskDefaultEndpoint, LocalityData(), true, false, apiVersion );
+}
+
 Database DatabaseContext::create(Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality) {
 	Reference<Cluster> cluster(new Cluster(connFile, clusterInterface));
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
