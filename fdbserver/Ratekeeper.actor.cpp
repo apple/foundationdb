@@ -91,7 +91,6 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	double localRateLimit;
-	Tag tag;
 	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
@@ -192,7 +191,6 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 				myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
 				myQueueInfo->value.lastReply = reply.get();
 				myQueueInfo->value.localRateLimit = reply.get().localRateLimit;
-				myQueueInfo->value.tag = reply.get().tag;
 				if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
 					myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
 					myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
@@ -360,7 +358,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
 	std::map<UID, limitReason_t> ssReasons;
-	std::map<Tag, double> storageRateLimits;
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
@@ -369,13 +366,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
-
-		auto iter = storageRateLimits.find(i->value.tag);
-		if (iter == storageRateLimits.end()) {
-			storageRateLimits.emplace(i->value.tag, i->value.localRateLimit);
-		} else {
-			iter->second = std::max(iter->second, i->value.localRateLimit);
-		}
 
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
@@ -445,6 +435,14 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			}
 		}
 
+		if (i->value.localRateLimit < 0.99) {
+			auto lim = double(self->actualTpsMetric) * i->value.localRateLimit;
+			if (lim < limitTps) {
+				limitTps = lim;
+				ssLimitReason = limitReason_t::storage_server_read_load;
+			}
+		}
+
 		storageTpsLimitReverseIndex.insert(std::make_pair(limitTps, &ss));
 
 		if (limitTps < limits->tpsLimit && (ssLimitReason == limitReason_t::storage_server_min_free_space || ssLimitReason == limitReason_t::storage_server_min_free_space_ratio)) {
@@ -458,19 +456,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
 	self->healthMetrics.worstStorageDurabilityLag = worstStorageDurabilityLagStorageServer;
-	double localRatekeeperMin = 1.0;
-	{
-		for(const auto& localLimits : storageRateLimits) {
-			localRatekeeperMin = std::min(localRatekeeperMin, localLimits.second);
-		}
-		if (localRatekeeperMin < 0.99) {
-			auto limit = double(self->actualTpsMetric) * localRatekeeperMin;
-			if (limit < limits.tpsLimit) {
-				limits.tpsLimit = limit;
-				limitReason = limitReason_t::storage_server_read_load;
-			}
-		}
-	}
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for (auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit; ++ss) {
@@ -633,7 +618,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.detail("LocalRatekeeperMin", localRatekeeperMin)
 			.trackLatest(name.c_str());
 	}
 }

@@ -344,7 +344,6 @@ struct StorageQueuingMetricsRequest {
 struct StorageQueuingMetricsReply {
 	double localTime;
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
-	Tag tag;
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
 	Version version; // current storage server version
