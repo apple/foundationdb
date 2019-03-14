@@ -92,9 +92,9 @@ func (o NetworkOptions) SetTraceLogGroup(param string) error {
 	return o.setOpt(33, []byte(param))
 }
 
-// Selects trace output format for this client. xml (the default) and json are supported.
+// Select the format of the log files. xml (the default) and json are supported.
 //
-// Parameter: trace format
+// Parameter: Format of trace files
 func (o NetworkOptions) SetTraceFormat(param string) error {
 	return o.setOpt(34, []byte(param))
 }
@@ -351,11 +351,23 @@ func (o TransactionOptions) SetDebugRetryLogging(param string) error {
 	return o.setOpt(401, []byte(param))
 }
 
-// Enables tracing for this transaction and logs results to the client trace logs. Client trace logging must be enabled to get log output.
+// Deprecated
 //
 // Parameter: String identifier to be used in the logs when tracing this transaction. The identifier must not exceed 100 characters.
 func (o TransactionOptions) SetTransactionLoggingEnable(param string) error {
 	return o.setOpt(402, []byte(param))
+}
+
+// Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
+//
+// Parameter: String identifier to be used when tracing or profiling this transaction. The identifier must not exceed 100 characters.
+func (o TransactionOptions) SetDebugTransactionIdentifier(param string) error {
+	return o.setOpt(403, []byte(param))
+}
+
+// Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output.
+func (o TransactionOptions) SetLogTransaction() error {
+	return o.setOpt(404, nil)
 }
 
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to onError. This behavior allows the user to make the timeout dynamic.
@@ -512,12 +524,12 @@ func (t Transaction) Min(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 13)
 }
 
-// Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
+// Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
 func (t Transaction) SetVersionstampedKey(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 14)
 }
 
-// Transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
+// Transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java, Python, and Go bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
 func (t Transaction) SetVersionstampedValue(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 15)
 }
@@ -530,6 +542,11 @@ func (t Transaction) ByteMin(key KeyConvertible, param []byte) {
 // Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database.
 func (t Transaction) ByteMax(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 17)
+}
+
+// Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared.
+func (t Transaction) CompareAndClear(key KeyConvertible, param []byte) {
+	t.atomicOp(key.FDBKey(), param, 20)
 }
 
 type conflictRangeType int
