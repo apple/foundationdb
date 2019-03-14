@@ -4,5 +4,5 @@ startAfter=10.0
 blockWritesFor=80.0
 
 testName=Cycle
-transactionsPerSecond=250
+transactionsPerSecond=25
 testDuration=100

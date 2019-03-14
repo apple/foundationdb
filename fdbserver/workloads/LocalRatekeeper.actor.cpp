@@ -32,7 +32,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		startAfter = getOption(options, LiteralStringRef("startAfter"), startAfter);
 		blockWritesFor = getOption(options, LiteralStringRef("blockWritesFor"),
-								   double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX));
+								   double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX)/double(1e6));
 	}
 	virtual std::string description() { return "LocalRatekeeperWorkload"; }
 
@@ -47,9 +47,10 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
 				expectedRateLimit = 0.0;
 			} else if (durabilityLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
-				expectedRateLimit = durabilityLag / SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX;
+				expectedRateLimit = double(durabilityLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX);
 			}
 			if (expectedRateLimit < metrics.localRateLimit - 0.01 || expectedRateLimit > metrics.localRateLimit + 0.01) {
+				self->testFailed;
 				TraceEvent(SevError, "StorageRateLimitTooFarOff")
 					.detail("Storage", ssi.id())
 					.detail("Expected", expectedRateLimit)
@@ -109,7 +110,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		}
 		return _start(this, cx);
 	}
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check(Database const& cx) { return !testFailed; }
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 };
 

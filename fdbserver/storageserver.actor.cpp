@@ -306,15 +306,25 @@ public:
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
-	double currentRate() const {
+	double old_rate = 1.0;
+	double currentRate() {
 		auto versionLag = version.get() - durableVersion.get();
+		double res;
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
-			return 0.0;
+			res = 0.0;
 		} else if (versionLag > SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX) {
-			return versionLag / SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX;
+			res = double(versionLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX);
 		} else {
-			return 1.0;
+			res = 1.0;
 		}
+		if (res != old_rate) {
+			TraceEvent(SevDebug, "LocalRatekeeperChange", thisServerID)
+				.detail("Old", old_rate)
+				.detail("New", res)
+				.detail("NDV", versionLag);
+			old_rate = res;
+		}
+		return res;
 	}
 
 	void addMutationToMutationLogOrStorage( Version ver, MutationRef m ); // Appends m to mutationLog@ver, or to storage if ver==invalidVersion
