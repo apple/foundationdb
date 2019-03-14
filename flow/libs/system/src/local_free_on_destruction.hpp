@@ -8,7 +8,7 @@
 
 //  This is derived from boost/asio/detail/local_free_on_block_exit.hpp to avoid
 //  a dependency on asio. Thanks to Chris Kohlhoff for pointing it out.
-
+/*
 #ifndef BOOST_SYSTEM_LOCAL_FREE_ON_EXIT_HPP
 #define BOOST_SYSTEM_LOCAL_FREE_ON_EXIT_HPP
 
@@ -38,5 +38,5 @@ private:
 } // namespace detail
 } // namespace system
 } // namespace boost
-
 #endif  // BOOST_SYSTEM_LOCAL_FREE_ON_EXIT_HPP
+*/

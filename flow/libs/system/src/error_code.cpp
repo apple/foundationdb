@@ -1,4 +1,4 @@
-//  error_code support implementation file  ----------------------------------//
+/*//  error_code support implementation file  ----------------------------------//
 
 //  Copyright Beman Dawes 2002, 2006
 
@@ -18,3 +18,4 @@
 #ifndef BOOST_ERROR_CODE_HEADER_ONLY
 #include <boost/system/detail/error_code.ipp>
 #endif
+*/
