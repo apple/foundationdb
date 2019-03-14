@@ -165,6 +165,7 @@ std::string BackupDescription::toString() const {
 std::string BackupDescription::toJSON() const {
 	JsonBuilderObject doc;
 
+	doc.setKey("SchemaVersion", "1.0.0");
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
 

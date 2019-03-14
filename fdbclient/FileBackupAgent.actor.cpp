@@ -3908,10 +3908,12 @@ public:
 
 	ACTOR static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state JsonBuilderObject doc;
 
 		loop {
 			try {
+				state JsonBuilderObject doc;
+				doc.setKey("SchemaVersion", "1.0.0");
+
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -4033,14 +4035,13 @@ public:
 					}
 					doc.setKey("Errors", errorList);
 				}
-				break;
+
+				return doc.getJson();
 			}
 			catch (Error &e) {
 				wait(tr->onError(e));
 			}
 		}
-
-		return doc.getJson();
 	}
 
 	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, bool showErrors, std::string tagName) {
