@@ -24,14 +24,14 @@
 
 
 bool IReplicationPolicy::selectReplicas(
-	LocalitySetRef &										fromServers,
+	Reference<LocalitySet> &										fromServers,
 	std::vector<LocalityEntry>	&				results )
 {
 	return selectReplicas(fromServers, std::vector<LocalityEntry>(), results);
 }
 
 bool IReplicationPolicy::validate(
-	LocalitySetRef const&								solutionSet ) const
+	Reference<LocalitySet> const&								solutionSet ) const
 {
 	return validate(solutionSet->getEntries(), solutionSet);
 }
@@ -40,7 +40,7 @@ bool IReplicationPolicy::validateFull(
 	bool																solved,
 	std::vector<LocalityEntry>	const&	solutionSet,
 	std::vector<LocalityEntry> const&		alsoServers,
-	LocalitySetRef const&				fromServers )
+	Reference<LocalitySet> const&				fromServers )
 {
 	bool	valid = true;
 	std::vector<LocalityEntry>	totalSolution(solutionSet);
@@ -105,7 +105,7 @@ bool IReplicationPolicy::validateFull(
 }
 
 bool PolicyOne::selectReplicas(
-	LocalitySetRef	&						fromServers,
+	Reference<LocalitySet>	&						fromServers,
 	std::vector<LocalityEntry> const&		alsoServers,
 	std::vector<LocalityEntry>	&				results )
 {
@@ -131,12 +131,12 @@ bool PolicyOne::selectReplicas(
 
 bool PolicyOne::validate(
 	std::vector<LocalityEntry>	const&	solutionSet,
-	LocalitySetRef const&				fromServers ) const
+	Reference<LocalitySet> const&				fromServers ) const
 {
 	return ((solutionSet.size() > 0) && (fromServers->size() > 0));
 }
 
-PolicyAcross::PolicyAcross(int count, std::string const& attribKey, IRepPolicyRef const policy):
+PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy):
 	_count(count),_attribKey(attribKey),_policy(policy)
 {
 	return;
@@ -150,7 +150,7 @@ PolicyAcross::~PolicyAcross()
 // Debug purpose only
 // Trace all record entries to help debug
 // fromServers is the servers locality to be printed out.
-void IReplicationPolicy::traceLocalityRecords(LocalitySetRef const& fromServers) {
+void IReplicationPolicy::traceLocalityRecords(Reference<LocalitySet> const& fromServers) {
 	std::vector<Reference<LocalityRecord>> const& recordArray = fromServers->getRecordArray();
 	TraceEvent("LocalityRecordArray").detail("Size", recordArray.size());
 	for (auto& record : recordArray) {
@@ -158,7 +158,7 @@ void IReplicationPolicy::traceLocalityRecords(LocalitySetRef const& fromServers)
 	}
 }
 
-void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record, LocalitySetRef const& fromServers) {
+void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record, Reference<LocalitySet> const& fromServers) {
 	int localityEntryIndex = record->_entryIndex._id;
 	Reference<KeyValueMap> const& dataMap = record->_dataMap;
 	std::vector<AttribRecord> const& keyValueArray = dataMap->_keyvaluearray;
@@ -185,7 +185,7 @@ void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record
 // return true if the team satisfies the policy; false otherwise
 bool PolicyAcross::validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
-		LocalitySetRef const&				fromServers ) const
+		Reference<LocalitySet> const&				fromServers ) const
 {
 	bool			valid = true;
 	int				count = 0;
@@ -262,7 +262,7 @@ bool PolicyAcross::validate(
 // that should be excluded from being selected as replicas.
 // FIXME: Simplify this function, such as removing unnecessary printf
 bool PolicyAcross::selectReplicas(
-	LocalitySetRef	&						fromServers,
+	Reference<LocalitySet>	&						fromServers,
 	std::vector<LocalityEntry> const&		alsoServers,
 	std::vector<LocalityEntry>	&				results )
 {
@@ -437,7 +437,7 @@ bool PolicyAcross::selectReplicas(
 
 bool PolicyAnd::validate(
 	std::vector<LocalityEntry>	const&	solutionSet,
-	LocalitySetRef const&				fromServers ) const
+	Reference<LocalitySet> const&				fromServers ) const
 {
 	bool valid = true;
 	for (auto& policy : _policies) {
@@ -450,7 +450,7 @@ bool PolicyAnd::validate(
 }
 
 bool PolicyAnd::selectReplicas(
-	LocalitySetRef	&						fromServers,
+	Reference<LocalitySet>	&						fromServers,
 	std::vector<LocalityEntry> const&		alsoServers,
 	std::vector<LocalityEntry>	&				results )
 {
@@ -486,26 +486,26 @@ bool PolicyAnd::selectReplicas(
 	return passed;
 }
 
-void testPolicySerialization(IRepPolicyRef& policy) {
+void testPolicySerialization(Reference<IReplicationPolicy>& policy) {
 	std::string	policyInfo = policy->info();
 
 	BinaryWriter writer(IncludeVersion());
 	serializeReplicationPolicy(writer, policy);
 
 	BinaryReader reader(writer.getData(), writer.getLength(), IncludeVersion());
-	IRepPolicyRef copy;
+	Reference<IReplicationPolicy> copy;
 	serializeReplicationPolicy(reader, copy);
 
 	ASSERT(policy->info() == copy->info());
 }
 
 void testReplicationPolicy(int nTests) {
-	IRepPolicyRef policy = IRepPolicyRef(new PolicyAcross(1, "data_hall", IRepPolicyRef(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(1, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
 	testPolicySerialization(policy);
 
-	policy = IRepPolicyRef(new PolicyAnd({
-		IRepPolicyRef(new PolicyAcross(2, "data_center", IRepPolicyRef(new PolicyAcross(3, "rack", IRepPolicyRef(new PolicyOne()))))),
-		IRepPolicyRef(new PolicyAcross(2, "data_center", IRepPolicyRef(new PolicyAcross(2, "data_hall", IRepPolicyRef(new PolicyOne())))))
+	policy = Reference<IReplicationPolicy>(new PolicyAnd({
+		Reference<IReplicationPolicy>(new PolicyAcross(2, "data_center", Reference<IReplicationPolicy>(new PolicyAcross(3, "rack", Reference<IReplicationPolicy>(new PolicyOne()))))),
+		Reference<IReplicationPolicy>(new PolicyAcross(2, "data_center", Reference<IReplicationPolicy>(new PolicyAcross(2, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())))))
 	}));
 
 	testPolicySerialization(policy);

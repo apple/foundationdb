@@ -36,23 +36,23 @@ public:
 	virtual void delref() { ReferenceCounted<LocalitySet>::delref(); }
 
 	bool selectReplicas(
-		IRepPolicyRef const&								policy,
+		Reference<IReplicationPolicy> const&								policy,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<LocalityEntry>	&				results)
 	{
-		LocalitySetRef	fromServers = LocalitySetRef::addRef(this);
+		Reference<LocalitySet>	fromServers = Reference<LocalitySet>::addRef(this);
 		return policy->selectReplicas(fromServers, alsoServers, results);
 	}
 
 	bool selectReplicas(
-		IRepPolicyRef const&								policy,
+		Reference<IReplicationPolicy> const&								policy,
 		std::vector<LocalityEntry>	&				results)
 	{	return selectReplicas(policy, std::vector<LocalityEntry>(), results);	}
 
 	bool validate(
-		IRepPolicyRef const&								policy) const
+		Reference<IReplicationPolicy> const&								policy) const
 	{
-		LocalitySetRef const	solutionSet = LocalitySetRef::addRef((LocalitySet*) this);
+		Reference<LocalitySet> const	solutionSet = Reference<LocalitySet>::addRef((LocalitySet*) this);
 		return policy->validate(solutionSet);
 	}
 
@@ -159,7 +159,7 @@ public:
 	}
 
 	static void staticDisplayEntries(
-		LocalitySetRef		const&		fromServers,
+		Reference<LocalitySet>		const&		fromServers,
 		std::vector<LocalityEntry> const&		entryArray,
 		const char*													name = "zone")
 	{
@@ -174,8 +174,8 @@ public:
 	// the specified value for the given key
 	// The returned LocalitySet contains the LocalityRecords that have the same value as
 	// the indexValue under the same indexKey (e.g., zoneid)
-	LocalitySetRef restrict(AttribKey indexKey, AttribValue indexValue ) {
-		LocalitySetRef	localitySet;
+	Reference<LocalitySet> restrict(AttribKey indexKey, AttribValue indexValue ) {
+		Reference<LocalitySet>	localitySet;
 		LocalityCacheRecord			searchRecord(AttribRecord(indexKey, indexValue), localitySet);
 		auto itKeyValue = std::lower_bound(_cacheArray.begin(), _cacheArray.end(), searchRecord, LocalityCacheRecord::compareKeyValue);
 
@@ -185,7 +185,7 @@ public:
 			localitySet = itKeyValue->_resultset;
 		}
 		else {
-			localitySet = LocalitySetRef(new LocalitySet(*_localitygroup));
+			localitySet = Reference<LocalitySet>(new LocalitySet(*_localitygroup));
 			_cachemisses ++;
 			// If the key is not within the current key set, skip it because no items within
 			// the current entry array has the key
@@ -213,8 +213,8 @@ public:
 	}
 
 	// This function is used to create an subset containing the specified entries
-	LocalitySetRef restrict(std::vector<LocalityEntry> const&	entryArray) {
-		LocalitySetRef	localitySet(new LocalitySet(*_localitygroup));
+	Reference<LocalitySet> restrict(std::vector<LocalityEntry> const&	entryArray) {
+		Reference<LocalitySet>	localitySet(new LocalitySet(*_localitygroup));
 		for (auto& entry : entryArray) {
 			localitySet->add(getRecordViaEntry(entry), *this);
 		}
@@ -453,8 +453,8 @@ protected:
 	// This class stores the cache record for each entry within the locality set
 	struct LocalityCacheRecord {
 		AttribRecord							_attribute;
-		LocalitySetRef		_resultset;
-		LocalityCacheRecord(AttribRecord const& attribute, LocalitySetRef resultset):_attribute(attribute),_resultset(resultset){}
+		Reference<LocalitySet>		_resultset;
+		LocalityCacheRecord(AttribRecord const& attribute, Reference<LocalitySet> resultset):_attribute(attribute),_resultset(resultset){}
 		LocalityCacheRecord(LocalityCacheRecord const& source):_attribute(source._attribute),_resultset(source._resultset){}
 		virtual ~LocalityCacheRecord(){}
 		LocalityCacheRecord& operator=(LocalityCacheRecord const& source) {
@@ -584,7 +584,7 @@ struct LocalityMap : public LocalityGroup  {
 	virtual ~LocalityMap() {}
 
 	bool selectReplicas(
-		IRepPolicyRef const&								policy,
+		Reference<IReplicationPolicy> const&								policy,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<LocalityEntry>&					entryResults,
 		std::vector<V*>	&										results)
@@ -601,7 +601,7 @@ struct LocalityMap : public LocalityGroup  {
 	}
 
 	bool selectReplicas(
-		IRepPolicyRef const&								policy,
+		Reference<IReplicationPolicy> const&								policy,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<V*>	&										results)
 	{
@@ -610,7 +610,7 @@ struct LocalityMap : public LocalityGroup  {
 	}
 
 	bool selectReplicas(
-		IRepPolicyRef const&								policy,
+		Reference<IReplicationPolicy> const&								policy,
 		std::vector<V*>	&										results)
 	{	return selectReplicas(policy, std::vector<LocalityEntry>(), results);	}
 

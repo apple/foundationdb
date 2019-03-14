@@ -120,7 +120,7 @@ struct InitializeLogRouterRequest {
 	Tag routerTag;
 	Version startVersion;
 	std::vector<LocalityData> tLogLocalities;
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 
