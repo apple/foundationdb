@@ -64,7 +64,7 @@ TEST_CASE("/flow/TraceEvent") {
 	state unsigned i;
 	state double startTime = g_network->now();
 	state std::string str = "hello";
-	for (i = 0; i < 10000; ++i) {
+	for (i = 0; i < 100000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
 			TraceEvent("TestTraceLineNoDebug")
 				.detail("Num", g_random->randomInt(0, 1000))
@@ -76,7 +76,7 @@ TEST_CASE("/flow/TraceEvent") {
 	TraceEvent("TraceDuration")
 		.detail("Time", g_network->now() - startTime);
 	startTime = g_network->now();
-	for (i = 0; i < 10000; ++i) {
+	for (i = 0; i < 1000000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
 			TraceEvent(SevDebug, "TestTraceLineNoDebug")
 				.detail("Num", g_random->randomInt(0, 1000))
