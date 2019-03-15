@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "flow/IndexedSet.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pCount, double *lastChangeTime, double *idleTime, double *allTime, bool returnWhenEmptied )
@@ -57,4 +58,34 @@ ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pC
 		}
 		when (Error e = waitNext(errors.getFuture())) { throw e; }
 	}
+}
+
+TEST_CASE("/flow/TraceEvent") {
+	state unsigned i;
+	state double startTime = g_network->now();
+	state std::string str = "hello";
+	for (i = 0; i < 10000; ++i) {
+		for (unsigned j = 0; j < 100; ++j) {
+			TraceEvent("TestTraceLineNoDebug")
+				.detail("Num", g_random->randomInt(0, 1000))
+				.detail("Double", g_random->random01())
+				.detail("hello", str);
+		}
+		wait(delay(0));
+	}
+	TraceEvent("TraceDuration")
+		.detail("Time", g_network->now() - startTime);
+	startTime = g_network->now();
+	for (i = 0; i < 10000; ++i) {
+		for (unsigned j = 0; j < 100; ++j) {
+			TraceEvent(SevDebug, "TestTraceLineNoDebug")
+				.detail("Num", g_random->randomInt(0, 1000))
+				.detail("Double", g_random->random01())
+				.detail("hello", str);
+		}
+		wait(delay(0));
+	}
+	TraceEvent("TraceDuration")
+		.detail("Time", g_network->now() - startTime);
+	return Void();
 }
