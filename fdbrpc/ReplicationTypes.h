@@ -34,9 +34,6 @@ struct LocalityRecord;
 struct StringToIntMap;
 struct IReplicationPolicy;
 
-typedef Reference<LocalitySet>	LocalitySetRef;
-typedef Reference<IReplicationPolicy>	IRepPolicyRef;
-
 extern int g_replicationdebug;
 
 struct AttribKey {

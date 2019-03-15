@@ -91,7 +91,7 @@ public:
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
-		std::map<NetworkAddress, std::string> traceLogGroupMap;
+		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
@@ -234,10 +234,10 @@ public:
 		throw no_more_servers();
 	}
 
-	std::vector<WorkerDetails> getWorkersForSeedServers( DatabaseConfiguration const& conf, IRepPolicyRef const& policy, Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>() ) {
+	std::vector<WorkerDetails> getWorkersForSeedServers( DatabaseConfiguration const& conf, Reference<IReplicationPolicy> const& policy, Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>() ) {
 		std::map<ProcessClass::Fitness, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
-		LocalitySetRef logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
+		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*) logServerSet.getPtr();
 		bool bCompleted = false;
 
@@ -275,11 +275,11 @@ public:
 		return results;
 	}
 
-	std::vector<WorkerDetails> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, IRepPolicyRef const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>() ) {
+	std::vector<WorkerDetails> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, Reference<IReplicationPolicy> const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>() ) {
 		std::map<std::pair<ProcessClass::Fitness,bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
-		LocalitySetRef logServerSet;
+		Reference<LocalitySet> logServerSet;
 		LocalityMap<WorkerDetails>* logServerMap;
 		bool bCompleted = false;
 
@@ -1253,6 +1253,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
+	int connectedCoordinatorsNum,
 	Standalone<StringRef> traceLogGroup,
 	ReplyPromise<ClientDBInfo> reply)
 {
@@ -1264,7 +1265,8 @@ ACTOR Future<Void> clusterOpenDatabase(
 		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
 	}
 
-	db->traceLogGroupMap[reply.getEndpoint().getPrimaryAddress()] = traceLogGroup.toString();
+
+	db->clientStatusInfoMap[reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(traceLogGroup.toString(), connectedCoordinatorsNum);
 
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
@@ -1275,7 +1277,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 
 	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
 	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
-	db->traceLogGroupMap.erase(reply.getEndpoint().getPrimaryAddress());
+	db->clientStatusInfoMap.erase(reply.getEndpoint().getPrimaryAddress());
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1945,7 +1947,8 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.clientStatusInfoMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -2495,7 +2498,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
+			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.connectedCoordinatorsNum, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );

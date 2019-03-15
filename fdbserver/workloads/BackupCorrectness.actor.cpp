@@ -192,6 +192,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		loop {
 			std::string status = wait(agent.getStatus(cx, true, tag));
 			puts(status.c_str());
+			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
+			puts(statusJSON.c_str());
 			wait(delay(2.0));
 		}
 	}

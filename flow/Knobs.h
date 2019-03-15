@@ -98,6 +98,7 @@ public:
 	int MIN_SUBMIT;
 
 	int PAGE_WRITE_CHECKSUM_HISTORY;
+	int DISABLE_POSIX_KERNEL_AIO;
 
 	//AsyncFileNonDurable
 	double MAX_PRIOR_MODIFICATION_DELAY;

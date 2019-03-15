@@ -79,6 +79,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_SUBMIT,                                           10 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
+	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
 
 	//AsyncFileNonDurable
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;

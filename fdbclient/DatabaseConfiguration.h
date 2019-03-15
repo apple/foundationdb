@@ -49,13 +49,13 @@ struct RegionInfo {
 	Key dcId;
 	int32_t priority;
 
-	IRepPolicyRef satelliteTLogPolicy;
+	Reference<IReplicationPolicy> satelliteTLogPolicy;
 	int32_t satelliteDesiredTLogCount;
 	int32_t satelliteTLogReplicationFactor;
 	int32_t satelliteTLogWriteAntiQuorum;
 	int32_t satelliteTLogUsableDcs;
 
-	IRepPolicyRef satelliteTLogPolicyFallback;
+	Reference<IReplicationPolicy> satelliteTLogPolicyFallback;
 	int32_t satelliteTLogReplicationFactorFallback;
 	int32_t satelliteTLogWriteAntiQuorumFallback;
 	int32_t satelliteTLogUsableDcsFallback;
@@ -157,7 +157,7 @@ struct DatabaseConfiguration {
 	int32_t autoResolverCount;
 
 	// TLogs
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t desiredTLogCount;
 	int32_t autoDesiredTLogCount;
 	int32_t tLogWriteAntiQuorum;
@@ -167,7 +167,7 @@ struct DatabaseConfiguration {
 	TLogSpillType tLogSpillType;
 
 	// Storage Servers
-	IRepPolicyRef storagePolicy;
+	Reference<IReplicationPolicy> storagePolicy;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
 
@@ -175,7 +175,7 @@ struct DatabaseConfiguration {
 	int32_t desiredLogRouterCount;
 	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
-	IRepPolicyRef remoteTLogPolicy;
+	Reference<IReplicationPolicy> remoteTLogPolicy;
 
 	//Data centers
 	int32_t usableRegions;
@@ -195,7 +195,7 @@ struct DatabaseConfiguration {
 		if(desired == -1) return autoDesiredTLogCount; return desired;
 	}
 	int32_t getRemoteTLogReplicationFactor() const { if(remoteTLogReplicationFactor == 0) return tLogReplicationFactor; return remoteTLogReplicationFactor; }
-	IRepPolicyRef getRemoteTLogPolicy() const { if(remoteTLogReplicationFactor == 0) return tLogPolicy; return remoteTLogPolicy; }
+	Reference<IReplicationPolicy> getRemoteTLogPolicy() const { if(remoteTLogReplicationFactor == 0) return tLogPolicy; return remoteTLogPolicy; }
 
 	bool operator == ( DatabaseConfiguration const& rhs ) const {
 		const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();

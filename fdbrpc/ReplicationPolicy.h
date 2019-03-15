@@ -26,7 +26,7 @@
 #include "fdbrpc/ReplicationTypes.h"
 
 template <class Ar>
-void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy);
+void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy);
 extern void testReplicationPolicy(int nTests);
 
 
@@ -40,36 +40,36 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 		virtual int maxResults() const = 0;
 		virtual int depth() const = 0;
 		virtual bool selectReplicas(
-			LocalitySetRef &										fromServers,
+			Reference<LocalitySet> &										fromServers,
 			std::vector<LocalityEntry> const&		alsoServers,
 			std::vector<LocalityEntry>	&				results ) = 0;
-	    virtual void traceLocalityRecords(LocalitySetRef const& fromServers);
-	    virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, LocalitySetRef const& fromServers);
+	    virtual void traceLocalityRecords(Reference<LocalitySet> const& fromServers);
+	    virtual void traceOneLocalityRecord(Reference<LocalityRecord> record, Reference<LocalitySet> const& fromServers);
 	    virtual bool validate(
 			std::vector<LocalityEntry>	const&	solutionSet,
-			LocalitySetRef const&								fromServers ) const = 0;
+			Reference<LocalitySet> const&								fromServers ) const = 0;
 
 		bool operator == ( const IReplicationPolicy& r ) const { return info() == r.info(); }
 		bool operator != ( const IReplicationPolicy& r ) const { return info() != r.info(); }
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			IRepPolicyRef	refThis(this);
+			Reference<IReplicationPolicy>	refThis(this);
 			serializeReplicationPolicy(ar, refThis);
 			refThis->delref_no_destroy();
 		}
 
 		// Utility functions
 		bool selectReplicas(
-			LocalitySetRef &										fromServers,
+			Reference<LocalitySet> &										fromServers,
 			std::vector<LocalityEntry>	&				results );
 		bool validate(
-			LocalitySetRef const&								solutionSet ) const;
+			Reference<LocalitySet> const&								solutionSet ) const;
 		bool validateFull(
 			bool																solved,
 			std::vector<LocalityEntry>	const&	solutionSet,
 			std::vector<LocalityEntry> const&		alsoServers,
-			LocalitySetRef const&								fromServers );
+			Reference<LocalitySet> const&								fromServers );
 
 		// Returns a set of the attributes that this policy uses in selection and validation.
 		std::set<std::string> attributeKeys() const
@@ -78,7 +78,7 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 };
 
 template <class Archive>
-inline void load( Archive& ar, IRepPolicyRef& value ) {
+inline void load( Archive& ar, Reference<IReplicationPolicy>& value ) {
 	bool	present = (value.getPtr());
 	ar >> present;
 	if (present) {
@@ -90,11 +90,11 @@ inline void load( Archive& ar, IRepPolicyRef& value ) {
 }
 
 template <class Archive>
-inline void save( Archive& ar, const IRepPolicyRef& value ) {
+inline void save( Archive& ar, const Reference<IReplicationPolicy>& value ) {
 	bool	present = (value.getPtr());
 	ar << present;
 	if (present) {
-		serializeReplicationPolicy(ar, (IRepPolicyRef&) value);
+		serializeReplicationPolicy(ar, (Reference<IReplicationPolicy>&) value);
 	}
 }
 
@@ -107,9 +107,9 @@ struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
 	virtual int depth() const { return 1; }
 	virtual bool validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
-		LocalitySetRef const&				fromServers ) const;
+		Reference<LocalitySet> const&				fromServers ) const;
 	virtual bool selectReplicas(
-		LocalitySetRef	&						fromServers,
+		Reference<LocalitySet>	&						fromServers,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<LocalityEntry>	&				results );
 	template <class Ar>
@@ -119,7 +119,7 @@ struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
 };
 
 struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> {
-	PolicyAcross(int count, std::string const& attribKey, IRepPolicyRef const policy);
+	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
 	virtual ~PolicyAcross();
 	virtual std::string name() const { return "Across"; }
 	virtual std::string info() const
@@ -128,9 +128,9 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 	virtual int depth() const  { return 1 + _policy->depth(); }
 	virtual bool validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
-		LocalitySetRef const&				fromServers ) const;
+		Reference<LocalitySet> const&				fromServers ) const;
 	virtual bool selectReplicas(
-		LocalitySetRef	&						fromServers,
+		Reference<LocalitySet>	&						fromServers,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<LocalityEntry>	&				results );
 
@@ -149,18 +149,18 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 protected:
 	int																_count;
 	std::string												_attribKey;
-	IRepPolicyRef								_policy;
+	Reference<IReplicationPolicy>								_policy;
 
 	// Cache temporary members
 	std::vector<AttribValue>					_usedValues;
 	std::vector<LocalityEntry>				_newResults;
-	LocalitySetRef										_selected;
+	Reference<LocalitySet>										_selected;
 	VectorRef<std::pair<int,int>>			_addedResults;
 	Arena															_arena;
 };
 
 struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
-	PolicyAnd(std::vector<IRepPolicyRef> policies): _policies(policies), _sortedPolicies(policies)
+	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies): _policies(policies), _sortedPolicies(policies)
 	{
 		// Sort the policy array
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
@@ -194,14 +194,14 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 	}
 	virtual bool validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
-		LocalitySetRef const&				fromServers ) const;
+		Reference<LocalitySet> const&				fromServers ) const;
 
 	virtual bool selectReplicas(
-		LocalitySetRef	&						fromServers,
+		Reference<LocalitySet>	&						fromServers,
 		std::vector<LocalityEntry> const&		alsoServers,
 		std::vector<LocalityEntry>	&				results );
 
-	static bool comparePolicy(const IRepPolicyRef& rhs, const IRepPolicyRef& lhs)
+	static bool comparePolicy(const Reference<IReplicationPolicy>& rhs, const Reference<IReplicationPolicy>& lhs)
 	{ return (lhs->maxResults() < rhs->maxResults()) || (!(rhs->maxResults() < lhs->maxResults()) && (lhs->depth() < rhs->depth())); }
 
 	template <class Ar>
@@ -219,18 +219,18 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 	}
 
 	virtual void attributeKeys(std::set<std::string> *set) const override
-	{ for (const IRepPolicyRef& r : _policies) { r->attributeKeys(set); } }
+	{ for (const Reference<IReplicationPolicy>& r : _policies) { r->attributeKeys(set); } }
 
 protected:
-	std::vector<IRepPolicyRef>			_policies;
-	std::vector<IRepPolicyRef>			_sortedPolicies;
+	std::vector<Reference<IReplicationPolicy>>			_policies;
+	std::vector<Reference<IReplicationPolicy>>			_sortedPolicies;
 };
 
 extern int testReplication();
 
 
 template <class Ar>
-void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
+void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 	if(Ar::isDeserializing) {
 		StringRef name;
 		serializer(ar, name);
@@ -238,20 +238,20 @@ void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
 		if(name == LiteralStringRef("One")) {
 			PolicyOne* pointer = new PolicyOne();
 			pointer->serialize(ar);
-			policy = IRepPolicyRef(pointer);
+			policy = Reference<IReplicationPolicy>(pointer);
 		}
 		else if(name == LiteralStringRef("Across")) {
-			PolicyAcross* pointer = new PolicyAcross(0, "", IRepPolicyRef());
+			PolicyAcross* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
 			pointer->serialize(ar);
-			policy = IRepPolicyRef(pointer);
+			policy = Reference<IReplicationPolicy>(pointer);
 		}
 		else if(name == LiteralStringRef("And")) {
 			PolicyAnd* pointer = new PolicyAnd({});
 			pointer->serialize(ar);
-			policy = IRepPolicyRef(pointer);
+			policy = Reference<IReplicationPolicy>(pointer);
 		}
 		else if(name == LiteralStringRef("None")) {
-			policy = IRepPolicyRef();
+			policy = Reference<IReplicationPolicy>();
 		}
 		else {
 			TraceEvent(SevError, "SerializingInvalidPolicyType")
