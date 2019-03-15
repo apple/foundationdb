@@ -245,7 +245,7 @@ struct SystemStatistics {
 
 struct SystemStatisticsState;
 
-class IPAddress;
+struct IPAddress;
 
 SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState);
 

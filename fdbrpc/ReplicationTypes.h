@@ -26,7 +26,7 @@
 #include "flow/flow.h"
 #include "fdbrpc/Locality.h"
 
-class LocalityData;
+struct LocalityData;
 struct LocalitySet;
 struct LocalityGroup;
 struct KeyValueMap;
