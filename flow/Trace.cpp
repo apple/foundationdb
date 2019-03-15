@@ -656,7 +656,7 @@ void removeTraceRole(std::string role) {
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
 	: id(id), type(type), severity(severity), initialized(false),
-	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY >= severity) {}
+	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {}
 TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(interval.severity), initialized(false), enabled(true) {
 	init(interval);
 }
@@ -664,7 +664,7 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
 	: id(id), type(interval.type),
 	  severity(severity),
 	  initialized(false),
-	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY >= severity) {
+	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 	init(interval);
 }
 
