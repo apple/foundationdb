@@ -62,14 +62,22 @@ ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pC
 
 TEST_CASE("/flow/TraceEvent") {
 	state unsigned i;
-	state double startTime = g_network->now();
-	state std::string str = "hello";
+	state double startTime;
+	state std::vector<std::string> strings;
+	strings.reserve(1000);
+	for (i = 0; i < 100; ++i) {
+		for (int j = 0; j < 100; ++j) {
+			strings.emplace_back(g_random->randomAlphaNumeric(g_random->randomInt(1, 30)));
+		}
+	}
+	wait(delay(0));
+	startTime = g_network->now();
 	for (i = 0; i < 100000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
 			TraceEvent("TestTraceLineNoDebug")
 				.detail("Num", g_random->randomInt(0, 1000))
 				.detail("Double", g_random->random01())
-				.detail("hello", str);
+				.detail("hello", strings[g_random->randomInt(0, strings.size())]);
 		}
 		wait(delay(0));
 	}
@@ -81,7 +89,7 @@ TEST_CASE("/flow/TraceEvent") {
 			TraceEvent(SevDebug, "TestTraceLineNoDebug")
 				.detail("Num", g_random->randomInt(0, 1000))
 				.detail("Double", g_random->random01())
-				.detail("hello", str);
+				.detail("hello", strings[g_random->randomInt(0, strings.size())]);
 		}
 		wait(delay(0));
 	}
