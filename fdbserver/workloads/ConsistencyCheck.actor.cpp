@@ -1225,7 +1225,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return true;
 	}
 
-	static ProcessClass::Fitness getBestAvailableFitness(std::vector<ProcessClass::ClassType>& availableClassTypes, ProcessClass::ClusterRole role) {
+	static ProcessClass::Fitness getBestAvailableFitness(const std::vector<ProcessClass::ClassType>& availableClassTypes, ProcessClass::ClusterRole role) {
 		ProcessClass::Fitness bestAvailableFitness = ProcessClass::NeverAssign;
 		for (auto classType : availableClassTypes) {
 			bestAvailableFitness = std::min(bestAvailableFitness, ProcessClass(classType, ProcessClass::InvalidSource).machineClassFitness(role));

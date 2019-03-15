@@ -2471,9 +2471,7 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 		state ServerDBInfo db = self->db.serverInfo->get();
 		masterWorker = self->id_worker.find(db.master.locality.processId());
 
-		// If the cluster controller is excluded, the master will change once the cluster controller is moved.
-		if (self->id_worker[self->clusterControllerProcessId].priorityInfo.isExcluded ||
-				masterWorker == self->id_worker.end()) {
+		if (masterWorker == self->id_worker.end()) {
 			wait(self->db.serverInfo->onChange());
 			continue;
 		}
@@ -2486,7 +2484,7 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 			auto rkFitness = (rkClassIter != self->id_class.end())
 				? rkClassIter->second.machineClassFitness(ProcessClass::RateKeeper)
 				: ProcessClass::BestFit;
-			if (rkFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+			if (rkFitness > masterFitness) {
 				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitness);
 				db.ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
@@ -2498,7 +2496,7 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 			auto ddFitness = (ddClassIter != self->id_class.end())
 				? ddClassIter->second.machineClassFitness(ProcessClass::DataDistributor)
 				: ProcessClass::BestFit;
-			if (ddFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+			if (ddFitness > masterFitness) {
 				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
 				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitness);
 				db.distributor.get().haltDataDistributor.send(HaltDataDistributorRequest(self->id));
