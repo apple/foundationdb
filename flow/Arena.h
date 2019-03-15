@@ -33,6 +33,7 @@
 #include <limits>
 #include <set>
 #include <type_traits>
+#include <sstream>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -559,15 +560,34 @@ public:
 	}
 
 	std::string toString() const { return std::string( (const char*)data, length ); }
+
+	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	std::string printable() const {
-		std::string s;
-		for (int i = 0; i<length; i++) {
-			uint8_t b = (*this)[i];
-			if (b >= 32 && b < 127 && b != '\\') s += (char)b;
-			else if (b == '\\') s += "\\\\";
-			else s += format("\\x%02x", b);
+		std::string result;
+		int nonPrintables = 0;
+		int numBackslashes = 0;
+		for (auto c : *this) {
+			if (!isPrintable(c)) {
+				++nonPrintables;
+			} else if (c == '\\') {
+				++numBackslashes;
+			}
 		}
-		return s;
+		result.reserve(size() - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		for (auto c : *this) {
+			if (isPrintable(c)) {
+				result.push_back(c);
+			} else if (c == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else {
+				result.push_back('\\');
+				result.push_back('x');
+				result.push_back(base16Char((c / 16) % 16));
+				result.push_back(base16Char(c % 16));
+			}
+		}
+		return result;
 	}
 
 	std::string toHexString(int limit = -1) const {
@@ -655,7 +675,7 @@ private:
 template<>
 struct Traceable<StringRef> : std::true_type {
 	static std::string toString(const StringRef& value) {
-		return value.toString();
+		return value.printable();
 	}
 };
 
@@ -873,6 +893,26 @@ private:
 		m_capacity = requiredCapacity;
 	}
 };
+
+template<class T>
+struct Traceable<VectorRef<T>> {
+	constexpr static bool value = Traceable<T>::value;
+
+	static std::string toString(const VectorRef<T>& value) {
+		std::stringstream ss;
+		bool first = true;
+		for (const auto& v : value) {
+			if (first) {
+				first = false;
+			} else {
+				ss << ' ';
+			}
+			ss << Traceable<T>::toString(v);
+		}
+		return ss.str();
+	}
+};
+
 template <class Archive, class T>
 inline void load( Archive& ar, VectorRef<T>& value ) {
 	// FIXME: range checking for length, here and in other serialize code

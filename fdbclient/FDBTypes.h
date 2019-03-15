@@ -213,6 +213,23 @@ struct KeyRangeRef {
 	};
 };
 
+template<>
+struct Traceable<KeyRangeRef> : std::true_type {
+	static std::string toString(const KeyRangeRef& value) {
+		auto begin = Traceable<StringRef>::toString(value.begin);
+		auto end = Traceable<StringRef>::toString(value.end);
+		std::string result;
+		result.reserve(begin.size() + end.size() + 3);
+		std::copy(begin.begin(), begin.end(), std::back_inserter(result));
+		result.push_back(' ');
+		result.push_back('-');
+		result.push_back(' ');
+		std::copy(end.begin(), end.end(), std::back_inserter(result));
+		return result;
+	}
+};
+
+
 inline KeyRangeRef operator & (const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
 	if (e < b)
@@ -261,6 +278,13 @@ struct KeyValueRef {
 			return a.key > b;
 		}
 	};
+};
+
+template<>
+struct Traceable<KeyValueRef> : std::true_type {
+	static std::string toString(const KeyValueRef& value) {
+		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
+	}
 };
 
 typedef Standalone<KeyRef> Key;

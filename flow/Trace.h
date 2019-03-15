@@ -135,6 +135,46 @@ private:
 
 struct DynamicEventMetric;
 
+template<class IntType>
+char base16Char(IntType c) {
+	switch (c) {
+		case 0:
+			return '0';
+		case 1:
+			return '1';
+		case 2:
+			return '2';
+		case 3:
+			return '3';
+		case 4:
+			return '4';
+		case 5:
+			return '5';
+		case 6:
+			return '6';
+		case 7:
+			return '7';
+		case 8:
+			return '8';
+		case 9:
+			return '9';
+		case 10:
+			return 'a';
+		case 11:
+			return 'b';
+		case 12:
+			return 'c';
+		case 13:
+			return 'd';
+		case 14:
+			return 'e';
+		case 15:
+			return 'f';
+		default:
+			UNSTOPPABLE_ASSERT(false);
+	}
+}
+
 // forward declare format from flow.h as we
 // can't include flow.h here
 std::string format(const char* form, ...);
@@ -176,7 +216,94 @@ struct Traceable<UID> : std::true_type {
 	}
 };
 
+template<>
+struct Traceable<const char*> : std::true_type {
+	static bool isPrintable(char c) { return c > 32 && c < 127; }
+	static std::string toString(const char* value) {
+		// if all characters are printable ascii, we simply return the string
+		int nonPrintables = 0;
+		int numBackslashes = 0;
+		auto val = value;
+		int size = 0;
+		while (auto c = *(val++)) {
+			++size;
+			if (!Traceable<const char*>::isPrintable(c)) {
+				++nonPrintables;
+			} else if (c == '\\') {
+				++numBackslashes;
+			}
+		}
+		if (nonPrintables == 0 && numBackslashes == 0) {
+			return std::string(value);
+		}
+		std::string result;
+		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		while (auto c = *(val++)) {
+			if (Traceable<const char*>::isPrintable(c)) {
+				result.push_back(c);
+			} else if (c == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else {
+				result.push_back('\\');
+				result.push_back('x');
+				result.push_back(base16Char((c / 16) % 16));
+				result.push_back(base16Char(c % 16));
+			}
+		}
+		return result;
+	}
+};
 
+template<size_t S>
+struct Traceable<char[S]> : std::true_type {
+	static std::string toString(const char* value) {
+		return Traceable<const char*>::toString(value);
+	}
+};
+
+template<>
+struct Traceable<char*> : std::true_type {
+	static std::string toString(const char* value) {
+		return Traceable<const char*>::toString(value);
+	}
+};
+
+template<>
+struct Traceable<std::string> : std::true_type {
+	template<class Str>
+	static std::string toString(Str&& value) {
+		// if all characters are printable ascii, we simply return the string
+		int nonPrintables = 0;
+		int numBackslashes = 0;
+		for (auto c : value) {
+			if (!Traceable<const char*>::isPrintable(c)) {
+				++nonPrintables;
+			} else if (c == '\\') {
+				++numBackslashes;
+			}
+		}
+		if (nonPrintables == 0 && numBackslashes == 0) {
+			return std::forward<Str>(value);
+		}
+		std::string result;
+		result.reserve(value.size() - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		for (auto c : value) {
+			if (Traceable<const char*>::isPrintable(c)) {
+				result.push_back(c);
+			} else if (c == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else {
+				result.push_back('\\');
+				result.push_back('x');
+				result.push_back(base16Char((c / 16) % 16));
+				result.push_back(base16Char(c % 16));
+			}
+		}
+		return result;
+	}
+};
 
 template<class T>
 struct SpecialTraceMetricType
@@ -241,21 +368,6 @@ struct TraceEvent {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
 			return detailImpl(std::string(key), format("%d", value), false);
-		}
-		return *this;
-	}
-	TraceEvent& detail(std::string key, std::string value) {
-		if (enabled && init()) {
-			init();
-			addMetric(key.c_str(), value, value);
-			return detailImpl(std::string(key), std::move(value), false);
-		}
-		return *this;
-	}
-	TraceEvent& detail(const char* key, std::string value) {
-		if (enabled && init()) {
-			addMetric(key, value, value);
-			return detailImpl(std::string(key), std::move(value), false);
 		}
 		return *this;
 	}

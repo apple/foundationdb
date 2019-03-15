@@ -37,7 +37,7 @@ public:
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
-		operator std::string() { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
+		operator std::string() const { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
 
 		template<class Ar>
 		void serialize_unversioned(Ar& ar) {
@@ -79,6 +79,13 @@ public:
 	virtual int getCommitOverhead() = 0; // returns the amount of unused space that would be written by a commit that immediately followed this call
 
 	virtual StorageBytes getStorageBytes() = 0;
+};
+
+template<>
+struct Traceable<IDiskQueue::location> : std::true_type {
+	static std::string toString(const IDiskQueue::location& value) {
+		return value;
+	}
 };
 
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.

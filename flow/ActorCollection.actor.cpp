@@ -60,14 +60,6 @@ ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pC
 	}
 }
 
-template<>
-struct Traceable<std::string> : std::true_type {
-	template<class Str>
-	static std::string toString(Str&& s) {
-		return std::forward<Str>(s);
-	}
-};
-
 template<class T, class U>
 struct Traceable<std::pair<T, U>> {
 	static constexpr bool value = Traceable<T>::value && Traceable<U>::value;
@@ -90,24 +82,45 @@ TEST_CASE("/flow/TraceEvent") {
 	state unsigned i;
 	state double startTime;
 	state std::vector<std::string> strings;
+	state std::vector<int> keyIdx;
+	state std::vector<int> pairRnd;
+	state std::vector<int> num;
+	state std::vector<double> doub;
+	state std::vector<int> strIdx;
 	strings.reserve(10000);
+	keyIdx.reserve(1e6);
+	pairRnd.reserve(1e6);
+	num.reserve(1e6);
+	doub.reserve(1e6);
+	strIdx.reserve(1e6);
 	for (i = 0; i < 100; ++i) {
 		for (int j = 0; j < 100; ++j) {
 			strings.emplace_back(g_random->randomAlphaNumeric(g_random->randomInt(1, 30)));
 		}
 		wait(delay(0));
 	}
+	for (i = 0; i < 1e6; ++i) {
+		keyIdx.emplace_back(g_random->randomInt(0, strings.size()));
+		pairRnd.emplace_back(g_random->randomInt(-1000, 1000));
+		num.emplace_back(g_random->randomInt(0, 1000));
+		doub.emplace_back(g_random->random01());
+		strIdx.emplace_back(g_random->randomInt(0, strings.size()));
+	}
 	TraceEvent("pairsfilled")
 		.detail("MemoryUsage", getMemoryUsage());
+	printf("Sleeping for 20 seconds - attach perf now to PID %d\n", getpid());
+	wait(delay(20));
+	printf("Done sleeping\n");
 	startTime = g_network->now();
 	for (i = 0; i < 100000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
-			StringRef key(strings[g_random->randomInt(0, strings.size())]);
-			auto p = std::make_pair(key, g_random->randomInt(-1000, 1000));
+			int idx = (i+1)*j % keyIdx.size();
+			StringRef key(strings[keyIdx[idx]]);
+			auto p = std::make_pair(key, pairRnd[idx]);
 			TraceEvent("TestTraceLineNoDebug")
-				.detail("Num", g_random->randomInt(0, 1000))
-				.detail("Double", g_random->random01())
-				.detail("str", strings[g_random->randomInt(0, strings.size())])
+				.detail("Num", num[idx])
+				.detail("Double", doub[idx])
+				.detail("str", strings[strIdx[idx]])
 				.detail("pair", p);
 		}
 		wait(delay(0));
@@ -117,17 +130,20 @@ TEST_CASE("/flow/TraceEvent") {
 	startTime = g_network->now();
 	for (i = 0; i < 1000000; ++i) {
 		for (unsigned j = 0; j < 100; ++j) {
-			StringRef key(strings[g_random->randomInt(0, strings.size())]);
-			auto p = std::make_pair(key, g_random->randomInt(-1000, 1000));
+			int idx = (i+1)*j % keyIdx.size();
+			StringRef key(strings[keyIdx[idx]]);
+			auto p = std::make_pair(key, pairRnd[idx]);
 			TraceEvent(SevDebug, "TestTraceLineDebug")
-				.detail("Num", g_random->randomInt(0, 1000))
-				.detail("Double", g_random->random01())
-				.detail("str", strings[g_random->randomInt(0, strings.size())])
+				.detail("Num", num[idx])
+				.detail("Double", doub[idx])
+				.detail("str", strings[strIdx[idx]])
 				.detail("pair", p);
 		}
 		wait(delay(0));
 	}
 	TraceEvent("TraceDuration")
 		.detail("Time", g_network->now() - startTime);
+	printf("benchmark done\n", getpid());
+	wait(delay(10));
 	return Void();
 }
