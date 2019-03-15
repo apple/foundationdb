@@ -26,6 +26,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/IDisk.h"
 #include "flow/TDMetric.actor.h"
 #include <random>
 #include "fdbrpc/ReplicationPolicy.h"
@@ -130,8 +131,13 @@ public:
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	machineId;
+		Reference<IDisk> disk;
 
-		MachineInfo() : machineProcess(0) {}
+		MachineInfo() : machineProcess(0), disk(Reference<IDisk>(createSimSSD())) {}
+
+		void killDisk() {
+			disk = Reference<IDisk>(createNeverDisk());
+		}
 	};
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }

@@ -15,6 +15,7 @@ set(FDBRPC_SRCS
   genericactors.actor.h
   genericactors.actor.cpp
   IAsyncFile.actor.cpp
+  IDisk.cpp
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp
