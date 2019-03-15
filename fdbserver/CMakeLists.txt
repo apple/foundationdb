@@ -66,13 +66,6 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
-  sqlite/btree.h
-  sqlite/hash.h
-  sqlite/sqlite3.h
-  sqlite/sqlite3ext.h
-  sqlite/sqliteInt.h
-  sqlite/sqliteLimit.h
-  sqlite/sqlite3.amalgamation.c
   Status.actor.cpp
   Status.h
   StorageMetrics.actor.h
