@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
 
 #if VALGRIND
 #include <memcheck.h>
@@ -134,12 +134,12 @@ private:
 				if(history.checksum != 0 && history.checksum != checksum) {
 					// For reads, verify the stored sum if it is not 0.  If it fails, clear it.
 					TraceEvent (SevError, "AsyncFileLostWriteDetected")
+						.error(checksum_failed())
 						.detail("Filename", m_f->getFilename())
 						.detail("PageNumber", page)
 						.detail("ChecksumOfPage", checksum)
 						.detail("ChecksumHistory", history.checksum)
-						.detail("LastWriteTime", history.timestamp)
-						.error(checksum_failed());
+						.detail("LastWriteTime", history.timestamp);
 					history.checksum = 0;
 				}
 			}

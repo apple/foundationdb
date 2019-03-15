@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SidebandMessage {
 	uint64_t key;
@@ -32,7 +32,7 @@ struct SidebandMessage {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & commitVersion;
+		serializer(ar, key, commitVersion);
 	}
 };
 
@@ -43,7 +43,7 @@ struct SidebandInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & updates;
+		serializer(ar, updates);
 	}
 };
 
@@ -91,7 +91,6 @@ struct SidebandWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> persistInterface( SidebandWorkload *self, Database cx ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Sideband");
 		state Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion()); wr << self->interf;
 		state Standalone<StringRef> serializedInterface = wr.toStringRef();
@@ -104,10 +103,10 @@ struct SidebandWorkload : TestWorkload {
 					break;
 				}
 				tr.set( format("Sideband/Client/%d", self->clientId), serializedInterface );
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
@@ -127,7 +126,7 @@ struct SidebandWorkload : TestWorkload {
 				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
 				return sideband;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -137,11 +136,11 @@ struct SidebandWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop {
-			Void _ = wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
+			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
 			state Transaction tr(cx);
 			state uint64_t key = g_random->randomUniqueID().hash();
 			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
-			state Standalone<StringRef> messageKey = format( "Sideband/Message/%llx", key );
+			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {
 				try {
 					Optional<Value> val = wait( tr.get( messageKey ) );
@@ -150,12 +149,12 @@ struct SidebandWorkload : TestWorkload {
 						break;
 					}
 					tr.set( messageKey, LiteralStringRef("deadbeef") );
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					commitVersion = tr.getCommittedVersion();
 					break;
 				}
 				catch( Error& e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 				}
 			}
 			++self->messages;
@@ -166,7 +165,7 @@ struct SidebandWorkload : TestWorkload {
 	ACTOR Future<Void> checker( SidebandWorkload *self, Database cx ) {
 		loop {
 			state SidebandMessage message = waitNext( self->interf.updates.getFuture() );
-			state Standalone<StringRef> messageKey = format( "Sideband/Message/%llx", message.key );
+			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
 			state Transaction tr(cx);
 			loop {
 				try {
@@ -180,7 +179,7 @@ struct SidebandWorkload : TestWorkload {
 					}
 					break;
 				} catch( Error& e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

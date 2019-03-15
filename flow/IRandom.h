@@ -22,13 +22,14 @@
 #define FLOW_IRANDOM_H
 #pragma once
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <stdint.h>
 #if (defined(__APPLE__))
 #include <ext/hash_map>
 #else
 #include <unordered_map>
 #endif
+#include <functional>
 
 class UID {
 	uint64_t part[2];
@@ -51,7 +52,7 @@ public:
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		ar & part[0] & part[1];
+		serializer(ar, part[0], part[1]);
 	}
 };
 
@@ -60,7 +61,7 @@ template <class Ar> void save( Ar& ar, UID const& uid ) { const_cast<UID&>(uid).
 
 namespace std {
 	template <>
-	class hash<UID> : public unary_function<UID,size_t> {
+	class hash<UID> {
 	public:
 		size_t operator()(UID const& u) const { return u.hash(); }
 	};
@@ -68,13 +69,14 @@ namespace std {
 
 class IRandom {
 public:
-	virtual double random01() = 0;
+	virtual double random01() = 0; // return random value in [0, 1]
 	virtual int randomInt(int min, int maxPlusOne) = 0;
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
 	virtual uint32_t randomUInt32() = 0;
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric()  = 0;
 	virtual std::string randomAlphaNumeric( int length ) = 0;
+	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
 	virtual uint64_t peek() const = 0;  // returns something that is probably different for different random states.  Deterministic (and idempotent) for a deterministic generator.
 
 	// The following functions have fixed implementations for now:
@@ -84,8 +86,12 @@ public:
 	template <class C>
 	void randomShuffle( C& container ) {
 		int s = (int)container.size();
-		for(int i=0; i<s; i++)
-			std::swap( container[i], container[ randomInt( i, s ) ] );
+		for(int i=0; i<s; i++) {
+			int j = randomInt( i, s );
+			if (i != j) {
+				std::swap( container[i], container[j] );
+			}
+		}
 	}
 
 	bool coinflip() { return (this->random01() < 0.5); }

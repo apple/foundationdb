@@ -23,18 +23,19 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
 	#define FLOW_LOADBALANCE_ACTOR_G_H
-	#include "LoadBalance.actor.g.h"
+	#include "fdbrpc/LoadBalance.actor.g.h"
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 	#define FLOW_LOADBALANCE_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
-#include "FailureMonitor.h"
-#include "fdbrpc.h"
-#include "Locality.h"
-#include "QueueModel.h"
-#include "MultiInterface.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/QueueModel.h"
+#include "fdbrpc/MultiInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
 
@@ -51,16 +52,16 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 		}
 	}
 
-	void release(bool clean, double penalty, bool measureLatency = true) {
+	void release(bool clean, bool futureVersion, double penalty, bool measureLatency = true) {
 		if(model && !released) {
 			released = true;
 			double latency = (clean || measureLatency) ? now() - startTime : 0.0;
-			model->endRequest(token, latency, penalty, delta, clean);
+			model->endRequest(token, latency, penalty, delta, clean, futureVersion);
 		}
 	}
 
 	~ModelHolder() { 
-		release(false, -1.0, false);
+		release(false, false, -1.0, false);
 	}
 };
 
@@ -70,7 +71,7 @@ struct LoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar &ar) {
-		ar & penalty;
+		serializer(ar, penalty);
 	}
 };
 
@@ -81,18 +82,19 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Throws an error if the request returned an error that should bubble out
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
-bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce) {
+bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
 	int errCode = result.isError() ? result.getError().code() : error_code_success;
 	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
 	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
 
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
-	holder->release(receivedResponse, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
-				
+	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+	
 	if(result.present()) {
 		return true;
 	}
@@ -105,13 +107,17 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 		throw request_maybe_delivered();
 	}
 
+	if(triedAllOptions && errCode == error_code_process_behind) {
+		throw future_version();
+	}
+
 	return false;
 }
 
 ACTOR template <class Request>
-Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce) {
+Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce, bool triedAllOptions) {
 	if(backoff > 0.0) {
-		Void _ = wait(delay(backoff) || requestUnneeded);
+		wait(delay(backoff) || requestUnneeded);
 	}
 
 	if(requestUnneeded.isReady()) {
@@ -121,7 +127,7 @@ Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* 
 	state Reference<ModelHolder> holder(new ModelHolder(model, stream->getEndpoint().token.first()));
 
 	ErrorOr<REPLY_TYPE(Request)> result = wait(stream->tryGetReply(request));
-	if(checkAndProcessResult(result, holder, atMostOnce)) {
+	if(checkAndProcessResult(result, holder, atMostOnce, triedAllOptions)) {
 		return result.get();	
 	}
 	else {
@@ -149,9 +155,9 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 // Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
 //   failMon's information for load balancing and avoiding failed servers
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the list of servers
-ACTOR template <class Interface, class Request>
+ACTOR template <class Interface, class Request, class Multi>
 Future< REPLY_TYPE(Request) > loadBalance(
-	Reference<MultiInterface<Interface>> alternatives,
+	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
 	int taskID = TaskDefaultPromiseEndpoint,
@@ -181,26 +187,32 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
-		for(int i=0; i<alternatives->countBest(); i++) {
+		for(int i=0; i<alternatives->size(); i++) {
+			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+				break;
+			}
+			
 			RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 			if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
 				auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
-				double thisMetric = qd.smoothOutstanding.smoothTotal();
-				double thisTime = qd.latency;
+				if(now() > qd.failedUntil) {
+					double thisMetric = qd.smoothOutstanding.smoothTotal();
+					double thisTime = qd.latency;
 				
-				if(thisMetric < bestMetric) {
-					if(i != bestAlt) {
-						nextAlt = bestAlt;
-						nextMetric = bestMetric;
-						nextTime = bestTime;
+					if(thisMetric < bestMetric) {
+						if(i != bestAlt) {
+							nextAlt = bestAlt;
+							nextMetric = bestMetric;
+							nextTime = bestTime;
+						}
+						bestAlt = i;
+						bestMetric = thisMetric;
+						bestTime = thisTime;
+					} else if( thisMetric < nextMetric ) {
+						nextAlt = i;
+						nextMetric = thisMetric;
+						nextTime = thisTime;
 					}
-					bestAlt = i;
-					bestMetric = thisMetric;
-					bestTime = thisTime;
-				} else if( thisMetric < nextMetric ) {
-					nextAlt = i;
-					nextMetric = thisMetric;
-					nextTime = thisTime;
 				}
 			}
 		}
@@ -209,13 +221,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
 					auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
-					double thisMetric = qd.smoothOutstanding.smoothTotal();
-					double thisTime = qd.latency;
+					if(now() > qd.failedUntil) {
+						double thisMetric = qd.smoothOutstanding.smoothTotal();
+						double thisTime = qd.latency;
 				
-					if( thisMetric < nextMetric ) {
-						nextAlt = i;
-						nextMetric = thisMetric;
-						nextTime = thisTime;
+						if( thisMetric < nextMetric ) {
+							nextAlt = i;
+							nextMetric = thisMetric;
+							nextTime = thisTime;
+						}
 					}
 				}
 			}
@@ -238,6 +252,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
+	state bool triedAllOptions = false;
 	loop {
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
@@ -252,44 +267,43 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed && (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
+			if(nextAlt == startAlt) triedAllOptions = true;
 			stream=NULL;
 		}
 
 		if(!stream && !firstRequest.isValid() ) {
 			// Everything is down!  Wait for someone to be up.
-			if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-				g_network->networkMetrics.oldestAlternativesFailure = now();
-			}
-			
-			double serversValidTime = alternatives->getRetrievedAt();
-			double minDelay = std::min(FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED - (now() - serversValidTime), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
-			double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), minDelay);
 
-			if(serversValidTime == ALWAYS_FRESH)
-				delay = ALWAYS_FRESH;
-
-			// Making this SevWarn means a lot of clutter
-			if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
-				TraceEvent("AllAlternativesFailed")
-					.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
-					.detail("ServersValidTime", serversValidTime)
-					.detail("Alternatives", alternatives->description())
-					.detail("Delay", delay);
-			}
-
-			g_network->networkMetrics.newestAlternativesFailure = now();
-
-			if (delay < 0) {
-				throw all_alternatives_failed();
-			}
 			vector<Future<Void>> ok( alternatives->size() );
-			for(int i=0; i<ok.size(); i++)
+			for(int i=0; i<ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual( alternatives->get(i, channel).getEndpoint(), FailureStatus(false) );
-			choose {
-				when ( Void _ = wait( quorum( ok, 1 ) ) ) {}
-				when ( Void _ = wait( ::delayJittered( delay ) ) ) {
-					throw all_alternatives_failed(); 
+			}
+
+			if(!alternatives->alwaysFresh()) {
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+					g_network->networkMetrics.oldestAlternativesFailure = now();
 				}
+
+				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
+
+				// Making this SevWarn means a lot of clutter
+				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
+					TraceEvent("AllAlternativesFailed")
+						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
+						.detail("Alternatives", alternatives->description())
+						.detail("Delay", delay);
+				}
+
+				g_network->networkMetrics.newestAlternativesFailure = now();
+
+				choose {
+					when ( wait( quorum( ok, 1 ) ) ) {}
+					when ( wait( ::delayJittered( delay ) ) ) {
+						throw all_alternatives_failed();
+					}
+				}
+			} else {
+				wait( quorum( ok, 1 ) );
 			}
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff
@@ -304,7 +318,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if( firstRequest.isValid() ) {
 			//Issue a second request, the first one is taking a long time.
-			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce);
+			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce, triedAllOptions);
 			state bool firstFinished = false;
 
 			loop {
@@ -347,7 +361,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 		} else {
 			//Issue a request, if it takes too long to get a reply, go around the loop
-			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce);
+			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce, triedAllOptions);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
@@ -370,7 +384,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						firstRequestEndpoint = Optional<uint64_t>();
 						break;
 					}
-					when(Void _ = wait(secondDelay)) {
+					when(wait(secondDelay)) {
 						secondDelay = Never();
 						if(model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
@@ -387,22 +401,12 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		}
 
 		nextAlt = (nextAlt+1) % alternatives->size();
+		if(nextAlt == startAlt) triedAllOptions = true;
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}
 }
 
-// This wrapper is just to help the compiler accept the coercesion to Reference<Multinterface>
-template <class Interface, class Request, class Multi>
-inline Future< REPLY_TYPE(Request) > loadBalance(
-	Reference<Multi> alternatives,
-	RequestStream<Request> Interface::* channel,
-	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
-	bool atMostOnce = false,
-	QueueModel* model = NULL)
-{
-	return loadBalance( Reference<MultiInterface<Interface>>(alternatives), channel, request, taskID, atMostOnce, model );
-}
+#include "flow/unactorcompiler.h"
 
 #endif

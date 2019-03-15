@@ -45,7 +45,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public <T> T run(Function<? super Transaction, T> retryable, Executor e) {
-		Transaction t = this.createTransaction();
+		Transaction t = this.createTransaction(e);
 		try {
 			while (true) {
 				try {
@@ -63,7 +63,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public <T> T read(Function<? super ReadTransaction, T> retryable, Executor e) {
-		return this.run(retryable);
+		return this.run(retryable, e);
 	}
 
 	@Override

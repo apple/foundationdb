@@ -25,7 +25,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include "crc32c.h"
+#include "fdbrpc/crc32c.h"
 
 #define NOMINMAX
 
@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <random>
 #include <algorithm>
-#include "Platform.h"
+#include "fdbrpc/Platform.h"
 #include "generated-constants.cpp"
 #pragma GCC target("sse4.2")
 

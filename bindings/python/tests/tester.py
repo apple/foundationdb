@@ -21,6 +21,7 @@
 
 
 import ctypes
+import math
 import sys
 import os
 import struct
@@ -91,7 +92,7 @@ class Stack:
                     else:
                         raw[i] = (raw[i][0], val)
                 except fdb.FDBError as e:
-                    # print('ERROR: %s' % repr(e))
+                    # print('ERROR: %r' % e)
                     raw[i] = (raw[i][0], fdb.tuple.pack((b'ERROR', str(e.code).encode('ascii'))))
 
         if count is None:
@@ -135,7 +136,8 @@ def test_options(tr):
     tr.options.set_retry_limit(50)
     tr.options.set_max_retry_delay(100)
     tr.options.set_used_during_commit_protection_disable()
-    tr.options.set_transaction_logging_enable('my_transaction')
+    tr.options.set_debug_transaction_identifier('my_transaction')
+    tr.options.set_log_transaction()
     tr.options.set_read_lock_aware()
     tr.options.set_lock_aware()
 
@@ -498,6 +500,8 @@ class Tester:
                 elif inst.op == six.u("ENCODE_FLOAT"):
                     f_bytes = inst.pop()
                     f = struct.unpack(">f", f_bytes)[0]
+                    if not math.isnan(f) and not math.isinf(f) and not f == -0.0 and f == int(f):
+                        f = int(f)
                     inst.push(fdb.tuple.SingleFloat(f))
                 elif inst.op == six.u("ENCODE_DOUBLE"):
                     d_bytes = inst.pop()
@@ -543,7 +547,7 @@ class Tester:
                 else:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:
-                # print('ERROR: %s' % repr(e))
+                # print('ERROR: %r' % e)
                 inst.stack.push(idx, fdb.tuple.pack((b"ERROR", str(e.code).encode('ascii'))))
 
             # print("        to %s" % self.stack)

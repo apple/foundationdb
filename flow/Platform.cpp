@@ -25,13 +25,13 @@
 #include <math.h> // For _set_FMA3_enable workaround in platformInit
 #endif
 
-#include "Platform.h"
-#include "Arena.h"
+#include "flow/Platform.h"
+#include "flow/Arena.h"
 
-#include "Trace.h"
-#include "Error.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
-#include "Knobs.h"
+#include "flow/Knobs.h"
 
 #include <iostream>
 #include <fstream>
@@ -43,13 +43,13 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "UnitTest.h"
-#include "FaultInjection.h"
+#include "flow/UnitTest.h"
+#include "flow/FaultInjection.h"
 
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
-#undef max
-#undef min
+#include <winioctl.h>
 #include <io.h>
 #include <psapi.h>
 #include <stdio.h>
@@ -85,7 +85,7 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
-#include "stacktrace.h"
+#include "flow/stacktrace.h"
 
 #ifdef __linux__
 /* Needed for memory allocation */
@@ -98,6 +98,8 @@
 #include <sys/resource.h>
 /* Needed for crash handler */
 #include <signal.h>
+/* Needed for gnu_dev_{major,minor} */
+#include <sys/sysmacros.h>
 #endif
 
 #ifdef __APPLE__
@@ -432,22 +434,40 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 #endif
 }
 
+Error systemErrorCodeToError() {
+#if defined(_WIN32)
+	if(GetLastError() == ERROR_IO_DEVICE) {
+		return io_error();
+	}
+#elif defined(__unixish__)
+	if(errno == EIO || errno == EROFS) {
+		return io_error();
+	}
+#else
+	#error Port me!
+#endif
+
+	return platform_error();
+}
+
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
 #ifdef __linux__
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	uint64_t blockSize = buf.f_frsize;
 #elif defined(__APPLE__)
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	uint64_t blockSize = buf.f_bsize;
@@ -466,7 +486,9 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalSpace;
 	ULARGE_INTEGER totalFreeSpace;
 	if( !GetDiskFreeSpaceEx( fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace ) ) {
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		throw e;
 	}
 	total = std::min( (uint64_t) std::numeric_limits<int64_t>::max(), totalSpace.QuadPart );
 	free = std::min( (uint64_t) std::numeric_limits<int64_t>::max(), freeSpace.QuadPart );
@@ -478,7 +500,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 }
 
 #ifdef __unixish__
-const char* getInterfaceName(uint32_t _ip) {
+const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT( platform_error, "getInterfaceName" );
 	static char iname[20];
 
@@ -493,9 +515,15 @@ const char* getInterfaceName(uint32_t _ip) {
 	for (struct ifaddrs* iter = interfaces; iter; iter = iter->ifa_next) {
 		if(!iter->ifa_addr)
 			continue;
-		if (iter->ifa_addr->sa_family == AF_INET) {
+		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
 			uint32_t ip = ntohl(((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr);
-			if (ip == _ip) {
+			if (ip == _ip.toV4()) {
+				ifa_name = iter->ifa_name;
+				break;
+			}
+		} else if (iter->ifa_addr->sa_family == AF_INET6 && _ip.isV6()) {
+			struct sockaddr_in6* ifa_addr = (struct sockaddr_in6*)iter->ifa_addr;
+			if (memcmp(_ip.toV6().data(), &ifa_addr->sin6_addr, 16) == 0) {
 				ifa_name = iter->ifa_name;
 				break;
 			}
@@ -517,8 +545,8 @@ const char* getInterfaceName(uint32_t _ip) {
 #endif
 
 #if defined(__linux__)
-void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
-					   uint64_t& outSegs, uint64_t& retransSegs) {
+void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+                       uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	const char* ifa_name = nullptr;
 	try {
@@ -623,7 +651,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		unsigned int minorId;
 		disk_stream >> majorId;
 		disk_stream >> minorId;
-		if(majorId == (unsigned int) major(buf.st_dev) && minorId == (unsigned int) minor(buf.st_dev)) {
+		if(majorId == (unsigned int) gnu_dev_major(buf.st_dev) && minorId == (unsigned int) gnu_dev_minor(buf.st_dev)) {
 			std::string ignore;
 			uint64_t rd_ios;	/* # of reads completed */
 			//	    This is the total number of reads completed successfully.
@@ -691,11 +719,11 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 			writeSectors = wr_sectors;
 			readSectors = rd_sectors;
 
-			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("ignore", ignore).detail("rd_ios", rd_ios)
-			//	.detail("rd_merges", rd_merges).detail("rd_sectors", rd_sectors).detail("rd_ticks", rd_ticks).detail("wr_ios", wr_ios).detail("wr_merges", wr_merges)
-			//	.detail("wr_sectors", wr_sectors).detail("wr_ticks", wr_ticks).detail("cur_ios", cur_ios).detail("ticks", ticks).detail("aveq", aveq)
-			//	.detail("currentIOs", currentIOs).detail("busyTicks", busyTicks).detail("reads", reads).detail("writes", writes).detail("writeSectors", writeSectors)
-			//  .detail("readSectors", readSectors);
+			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
+			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks", rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges)
+			//	.detail("WrSectors", wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq", aveq)
+			//	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads", reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
+			//  .detail("ReadSectors", readSectors);
 			return;
 		} else
 			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
@@ -725,8 +753,8 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #ifdef __APPLE__
-void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
-					   uint64_t& outSegs, uint64_t& retransSegs) {
+void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
+                       uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
 
 	const char* ifa_name = nullptr;
@@ -814,8 +842,9 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError().error(e);
+		throw e;
 	}
 
 	const char* dev = strrchr(buf.f_mntfromname, '/');
@@ -1073,7 +1102,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 }
 #endif
 
-SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, SystemStatisticsState **statState) {
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState) {
 	if( (*statState) == NULL )
 		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
@@ -1167,7 +1196,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, System
 	uint64_t machineOutSegs = (*statState)->machineLastOutSegs;
 	uint64_t machineRetransSegs = (*statState)->machineLastRetransSegs;
 
-	getNetworkTraffic(ip, machineNowSent, machineNowReceived, machineOutSegs, machineRetransSegs);
+	getNetworkTraffic(*ip, machineNowSent, machineNowReceived, machineOutSegs, machineRetransSegs);
 	if( returnStats.initialized ) {
 		returnStats.machineMegabitsSent = ((machineNowSent - (*statState)->machineLastSent) * 8e-6);
 		returnStats.machineMegabitsReceived = ((machineNowReceived - (*statState)->machineLastReceived) * 8e-6);
@@ -1349,12 +1378,12 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 #ifdef _WIN32
 	if(localtime_s(result, timep) != 0) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #elif defined(__unixish__)
 	if(localtime_r(timep, result) == NULL) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error;
+		throw platform_error();
 	}
 #else
 #error Port me!
@@ -1628,17 +1657,20 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
-void atomicReplace( std::string const& path, std::string const& content ) {
+void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
-		f = fopen( tempfilename.c_str(), "wt" );
+		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 
-		if(fprintf( f, "%s", content.c_str() ) < 0)
+		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
+			throw io_error();
+
+		if (!textmode && fwrite(content.c_str(), sizeof(uint8_t), content.size(), f) != content.size())
 			throw io_error();
 
 		if(fflush(f) != 0)
@@ -1680,7 +1712,7 @@ void atomicReplace( std::string const& path, std::string const& content ) {
 		INJECT_FAULT( io_error, "atomicReplace" );
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarn, "AtomicReplace").detail("path", path).error(e).GetLastError();
+		TraceEvent(SevWarn, "AtomicReplace").error(e).detail("Path", path).GetLastError();
 		if (f) fclose(f);
 		throw;
 	}
@@ -1706,8 +1738,9 @@ bool deleteFile( std::string const& filename ) {
 #else
 	#error Port me!
 #endif
-	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError();
-	throw platform_error();
+	Error e = systemErrorCodeToError();
+	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
+	throw errno;
 }
 
 static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
@@ -1731,8 +1764,9 @@ bool createDirectory( std::string const& directory ) {
 			return createDirectory( directory );
 		}
 	}
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
-	throw platform_error();
+	Error e = systemErrorCodeToError();
+	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	throw e;
 #elif (defined(__linux__) || defined(__APPLE__))
 	size_t sep = 0;
 	do {
@@ -1741,13 +1775,16 @@ bool createDirectory( std::string const& directory ) {
 			if (errno == EEXIST)
 				continue;
 
-			TraceEvent(SevError, "mkdir").detail("Directory", directory).GetLastError();
-			if (errno == EACCES)
-				throw file_not_writable();
-			else {
-				TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
-				throw platform_error();
+			Error e;
+			if(errno == EACCES) {
+				e = file_not_writable();
 			}
+			else {
+				e = systemErrorCodeToError();
+			}
+
+			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+			throw e;
 		}
 		createdDirectory();
 	} while (sep != std::string::npos && sep != directory.length() - 1);
@@ -1766,8 +1803,9 @@ std::string abspath( std::string const& filename ) {
 #ifdef _WIN32
 	char nameBuffer[MAX_PATH];
 	if (!GetFullPathName(filename.c_str(), MAX_PATH, nameBuffer, NULL)) {
-		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError().error(e);
+		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
 	for(char*x = nameBuffer; *x; x++)
@@ -1787,8 +1825,9 @@ std::string abspath( std::string const& filename ) {
 				return joinPath( abspath( "." ), filename );
 			}
 		}
-		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError();
-		throw platform_error();
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError().error(e);
+		throw e;
 	}
 	return std::string(r);
 #else
@@ -1808,7 +1847,7 @@ std::string parentDirectory( std::string const& filename ) {
 	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {
 		TraceEvent(SevError, "GetParentDirectoryOfFile")
-			.detail("file", filename)
+			.detail("File", filename)
 			.GetLastError();
 		throw platform_error();
 	}
@@ -2036,6 +2075,19 @@ bool fileExists(std::string const& filename) {
 	return true;
 }
 
+bool directoryExists(std::string const& path) {
+#ifdef _WIN32
+	DWORD bits = ::GetFileAttributes(path.c_str());
+	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
+#else
+	DIR *d = opendir(path.c_str());
+	if(d == nullptr)
+		return false;
+	closedir(d);
+	return true;
+#endif
+}
+
 int64_t fileSize(std::string const& filename) {
 #ifdef _WIN32
 	struct _stati64 file_status;
@@ -2079,7 +2131,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 	FILE* f = fopen(filename.c_str(), "wb");
 	if (!f)
 	{
-		TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).GetLastError();
+		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 		throw file_not_writable();
 	}
 
@@ -2087,7 +2139,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 		size_t length = fwrite(data, sizeof(uint8_t), count, f);
 		if (length != count)
 		{
-			TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
 			throw file_not_writable();
 		}
 	}
@@ -2193,7 +2245,7 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 }; // namespace platform
 
 #ifdef ALLOC_INSTRUMENTATION
-#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
+#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
 #ifdef __linux__
 #include <cxxabi.h>
 #endif
@@ -2320,6 +2372,7 @@ extern void flushTraceFileVoid();
 extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
+	closeTraceFile();
 #ifdef _WIN32
 	// This function is documented as being asynchronous, but we suspect it might actually be synchronous in the
 	// case that it is passed a handle to the current process. If not, then there may be cases where we escalate
@@ -2512,9 +2565,9 @@ void crashHandler(int sig) {
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
-		.detail("signal", sig)
-		.detail("name", strsignal(sig))
-		.detail("trace", backtrace);
+		.detail("Signal", sig)
+		.detail("Name", strsignal(sig))
+		.detail("Trace", backtrace);
 	flushTraceFileVoid();
 
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
@@ -2552,13 +2605,13 @@ extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
 extern volatile double net2liveness;
-extern volatile int profilingEnabled;
+extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
 volatile thread_local bool profileThread = false;
 #endif
 
-volatile int profilingEnabled = 1;
+volatile thread_local int profilingEnabled = 1;
 
 void setProfilingEnabled(int enabled) { 
 	profilingEnabled = enabled; 
@@ -2674,7 +2727,7 @@ wchar_basic_istream& __attribute__((weak)) wchar_basic_istream::ignore(streamsiz
 
 // UnitTest for getMemoryInfo
 #ifdef __linux__
-TEST_CASE("flow/Platform/getMemoryInfo") {
+TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	printf("UnitTest flow/Platform/getMemoryInfo 1\n");
 	std::string memString =

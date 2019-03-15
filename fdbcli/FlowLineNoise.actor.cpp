@@ -18,8 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "FlowLineNoise.h"
+#include "fdbcli/FlowLineNoise.h"
 #include "flow/IThreadPool.h"
 
 #define BOOST_SYSTEM_NO_LIB
@@ -31,10 +30,11 @@
 
 #if __unixish__
     #define HAVE_LINENOISE 1
-    #include "linenoise/linenoise.h"
+    #include "fdbcli/linenoise/linenoise.h"
 #else
     #define HAVE_LINENOISE 0
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LineNoiseReader : IThreadPoolReceiver {
     virtual void init() {}
@@ -150,7 +150,7 @@ ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
         }
     });
 
-    Void _ = wait(result.getFuture());
+    wait(result.getFuture());
     return Void();
 }
 

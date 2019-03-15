@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
 
 //Page caches used in non-simulated environments
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;
@@ -142,15 +142,35 @@ Future<Void> AsyncFileCached::readZeroCopy( void** data, int* length, int64_t of
 void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) {
 	ASSERT( length == pageCache->pageSize && !(offset & (pageCache->pageSize-1)) && offset + length <= this->length);
 	auto p = pages.find( offset );
-	ASSERT( p != pages.end() && p->second->data == data );
-	p->second->releaseZeroCopy();
+	// If the page is in the cache and the data pointer matches then release the page
+	if(p != pages.end() && p->second->data == data ) {
+		p->second->releaseZeroCopy();
+	}
+	else {
+		// Otherwise, the data pointer might exist in the orphaned pages map
+		auto o = orphanedPages.find(data);
+		if(o != orphanedPages.end()) {
+			if(o->second == 1) {
+				if (data) {
+					if (length == 4096)
+						FastAllocator<4096>::release(data);
+					else
+						aligned_free(data);
+				}
+			}
+			else {
+				--o->second;
+			}
+		}
+	}
 }
 
-Future<Void> AsyncFileCached::truncate( int64_t size ) {
+Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	++countFileCacheWrites;
 	++countCacheWrites;
 
 	std::vector<Future<Void>> actors;
+	int64_t oldLength = length;
 
 	int offsetInPage = size % pageCache->pageSize;
 	int64_t pageOffset = size - offsetInPage;
@@ -176,27 +196,51 @@ Future<Void> AsyncFileCached::truncate( int64_t size ) {
 
 		pageOffset += pageCache->pageSize;
 	}
-	/*
-	for ( auto p = pages.lower_bound( pageOffset ); p != pages.end(); p = pages.erase(p) ) {
-		auto f = p->second->truncate();
-		if ( !f.isReady() || f.isError())
-			actors.push_back( f );
-	}
-	*/
 
-	for ( auto p = pages.begin(); p != pages.end(); ) {
-		if ( p->first >= pageOffset ) {
-			auto f = p->second->truncate();
-			if ( !f.isReady() || f.isError() )
-				actors.push_back( f );
-			auto last = p;
-			++p;
-			pages.erase(last);
-		} else
-			++p;
+	// if this call to truncate results in a larger file, there is no
+	// need to erase any pages
+	if(oldLength > pageOffset) {
+		// Iterating through all pages results in better cache locality than
+		// looking up pages one by one in the hash table. However, if we only need
+		// to truncate a small portion of data, looking up pages one by one should
+		// be faster. So for now we do single key lookup for each page if it results
+		// in less than a fixed percentage of the unordered map being accessed.
+		int64_t numLookups = (oldLength + (pageCache->pageSize-1) - pageOffset) / pageCache->pageSize;
+		if(numLookups < pages.size() * FLOW_KNOBS->PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION) {
+			for(int64_t offset = pageOffset; offset < oldLength; offset += pageCache->pageSize) {
+				auto iter = pages.find(offset);
+				if(iter != pages.end()) {
+					auto f = iter->second->truncate();
+					if(!f.isReady() || f.isError()) {
+						actors.push_back(f);
+					}
+					pages.erase(iter);
+				}
+			}
+		}
+		else {
+			for(auto p = pages.begin(); p != pages.end();) {
+				if(p->first >= pageOffset) {
+					auto f = p->second->truncate();
+					if(!f.isReady() || f.isError()) { 
+						actors.push_back(f);
+					}
+					auto last = p;
+					++p;
+					pages.erase(last);
+				}
+				else {
+					++p;
+				}
+			}
+		}
 	}
 
-	return truncate_impl( this, size, waitForAll( actors ) );
+	// Wait for the page truncations to finish, then truncate the underlying file
+	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+	return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(waitForAll(actors), [=](Void _) -> Future<Void> {
+		return uncached->truncate(size);
+	});
 }
 
 Future<Void> AsyncFileCached::flush() {

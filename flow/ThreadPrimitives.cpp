@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "ThreadPrimitives.h"
-#include "Trace.h"
+#include "flow/ThreadPrimitives.h"
+#include "flow/Trace.h"
 #include <stdint.h>
 #include <iostream>
 #include <errno.h>

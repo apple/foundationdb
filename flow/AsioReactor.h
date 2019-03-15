@@ -75,7 +75,7 @@ private:
 		int open() {
 			fd = eventfd(0, EFD_NONBLOCK);
 			if (fd<0) {
-				TraceEvent(SevError, "eventfdError").GetLastError();
+				TraceEvent(SevError, "EventfdError").GetLastError();
 				throw platform_error();
 			}
 			return fd;

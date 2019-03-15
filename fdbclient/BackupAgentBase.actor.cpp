@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
-#include "BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
 const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");
@@ -62,7 +63,7 @@ Version getVersionFromString(std::string const& value) {
 	Version version(-1);
 	int n = 0;
 	if (sscanf(value.c_str(), "%lld%n", (long long*)&version, &n) != 1 || n != value.size()) {
-		TraceEvent(SevWarnAlways, "getVersionFromString").detail("InvalidVersion", value);
+		TraceEvent(SevWarnAlways, "GetVersionFromString").detail("InvalidVersion", value);
 		throw restore_invalid_version();
 	}
 	return version;
@@ -77,7 +78,7 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 
 	Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
-	//TraceEvent("getLogRanges").detail("destUidValue", destUidValue).detail("prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", printable(StringRef(baLogRangePrefix)));
 
 	for (int64_t vblock = beginVersion / blockSize; vblock < (endVersion + blockSize - 1) / blockSize; ++vblock) {
 		int64_t tb = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -100,7 +101,7 @@ Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version 
 
 	Key baLogRangePrefix = backupUid.withPrefix(applyLogKeys.begin);
 
-	//TraceEvent("getLogRanges").detail("backupUid", backupUid).detail("prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", printable(StringRef(baLogRangePrefix)));
 
 	for (int64_t vblock = beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE; vblock < (endVersion + CLIENT_KNOBS->APPLY_BLOCK_SIZE - 1) / CLIENT_KNOBS->APPLY_BLOCK_SIZE; ++vblock) {
 		int64_t tb = vblock * CLIENT_KNOBS->APPLY_BLOCK_SIZE / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -148,8 +149,8 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
-			TraceEvent(SevError, "decodeBackupLogValue").detail("incompatible_protocol_version", protocolVersion)
-				.detail("valueSize", value.size()).detail("value", printable(value));
+			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
+				.detail("ValueSize", value.size()).detail("Value", printable(value));
 			throw incompatible_protocol_version();
 		}
 
@@ -188,14 +189,14 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 
 		ASSERT(consumed == totalBytes);
 		if (value.size() != offset) {
-			TraceEvent(SevError, "BA_decodeBackupLogValue").detail("unexpected_extra_data_size", value.size()).detail("offset", offset).detail("totalBytes", totalBytes).detail("consumed", consumed).detail("originalOffset", originalOffset);
+			TraceEvent(SevError, "BA_DecodeBackupLogValue").detail("UnexpectedExtraDataSize", value.size()).detail("Offset", offset).detail("TotalBytes", totalBytes).detail("Consumed", consumed).detail("OriginalOffset", originalOffset);
 			throw restore_corrupted_data();
 		}
 
 		return result;
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_decodeBackupLogValue").error(e).GetLastError().detail("valueSize", value.size()).detail("value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
@@ -207,8 +208,8 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
-			TraceEvent(SevError, "decodeBackupLogValue").detail("incompatible_protocol_version", protocolVersion)
-				.detail("valueSize", value.size()).detail("value", printable(value));
+			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
+				.detail("ValueSize", value.size()).detail("Value", printable(value));
 			throw incompatible_protocol_version();
 		}
 
@@ -280,7 +281,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 			}
 			else {
 				Version ver = key_version->rangeContaining(logValue.param1).value();
-				//TraceEvent("ApplyMutation").detail("logValue", logValue.toString()).detail("version", version).detail("ver", ver).detail("apply", version > ver && ver != invalidVersion);
+				//TraceEvent("ApplyMutation").detail("LogValue", logValue.toString()).detail("Version", version).detail("Ver", ver).detail("Apply", version > ver && ver != invalidVersion);
 				if (version > ver && ver != invalidVersion) {
 					if(removePrefix.size()) {
 						logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -298,30 +299,31 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 
 		ASSERT(consumed == totalBytes);
 		if (value.size() != offset) {
-			TraceEvent(SevError, "BA_decodeBackupLogValue").detail("unexpected_extra_data_size", value.size()).detail("offset", offset).detail("totalBytes", totalBytes).detail("consumed", consumed).detail("originalOffset", originalOffset);
+			TraceEvent(SevError, "BA_DecodeBackupLogValue").detail("UnexpectedExtraDataSize", value.size()).detail("Offset", offset).detail("TotalBytes", totalBytes).detail("Consumed", consumed).detail("OriginalOffset", originalOffset);
 			throw restore_corrupted_data();
 		}
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_decodeBackupLogValue").error(e).GetLastError().detail("valueSize", value.size()).detail("value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
 static double lastErrorTime = 0;
-ACTOR Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string message) {
+void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string message) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if(now() - lastErrorTime > CLIENT_KNOBS->BACKUP_ERROR_DELAY) {
-		TraceEvent("BA_logError").detail("key", printable(keyErrors)).detail("message", message);
+		TraceEvent("BA_LogError").detail("Key", printable(keyErrors)).detail("Message", message);
 		lastErrorTime = now();
 	}
 	tr->set(keyErrors, message);
-	return Void();
 }
 
-
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message) {
-	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){return logErrorWorker(tr, keyErrors, message); });
+	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { 
+		logErrorWorker(tr, keyErrors, message); 
+		return Future<Void>(Void());
+	});
 }
 
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message) {
@@ -346,7 +348,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 
 			//add lock
 			releaser.release();
-			Void _ = wait(lock->take(TaskDefaultYield, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
+			wait(lock->take(TaskDefaultYield, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
 			releaser = FlowLock::Releaser(*lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
 			state Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, limits));
@@ -357,7 +359,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if(g_random->random01() < 0.5)
-					Void _ = wait(delay(6.0));
+					wait(delay(6.0));
 			}
 
 			releaser.remaining -= values.expectedSize(); //its the responsibility of the caller to release after this point
@@ -411,31 +413,31 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				rangevalue.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if(g_random->random01() < 0.5)
-					Void _ = wait(delay(6.0));
+					wait(delay(6.0));
 			}
 
 			//add lock
-			Void _ = wait(active);
+			wait(active);
 			releaser.release();
-			Void _ = wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
+			wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
 			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 
 			int index(0);
 			for (auto & s : rangevalue){
 				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("log_readCommitted").detail("groupKey", groupKey).detail("skipGroup", skipGroup).detail("nextKey", printable(nextKey.key)).detail("end", printable(end.key)).detail("valuesize", value.size()).detail("index",index++).detail("size",s.value.size());
+				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", printable(nextKey.key)).detail("End", printable(end.key)).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
 				if (groupKey != skipGroup){
 					if (rcGroup.version == -1){
 						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
 					else if (rcGroup.groupKey != groupKey) {
-						//TraceEvent("log_readCommitted").detail("sendGroup0", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length",rcGroup.items[0].value.size());
+						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength",rcGroup.items[0].value.size());
 						//state uint32_t len(0);
 						//for (size_t j = 0; j < rcGroup.items.size(); ++j) {
 						//	len += rcGroup.items[j].value.size();
 						//}
-						//TraceEvent("SendGroup").detail("groupKey", rcGroup.groupKey).detail("version", rcGroup.version).detail("length", len).detail("releaser.remaining", releaser.remaining);
+						//TraceEvent("SendGroup").detail("GroupKey", rcGroup.groupKey).detail("Version", rcGroup.version).detail("Length", len).detail("Releaser.remaining", releaser.remaining);
 						releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
 						ASSERT(releaser.remaining >= 0);
 						results.send(rcGroup);
@@ -454,7 +456,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				if (rcGroup.version != -1){
 					releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
 					ASSERT(releaser.remaining >= 0);
-					//TraceEvent("log_readCommitted").detail("sendGroup1", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length", rcGroup.items[0].value.size());
+					//TraceEvent("Log_ReadCommitted").detail("SendGroup1", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength", rcGroup.items[0].value.size());
 					results.send(rcGroup);
 				}
 
@@ -468,7 +470,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 		catch (Error &e) {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -528,10 +530,10 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
 		// for our transaction to be aborted due to conflicts.
 		req.transaction.read_snapshot = committedVersion->get();
-		req.isLockAware = true;
+		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
 		totalBytes += mutationSize;
-		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
+		wait( commitLock->take(TaskDefaultYield, mutationSize) );
 		addActor.send( commitLock->releaseWhen( success(commit.getReply(req)), mutationSize ) );
 
 		if(endOfStream) {
@@ -569,9 +571,9 @@ ACTOR Future<Void> coalesceKeyVersionCache(Key uid, Version endVersion, Referenc
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(countKey));
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::AddValue, countKey, StringRef((uint8_t*)&removed, 8)));
 		req.transaction.read_snapshot = committedVersion->get();
-		req.isLockAware = true;
+		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
-		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
+		wait( commitLock->take(TaskDefaultYield, mutationSize) );
 		addActor.send( commitLock->releaseWhen( success(commit.getReply(req)), mutationSize ) );
 	}
 
@@ -584,10 +586,12 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 	state Future<Void> error = actorCollection( addActor.getFuture() );
 	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
 
+	keyVersion->insert(metadataVersionKey, 0);
+
 	try {
 		loop {
 			if(beginVersion >= *endVersion) {
-				Void _ = wait( commitLock.take(TaskDefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES) );
+				wait( commitLock.take(TaskDefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES) );
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if(beginVersion >= *endVersion) {
 					return Void();
@@ -615,11 +619,11 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 				if(error.isError()) throw error.getError();
 			}
 
-			Void _ = wait(coalesceKeyVersionCache(uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
+			wait(coalesceKeyVersionCache(uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
 			beginVersion = newEndVersion;
 		}
 	} catch( Error &e ) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "AM_error").error(e);
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError").error(e);
 		throw;	
 	}
 }
@@ -715,7 +719,7 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 					}
 				}
 			}
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 
 			if (!endVersion.present() && (backupVersions.size() == 1 || currEndVersion >= nextSmallestVersion)) {
 				return Void();
@@ -725,7 +729,7 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 			}
 			tr->reset();
 		} catch (Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }

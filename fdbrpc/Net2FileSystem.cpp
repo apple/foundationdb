@@ -19,7 +19,7 @@
  */
 
 
-#include "Net2FileSystem.h"
+#include "fdbrpc/Net2FileSystem.h"
 
 // Define boost::asio::io_service
 #include <algorithm>
@@ -31,13 +31,13 @@
 
 #define FILESYSTEM_IMPL 1
 
-#include "AsyncFileCached.actor.h"
-#include "AsyncFileEIO.actor.h"
-#include "AsyncFileWinASIO.actor.h"
-#include "AsyncFileKAIO.actor.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileEIO.actor.h"
+#include "fdbrpc/AsyncFileWinASIO.actor.h"
+#include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
-#include "AsyncFileWriteChecker.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
 Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
@@ -58,7 +58,12 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 
 	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
-	if ( (flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) )
+	// In the vast majority of cases, we wish to use Kernel AIO. However, some systems
+	// dont properly support don’t properly support kernel async I/O without O_DIRECT
+	// or AIO at all. In such cases, DISABLE_POSIX_KERNEL_AIO knob can be enabled to fallback to
+	// EIO instead of Kernel AIO.
+	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) &&
+	    !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
 		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
 	else
 #endif
@@ -72,6 +77,10 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 Future< Void > Net2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
 {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
+}
+
+Future< std::time_t > Net2FileSystem::lastWriteTime( std::string filename ) {
+	return Net2AsyncFile::lastWriteTime( filename );
 }
 
 void Net2FileSystem::newFileSystem(double ioTimeout, std::string fileSystemPath)

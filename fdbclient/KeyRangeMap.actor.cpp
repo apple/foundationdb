@@ -18,11 +18,12 @@
  * limitations under the License.
  */
 
-#include "KeyRangeMap.h"
-#include "NativeAPI.h"
-#include "CommitTransaction.h"
-#include "FDBTypes.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 void KeyRangeActorMap::getRangesAffectedByInsertion( const KeyRangeRef& keys, vector< KeyRange >& affectedRanges ) {
 	auto s = map.rangeContaining( keys.begin );
@@ -158,7 +159,7 @@ ACTOR Future<Void> krmSetRangeCoalescing( Transaction *tr, Key mapPrefix, KeyRan
 	state vector<Future<Standalone<RangeResultRef>>> keys;
 	keys.push_back(tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, true));
 	keys.push_back(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, true));
-	Void _ = wait(waitForAll(keys));
+	wait(waitForAll(keys));
 
 	//Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();

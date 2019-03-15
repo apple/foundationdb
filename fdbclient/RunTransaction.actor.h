@@ -23,12 +23,13 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_G_H)
 	#define FDBCLIENT_RUNTRANSACTION_ACTOR_G_H
-	#include "RunTransaction.actor.g.h"
+	#include "fdbclient/RunTransaction.actor.g.h"
 #elif !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_H)
 	#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
 
 #include "flow/flow.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template < class Function >
 Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
@@ -37,11 +38,11 @@ runRYWTransaction(Database cx, Function func) {
 	loop{
 		try {
 			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			return result;
 		}
 		catch (Error& e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -53,13 +54,13 @@ runRYWTransactionFailIfLocked(Database cx, Function func) {
 	loop{
 		try {
 			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			return result;
 		}
 		catch (Error& e) {
 			if(e.code() == error_code_database_locked)
 				throw;
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -69,7 +70,9 @@ Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValu
 runRYWTransactionNoRetry(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
-	Void _ = wait(tr->commit());
+	wait(tr->commit());
 	return result;
 }
+
+#include "flow/unactorcompiler.h"
 #endif

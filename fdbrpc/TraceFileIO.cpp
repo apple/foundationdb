@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "TraceFileIO.h"
+#include "fdbrpc/TraceFileIO.h"
 
 #if CENABLED(0, NOT_IN_CLEAN)
 //TO RUN: Set the name of file you wish to track

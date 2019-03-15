@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/TLSConnection.h"
+
 #ifndef FDBSERVER_SIMULATEDCLUSTER_H
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
-void setupAndRun(std::string const& dataFolder, const char* const& testFile, bool const& rebooting);
+void setupAndRun(std::string const& dataFolder, const char* const& testFile, bool const& rebooting, Reference<TLSOptions> const& useSSL);
 
 #endif

@@ -23,12 +23,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ORDERER_ACTOR_G_H)
 	#define FDBSERVER_ORDERER_ACTOR_G_H
-	#include "Orderer.actor.g.h"
+	#include "fdbserver/Orderer.actor.g.h"
 #elif !defined(FDBSERVER_ORDERER_ACTOR_H)
 	#define FDBSERVER_ORDERER_ACTOR_H
 
 #include "fdbclient/Notified.h"
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <class Seq>
 class Orderer {
@@ -55,8 +55,8 @@ public:
 	}
 private:
 	ACTOR static Future<bool> waitAndOrder( Orderer<Seq>* self, Seq s, int taskID ) {
-		Void _ = wait( self->ready.whenAtLeast(s) );
-		Void _ = wait( yield( taskID ) || self->shutdown.getFuture() );
+		wait( self->ready.whenAtLeast(s) );
+		wait( yield( taskID ) || self->shutdown.getFuture() );
 		return self->dedup(s);
 	}
 	bool dedup( Seq s ) {
@@ -70,5 +70,7 @@ private:
 	NotifiedVersion ready;   // FIXME: Notified<Seq>
 	Promise<Void> shutdown;  // Never set, only broken on destruction
 };
+
+#include "flow/unactorcompiler.h"
 
 #endif

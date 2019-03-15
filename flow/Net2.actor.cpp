@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Platform.h"
+#include "flow/Platform.h"
 #include <algorithm>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -26,21 +26,21 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "actorcompiler.h"
-#include "network.h"
-#include "IThreadPool.h"
+#include "flow/network.h"
+#include "flow/IThreadPool.h"
 #include "boost/range.hpp"
 
-#include "ActorCollection.h"
-#include "ThreadSafeQueue.h"
-#include "ThreadHelper.actor.h"
-#include "TDMetric.actor.h"
-#include "AsioReactor.h"
+#include "flow/ActorCollection.h"
+#include "flow/ThreadSafeQueue.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
@@ -48,13 +48,19 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys
-//                                                 xyzdev
-//                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A552000001LL;
-uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
+//
+// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+//
+//                                                       xyzdev
+//                                                       vvvv
+const uint64_t currentProtocolVersion        = 0x0FDB00B061040001LL;
+const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
+// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
+static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -117,7 +123,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics);
+	Net2(bool useThreadPool, bool useMetrics);
 	void run();
 	void initMetrics();
 
@@ -158,7 +164,6 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
-	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -167,7 +172,7 @@ public:
 	TDMetricCollection tdmetrics;
 	double currentTime;
 	bool stopped;
-	std::map< uint32_t, bool > addressOnHostCache;
+	std::map<IPAddress, bool> addressOnHostCache;
 
 	uint64_t numYields;
 
@@ -221,8 +226,16 @@ public:
 	std::vector<std::string> blobCredentialFiles;
 };
 
+static boost::asio::ip::address tcpAddress(IPAddress const& n) {
+	if (n.isV6()) {
+		return boost::asio::ip::address_v6(n.toV6());
+	} else {
+		return boost::asio::ip::address_v4(n.toV4());
+	}
+}
+
 static tcp::endpoint tcpEndpoint( NetworkAddress const& n ) {
-	return tcp::endpoint( boost::asio::ip::address_v4( n.ip ), n.port );
+	return tcp::endpoint(tcpAddress(n.ip), n.port);
 }
 
 class BindPromise {
@@ -232,7 +245,7 @@ class BindPromise {
 public:
 	BindPromise( const char* errContext, UID errID ) : errContext(errContext), errID(errID) {}
 	BindPromise( BindPromise const& r ) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept(true) : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise&& r) BOOST_NOEXCEPT : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
 	Future<Void> getFuture() { return p.getFuture(); }
 
@@ -240,7 +253,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value());
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -277,7 +290,7 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect( to, std::move(p) );
 
-			Void _ = wait( onConnected );
+			wait( onConnected );
 			self->init();
 			return self;
 		} catch (Error&) {
@@ -403,8 +416,7 @@ private:
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
-		boost::asio::socket_base::non_blocking_io nbio(true);
-		socket.io_control(nbio);
+		socket.non_blocking(true);
 		socket.set_option(boost::asio::ip::tcp::no_delay(true));
 	}
 
@@ -412,15 +424,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
+			TraceEvent(SevWarn, "N2_CloseError", id).suppressFor(1.0).detail("Message", error.value());
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("Message", error.value());
 		closeSocket();
 	}
 };
@@ -453,8 +465,10 @@ private:
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
-			Void _ = wait( f );
-			conn->accept( NetworkAddress(peer_endpoint.address().to_v4().to_ulong(), peer_endpoint.port()) );
+			wait( f );
+			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
+			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
+			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
 
 			return conn;
 		} catch (...) {
@@ -467,7 +481,7 @@ private:
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
-	explicit PromiseTask( Promise<Void>&& promise ) noexcept(true) : promise(std::move(promise)) {}
+	explicit PromiseTask( Promise<Void>&& promise ) BOOST_NOEXCEPT : promise(std::move(promise)) {}
 
 	virtual void operator()() {
 		promise.send(Void());
@@ -475,11 +489,10 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
+Net2::Net2(bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
-	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -515,7 +528,7 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 		double processTime = timer_monotonic();
 		double systemTime = timer();
 		TraceEvent("ProcessTimeOffset").detailf("ProcessTime", "%lf", processTime).detailf("SystemTime", "%lf", systemTime).detailf("OffsetFromSystemTime", "%lf", processTime - systemTime);
-		Void _ = wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
+		wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
 	}
 }
 
@@ -550,7 +563,7 @@ void Net2::run() {
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "timeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError");
 #endif
 
 	timeOffsetLogger = logTimeOffset();
@@ -818,6 +831,7 @@ void Net2::onMainThread(Promise<Void>&& signal, int taskID) {
 
 	if ( thread_network == this )
 	{
+		processThreadReady();
 		this->ready.push( OrderedTask( priority-(++tasksIssued), taskID, p ) );
 	} else {
 		if (threadReady.push( OrderedTask( priority, taskID, p ) ))
@@ -835,11 +849,13 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	Promise<std::vector<NetworkAddress>> result;
+	state tcp::resolver tcpResolver(self->reactor.ios);
+	Promise<std::vector<NetworkAddress>> promise;
+	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+	tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {
-			result.sendError(lookup_failed());
+			promise.sendError(lookup_failed());
 			return;
 		}
 
@@ -847,18 +863,28 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 
 		tcp::resolver::iterator end;
 		while(iter != end) {
-			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
-			// endpoint::to_string doesn't exist but operator<< does.
-			std::stringstream s;
-			s << iter->endpoint();
-			addrs.push_back(NetworkAddress::parse(s.str()));
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.push_back(NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port()));
+			} else {
+				addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+			}
 			++iter;
 		}
-		result.send(addrs);
+
+		if(addrs.empty()) {
+			promise.sendError(lookup_failed());
+		}
+		else {
+			promise.send(addrs);
+		}
 	});
 
-	std::vector<NetworkAddress> addresses = wait(result.getFuture());
-	return addresses;
+	wait(ready(result));
+	tcpResolver.cancel();
+
+	return result.get();
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
@@ -875,9 +901,10 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 	try {
 		boost::asio::io_service ioService;
 		boost::asio::ip::udp::socket socket(ioService);
-		boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address_v4(addr.ip), 1);
+		boost::asio::ip::udp::endpoint endpoint(tcpAddress(addr.ip), 1);
 		socket.connect(endpoint);
-		bool local = socket.local_endpoint().address().to_v4().to_ulong() == addr.ip;
+		bool local = addr.ip.isV6() ? socket.local_endpoint().address().to_v6().to_bytes() == addr.ip.toV6()
+		                            : socket.local_endpoint().address().to_v4().to_ulong() == addr.ip.toV4();
 		socket.close();
 		if (local) TraceEvent(SevInfo, "AddressIsOnHost").detail("Address", addr);
 		return addressOnHostCache[ addr.ip ] = local;
@@ -900,11 +927,11 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 			x = invalid_local_address();
 		else
 			x = bind_failed();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (std::exception const& e) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (...) {
 		Error x = unknown_error();
@@ -982,9 +1009,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(localAddress, useThreadPool, useMetrics);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
@@ -1008,7 +1035,7 @@ struct TestGVR {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & version & debugID & reply;
+		serializer(ar, key, version, debugID, reply);
 	}
 };
 
@@ -1084,11 +1111,11 @@ void net2_test() {
 	finished2.block();
 
 
-	g_network = newNet2(NetworkAddress::parse("127.0.0.1:12345"));  // for promise serialization below
+	g_network = newNet2();  // for promise serialization below
 
 	Endpoint destination;
 
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 
 	char junk[100];
 
@@ -1138,6 +1165,6 @@ void net2_test() {
 
 	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
 	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getMemoryUsed());
+	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };

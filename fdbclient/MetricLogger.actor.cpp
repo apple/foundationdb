@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <cmath>
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include <cmath>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const &name = StringRef()) : enabled(enabled), minLevel(minLevel), namePattern(name) {}
@@ -158,12 +158,12 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig *config, TDMetri
 			config->rules = std::move(rules);
 
 			state Future<Void> rulesChanged = tr->watch(config->ruleChangeKey);
-			Void _ = wait(tr->commit());
-			Void _ = wait(rulesChanged || newMetric);
+			wait(tr->commit());
+			wait(rulesChanged || newMetric);
 			tr->reset();
 
 		} catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -235,7 +235,7 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig *config, TDMetricColle
 			state Error lastError;
 			while(cb != results.end()) {
 				try {
-					Void _ = wait(cb->second);
+					wait(cb->second);
 					cb = results.erase(cb);
 				} catch(Error &e) {
 					++cb;
@@ -248,7 +248,7 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig *config, TDMetricColle
 				break;
 
 			// Otherwise, wait to retry
-			Void _ = wait(cbtr.onError(lastError));
+			wait(cbtr.onError(lastError));
 			for(auto &cb : results)
 				cb.second = batch.callbacks[cb.first](&mdb, &batch);
 		}
@@ -283,13 +283,13 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig *config, TDMetricColle
 					tr.set(u.first, u.second);
 				}
 
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch( Error &e ) {
-				Void _ = wait(  tr.onError( e ) );
+				wait(  tr.onError( e ) );
 			}
 		}
-		Void _ = wait( nextDump );
+		wait( nextDump );
 	}
 }
 
@@ -347,15 +347,15 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig *config, 
 					tr.set(key, timestamp);
 				}
 
-				Void _ = wait(tr.commit());
+				wait(tr.commit());
 				break;
 			} catch(Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 
 		// Wait for a metric to require registration or a new metric to be added
-		Void _ = wait(registrationChange || newMetric);
+		wait(registrationChange || newMetric);
 	}
 }
 
@@ -373,7 +373,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 		if(metrics != nullptr)
 			if(metrics->init())
 				break;
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 
 	state MetricsConfig config(prefix);
@@ -384,7 +384,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 		Future<Void> dump = dumpMetrics(cx, &config, metrics);
 		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
 
-		Void _ = wait( conf || dump || reg);
+		wait( conf || dump || reg);
 	} catch( Error &e ) {
 		if( e.code() != error_code_actor_cancelled ) {
 			// Disable all metrics
@@ -398,7 +398,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 	return Void();
 }
 
-TEST_CASE("fdbserver/metrics/TraceEvents") {
+TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	auto getenv2 = [](const char *s) -> const char * {s = getenv(s); return s ? s : ""; };
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");
@@ -408,9 +408,9 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Reference<Cluster> metricsCluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
+	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
-	state Future<Void> metrics = runMetrics(metricsCluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;
@@ -437,58 +437,64 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 	state Arena arena;
 	
 	loop {
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = (x % 2) > 0;
-			const char *s = d[x % 3];
-			// s doesn't actually require an arena
-			stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = (x % 2) > 0;
+				const char *s = d[x % 3];
+				// s doesn't actually require an arena
+				stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
 
-			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("d", s)
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(10.0 * i / chunk));
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("D", s)
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
+			}
+			wait(delay(w));
 		}
-		Void _ = wait(delay(w));
 
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = x % 2 > 0;
-			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("b", x*2)
-				.detail("y", 3.0 * x)
-				.detail("d", d[x % 3])
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(40.0 * i / chunk));
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = x % 2 > 0;
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("B", x*2)
+					.detail("Y", 3.0 * x)
+					.detail("D", d[x % 3])
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
+			}
+			wait(delay(w));
 		}
-		Void _ = wait(delay(w));
 
-		double sstart = x;
-		for(int i = 0; i < chunk; ++i, ++x) {
-			intMetric = x;
-			boolMetric = x % 2 > 0;
-			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("c", x*3)
-				.detail("z", 4.5 * x)
-				.detail("d", d[x % 3])
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(160.0 * i / chunk));
+		{
+			double sstart = x;
+			for(int i = 0; i < chunk; ++i, ++x) {
+				intMetric = x;
+				boolMetric = x % 2 > 0;
+				TraceEvent("Dummy")
+					.detail("A", x)
+					.detail("X", 1.5 * x)
+					.detail("C", x*3)
+					.detail("Z", 4.5 * x)
+					.detail("D", d[x % 3])
+					.detail("J", sin(2.0 * x))
+					.detail("K", sin(3.0 * x))
+					.detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
+			}
+			wait(delay(w));
+
+			if(x >= total)
+				return Void();
 		}
-		Void _ = wait(delay(w));
-
-		if(x >= total)
-			return Void();
 	}
 }
 

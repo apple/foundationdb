@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Net2Packet.h"
+#include "flow/Net2Packet.h"
 
 void PacketWriter::init(PacketBuffer* buf, ReliablePacket* reliable) {
 	this->buffer = buf;

@@ -92,6 +92,7 @@ abstract class Context implements Runnable, AutoCloseable {
 
 	private static synchronized Transaction getTransaction(String trName) {
 		Transaction tr = transactionMap.get(trName);
+		assert tr != null : "Null transaction";
 		addTransactionReference(tr);
 		return tr;
 	}
@@ -117,7 +118,15 @@ abstract class Context implements Runnable, AutoCloseable {
 	}
 
 	private static synchronized boolean updateTransaction(String trName, Transaction oldTr, Transaction newTr) {
-		if(transactionMap.replace(trName, oldTr, newTr)) {
+		boolean added;
+		if(oldTr == null) {
+			added = (transactionMap.putIfAbsent(trName, newTr) == null);
+		}
+		else {
+			added = transactionMap.replace(trName, oldTr, newTr);
+		}
+
+		if(added) {
 			addTransactionReference(newTr);
 			releaseTransaction(oldTr);
 			return true;

@@ -23,12 +23,12 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "boost/range.hpp"
 #include "flow/IndexedSet.h"
-#include "SystemData.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/RangeMap.h"
-#include "Knobs.h"
+#include "fdbclient/Knobs.h"
 
 using boost::iterator_range;
 
@@ -36,7 +36,7 @@ template <class Val, class Metric=int, class MetricFunc = ConstantMetric<Metric>
 class KeyRangeMap : public RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>, NonCopyable, public ReferenceCounted<KeyRangeMap<Val>> {
 public:
 	explicit KeyRangeMap(Val v=Val(), Key endKey = allKeys.end) : RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>(endKey, v), mapEnd(endKey) {}
-	void operator=(KeyRangeMap&& r) noexcept(true) { mapEnd = std::move(r.mapEnd); RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
+	void operator=(KeyRangeMap&& r) BOOST_NOEXCEPT { mapEnd = std::move(r.mapEnd); RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
 	void insert( const KeyRangeRef& keys, const Val& value ) { RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::insert(keys, value); }
 	void insert( const KeyRef& key, const Val& value ) { RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::insert( singleKeyRange(key), value); }
 	std::vector<KeyRangeWith<Val>> getAffectedRangesAfterInsertion( const KeyRangeRef& keys, const Val &insertionValue = Val());
@@ -67,7 +67,7 @@ template <class Val, class Metric=int, class MetricFunc = ConstantMetric<Metric>
 class CoalescedKeyRefRangeMap : public RangeMap<KeyRef,Val,KeyRangeRef,Metric,MetricFunc>, NonCopyable {
 public:
 	explicit CoalescedKeyRefRangeMap(Val v=Val(), Key endKey = allKeys.end) : RangeMap<KeyRef,Val,KeyRangeRef,Metric,MetricFunc>(endKey, v), mapEnd(endKey) {}
-	void operator=(CoalescedKeyRefRangeMap&& r) noexcept(true) { mapEnd = std::move(r.mapEnd); RangeMap<KeyRef, Val, KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
+	void operator=(CoalescedKeyRefRangeMap&& r) BOOST_NOEXCEPT { mapEnd = std::move(r.mapEnd); RangeMap<KeyRef, Val, KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
 	void insert( const KeyRangeRef& keys, const Val& value );
 	void insert( const KeyRef& key, const Val& value, Arena& arena );
 	Key mapEnd;
@@ -77,7 +77,7 @@ template <class Val, class Metric=int, class MetricFunc = ConstantMetric<Metric>
 class CoalescedKeyRangeMap : public RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>, NonCopyable {
 public:
 	explicit CoalescedKeyRangeMap(Val v=Val(), Key endKey = allKeys.end) : RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>(endKey, v), mapEnd(endKey) {}
-	void operator=(CoalescedKeyRangeMap&& r) noexcept(true) { mapEnd = std::move(r.mapEnd); RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
+	void operator=(CoalescedKeyRangeMap&& r) BOOST_NOEXCEPT { mapEnd = std::move(r.mapEnd); RangeMap<Key,Val,KeyRangeRef,Metric,MetricFunc>::operator=(std::move(r)); }
 	void insert( const KeyRangeRef& keys, const Val& value );
 	void insert( const KeyRef& key, const Val& value );
 	Key mapEnd;

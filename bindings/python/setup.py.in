@@ -18,7 +18,7 @@ setup(name="foundationdb",
       classifiers=[
           'Development Status :: 5 - Production/Stable',
           'Intended Audience :: Developers',
-          'License :: OSI Approved :: Apache v2 License',
+          'License :: OSI Approved :: Apache Software License',
           'Operating System :: MacOS :: MacOS X',
           'Operating System :: Microsoft :: Windows',
           'Operating System :: POSIX :: Linux',

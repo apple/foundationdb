@@ -23,9 +23,10 @@
 #pragma once
 
 #include <stdint.h>
+#include <array>
 #include <set>
-#include "Error.h"
-#include "Arena.h"
+#include "flow/Error.h"
+#include "flow/Arena.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -39,6 +40,7 @@ struct is_binary_serializable { enum { value = 0 }; };
 
 #define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
 
+BINARY_SERIALIZABLE( int8_t );
 BINARY_SERIALIZABLE( uint8_t );
 BINARY_SERIALIZABLE( int16_t );
 BINARY_SERIALIZABLE( uint16_t );
@@ -61,15 +63,20 @@ inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::WRITER& operator & (Archive& ar, Item& item ) {
+template <class Archive>
+void serializer(Archive& ar) {}
+
+template <class Archive, class Item, class... Items>
+typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
 	save(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::READER& operator & (Archive& ar, Item& item ) {
+template <class Archive, class Item, class... Items>
+typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
 	load(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
@@ -120,7 +127,7 @@ template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
 	static void serialize( Archive& ar, std::pair<T1, T2>& p ) {
-		ar & p.first & p.second;
+		serializer(ar, p.first, p.second);
 	}
 };
 
@@ -140,6 +147,20 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 	for (int i = 0; i < s; i++) {
 		value.push_back(T());
 		ar >> value[i];
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
+template <class Archive, class T, size_t N>
+inline void save( Archive& ar, const std::array<T, N>& value ) {
+	for(int ii = 0; ii < N; ++ii)
+		ar << value[ii];
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class T, size_t N>
+inline void load( Archive& ar, std::array<T, N>& value ) {
+	for (int ii = 0; ii < N; ii++) {
+		ar >> value[ii];
 	}
 	ASSERT( ar.protocolVersion() != 0 );
 }
@@ -164,6 +185,27 @@ inline void load( Archive& ar, std::set<T>& value ) {
 	ASSERT( ar.protocolVersion() != 0 );
 }
 
+template <class Archive, class K, class V>
+inline void save( Archive& ar, const std::map<K, V>& value ) {
+	ar << (int)value.size();
+	for (const auto &it : value) {
+		ar << it.first << it.second;
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class K, class V>
+inline void load( Archive& ar, std::map<K, V>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	for (int i = 0; i < s; ++i) {
+		std::pair<K, V> p;
+		ar >> p.first >> p.second;
+		value.emplace(p);
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
 #pragma intrinsic (memcpy)
 
 #if VALGRIND
@@ -184,9 +226,9 @@ static bool valgrindCheck( const void* data, int bytes, const char* context ) {
 static inline bool valgrindCheck( const void* data, int bytes, const char* context ) { return true; }
 #endif
 
-extern uint64_t currentProtocolVersion;
-extern uint64_t minValidProtocolVersion;
-extern uint64_t compatibleProtocolVersionMask;
+extern const uint64_t currentProtocolVersion;
+extern const uint64_t minValidProtocolVersion;
+extern const uint64_t compatibleProtocolVersionMask;
 
 struct _IncludeVersion {
 	uint64_t v;
@@ -203,7 +245,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (v < minValidProtocolVersion) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
@@ -211,7 +253,7 @@ struct _IncludeVersion {
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		ar.setProtocolVersion(v);
@@ -463,7 +505,7 @@ public:
 	}
 
 	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena) {
+	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
 		begin = (const char*)input.begin();
 		end = begin + input.size();
 		vo.read(*this);
@@ -476,8 +518,18 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != NULL);
+		begin = check;
+		check = NULL;
+	}
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };
@@ -493,6 +545,11 @@ public:
 		ASSERT( e <= end );
 		begin = e;
 		return b;
+	}
+
+	const void* peekBytes( int bytes ) {
+		ASSERT( begin + bytes <= end );
+		return begin;
 	}
 
 	void serializeBytes(void* data, int bytes) {
@@ -518,6 +575,7 @@ public:
 	BinaryReader( const void* data, int length, VersionOptions vo ) {
 		begin = (const char*)data;
 		end = begin + length;
+		check = nullptr;
 		vo.read(*this);
 	}
 	template <class VersionOptions>
@@ -542,8 +600,19 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != nullptr);
+		begin = check;
+		check = nullptr;
+	}
+
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };
@@ -556,7 +625,7 @@ struct SendBuffer {
 
 struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 	int reference_count;
-	enum { DATA_SIZE = 4096 - 28 };
+	enum { DATA_SIZE = 4096 - 28 }; //28 is the size of the PacketBuffer fields
 	uint8_t data[ DATA_SIZE ];
 
 	PacketBuffer() : reference_count(1) {

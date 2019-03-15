@@ -102,71 +102,71 @@ class DirectoryExtension():
                     new_dir = self.dir_list[self.dir_index]
                     clazz = new_dir.__class__.__name__
                     new_path = repr(new_dir._path) if hasattr(new_dir, '_path') else "<na>"
-                    print('changed directory to %d (%s @%s)' % (self.dir_index, clazz, new_path))
+                    print('changed directory to %d (%s @%r)' % (self.dir_index, clazz, new_path))
             elif inst.op == six.u('DIRECTORY_SET_ERROR_INDEX'):
                 self.error_index = inst.pop()
             elif inst.op == six.u('DIRECTORY_CREATE_OR_OPEN'):
                 path = self.pop_tuples(inst.stack)
                 layer = inst.pop()
-                log_op('create_or_open %s: layer=%s' % (repr(directory.get_path() + path), repr(layer)))
+                log_op('create_or_open %r: layer=%r' % (directory.get_path() + path, layer))
                 d = directory.create_or_open(inst.tr, path, layer or b'')
                 self.append_dir(inst, d)
             elif inst.op == six.u('DIRECTORY_CREATE'):
                 path = self.pop_tuples(inst.stack)
                 layer, prefix = inst.pop(2)
-                log_op('create %s: layer=%s, prefix=%s' % (repr(directory.get_path() + path), repr(layer), repr(prefix)))
+                log_op('create %r: layer=%r, prefix=%r' % (directory.get_path() + path, layer, prefix))
                 self.append_dir(inst, directory.create(inst.tr, path, layer or b'', prefix))
             elif inst.op == six.u('DIRECTORY_OPEN'):
                 path = self.pop_tuples(inst.stack)
                 layer = inst.pop()
-                log_op('open %s: layer=%s' % (repr(directory.get_path() + path), repr(layer)))
+                log_op('open %r: layer=%r' % (directory.get_path() + path, layer))
                 self.append_dir(inst, directory.open(inst.tr, path, layer or b''))
             elif inst.op == six.u('DIRECTORY_MOVE'):
                 old_path, new_path = self.pop_tuples(inst.stack, 2)
-                log_op('move %s to %s' % (repr(directory.get_path() + old_path), repr(directory.get_path() + new_path)))
+                log_op('move %r to %r' % (directory.get_path() + old_path, directory.get_path() + new_path))
                 self.append_dir(inst, directory.move(inst.tr, old_path, new_path))
             elif inst.op == six.u('DIRECTORY_MOVE_TO'):
                 new_absolute_path = self.pop_tuples(inst.stack)
-                log_op('move %s to %s' % (repr(directory.get_path()), repr(new_absolute_path)))
+                log_op('move %r to %r' % (directory.get_path(), new_absolute_path))
                 self.append_dir(inst, directory.move_to(inst.tr, new_absolute_path))
             elif inst.op == six.u('DIRECTORY_REMOVE'):
                 count = inst.pop()
                 if count == 0:
-                    log_op('remove %s' % repr(directory.get_path()))
+                    log_op('remove %r' % (directory.get_path(),))
                     directory.remove(inst.tr)
                 else:
                     path = self.pop_tuples(inst.stack)
-                    log_op('remove %s' % repr(directory.get_path() + path))
+                    log_op('remove %r' % (directory.get_path() + path,))
                     directory.remove(inst.tr, path)
             elif inst.op == six.u('DIRECTORY_REMOVE_IF_EXISTS'):
                 count = inst.pop()
                 if count == 0:
-                    log_op('remove_if_exists %s' % repr(directory.get_path()))
+                    log_op('remove_if_exists %r' % (directory.get_path(),))
                     directory.remove_if_exists(inst.tr)
                 else:
                     path = self.pop_tuples(inst.stack)
-                    log_op('remove_if_exists %s' % repr(directory.get_path() + path))
+                    log_op('remove_if_exists %r' % (directory.get_path() + path,))
                     directory.remove_if_exists(inst.tr, path)
             elif inst.op == six.u('DIRECTORY_LIST'):
                 count = inst.pop()
                 if count == 0:
                     result = directory.list(inst.tr)
-                    log_op('list %s' % (repr(directory.get_path())))
+                    log_op('list %r' % (directory.get_path(),))
                 else:
                     path = self.pop_tuples(inst.stack)
                     result = directory.list(inst.tr, path)
-                    log_op('list %s' % (repr(directory.get_path() + path)))
+                    log_op('list %r' % (directory.get_path() + path,))
 
                 inst.push(fdb.tuple.pack(tuple(result)))
             elif inst.op == six.u('DIRECTORY_EXISTS'):
                 count = inst.pop()
                 if count == 0:
                     result = directory.exists(inst.tr)
-                    log_op('exists %s: %d' % (repr(directory.get_path()), result))
+                    log_op('exists %r: %d' % (directory.get_path(), result))
                 else:
                     path = self.pop_tuples(inst.stack)
                     result = directory.exists(inst.tr, path)
-                    log_op('exists %s: %d' % (repr(directory.get_path() + path), result))
+                    log_op('exists %r: %d' % (directory.get_path() + path, result))
 
                 if result:
                     inst.push(1)
@@ -177,7 +177,7 @@ class DirectoryExtension():
                 inst.push(directory.pack(key_tuple))
             elif inst.op == six.u('DIRECTORY_UNPACK_KEY'):
                 key = inst.pop()
-                log_op('unpack %s in subspace with prefix %s' % (repr(key), repr(directory.rawPrefix)))
+                log_op('unpack %r in subspace with prefix %r' % (key, directory.rawPrefix))
                 tup = directory.unpack(key)
                 for t in tup:
                     inst.push(t)
@@ -215,7 +215,7 @@ class DirectoryExtension():
             elif inst.op == six.u('DIRECTORY_STRIP_PREFIX'):
                 s = inst.pop()
                 if not s.startswith(directory.key()):
-                    raise Exception('String %s does not start with raw prefix %s' % (s, directory.key()))
+                    raise Exception('String %r does not start with raw prefix %r' % (s, directory.key()))
 
                 inst.push(s[len(directory.key()):])
             else:

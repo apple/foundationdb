@@ -24,14 +24,14 @@ package main
 
 import (
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"go/doc"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 type Option struct {
@@ -50,22 +50,22 @@ type Options struct {
 	Scope []Scope
 }
 
-func writeOptString(receiver string, function string, opt Option) {
-	fmt.Printf(`func (o %s) %s(param string) error {
+func writeOptString(w io.Writer, receiver string, function string, opt Option) {
+	fmt.Fprintf(w, `func (o %s) %s(param string) error {
 	return o.setOpt(%d, []byte(param))
 }
 `, receiver, function, opt.Code)
 }
 
-func writeOptBytes(receiver string, function string, opt Option) {
-	fmt.Printf(`func (o %s) %s(param []byte) error {
+func writeOptBytes(w io.Writer, receiver string, function string, opt Option) {
+	fmt.Fprintf(w, `func (o %s) %s(param []byte) error {
 	return o.setOpt(%d, param)
 }
 `, receiver, function, opt.Code)
 }
 
-func writeOptInt(receiver string, function string, opt Option) {
-	fmt.Printf(`func (o %s) %s(param int64) error {
+func writeOptInt(w io.Writer, receiver string, function string, opt Option) {
+	fmt.Fprintf(w, `func (o %s) %s(param int64) error {
 	b, e := int64ToBytes(param)
 	if e != nil {
 		return e
@@ -75,36 +75,36 @@ func writeOptInt(receiver string, function string, opt Option) {
 `, receiver, function, opt.Code)
 }
 
-func writeOptNone(receiver string, function string, opt Option) {
-	fmt.Printf(`func (o %s) %s() error {
+func writeOptNone(w io.Writer, receiver string, function string, opt Option) {
+	fmt.Fprintf(w, `func (o %s) %s() error {
 	return o.setOpt(%d, nil)
 }
 `, receiver, function, opt.Code)
 }
 
-func writeOpt(receiver string, opt Option) {
+func writeOpt(w io.Writer, receiver string, opt Option) {
 	function := "Set" + translateName(opt.Name)
 
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	if opt.Description != "" {
-		fmt.Printf("// %s\n", opt.Description)
+		fmt.Fprintf(w, "// %s\n", opt.Description)
 		if opt.ParamDesc != "" {
-			fmt.Printf("//\n// Parameter: %s\n", opt.ParamDesc)
+			fmt.Fprintf(w, "//\n// Parameter: %s\n", opt.ParamDesc)
 		}
 	} else {
-		fmt.Printf("// Not yet implemented.\n")
+		fmt.Fprintf(w, "// Not yet implemented.\n")
 	}
 
 	switch opt.ParamType {
 	case "String":
-		writeOptString(receiver, function, opt)
+		writeOptString(w, receiver, function, opt)
 	case "Bytes":
-		writeOptBytes(receiver, function, opt)
+		writeOptBytes(w, receiver, function, opt)
 	case "Int":
-		writeOptInt(receiver, function, opt)
+		writeOptInt(w, receiver, function, opt)
 	case "":
-		writeOptNone(receiver, function, opt)
+		writeOptNone(w, receiver, function, opt)
 	default:
 		log.Fatalf("Totally unexpected ParamType %s", opt.ParamType)
 	}
@@ -114,42 +114,48 @@ func translateName(old string) string {
 	return strings.Replace(strings.Title(strings.Replace(old, "_", " ", -1)), " ", "", -1)
 }
 
-func lowerFirst(s string) string {
-	if s == "" {
-		return ""
-	}
-	r, n := utf8.DecodeRuneInString(s)
-	return string(unicode.ToLower(r)) + s[n:]
-}
-
-func writeMutation(opt Option) {
-	desc := lowerFirst(opt.Description)
+func writeMutation(w io.Writer, opt Option) {
 	tname := translateName(opt.Name)
-	fmt.Printf(`
-// %s %s
+	fmt.Fprintf(w, `
+// %s
 func (t Transaction) %s(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, %d)
 }
-`, tname, desc, tname, opt.Code)
+`, opt.Description, tname, opt.Code)
 }
 
-func writeEnum(scope Scope, opt Option, delta int) {
-	fmt.Println()
+func writeEnum(w io.Writer, scope Scope, opt Option, delta int) {
+	fmt.Fprintln(w)
 	if opt.Description != "" {
-		doc.ToText(os.Stdout, opt.Description, "\t// ", "", 73)
+		doc.ToText(w, opt.Description, "\t// ", "", 73)
 		// fmt.Printf("	// %s\n", opt.Description)
 	}
-	fmt.Printf("	%s %s = %d\n", scope.Name+translateName(opt.Name), scope.Name, opt.Code+delta)
+	fmt.Fprintf(w, "	%s %s = %d\n", scope.Name+translateName(opt.Name), scope.Name, opt.Code+delta)
 }
 
 func main() {
+	var inFile string
+	var outFile string
+	flag.StringVar(&inFile, "in", "stdin", "Input file")
+	flag.StringVar(&outFile, "out", "stdout", "Output file")
+	flag.Parse()
+
 	var err error
 
 	v := Options{}
 
-	data, err := ioutil.ReadAll(os.Stdin)
-	if err != nil {
-		log.Fatal(err)
+	var data []byte
+
+	if inFile == "stdin" {
+		data, err = ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		data, err = ioutil.ReadFile(inFile)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	err = xml.Unmarshal(data, &v)
@@ -157,7 +163,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Print(`/*
+	var out *os.File
+	if outFile == "stdout" {
+		out = os.Stdout
+	} else {
+		out, err = os.Create(outFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	fmt.Fprint(out, `/*
  * generated.go
  *
  * This source file is part of the FoundationDB open source project
@@ -207,8 +223,8 @@ func int64ToBytes(i int64) ([]byte, error) {
 			receiver := scope.Name + "s"
 
 			for _, opt := range scope.Option {
-				if opt.Description != "Deprecated" && !opt.Hidden { // Eww
-					writeOpt(receiver, opt)
+				if !opt.Hidden {
+					writeOpt(out, receiver, opt)
 				}
 			}
 			continue
@@ -216,8 +232,8 @@ func int64ToBytes(i int64) ([]byte, error) {
 
 		if scope.Name == "MutationType" {
 			for _, opt := range scope.Option {
-				if opt.Description != "Deprecated" && !opt.Hidden { // Eww
-					writeMutation(opt)
+				if !opt.Hidden {
+					writeMutation(out, opt)
 				}
 			}
 			continue
@@ -234,16 +250,17 @@ func int64ToBytes(i int64) ([]byte, error) {
 			scope.Name = "conflictRangeType"
 		}
 
-		fmt.Printf(`
+		fmt.Fprintf(out, `
 type %s int
 
 const (
 `, scope.Name)
 		for _, opt := range scope.Option {
 			if !opt.Hidden {
-				writeEnum(scope, opt, d)
+				writeEnum(out, scope, opt, d)
 			}
 		}
-		fmt.Println(")")
+		fmt.Fprintln(out, ")")
 	}
+	out.Close()
 }

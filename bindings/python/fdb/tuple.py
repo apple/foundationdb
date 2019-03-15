@@ -24,6 +24,7 @@ import ctypes
 import uuid
 import struct
 import math
+import sys
 from bisect import bisect_left
 
 from fdb import six
@@ -78,7 +79,7 @@ class SingleFloat(object):
             self.value = ctypes.c_float(value).value
         elif isinstance(value, ctypes.c_float):
             self.value = value.value
-        elif isinstance(value, six.integertypes):
+        elif isinstance(value, six.integer_types):
             self.value = ctypes.c_float(value).value
         else:
             raise ValueError("Incompatible type for single-precision float: " + repr(value))
@@ -306,6 +307,16 @@ def _reduce_children(child_values):
     return bytes_list, version_pos
 
 
+if sys.version_info < (2, 7):
+    def _bit_length(x):
+        s = bin(x)       # binary representation:  bin(-37) --> '-0b100101'
+        s = s.lstrip('-0b') # remove leading zeros and minus sign
+        return len(s)
+else:
+    def _bit_length(x):
+        return x.bit_length()
+
+
 def _encode(value, nested=False):
     # returns [code][data] (code != 0xFF)
     # encoded values are self-terminating
@@ -324,7 +335,7 @@ def _encode(value, nested=False):
             return b''.join([six.int2byte(INT_ZERO_CODE)]), -1
         elif value > 0:
             if value >= _size_limits[-1]:
-                length = (value.bit_length() + 7) // 8
+                length = (_bit_length(value) + 7) // 8
                 data = [six.int2byte(POS_INT_END), six.int2byte(length)]
                 for i in _range(length - 1, -1, -1):
                     data.append(six.int2byte((value >> (8 * i)) & 0xff))
@@ -334,7 +345,7 @@ def _encode(value, nested=False):
             return six.int2byte(INT_ZERO_CODE + n) + struct.pack(">Q", value)[-n:], -1
         else:
             if -value >= _size_limits[-1]:
-                length = (value.bit_length() + 7) // 8
+                length = (_bit_length(value) + 7) // 8
                 value += (1 << (length * 8)) - 1
                 data = [six.int2byte(NEG_INT_START), six.int2byte(length ^ 0xff)]
                 for i in _range(length - 1, -1, -1):

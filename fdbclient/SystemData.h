@@ -24,8 +24,8 @@
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
-#include "FDBTypes.h"
-#include "StorageServerInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -54,17 +54,45 @@ bool serverHasKey( ValueRef storedValue );
 
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
-extern const KeyRef serverTagMaxKey;
+extern const KeyRangeRef serverTagMaxKeys;
 extern const KeyRangeRef serverTagConflictKeys;
 extern const KeyRef serverTagConflictPrefix;
+extern const KeyRangeRef serverTagHistoryKeys;
+extern const KeyRef serverTagHistoryPrefix;
 
 const Key serverTagKeyFor( UID serverID );
+const Key serverTagHistoryKeyFor( UID serverID );
+const KeyRange serverTagHistoryRangeFor( UID serverID );
+const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version );
 const Value serverTagValue( Tag );
 UID decodeServerTagKey( KeyRef const& );
+Version decodeServerTagHistoryKey( KeyRef const& );
 Tag decodeServerTagValue( ValueRef const& );
 const Key serverTagConflictKeyFor( Tag );
-const Value serverTagMaxValue( Tag );
-Tag decodeServerTagMaxValue( ValueRef const& );
+
+//    "\xff/tagLocalityList/[[datacenterID]]" := "[[tagLocality]]"
+extern const KeyRangeRef tagLocalityListKeys;
+extern const KeyRef tagLocalityListPrefix;
+const Key tagLocalityListKeyFor( Optional<Value> dcID );
+const Value tagLocalityListValue( int8_t const& );
+Optional<Value> decodeTagLocalityListKey( KeyRef const& );
+int8_t decodeTagLocalityListValue( ValueRef const& );
+
+//    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
+extern const KeyRangeRef datacenterReplicasKeys;
+extern const KeyRef datacenterReplicasPrefix;
+const Key datacenterReplicasKeyFor( Optional<Value> dcID );
+const Value datacenterReplicasValue( int const& );
+Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
+int decodeDatacenterReplicasValue( ValueRef const& );
+
+//    "\xff\x02/tLogDatacenters/[[datacenterID]]"
+extern const KeyRangeRef tLogDatacentersKeys;
+extern const KeyRef tLogDatacentersPrefix;
+const Key tLogDatacentersKeyFor( Optional<Value> dcID );
+Optional<Value> decodeTLogDatacentersKey( KeyRef const& );
+
+extern const KeyRef primaryDatacenterKey;
 
 //    "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 // Storage servers are listed here when they are recruited - always before assigning them keys
@@ -126,6 +154,12 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
+extern const KeyRef killStorageKey;
+extern const KeyRef killStoragePrivateKey;
+extern const KeyRef rebootWhenDurableKey;
+extern const KeyRef rebootWhenDurablePrivateKey;
+extern const KeyRef primaryLocalityKey;
+extern const KeyRef primaryLocalityPrivateKey;
 extern const KeyRef fastLoggingEnabled;
 extern const KeyRef fastLoggingEnabledPrivateKey;
 
@@ -182,6 +216,9 @@ extern const KeyRangeRef fdbClientInfoPrefixRange;
 extern const KeyRef fdbClientInfoTxnSampleRate;
 extern const KeyRef fdbClientInfoTxnSizeLimit;
 
+// Request latency measurement key
+extern const KeyRef latencyBandConfigKey;
+
 // Keyspace to maintain wall clock to version map
 extern const KeyRangeRef timeKeeperPrefixRange;
 extern const KeyRef timeKeeperVersionKey;
@@ -228,5 +265,16 @@ extern const KeyRef metricConfPrefix;
 extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
+extern const KeyRef metadataVersionKey;
+extern const KeyRef metadataVersionRequiredValue;
+extern const KeyRef mustContainSystemMutationsKey;
+
+// Key range reserved for storing changes to monitor conf files
+extern const KeyRangeRef monitorConfKeys;
+
+extern const KeyRef restoreLeaderKey;
+extern const KeyRangeRef restoreWorkersKeys;
+
+const Key restoreWorkerKeyFor( UID const& agentID );
 
 #endif

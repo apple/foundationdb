@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow.h"
-#include "Platform.h"
-#include "TDMetric.actor.h"
-#include "SystemMonitor.h"
+#include "flow/flow.h"
+#include "flow/Platform.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/SystemMonitor.h"
 
 #if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
 #include <cxxabi.h>
@@ -41,13 +41,20 @@ void systemMonitor() {
 	customSystemMonitor("ProcessMetrics", &statState, true );
 }
 
-#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
-#define DETAILALLOCATORMEMUSAGE( size ) detail("AllocatedMemory"#size, FastAllocator<size>::getMemoryUsed()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getMemoryUnused())
+SystemStatistics getSystemStatistics() {
+	static StatisticsState statState = StatisticsState();
+	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
+	return getSystemStatistics(
+		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState);
+}
+
+#define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
+#define DETAILALLOCATORMEMUSAGE( size ) detail("TotalMemory"#size, FastAllocator<size>::getTotalMemory()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getApproximateMemoryUnused()).detail("ActiveThreads"#size, FastAllocator<size>::getActiveThreads())
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
-	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "", 
-														machineState.ip.present() ? machineState.ip.get() : 0, 
-														&statState->systemState);
+	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
+	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
+	                                                    &ipAddr, &statState->systemState);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
@@ -60,6 +67,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("UptimeSeconds", now() - machineState.monitorStartTime)
 				.detail("Memory", currentStats.processMemory)
 				.detail("ResidentMemory", currentStats.processResidentMemory)
+				.detail("UnusedAllocatedMemory", getTotalUnusedAllocatedMemory())
 				.detail("MbpsSent", ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 				.detail("MbpsReceived", ((netData.bytesReceived - statState->networkState.bytesReceived) * 8e-6) / currentStats.elapsed)
 				.detail("DiskTotalBytes", currentStats.processDiskTotalBytes)
@@ -83,10 +91,10 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("CacheReads", netData.countFileCacheReads - statState->networkState.countFileCacheReads)
 				.detailext("ZoneID", machineState.zoneId)
 				.detailext("MachineID", machineState.machineId)
-				.detail("AIO_SubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
-				.detail("AIO_CollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
-				.detail("AIO_SubmitLagMS", 1e3 * (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
-				.detail("AIO_DiskStallMS", 1e3 * (g_network->networkMetrics.secSquaredDiskStall - statState->networkMetricsState.secSquaredDiskStall) / currentStats.elapsed)
+				.detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
+				.detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
+				.detail("AIOSubmitLag", (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
+				.detail("AIODiskStall", (g_network->networkMetrics.secSquaredDiskStall - statState->networkMetricsState.secSquaredDiskStall) / currentStats.elapsed)
 				.detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError - netData.countConnClosedWithoutError)
 				.detail("ConnectionsEstablished", (double) (netData.countConnEstablished - statState->networkState.countConnEstablished) / currentStats.elapsed)
 				.detail("ConnectionsClosed", ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) + (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) / currentStats.elapsed)
@@ -106,31 +114,31 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 			TraceEvent n("NetworkMetrics");
 			n
-				.detail("N2_CantSleep", netData.countCantSleep - statState->networkState.countCantSleep)
-				.detail("N2_WontSleep", netData.countWontSleep - statState->networkState.countWontSleep)
-				.detail("N2_Yields", netData.countYields - statState->networkState.countYields)
-				.detail("N2_YieldCalls", netData.countYieldCalls - statState->networkState.countYieldCalls)
-				.detail("N2_YieldCallsTrue", netData.countYieldCallsTrue - statState->networkState.countYieldCallsTrue)
-				.detail("N2_SlowTaskSignals", netData.countSlowTaskSignals - statState->networkState.countSlowTaskSignals)
-				.detail("N2_YieldBigStack", netData.countYieldBigStack - statState->networkState.countYieldBigStack)
-				.detail("N2_RunLoopIterations", netData.countRunLoop - statState->networkState.countRunLoop)
-				.detail("N2_TimersExecuted", netData.countTimers - statState->networkState.countTimers)
-				.detail("N2_TasksExecuted", netData.countTasks - statState->networkState.countTasks)
-				.detail("N2_ASIOEventsProcessed", netData.countASIOEvents - statState->networkState.countASIOEvents)
-				.detail("N2_ReadCalls", netData.countReads - statState->networkState.countReads)
-				.detail("N2_WriteCalls", netData.countWrites - statState->networkState.countWrites)
-				.detail("N2_ReadProbes", netData.countReadProbes - statState->networkState.countReadProbes)
-				.detail("N2_WriteProbes", netData.countWriteProbes - statState->networkState.countWriteProbes)
-				.detail("N2_PacketsRead", netData.countPacketsReceived - statState->networkState.countPacketsReceived)
-				.detail("N2_PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
-				.detail("N2_WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
+				.detail("CantSleep", netData.countCantSleep - statState->networkState.countCantSleep)
+				.detail("WontSleep", netData.countWontSleep - statState->networkState.countWontSleep)
+				.detail("Yields", netData.countYields - statState->networkState.countYields)
+				.detail("YieldCalls", netData.countYieldCalls - statState->networkState.countYieldCalls)
+				.detail("YieldCallsTrue", netData.countYieldCallsTrue - statState->networkState.countYieldCallsTrue)
+				.detail("SlowTaskSignals", netData.countSlowTaskSignals - statState->networkState.countSlowTaskSignals)
+				.detail("YieldBigStack", netData.countYieldBigStack - statState->networkState.countYieldBigStack)
+				.detail("RunLoopIterations", netData.countRunLoop - statState->networkState.countRunLoop)
+				.detail("TimersExecuted", netData.countTimers - statState->networkState.countTimers)
+				.detail("TasksExecuted", netData.countTasks - statState->networkState.countTasks)
+				.detail("ASIOEventsProcessed", netData.countASIOEvents - statState->networkState.countASIOEvents)
+				.detail("ReadCalls", netData.countReads - statState->networkState.countReads)
+				.detail("WriteCalls", netData.countWrites - statState->networkState.countWrites)
+				.detail("ReadProbes", netData.countReadProbes - statState->networkState.countReadProbes)
+				.detail("WriteProbes", netData.countWriteProbes - statState->networkState.countWriteProbes)
+				.detail("PacketsRead", netData.countPacketsReceived - statState->networkState.countPacketsReceived)
+				.detail("PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
+				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
 
 			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
 				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i])
-					n.detail(format("N2_SlowTask%dM", 1 << i).c_str(), c);
+					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
 			for (int i = 0; i<NetworkMetrics::PRIORITY_BINS; i++)
 				if (double x = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i])
-					n.detail(format("N2_S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
+					n.detail(format("S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
 		}
 
 		if(machineMetrics) {

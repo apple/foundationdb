@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/Atomic.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
 	double testDuration, slowModeStart;
@@ -77,8 +77,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		useExtraDB = g_simulator.extraDB != NULL;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}
 
@@ -91,7 +90,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		maxClearSize = 1<<g_random->randomInt(0, 20);
 		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
 		if( clientId == 0 )
-			TraceEvent("RYWConfiguration").detail("nodes", nodes).detail("initialKeyDensity", initialKeyDensity).detail("adjacentKeys", adjacentKeys).detail("valueSizeMin", valueSizeRange.first).detail("valueSizeMax", valueSizeRange.second).detail("maxClearSize", maxClearSize);
+			TraceEvent("RYWConfiguration").detail("Nodes", nodes).detail("InitialKeyDensity", initialKeyDensity).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
 	}
 
 	virtual std::string description() { return "WriteDuringRead"; }
@@ -149,7 +148,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if( self->useSystemKeys && res > self->getKeyForIndex(self->nodes) )
 				res = allKeys.end;
 			if( res != memRes ) {
-				TraceEvent(SevError, "WDRGetKeyWrongResult", randomID).detail("Key", printable(key.getKey())).detail("Offset", key.offset).detail("orEqual", key.orEqual)
+				TraceEvent(SevError, "WDRGetKeyWrongResult", randomID).detail("Key", printable(key.getKey())).detail("Offset", key.offset).detail("OrEqual", key.orEqual)
 					.detail("Snapshot", snapshot).detail("MemoryResult", printable(memRes)).detail("DbResult", printable(res));
 				self->success = false;
 			}
@@ -168,7 +167,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	Standalone<VectorRef<KeyValueRef>> memoryGetRange( std::map<Key, Value> *db, KeySelector begin, KeySelector end, GetRangeLimits limit, bool reverse ) {
 		Key beginKey = memoryGetKey( db, begin );
 		Key endKey = memoryGetKey( db, end );
-		//TraceEvent("WDRGetRange").detail("begin", printable(beginKey)).detail("end", printable(endKey));
+		//TraceEvent("WDRGetRange").detail("Begin", printable(beginKey)).detail("End", printable(endKey));
 		if( beginKey >= endKey )
 			return Standalone<VectorRef<KeyValueRef>>();
 
@@ -255,7 +254,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						.detail("BeginKey", printable(begin.getKey())).detail("BeginOffset", begin.offset).detail("BeginOrEqual", begin.orEqual)
 						.detail("EndKey", printable(end.getKey())).detail("EndOffset", end.offset).detail("EndOrEqual", end.orEqual)
 						.detail("LimitRows", limit.rows).detail("LimitBytes", limit.bytes).detail("Snapshot", snapshot).detail("Reverse", reverse).detail("MemorySize", memRes.size()).detail("DbSize", res.size())
-						.detail("ReadYourWritesDisabled", readYourWritesDisabled).detail("more", res.more).detail("systemKeyCount", systemKeyCount);
+						.detail("ReadYourWritesDisabled", readYourWritesDisabled).detail("More", res.more).detail("SystemKeyCount", systemKeyCount);
 
 					self->success = false;
 					return Void();
@@ -269,7 +268,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 							.detail("LimitRows", limit.rows).detail("LimitBytes", limit.bytes).detail("Snapshot", snapshot).detail("Reverse", reverse).detail("Size", memRes.size()).detail("WrongLocation", i)
 							.detail("MemoryResultKey", printable(memRes[i].key)).detail("DbResultKey", printable(res[i].key))
 							.detail("MemoryResultValueSize", memRes[i].value.size() ).detail("DbResultValueSize", res[i].value.size())
-							.detail("ReadYourWritesDisabled", readYourWritesDisabled).detail("more", res.more);
+							.detail("ReadYourWritesDisabled", readYourWritesDisabled).detail("More", res.more);
 						self->success = false;
 						return Void();
 					}
@@ -304,7 +303,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			Optional<Value> res = wait( tr->get( key, snapshot ) );
 			*memLimit += memRes.expectedSize();
 			if( res != memRes ) {
-				TraceEvent(SevError, "WDRGetWrongResult", randomID).detail("Key", printable(key)).detail("Snapshot", snapshot).detail("MemoryResult", memRes.present() ? memRes.get().size() : -1 ).detail("DbResult",  res.present() ? res.get().size() : -1 ).detail("rywDisable", readYourWritesDisabled);
+				TraceEvent(SevError, "WDRGetWrongResult", randomID).detail("Key", printable(key)).detail("Snapshot", snapshot).detail("MemoryResult", memRes.present() ? memRes.get().size() : -1 ).detail("DbResult",  res.present() ? res.get().size() : -1 ).detail("RywDisable", readYourWritesDisabled);
 				self->success = false;
 			}
 			return Void();
@@ -331,12 +330,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 			state Optional<Value> memRes = self->memoryGet( &self->memoryDatabase, key );
 			*memLimit -= memRes.expectedSize();
 			choose {
-				when( Void _ = wait( tr->watch( key ) ) ) {
+				when( wait( tr->watch( key ) ) ) {
 					if( changeNum == self->changeCount[key] ) {
-						TraceEvent(SevError, "WDRWatchWrongResult", randomID).detail("Reason", "Triggered without changing").detail("Key", printable(key)).detail("Value", changeNum).detail("duringCommit", *doingCommit);
+						TraceEvent(SevError, "WDRWatchWrongResult", randomID).detail("Reason", "Triggered without changing").detail("Key", printable(key)).detail("Value", changeNum).detail("DuringCommit", *doingCommit);
 					}
 				}
-				when( Void _ = wait( self->finished.onTrigger() ) ) {
+				when( wait( self->finished.onTrigger() ) ) {
 					Optional<Value> memRes2 = self->memoryGet( &self->memoryDatabase, key );
 					if( memRes != memRes2 ) {
 						TraceEvent(SevError, "WDRWatchWrongResult", randomID).detail("Reason", "Changed without triggering").detail("Key", printable(key)).detail("Value1", printable(memRes)).detail("Value2", printable(memRes2));
@@ -358,7 +357,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool* doingCommit, double* startTime, Key timebombStr ) {
+	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool useBatchPriority, bool* doingCommit, double* startTime, Key timebombStr ) {
 		state UID randomID = g_nondeterministic_random->randomUniqueID();
 		//TraceEvent("WDRCommit", randomID);
 		try {
@@ -374,7 +373,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				bool failed = false;
 				while( transactionIter != transactionRanges.end() && addedIter != addedRanges.end() ) {
 					if( transactionIter->begin() != addedIter->begin() || transactionIter->value() != addedIter->value() ) {
-						TraceEvent(SevError, "WriteConflictError").detail("transactionKey", printable(transactionIter->begin())).detail("addedKey", printable(addedIter->begin())).detail("transactionVal", transactionIter->value()).detail("addedVal", addedIter->value());
+						TraceEvent(SevError, "WriteConflictError").detail("TransactionKey", printable(transactionIter->begin())).detail("AddedKey", printable(addedIter->begin())).detail("TransactionVal", transactionIter->value()).detail("AddedVal", addedIter->value());
 						failed = true;
 					}
 					++transactionIter;
@@ -388,17 +387,17 @@ struct WriteDuringReadWorkload : TestWorkload {
 				if( failed ) {
 					TraceEvent(SevError, "WriteConflictRangeError");
 					for(transactionIter = transactionRanges.begin(); transactionIter != transactionRanges.end(); ++transactionIter ) {
-						TraceEvent("WCRTransaction").detail("range", printable(transactionIter.range())).detail("value", transactionIter.value());
+						TraceEvent("WCRTransaction").detail("Range", printable(transactionIter.range())).detail("Value", transactionIter.value());
 					}
 					for(addedIter = addedRanges.begin(); addedIter != addedRanges.end(); ++addedIter ) {
-						TraceEvent("WCRAdded").detail("range", printable(addedIter.range())).detail("value", addedIter.value());
+						TraceEvent("WCRAdded").detail("Range", printable(addedIter.range())).detail("Value", addedIter.value());
 					}
 				}
 			}
 
 			state std::map<Key, Value> committedDB = self->memoryDatabase;
 			*doingCommit = true;
-			Void _ = wait( tr->commit() );
+			wait( tr->commit() );
 			*doingCommit = false;
 			self->finished.trigger();
 
@@ -408,6 +407,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 			if(readAheadDisabled)
 				tr->setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
+			if(useBatchPriority)
+				tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
 			if(self->useSystemKeys)
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->addWriteConflictRange( self->conflictRange );
@@ -437,7 +438,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> loadAndRun( Database cx, WriteDuringReadWorkload* self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "WriteDuringRead");
 		state double startTime = now();
 		loop {
 			state int i = 0;
@@ -472,11 +472,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 								}
 							}
 						}
-						Void _ = wait( tr.commit() );
-						//TraceEvent("WDRInitBatch").detail("i", i).detail("CommittedVersion", tr.getCommittedVersion());
+						wait( tr.commit() );
+						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError( e ) );
+						wait( tr.onError( e ) );
 					}
 				}
 			}
@@ -485,9 +485,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 			//TraceEvent("WDRInit");
 
 			loop {
-				Void _ = wait(delay( now() - startTime > self->slowModeStart || (g_network->isSimulated() && g_simulator.speedUpSimulation) ? 1.0 : 0.1 ));
+				wait(delay( now() - startTime > self->slowModeStart || (g_network->isSimulated() && g_simulator.speedUpSimulation) ? 1.0 : 0.1 ));
 				try {
-					Void _ = wait( self->randomTransaction( ( self->useExtraDB && g_random->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
+					wait( self->randomTransaction( ( self->useExtraDB && g_random->random01() < 0.5 ) ? self->extraDB : cx, self, startTime ) );
 				} catch( Error &e ) {
 					if( e.code() != error_code_not_committed )
 						throw;
@@ -576,6 +576,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		state bool readYourWritesDisabled = g_random->random01() < 0.5;
 		state bool readAheadDisabled = g_random->random01() < 0.5;
 		state bool snapshotRYWDisabled = g_random->random01() < 0.5;
+		state bool useBatchPriority = g_random->random01() < 0.5;
 		state int64_t timebomb = g_random->random01() < 0.01 ? g_random->randomInt64(1, 6000) : 0;
 		state std::vector<Future<Void>> operations;
 		state ActorCollection commits(false);
@@ -616,6 +617,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 				tr.setOption( FDBTransactionOptions::SNAPSHOT_RYW_DISABLE );
 			if( readAheadDisabled )
 				tr.setOption( FDBTransactionOptions::READ_AHEAD_DISABLE );
+			if( useBatchPriority )
+				tr.setOption( FDBTransactionOptions::PRIORITY_BATCH );
 			if( self->useSystemKeys )
 				tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::TIMEOUT, timebombStr );
@@ -625,7 +628,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				state int numWaits = g_random->randomInt( 1, 5 );
 				state int i = 0;
 				for(; i < numWaits && memLimit > 0; i++ ) {
-					//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("readYourWritesDisabled",readYourWritesDisabled);
+					//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("ReadYourWritesDisabled",readYourWritesDisabled);
 					state int numOps = g_random->randomInt( 1, self->numOps );
 					state int j = 0;
 					for(; j < numOps && memLimit > 0; j++ ) {
@@ -649,7 +652,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									g_random->random01() > 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 3 && !disableCommit ) {
 								if( !self->rarelyCommit || g_random->random01() < 1.0 / self->numOps ) {
-									Future<Void> commit = self->commitAndUpdateMemory( &tr, self, &cancelled, readYourWritesDisabled, snapshotRYWDisabled, readAheadDisabled, &doingCommit, &startTime, timebombStr );
+									Future<Void> commit = self->commitAndUpdateMemory( &tr, self, &cancelled, readYourWritesDisabled, snapshotRYWDisabled, readAheadDisabled, useBatchPriority, &doingCommit, &startTime, timebombStr );
 									operations.push_back( commit );
 									commits.add( commit );
 								}
@@ -657,7 +660,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								KeyRange range = self->getRandomRange( self->maxClearSize );
 								self->changeCount.insert( range, changeNum++ );
 								bool noConflict = g_random->random01() < 0.5;
-								//TraceEvent("WDRClearRange").detail("Begin", printable(range)).detail("noConflict", noConflict);
+								//TraceEvent("WDRClearRange").detail("Begin", printable(range)).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.clear( range );
@@ -671,7 +674,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								Key key = self->getRandomKey();
 								self->changeCount.insert( key, changeNum++ );
 								bool noConflict = g_random->random01() < 0.5;
-								//TraceEvent("WDRClear").detail("Key", printable(key)).detail("noConflict", noConflict);
+								//TraceEvent("WDRClear").detail("Key", printable(key)).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.clear( key );
@@ -685,7 +688,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									readYourWritesDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 7 && !disableWriteConflictRange ) {
 								KeyRange range = self->getRandomRange( self->nodes );
-								//TraceEvent("WDRAddWriteConflict").detail("range", printable(range));
+								//TraceEvent("WDRAddWriteConflict").detail("Range", printable(range));
 								tr.addWriteConflictRange( range );
 								KeyRangeRef conflict( range.begin.substr(0, std::min<int>(range.begin.size(), (range.begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)+1)), 
 									range.end.substr(0, std::min<int>(range.end.size(), (range.end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)+1)));
@@ -723,7 +726,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									Value value = self->getRandomValue();
 									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, normalKeys.end);
 									self->changeCount.insert( range, changeNum++ );
-									//TraceEvent("WDRVersionStamp").detail("versionStampKey", printable(versionStampKey)).detail("range", printable(range));
+									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", printable(versionStampKey)).detail("Range", printable(range));
 									tr.atomicOp( versionStampKey, value, MutationRef::SetVersionstampedKey );
 									tr.clear( range );
 									KeyRangeRef conflict( range.begin.substr(0, std::min<int>(range.begin.size(), (range.begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)+1)), 
@@ -762,7 +765,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									}
 									self->changeCount.insert( key, changeNum++ );
 									bool noConflict = g_random->random01() < 0.5;
-									//TraceEvent("WDRAtomicOp").detail("Key", printable(key)).detail("Value", value.size()).detail("noConflict", noConflict);
+									//TraceEvent("WDRAtomicOp").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
 									if( noConflict )
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 									tr.atomicOp( key, value, opType );
@@ -777,7 +780,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								Value value = self->getRandomValue();
 								self->changeCount.insert( key, changeNum++ );
 								bool noConflict = g_random->random01() < 0.5;
-								//TraceEvent("WDRSet").detail("Key", printable(key)).detail("Value", value.size()).detail("noConflict", noConflict);
+								//TraceEvent("WDRSet").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
 								if( noConflict )
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.set( key, value );
@@ -787,27 +790,28 @@ struct WriteDuringReadWorkload : TestWorkload {
 								self->memoryDatabase[ key ] = value;
 							}
 						} catch( Error &e ) {
-							if( e.code() == error_code_used_during_commit )
+							if( e.code() == error_code_used_during_commit ) {
 								ASSERT( doingCommit );
-							else if( e.code() != error_code_transaction_cancelled )
+							} else if( e.code() != error_code_transaction_cancelled ) {
 								throw;
+							}
 						}
 					}
 
 					if( waitLocation < operations.size() ) {
 						int waitOp = g_random->randomInt(waitLocation,operations.size());
-						//TraceEvent("WDRWait").detail("Op", waitOp).detail("operations", operations.size()).detail("waitLocation", waitLocation);
-						Void _ = wait( operations[waitOp] );
-						Void _ = wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
+						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
+						wait( operations[waitOp] );
+						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
-				Void _ = wait( waitForAll( operations ) );
+				wait( waitForAll( operations ) );
 				ASSERT( timebomb == 0 || 1000*(now() - startTime) <= timebomb + 1 );
-				Void _ = wait( tr.debug_onIdle() );
-				Void _ = wait( delay(0.000001) ); //to ensure triggered watches have a change to register
+				wait( tr.debug_onIdle() );
+				wait( delay(0.000001) ); //to ensure triggered watches have a change to register
 				self->finished.trigger();
-				Void _ = wait( waitForAll( watches ) ); //only for errors, should have all returned
+				wait( waitForAll( watches ) ); //only for errors, should have all returned
 				self->changeCount.insert( allKeys, 0 );
 				break;
 			} catch( Error &e ) {
@@ -826,7 +830,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				if( e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large || e.code() == error_code_value_too_large || cancelled )
 					throw not_committed();
 				try {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				} catch( Error &e ) {
 					if( e.code() == error_code_transaction_timed_out ) {
 						ASSERT( timebomb != 0 && 1000*(now() - startTime) >= timebomb - 1 );

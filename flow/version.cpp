@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "hgVersion.h"
+#include "flow/hgVersion.h"
 
 const char* getHGVersion() {
 	return hgVersion;

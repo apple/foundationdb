@@ -22,6 +22,7 @@
 #define FLOW_IASYNCFILE_H
 #pragma once
 
+#include <ctime>
 #include "flow/flow.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
@@ -95,6 +96,9 @@ public:
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	virtual Future<Void> incrementalDeleteFile( std::string filename, bool mustBeDurable );
+
+	// Returns the time of the last modification of the file.
+	virtual Future<std::time_t> lastWriteTime( std::string filename ) = 0;
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() { return reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc))); }

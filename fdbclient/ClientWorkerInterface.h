@@ -22,10 +22,10 @@
 #define FDBCLIENT_CLIENTWORKERINTERFACE_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "Status.h"
-#include "ClientDBInfo.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/ClientDBInfo.h"
 
 // Streams from WorkerInterface that are safe and useful to call from a client.
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
@@ -36,11 +36,11 @@ struct ClientWorkerInterface {
 	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
 	UID id() const { return reboot.getEndpoint().token; }
-	NetworkAddress address() const { return reboot.getEndpoint().address; }
+	NetworkAddress address() const { return reboot.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & reboot & profiler;
+		serializer(ar, reboot, profiler);
 	}
 };
 
@@ -52,7 +52,7 @@ struct RebootRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & deleteData & checkData;
+		serializer(ar, deleteData, checkData);
 	}
 };
 
@@ -77,7 +77,7 @@ struct ProfilerRequest {
 
 	template<class Ar>
 	void serialize( Ar& ar ) {
-		ar & reply & type & action & duration & outputFile;
+		serializer(ar, reply, type, action, duration, outputFile);
 	}
 };
 BINARY_SERIALIZABLE( ProfilerRequest::Type );

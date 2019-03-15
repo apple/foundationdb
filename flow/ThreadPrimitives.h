@@ -22,8 +22,8 @@
 #define FLOW_THREADPRIMITIVES_H
 #pragma once
 
-#include "Error.h"
-#include "Trace.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 
 #ifdef __linux__
 #include <semaphore.h>

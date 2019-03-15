@@ -22,12 +22,13 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_GENERICACTORS_ACTOR_G_H)
 	#define FDBRPC_GENERICACTORS_ACTOR_G_H
-	#include "genericactors.actor.g.h"
+	#include "fdbrpc/genericactors.actor.g.h"
 #elif !defined(RPCGENERICACTORS_ACTOR_H)
 	#define RPCGENERICACTORS_ACTOR_H
 
 #include "flow/genericactors.actor.h"
-#include "fdbrpc.h"
+#include "fdbrpc/fdbrpc.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Req>
 Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request ) {
@@ -42,7 +43,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request )
 			if (e.code() != error_code_broken_promise)
 				throw;
 			resetReply( request );
-			Void _ = wait( delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 			TEST(true); // retryBrokenPromise
 		}
 	}
@@ -61,7 +62,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request, 
 			if (e.code() != error_code_broken_promise)
 				throw;
 			resetReply( request );
-			Void _ = wait( delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID) );
+			wait( delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID) );
 			TEST(true); // retryBrokenPromise
 		}
 	}
@@ -73,35 +74,10 @@ Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> outpu
 	state Future<Void> end = delay( time );
 	loop choose {
 		when ( T t = wait( what ) ) { return t; }
-		when ( Void _ = wait( end ) ) {
+		when ( wait( end ) ) {
 			output.send( Void() );
 			end = delay( time ); 
 		}
-	}
-}
-
-
-ACTOR template <class T> 
-Future<T> sendCanceler( ReplyPromise<T> reply, PacketID send ) {
-	try {
-		T t = wait( reply.getFuture() );
-		FlowTransport::transport().cancelReliable(send);
-		return t;
-	} catch (...) {
-		FlowTransport::transport().cancelReliable(send);
-		throw;
-	}
-}
-
-ACTOR template <class T>
-void networkSender( Future<T> input, Endpoint endpoint ) {
-	try {
-		T value = wait( input );
-		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<T>(true, value), endpoint );
-	} catch (Error& err) {
-		//if (err.code() == error_code_broken_promise) return;
-		ASSERT( err.code() != error_code_actor_cancelled );
-		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<Error>(false, err), endpoint );
 	}
 }
 
@@ -156,7 +132,7 @@ ACTOR template <class T> Future<Void> broadcast( Future<T> input, std::vector<Re
 
 
 // Needed for the call to endpointNotFound()
-#include "FailureMonitor.h"
+#include "fdbrpc/FailureMonitor.h"
 
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>
@@ -167,7 +143,7 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 				when ( X x = wait(value) ) {
 					return x; 
 				}
-				when ( Void _ = wait(signal) ) {
+				when ( wait(signal) ) {
 					return ErrorOr<X>(request_maybe_delivered()); 
 				}
 			}
@@ -190,8 +166,36 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 	}
 }
 
+ACTOR template <class T> 
+Future<T> sendCanceler( ReplyPromise<T> reply, PacketID send, Endpoint endpoint ) {
+	try {
+		T t = wait( reply.getFuture() );
+		FlowTransport::transport().cancelReliable(send);
+		return t;
+	} catch (Error& e) {
+		FlowTransport::transport().cancelReliable(send);
+		if (e.code() == error_code_broken_promise) {
+			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
+		}
+		throw;
+	}
+}
+
+ACTOR template <class X>
+Future<X> reportEndpointFailure( Future<X> value, Endpoint endpoint ) {
+	try { 
+		X x = wait(value);
+		return x; 
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
+		}
+		throw;
+	}
+}
 
 Future<Void> disableConnectionFailuresAfter( double const& time, std::string const& context );
 
+#include "flow/unactorcompiler.h"
 
 #endif

@@ -22,9 +22,9 @@
 #define FDBCLIENT_READYOURWRITES_H
 #pragma once
 
-#include "NativeAPI.h"
-#include "KeyRangeMap.h"
-#include "RYWIterator.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/RYWIterator.h"
 #include <list>
 
 //SOMEDAY: Optimize getKey to avoid using getRange
@@ -111,23 +111,22 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
-	void operator=(ReadYourWritesTransaction&& r) noexcept(true);
-	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept(true);
+	void operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
 
 	virtual void addref() { ReferenceCounted<ReadYourWritesTransaction>::addref(); }
 	virtual void delref() { ReferenceCounted<ReadYourWritesTransaction>::delref(); }
 
 	void cancel();
 	void reset();
-	double getBackoff() { return tr.getBackoff(); }
 	void debugTransaction(UID dID) { tr.debugTransaction(dID); }
 
 	Future<Void> debug_onIdle() {  return reading; }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
-	Error deferred_error;
+	Error deferredError;
 
-	void checkDeferredError() { tr.checkDeferredError(); if (deferred_error.code() != invalid_error_code) throw deferred_error; }
+	void checkDeferredError() { tr.checkDeferredError(); if (deferredError.code() != invalid_error_code) throw deferredError; }
 
 	void getWriteConflicts( KeyRangeMap<bool> *result );
 

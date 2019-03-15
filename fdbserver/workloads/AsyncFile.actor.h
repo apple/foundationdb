@@ -23,12 +23,13 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(WORKLOADS_ASYNCFILE_ACTOR_G_H)
 	#define WORKLOADS_ASYNCFILE_ACTOR_G_H
-	#include "AsyncFile.actor.g.h"
+	#include "fdbserver/workloads/AsyncFile.actor.g.h"
 #elif !defined(WORKLOADS_ASYNCFILE_ACTOR_H)
 	#define WORKLOADS_ASYNCFILE_ACTOR_H
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class RandomByteGenerator{
 private:
@@ -92,7 +93,7 @@ struct AsyncFileWorkload : TestWorkload
 		if(self->fileHandle.getPtr() != NULL)
 		{
 			self->fileHandle->file = Reference<IAsyncFile>(NULL);
-			Void _ = wait(delay(0.1));
+			wait(delay(0.1));
 		}
 
 		state bool fileCreated = self->path.length() == 0;
@@ -127,7 +128,7 @@ struct AsyncFileWorkload : TestWorkload
 				state int64_t newSize = (size + _PAGE_SIZE - 1) & ~(int64_t(_PAGE_SIZE-1)); // align size up
 
 				if(!fileCreated)
-					Void _ = wait(file->truncate(newSize));
+					wait(file->truncate(newSize));
 
 				state int chunkSize = 4<<16;
 				state Reference<AsyncFileBuffer> data = self->allocateBuffer(chunkSize);
@@ -140,9 +141,9 @@ struct AsyncFileWorkload : TestWorkload
 						rbg.writeRandomBytesToBuffer(data->buffer, chunkSize);
 					auto w = lastWrite;
 					lastWrite = file->write(data->buffer, chunkSize, i);
-					Void _ = wait(w);
+					wait(w);
 				}
-				Void _ = wait(lastWrite);
+				wait(lastWrite);
 			}
 		}
 		catch(Error &error)
@@ -155,4 +156,5 @@ struct AsyncFileWorkload : TestWorkload
 	}
 };
 
+#include "flow/unactorcompiler.h"
 #endif

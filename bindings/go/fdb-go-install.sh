@@ -11,8 +11,11 @@
 # library.
 #
 
+# Currently, this script doesn't work with modules enabled.
+GO111MODULE=off
+
 DESTDIR="${DESTDIR:-}"
-FDBVER="${FDBVER:-5.1.0}"
+FDBVER="${FDBVER:-}"
 REMOTE="${REMOTE:-github.com}"
 FDBREPO="${FDBREPO:-apple/foundationdb}"
 
@@ -23,8 +26,32 @@ if [[ "${platform}" == "Darwin" ]] ; then
     FDBLIBDIR="${FDBLIBDIR:-/usr/local/lib}"
     libfdbc="libfdb_c.dylib"
 elif [[ "${platform}" == "Linux" ]] ; then
-    FDBLIBDIR="${FDBLIBDIR:-/usr/lib}"
     libfdbc="libfdb_c.so"
+    custom_libdir="${FDBLIBDIR:-}"
+    FDBLIBDIR=""
+
+    if [[ -z "${custom_libdir}" ]]; then
+	search_libdirs=( '/usr/lib' '/usr/lib64' )
+    else
+	search_libdirs=( "${custom_libdir}" )
+    fi
+
+    for libdir in "${search_libdirs[@]}" ; do
+        if [[ -e "${libdir}/${libfdbc}" ]]; then
+            FDBLIBDIR="${libdir}"
+            break
+        fi
+    done
+
+    if [[ -z "${FDBLIBDIR}" ]]; then
+        echo "The FoundationDB C library could not be found in any of:"
+        for libdir in "${search_libdirs[@]}" ; do
+            echo "   ${libdir}"
+        done
+        echo "Your installation may be incomplete, or you need to set a custom FDBLIBDIR."
+        let status="${status} + 1"
+    fi
+
 else
     echo "Unsupported platform ${platform}".
     echo "At the moment, only macOS and Linux are supported by this script."
@@ -39,15 +66,16 @@ function printUsage() {
     echo
     echo "cmd: One of the commands to run. The options are:"
     echo "     install         Download the FDB go bindings and install them"
-    echo "     localinstall    Install a into the go path a local copy of the repo"
+    echo "     localinstall    Install into the go path a local copy of the repo"
     echo "     download        Download but do not prepare the FoundationDB bindings"
     echo "     help            Print this help message and then quit"
     echo
     echo "Command Line Options:"
-    echo "     --fdbver <version>    FoundationDB semantic version (default is ${FDBVER})"
+    echo "     --fdbver <version>    FoundationDB semantic version to install or download (required if FDBVER environment variable is not set)"
     echo "     -d/--dest-dir <dest>  Local location for the repo (default is to place in go path)"
     echo
     echo "Environment Variable Options:"
+    echo "     FDBVER          Default FoundationDB semantic version to use if --fdbver flag is not set"
     echo "     REMOTE          Remote repository to download from (currently ${REMOTE})"
     echo "     FDBREPO         Repository of FoundationDB library to download (currently ${FDBREPO})"
     echo "     FDBLIBDIR       Directory within which should be the FoundationDB c library (currently ${FDBLIBDIR})"
@@ -101,6 +129,12 @@ function parseArgs() {
         esac
         shift
     done
+
+    if [[ -z "${FDBVER}" ]] ; then
+        echo "No FoundationDB version specified!"
+        echo "Please supply a version by setting the --fdbver flag or the FDBVER environment variable."
+        let status="${status} + 1"
+    fi
 
     return "${status}"
 }
@@ -186,18 +220,18 @@ else
             if [[ -d "${fdbdir}" ]] ; then
                 echo "Directory ${fdbdir} already exists ; checking out appropriate tag"
                 cmd1=( 'git' '-C' "${fdbdir}" 'fetch' 'origin' )
-                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "release-${FDBVER}" )
+                cmd2=( 'git' '-C' "${fdbdir}" 'checkout' "${FDBVER}" )
 
                 if ! echo "${cmd1[*]}" || ! "${cmd1[@]}" ; then
                     let status="${status} + 1"
                     echo "Could not pull latest changes from origin"
                 elif ! echo "${cmd2[*]}" ||  ! "${cmd2[@]}" ; then
                     let status="${status} + 1"
-                    echo "Could not checkout tag release-${FDBVER}."
+                    echo "Could not checkout tag ${FDBVER}."
                 fi
             else
                 echo "Downloading foundation repository into ${destdir}:"
-                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "release-${FDBVER}" "git@${REMOTE}:${FDBREPO}.git" )
+                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
 
                 echo "${cmd[*]}"
                 if ! "${cmd[@]}" ; then
@@ -272,17 +306,12 @@ else
             # Do not install if only downloading
             :
         elif [[ "${status}" -eq 0 ]] ; then
-            cgo_cflags="-g -O2 -I${linkpath}/bindings/c"
-            cgo_ldflags="-g -O2 -L${FDBLIBDIR}"
+            cgo_cppflags="-I${linkpath}/bindings/c"
+            cgo_cflags="-g -O2"
+            cgo_ldflags="-L${FDBLIBDIR}"
             fdb_go_path="${REMOTE}/${FDBREPO}/bindings/go/src"
 
-            if [[ ! -e "${FDBLIBDIR}/${libfdbc}" ]] ; then
-                # Just a warning. Don't fail script.
-                echo
-                echo "WARNING: The FoundationDB C library was not found within ${FDBLIBDIR}."
-                echo "Your installation may be incomplete."
-                echo
-            elif ! CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" go install "${fdb_go_path}/fdb" "${fdb_go_path}/fdb/tuple" "${fdb_go_path}/fdb/subspace" "${fdb_go_path}/fdb/directory" ; then
+            if ! CGO_CPPFLAGS="${cgo_cppflags}" CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" go install "${fdb_go_path}/fdb" "${fdb_go_path}/fdb/tuple" "${fdb_go_path}/fdb/subspace" "${fdb_go_path}/fdb/directory" ; then
                 let status="${status} + 1"
                 echo "Could not build FoundationDB go libraries."
             fi
@@ -295,6 +324,7 @@ else
             echo "The FoundationDB go bindings were successfully installed."
             echo "To build packages which use the go bindings, you will need to"
             echo "set the following environment variables:"
+            echo "   CGO_CPPFLAGS=\"${cgo_cppflags}\""
             echo "   CGO_CFLAGS=\"${cgo_cflags}\""
             echo "   CGO_LDFLAGS=\"${cgo_ldflags}\""
         fi

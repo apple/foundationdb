@@ -30,7 +30,7 @@
  *
  * Usage:
  * 
- * TEST_CASE( "product/module/testcase" ) {
+ * TEST_CASE("/product/module/testcase") {
  *   double random_test_parameter = g_random->random01();
  *   ASSERT( something );
  *   return Void();
@@ -43,7 +43,7 @@
  * See the `UnitTestWorkload` class.
 */
 
-#include "flow.h"
+#include "flow/flow.h"
 
 struct UnitTest {
 	typedef Future<Void>(*TestFunction)();

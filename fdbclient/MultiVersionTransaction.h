@@ -22,9 +22,9 @@
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #pragma once
 
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
-#include "IClientApi.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -55,12 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	FDBFuture* (*createCluster)(const char *clusterFilePath);
-
-	//Cluster
-	FDBFuture* (*clusterCreateDatabase)(FDBCluster *cluster, uint8_t *dbName, int dbNameLength);
-	fdb_error_t (*clusterSetOption)(FDBCluster *cluster, FDBClusterOptions::Option option, uint8_t const *value, int valueLength);
-	void (*clusterDestroy)(FDBCluster *cluster);
+	fdb_error_t* (*createDatabase)(const char *clusterFilePath, FDBDatabase **db);
 
 	//Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase *database, FDBTransaction **tr);
@@ -98,7 +93,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 												uint8_t const *endKeyName, int endKeyNameLength, FDBConflictRangeTypes::Option);
 
 	//Future
-	fdb_error_t (*futureGetCluster)(FDBFuture *f, FDBCluster **outCluster);
 	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
 	fdb_error_t (*futureGetVersion)(FDBFuture *f, int64_t *outVersion);
 	fdb_error_t (*futureGetError)(FDBFuture *f);
@@ -109,6 +103,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureSetCallback)(FDBFuture *f, FDBCallback callback, void *callback_parameter);
 	void (*futureCancel)(FDBFuture *f);
 	void (*futureDestroy)(FDBFuture *f);
+
+	//Legacy Support
+	FDBFuture* (*createCluster)(const char *clusterFilePath);
+	FDBFuture* (*clusterCreateDatabase)(FDBCluster *cluster, uint8_t *dbName, int dbNameLength);
+	void (*clusterDestroy)(FDBCluster *cluster);
+	fdb_error_t (*futureGetCluster)(FDBFuture *f, FDBCluster **outCluster);
 };
 
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
@@ -159,8 +159,11 @@ private:
 
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
-	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db) {}
+	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
+	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
 	~DLDatabase() { api->databaseDestroy(db); }
+
+	ThreadFuture<Void> onReady();
 
 	Reference<ITransaction> createTransaction();
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
@@ -170,23 +173,8 @@ public:
 
 private:
 	const Reference<FdbCApi> api;
-	FdbCApi::FDBDatabase* const db;
-};
-
-class DLCluster : public ICluster, ThreadSafeReferenceCounted<DLCluster> {
-public:
-	DLCluster(Reference<FdbCApi> api, FdbCApi::FDBCluster *cluster) : api(api), cluster(cluster) {}
-	~DLCluster() { api->clusterDestroy(cluster); }
-
-	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
-	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
-
-	void addref() { ThreadSafeReferenceCounted<DLCluster>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<DLCluster>::delref(); }
-
-private:
-	const Reference<FdbCApi> api;
-	FdbCApi::FDBCluster* const cluster;
+	FdbCApi::FDBDatabase* db; // Always set if API version >= 610, otherwise guaranteed to be set when onReady future is set
+	ThreadFuture<Void> ready;
 };
 
 class DLApi : public IClientApi {
@@ -201,7 +189,8 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase609(const char *clusterFilePath); // legacy database creation
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
@@ -274,51 +263,6 @@ private:
 	void updateTransaction();
 };
 
-class MultiVersionCluster;
-
-class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
-public:
-	MultiVersionDatabase(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
-	~MultiVersionDatabase();
-
-	Reference<ITransaction> createTransaction();
-	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
-
-	void addref() { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }
-
-	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
-
-private:
-	struct DatabaseState : ThreadCallback, ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(Reference<MultiVersionCluster> cluster, Standalone<StringRef> dbName, Reference<IDatabase> db, ThreadFuture<Void> changed);
-
-		void updateDatabase();
-		void cancelCallbacks();
-
-		bool canFire(int notMadeActive) { return true; }
-		void fire(const Void &unused, int& userParam);
-		void error(const Error& e, int& userParam);
-
-		const Reference<MultiVersionCluster> cluster;
-
-		Reference<IDatabase> db;
-		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
-		const Standalone<StringRef> dbName;
-
-		ThreadFuture<Reference<IDatabase>> dbFuture;
-		ThreadFuture<Void> changed;
-
-		bool cancelled;
-
-		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
-		Mutex optionLock;
-	};
-
-	const Reference<DatabaseState> dbState;
-	friend class MultiVersionTransaction;
-};
-
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	uint64_t protocolVersion;
 	IClientApi *api;
@@ -337,23 +281,24 @@ struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
-class MultiVersionCluster : public ICluster, ThreadSafeReferenceCounted<MultiVersionCluster> {
+class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
-	MultiVersionCluster() : clusterState(new ClusterState()) {} // Used in testing workloads
-	MultiVersionCluster(MultiVersionApi *api, std::string clusterFilePath, Reference<ICluster> cluster);
-	~MultiVersionCluster();
+	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
+	~MultiVersionDatabase();
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName);
-	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
+	Reference<ITransaction> createTransaction();
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	void addref() { ThreadSafeReferenceCounted<MultiVersionCluster>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<MultiVersionCluster>::delref(); }
+	void addref() { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
+	void delref() { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }
+
+	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
 private:
-	struct ClusterState;
+	struct DatabaseState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
-		Connector(Reference<ClusterState> clusterState, Reference<ClientInfo> client, std::string clusterFilePath) : clusterState(clusterState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
+		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client, std::string clusterFilePath) : dbState(dbState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
 
 		void connect();
 		void cancel();
@@ -365,38 +310,42 @@ private:
 		const Reference<ClientInfo> client;
 		const std::string clusterFilePath;
 
-		const Reference<ClusterState> clusterState;
+		const Reference<DatabaseState> dbState;
 
 		ThreadFuture<Void> connectionFuture;
 
-		Reference<ICluster> candidateCluster;
+		Reference<IDatabase> candidateDatabase;
 		Reference<ITransaction> tr;
 
 		bool connected;
 		bool cancelled;
 	};
 
-	struct ClusterState : ThreadSafeReferenceCounted<ClusterState> {
-		ClusterState() : clusterVar(new ThreadSafeAsyncVar<Reference<ICluster>>(Reference<ICluster>(NULL))), currentClientIndex(-1) {}
+	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
+		DatabaseState();
 
 		void stateChanged();
 		void addConnection(Reference<ClientInfo> client, std::string clusterFilePath);
 		void startConnections();
 		void cancelConnections();
 
-		Reference<ICluster> cluster;
-		const Reference<ThreadSafeAsyncVar<Reference<ICluster>>> clusterVar;
+		Reference<IDatabase> db;
+		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
+
+		ThreadFuture<Void> changed;
+
+		bool cancelled;
 
 		int currentClientIndex;
 		std::vector<Reference<ClientInfo>> clients;
 		std::vector<Reference<Connector>> connectionAttempts;
 
-		std::vector<std::pair<FDBClusterOptions::Option, Optional<Standalone<StringRef>>>> options;
+		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
 		Mutex optionLock;
 	};
 
-	const Reference<ClusterState> clusterState;
-	friend class MultiVersionDatabase;
+	const Reference<DatabaseState> dbState;
+	friend class MultiVersionTransaction;
 };
 
 class MultiVersionApi : public IClientApi {
@@ -410,7 +359,7 @@ public:
 	void stopNetwork();
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
-	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char *clusterFilePath);
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
@@ -449,6 +398,5 @@ private:
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
 };
-
 
 #endif

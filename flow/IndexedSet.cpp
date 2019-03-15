@@ -21,15 +21,16 @@
 // At the moment, this file just contains tests.  IndexedSet<> is a template
 // and so all the important implementation is in the header file
 
-#include "IndexedSet.h"
-#include "IRandom.h"
-#include "ThreadPrimitives.h"
+#include "flow/IndexedSet.h"
+#include "flow/IRandom.h"
+#include "flow/ThreadPrimitives.h"
 #include <algorithm>
 #include <set>
 #include <string>
 #include <cstring>
 #include <deque>
-#include "UnitTest.h"
+#include <random>
+#include "flow/UnitTest.h"
 
 template <class Node>
 int ISGetHeight(Node* n){
@@ -118,7 +119,7 @@ bool operator < (const char* l, std::string const& r) {
 	return std::move(s);
 }*/
 
-TEST_CASE("flow/IndexedSet/erase 400k of 1M") {
+TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	IndexedSet<int, int> is;
 	for (int n = 0; n<1000000; n++)
 		is.insert(n, 3);
@@ -135,7 +136,7 @@ TEST_CASE("flow/IndexedSet/erase 400k of 1M") {
 	return Void();
 }
 
-/*TEST_CASE("flow/IndexedSet/performance") {
+/*TEST_CASE("/flow/IndexedSet/performance") {
 	std::vector<int> x;
 	for (int i = 0; i<1000000; i++)
 		x.push_back(g_random->randomInt(0, 10000000));
@@ -206,7 +207,7 @@ TEST_CASE("flow/IndexedSet/erase 400k of 1M") {
 		ASSERT(is.find(x[i]) == is.end());
 }*/
 
-TEST_CASE("flow/IndexedSet/random ops") {
+TEST_CASE("/flow/IndexedSet/random ops") {
 	for (int t = 0; t<100; t++) {
 		IndexedSet<int, int> is;
 		int rr = g_random->randomInt(0, 600) * g_random->randomInt(0, 600);
@@ -254,7 +255,7 @@ TEST_CASE("flow/IndexedSet/random ops") {
 	return Void();
 }
 
-TEST_CASE("flow/IndexedSet/strings") {
+TEST_CASE("/flow/IndexedSet/strings") {
 	Map< std::string, int > myMap;
 	std::map< std::string, int > aMap;
 	myMap["Hello"] = 1;
@@ -290,7 +291,7 @@ TEST_CASE("flow/IndexedSet/strings") {
 	return Void();
 }
 
-TEST_CASE("flow/IndexedSets/ints") {
+TEST_CASE("/flow/IndexedSets/ints") {
 	IndexedSet<int, int> is;
 	ASSERT(is.find(10) == is.end());
 	is.insert(10, 3);
@@ -332,7 +333,7 @@ TEST_CASE("flow/IndexedSets/ints") {
 	return Void();
 }
 
-TEST_CASE("flow/IndexedSet/data constructor and destructor calls match") {
+TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 	static int count;
 	count = 0;
 	struct Counter {
@@ -357,7 +358,7 @@ TEST_CASE("flow/IndexedSet/data constructor and destructor calls match") {
 	return Void();
 }
 
-TEST_CASE("flow/IndexedSet/comparison to std::set") {
+TEST_CASE("/flow/IndexedSet/comparison to std::set") {
 	IndexedSet<int, int> is;
 	std::set<int> ss;
 	for (int i = 0; i<1000000; i++) {
@@ -381,13 +382,14 @@ TEST_CASE("flow/IndexedSet/comparison to std::set") {
 	return Void();
 }
 
-TEST_CASE("flow/IndexedSet/all numbers") {
+TEST_CASE("/flow/IndexedSet/all numbers") {
 	IndexedSet<int, int64_t> is;
+	std::mt19937_64 urng(g_random->randomUInt32());
 
 	std::vector<int> allNumbers;
 	for (int i = 0; i<1000000; i++)
 		allNumbers.push_back(i);
-	std::random_shuffle(allNumbers.begin(), allNumbers.end());
+	std::shuffle(allNumbers.begin(), allNumbers.end(), urng);
 
 	for (int i = 0; i<allNumbers.size(); i++)
 		is.insert(allNumbers[i], allNumbers[i]);

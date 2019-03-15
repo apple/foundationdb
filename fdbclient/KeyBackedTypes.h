@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "ReadYourWrites.h"
-#include "Subspace.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Subspace.h"
 #include "flow/genericactors.actor.h"
 
 // Codec is a utility struct to convert a type to and from a Tuple.  It is used by the template
@@ -123,10 +123,10 @@ public:
 		auto backtrace = platform::get_backtrace();
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
-				TraceEvent(SevInfo, "KeyBackedProperty_keyNotFound")
-						.detail("key", printable(keyCopy))
-						.detail("err", err.code())
-						.detail("parentTrace", backtrace.c_str());
+				TraceEvent(SevInfo, "KeyBackedProperty_KeyNotFound")
+						.detail("Key", printable(keyCopy))
+						.detail("Err", err.code())
+						.detail("ParentTrace", backtrace.c_str());
 				throw err;
 			}
 

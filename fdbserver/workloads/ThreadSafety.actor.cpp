@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ThreadSafetyWorkload;
 
@@ -158,6 +158,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if(g_random->coinflip()) {
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 
@@ -167,7 +168,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			g_network->startThread(self->threadStart, threadInfo[i]);
 		}
 
-		Void _ = wait(delay(self->threadDuration));
+		wait(delay(self->threadDuration));
 
 		// Signals the threads to stop
 		self->mutex.enter();
@@ -176,7 +177,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			
 		for(i = 0; i < threadInfo.size(); ++i) {
 			try {
-				Void _ = wait(threadInfo[i]->done.getFuture());
+				wait(threadInfo[i]->done.getFuture());
 			}
 			catch(Error &e) {
 				self->success = false;

@@ -21,7 +21,12 @@
 #ifndef FDBCLIENT_STATUS_H
 #define FDBCLIENT_STATUS_H
 
-#include "../fdbrpc/JSONDoc.h"
+#include "fdbclient/JSONDoc.h"
+
+// Reads the entire string s as a JSON value
+// Throws if no value can be parsed or if s contains data after the first JSON value
+// Trailing whitespace in s is allowed
+json_spirit::mValue readJSONStrictly(const std::string &s);
 
 struct StatusObject : json_spirit::mObject {
 	typedef json_spirit::mObject Map;
@@ -73,7 +78,7 @@ static StatusObject makeMessage(const char *name, const char *description) {
 // Typedef to cover older code that was written when this class was only a reader and called StatusObjectReader
 typedef JSONDoc StatusObjectReader;
 
-// Template specialization for get<JSONDoc> because is convenient to get() an 
+// Template specialization for get<JSONDoc> because is convenient to get() an
 // element from an object directly into a JSONDoc to have a handle to that sub-doc.
 template <> inline bool JSONDoc::get<JSONDoc>(const std::string path, StatusObjectReader &out, bool split) {
 	bool r = has(path, split);

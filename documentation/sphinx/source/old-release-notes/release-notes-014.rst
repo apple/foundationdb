@@ -10,7 +10,7 @@ Language support
 
 * FoundationDB now supports :doc:`Ruby </api-ruby>`
 
-* FoundationDB now supports :doc:`Node.js </api-node>`
+* FoundationDB now supports Node.js
 
 * FoundationDB now supports `Java </javadoc/index.html>`_ and other JVM languages.
 

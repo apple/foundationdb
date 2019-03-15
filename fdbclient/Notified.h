@@ -22,7 +22,7 @@
 #define FDBCLIENT_NOTIFIED_H
 #pragma once
 
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/TDMetric.actor.h"
 
 struct NotifiedVersion {
@@ -66,8 +66,8 @@ struct NotifiedVersion {
 		set( v );
 	}
 
-	NotifiedVersion(NotifiedVersion&& r) noexcept(true) : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
-	void operator=(NotifiedVersion&& r) noexcept(true) { waiting = std::move(r.waiting); val = std::move(r.val); }
+	NotifiedVersion(NotifiedVersion&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
+	void operator=(NotifiedVersion&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = std::move(r.val); }
 
 private:
 	typedef std::pair<Version,Promise<Void>> Item;

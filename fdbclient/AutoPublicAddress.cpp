@@ -26,15 +26,23 @@
 #define BOOST_REGEX_NO_LIB
 #include "boost/asio.hpp"
 
-#include "CoordinationInterface.h"
+#include "fdbclient/CoordinationInterface.h"
 
-uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs ) {
+IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs) {
 	try {
-		boost::asio::io_service ioService;
-		boost::asio::ip::udp::socket socket(ioService);
-		boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address_v4(ccs.coordinators()[0].ip), ccs.coordinators()[0].port);
+		using namespace boost::asio;
+
+		io_service ioService;
+		ip::udp::socket socket(ioService);
+
+		const auto& coordAddr = ccs.coordinators()[0];
+		const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
+		                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));
+
+		ip::udp::endpoint endpoint(boostIp, coordAddr.port);
 		socket.connect(endpoint);
-		auto ip = socket.local_endpoint().address().to_v4().to_ulong();
+		IPAddress ip = coordAddr.ip.isV6() ? IPAddress(socket.local_endpoint().address().to_v6().to_bytes())
+		                                   : IPAddress(socket.local_endpoint().address().to_v4().to_ulong());
 		socket.close();
 
 		return ip;

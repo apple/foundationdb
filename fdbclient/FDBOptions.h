@@ -47,6 +47,7 @@ private:
 public:
 	typename std::map<typename T::Option, FDBOptionInfo>::iterator begin() { return optionInfo.begin(); }
 	typename std::map<typename T::Option, FDBOptionInfo>::iterator end() { return optionInfo.end(); }
+	typename std::map<typename T::Option, FDBOptionInfo>::iterator find(const typename T::Option& key) { return optionInfo.find(key); }
 
 	FDBOptionInfo& operator[] (const typename T::Option& key) { return optionInfo[key]; }
 

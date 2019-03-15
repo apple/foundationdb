@@ -2,6 +2,9 @@
 #define FLOW_HASH3_H
 #pragma once
 
+#include <stdint.h>
+#include <stddef.h>
+
 // Prototypes for Bob Jenkins' "lookup3" hash
 // See Hash3.c for detailed documentation
 

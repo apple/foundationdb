@@ -78,7 +78,7 @@
     <li> Include the SimpleOpt.h header file
 
         <pre>
-        \#include "SimpleOpt.h"
+        \#include "flow/SimpleOpt.h"
         </pre>
 
     <li> Define an array of valid options for your program.

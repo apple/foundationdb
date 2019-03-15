@@ -20,6 +20,6 @@
 
 #pragma once
 
-#include "NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 Future<Void> runMetrics( Future<Database> const& fcx, Key const& metricsPrefix );

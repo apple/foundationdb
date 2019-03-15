@@ -30,7 +30,7 @@
 // effect outside simulation.
 // Typical use is something like:
 //   debug_advanceMaxCommittedVersion( self->id, version );
-//   Void _ = wait( commit(version) );
+//   wait( commit(version) );
 //   debug_advanceMinCommittedVersion( self->id, version );
 // and then a call to debug_checkRestoredVersion() after some kind of reboot or recovery event
 

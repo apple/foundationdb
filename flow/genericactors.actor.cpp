@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "actorcompiler.h"	// Gets genericactors.actor.g.h indirectly
+#include "flow/flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {
 	state int i=0;
@@ -30,9 +31,22 @@ ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {
 	return true;
 }
 
+ACTOR Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> input, Reference<AsyncVar<bool>> output ) {
+	loop {
+		bool oneTrue = false;
+		std::vector<Future<Void>> changes;
+		for(auto it : input) {
+			if( it->get() ) oneTrue = true;
+			changes.push_back( it->onChange() );
+		}
+		output->set( oneTrue );
+		wait( waitForAny(changes) );
+	}
+}
+
 ACTOR Future<Void> cancelOnly( std::vector<Future<Void>> futures ) {
 	// We don't do anything with futures except hold them, we never return, but if we are cancelled we (naturally) drop the futures
-	Void _ = wait( Never() );
+	wait( Never() );
 	return Void();
 }
 
@@ -40,10 +54,10 @@ ACTOR Future<Void> timeoutWarningCollector( FutureStream<Void> input, double log
 	state uint64_t counter = 0;
 	state Future<Void> end = delay( logDelay );
 	loop choose {
-		when ( Void _ = waitNext( input ) ) {
+		when ( waitNext( input ) ) {
 			counter++;
 		}
-		when ( Void _ = wait( end ) ) {
+		when ( wait( end ) ) {
 			if( counter )
 				TraceEvent(SevWarn, context, id).detail("LateProcessCount", counter).detail("LoggingDelay", logDelay);
 			end = delay( logDelay );
@@ -61,10 +75,10 @@ ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int requ
 	}
 
 	choose {
-		when( Void _ = wait( quorum( true_futures, required ) ) ) {
+		when( wait( quorum( true_futures, required ) ) ) {
 			return true;
 		}
-		when( Void _ = wait( quorum( false_futures, futures.size() - required + 1 ) ) ) {
+		when( wait( quorum( false_futures, futures.size() - required + 1 ) ) ) {
 			return false;
 		}
 	}

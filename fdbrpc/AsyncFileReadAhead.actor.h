@@ -23,12 +23,13 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_ASYNCFILEREADAHEAD_ACTOR_G_H)
 	#define FDBRPC_ASYNCFILEREADAHEAD_ACTOR_G_H
-	#include "AsyncFileReadAhead.actor.g.h"
+	#include "fdbrpc/AsyncFileReadAhead.actor.g.h"
 #elif !defined(FDBRPC_ASYNCFILEREADAHEAD_ACTOR_H)
 	#define FDBRPC_ASYNCFILEREADAHEAD_ACTOR_H
 
 #include "flow/flow.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range requested
 class AsyncFileReadAheadCache : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
@@ -45,7 +46,7 @@ public:
 
 	// Read from the underlying file to a CacheBlock
 	ACTOR static Future<Reference<CacheBlock>> readBlock(AsyncFileReadAheadCache *f, int length, int64_t offset) {
-		Void _ = wait(f->m_max_concurrent_reads.take());
+		wait(f->m_max_concurrent_reads.take());
 
 		state Reference<CacheBlock> block(new CacheBlock(length));
 		try {
@@ -66,14 +67,18 @@ public:
 		if(offset >= fileSize)
 			return 0;  // TODO:  Should this throw since the input isn't really valid?
 
+		if(length == 0) {
+			return 0;
+		}
+
 		// If reading past the end then clip length to just read to the end
 		if(offset + length > fileSize)
 			length = fileSize - offset;   // Length is at least 1 since offset < fileSize
 
 		// Calculate block range for the blocks that contain this data
 		state int firstBlockNum = offset / f->m_block_size;
-		state int lastBlockNum = (offset + length) / f->m_block_size;
-		state int blockNum;
+		ASSERT(f->m_block_size > 0);
+		state int lastBlockNum = (offset + length - 1) / f->m_block_size;
 
 		// Start reads (if needed) of the block range required for this read, plus the read ahead blocks
 		// The futures for the read started will be stored in the cache but since things can be evicted from
@@ -83,8 +88,10 @@ public:
 
 		// Start blocks up to the read ahead size beyond the last needed block but don't go past the end of the file
 		state int lastBlockNumInFile = ((fileSize + f->m_block_size - 1) / f->m_block_size) - 1;
+		ASSERT(lastBlockNum <= lastBlockNumInFile);
 		int lastBlockToStart = std::min<int>(lastBlockNum + f->m_read_ahead_blocks, lastBlockNumInFile);
 
+		state int blockNum;
 		for(blockNum = firstBlockNum; blockNum <= lastBlockToStart; ++blockNum) {
 			Future<Reference<CacheBlock>> fblock;
 
@@ -192,4 +199,5 @@ public:
 
 };
 
+#include "flow/unactorcompiler.h"
 #endif

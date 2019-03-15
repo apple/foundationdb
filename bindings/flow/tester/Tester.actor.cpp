@@ -28,7 +28,7 @@
 #include <string.h>
 #endif
 
-// Otherwise we have to type setupNetwork(), Cluster::createCluster(), etc.
+// Otherwise we have to type setupNetwork(), FDB::open(), etc.
 using namespace FDB;
 
 std::map<std::string, FDBMutationType> optionInfo;
@@ -41,7 +41,8 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
 const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION)/sizeof(int);
 
-static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<DatabaseContext> const& db, StringRef const& prefix);
+static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<Database> const& db,
+                            StringRef const& prefix);
 
 THREAD_FUNC networkThread( void* api ) {
 	// This is the fdb_flow network we're running on a thread
@@ -327,8 +328,8 @@ struct EmptyStackFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		//Void _ = wait(printFlowTesterStack(&(data->stack)));
-		//Void _ = wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+		//wait(printFlowTesterStack(&(data->stack)));
+		//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 		data->stack.clear();
 		return Void();
 	}
@@ -340,7 +341,7 @@ struct SwapFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackSwap(&(data->stack)));
+		wait(stackSwap(&(data->stack)));
 		return Void();
 	}
 };
@@ -353,7 +354,7 @@ struct PopFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
 		for(StackItem item : items) {
-			Standalone<StringRef> _ = wait(item.value);
+			wait(success(item.value));
 		}
 		return Void();
 	}
@@ -365,7 +366,7 @@ struct SubFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackSub(&(data->stack)));
+		wait(stackSub(&(data->stack)));
 		return Void();
 	}
 };
@@ -376,7 +377,7 @@ struct ConcatFunc : InstructionFunc {
 	static const char* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		Void _ = wait(stackConcat(&(data->stack)));
+		wait(stackConcat(&(data->stack)));
 		return Void();
 	}
 };
@@ -388,7 +389,7 @@ struct LogStackFunc : InstructionFunc {
 
 	ACTOR static Future<Void> logStack(Reference<FlowTesterData> data, std::map<int, StackItem> entries, Standalone<StringRef> prefix) {
 		loop {
-			state Reference<Transaction> tr(new Transaction(data->db));
+			state Reference<Transaction> tr = data->db->createTransaction();
 			try {
 				for(auto it : entries) {
 					Tuple tk;
@@ -399,11 +400,11 @@ struct LogStackFunc : InstructionFunc {
 					tr->set(pk, pv.substr(0, std::min(pv.size(), 40000)));
 				}
 
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 				return Void();
 			}
 			catch(Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -422,11 +423,11 @@ struct LogStackFunc : InstructionFunc {
 			ASSERT(it.size() == 1);
 			entries[data->stack.data.size()] = it.front();
 			if(entries.size() == 100) {
-				Void _ = wait(logStack(data, entries, prefix));
+				wait(logStack(data, entries, prefix));
 				entries.clear();
 			}
 
-			Void _ = wait(logStack(data, entries, prefix));
+			wait(logStack(data, entries, prefix));
 		}
 
 		return Void();
@@ -440,7 +441,7 @@ REGISTER_INSTRUCTION_FUNC(LogStackFunc);
 //
 ACTOR Future<Standalone<StringRef>> waitForVoid(Future<Void> f) {
 	try{
-		Void _ = wait(f);
+		wait(f);
 		Tuple t;
 		t.append(LiteralStringRef("RESULT_NOT_PRESENT"));
 		return t.pack();
@@ -534,7 +535,7 @@ struct NewTransactionFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		trMap[data->trName] = Reference<Transaction>(new Transaction(data->db));
+		trMap[data->trName] = data->db->createTransaction();
 		return Void();
 	}
 };
@@ -550,7 +551,7 @@ struct UseTransactionFunc : InstructionFunc {
 		data->trName = name;
 
 		if(trMap.count(data->trName) == 0) {
-			trMap[data->trName] = Reference<Transaction>(new Transaction(data->db));
+			trMap[data->trName] = data->db->createTransaction();
 		}
 		return Void();
 	}
@@ -605,7 +606,7 @@ struct SetFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -681,7 +682,7 @@ struct SetReadVersionFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		instruction->tr->setVersion(data->lastVersion);
+		instruction->tr->setReadVersion(data->lastVersion);
 		return Void();
 	}
 };
@@ -765,7 +766,7 @@ struct ClearFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -902,7 +903,7 @@ struct ClearRangeFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -933,7 +934,7 @@ struct ClearRangeStartWithFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -1323,6 +1324,20 @@ struct StartThreadFunc : InstructionFunc {
 const char* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
+ACTOR template <class Function>
+Future<decltype(fake<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
+                                                                                 Function func) {
+	state Reference<ReadTransaction> tr = db->createTransaction();
+	loop {
+		try {
+			state decltype(fake<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
+			return result;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // WAIT_EMPTY
 struct WaitEmptyFunc : InstructionFunc {
 	static const char* name;
@@ -1333,23 +1348,21 @@ struct WaitEmptyFunc : InstructionFunc {
 			return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
-		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
+		Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
 		// printf("=========WAIT_EMPTY:%s\n", printable(prefix).c_str());
 
-		state Reference<Transaction> tr(new Transaction(data->db));
-		loop {
-			try {
-				FDBStandalone<RangeResultRef> results = wait(tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1));
-				if(results.size() > 0) {
-					throw not_committed();
-				}
-				break;
-			}
-			catch(Error &e) {
-				Void _ = wait(tr->onError(e));
-			}
-		}
+		wait(read(data->db,
+		          [=](Reference<ReadTransaction> tr) -> Future<Void> { return checkEmptyPrefix(tr, prefix); }));
 
+		return Void();
+	}
+
+private:
+	ACTOR static Future<Void> checkEmptyPrefix(Reference<ReadTransaction> tr, Standalone<StringRef> prefix) {
+		FDBStandalone<RangeResultRef> results = wait(tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1));
+		if (results.size() > 0) {
+			throw not_committed();
+		}
 		return Void();
 	}
 };
@@ -1493,7 +1506,7 @@ struct AtomicOPFunc : InstructionFunc {
 			data->stack.push(waitForVoid(mutation));
 		}
 		else {
-			Void _ = wait(mutation);
+			wait(mutation);
 		}
 
 		return Void();
@@ -1529,7 +1542,7 @@ struct UnitTestsFunc : InstructionFunc {
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
 
-		state Reference<Transaction> tr(new Transaction(data->db));
+		state Reference<Transaction> tr = data->db->createTransaction();
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_BATCH);
@@ -1560,7 +1573,7 @@ const char* UnitTestsFunc::name = "UNIT_TESTS";
 REGISTER_INSTRUCTION_FUNC(UnitTestsFunc);
 
 ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, StringRef prefix) {
-	state Reference<Transaction> tr(new Transaction(data->db));
+	state Reference<Transaction> tr = data->db->createTransaction();
 
 	// get test instructions
 	state Tuple testSpec;
@@ -1572,7 +1585,7 @@ ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, String
 			return Void();
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -1605,12 +1618,12 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				// idx, data->instructions.size(), printable(StringRef(data->instructions[idx].key)).c_str(), printable(StringRef(data->instructions[idx].value)).c_str(),
 				// isDatabase, isSnapshot, data->stack.data.size());
 
-			//Void _ = wait(printFlowTesterStack(&(data->stack)));
-			//Void _ = wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
+			//wait(printFlowTesterStack(&(data->stack)));
+			//wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 
 			state Reference<InstructionData> instruction = Reference<InstructionData>(new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
 			if (isDatabase) {
-				state Reference<Transaction> tr(new Transaction(data->db));
+				state Reference<Transaction> tr = data->db->createTransaction();
 				instruction->tr = tr;
 			}
 			else {
@@ -1621,7 +1634,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			ASSERT(!isDirectory || !isSnapshot);
 
 			data->stack.index = idx;
-			Void _ = wait(InstructionFunc::call(op.toString(), data, instruction));
+			wait(InstructionFunc::call(op.toString(), data, instruction));
 		}
 		catch (Error& e) {
 			if(LOG_ERRORS) {
@@ -1644,13 +1657,13 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 	return Void();
 }
 
-ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<DatabaseContext> db, StringRef prefix) {
+ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, StringRef prefix) {
 	ASSERT(data);
 	try {
 		data->db = db;
-		Void _ = wait(getInstructions(data, prefix));
-		Void _ = wait(doInstructions(data));
-		Void _ = wait(waitForAll(data->subThreads));
+		wait(getInstructions(data, prefix));
+		wait(doInstructions(data));
+		wait(waitForAll(data->subThreads));
 	}
 	catch (Error& e) {
 		TraceEvent(SevError, "FlowTesterDataRunError").error(e);
@@ -1693,7 +1706,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1714,11 +1727,10 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		startThread(networkThread, fdb);
 
 		// Connect to the default cluster/database, and create a transaction
-		auto cluster = fdb->createCluster(clusterFilename);
-		Reference<DatabaseContext> db = cluster->createDatabase();
+		auto db = fdb->createDatabase(clusterFilename);
 
 		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
-		Void _ = wait(runTest(data, db, prefix));
+		wait(runTest(data, db, prefix));
 
 		// Stopping the network returns from g_network->run() and allows
 		// the program to terminate
@@ -1737,22 +1749,21 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
-		API *fdb = FDB::API::selectAPIVersion(520);
+		API *fdb = FDB::API::selectAPIVersion(610);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
 
-		auto c = fdb->createCluster(std::string());
-		auto db = c->createDatabase();
-		state Reference<Transaction> tr(new Transaction(db));
+		auto db = fdb->createDatabase();
+		state Reference<Transaction> tr = db->createTransaction();
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
 		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
-		Void _ = wait(tr->commit()); // should use retry loop
+		wait(tr->commit()); // should use retry loop
 
 		tr->reset();
 
@@ -1816,7 +1827,7 @@ int main( int argc, char** argv ) {
 	}
 	catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 }

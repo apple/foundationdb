@@ -47,7 +47,7 @@ Fixes
 Java
 ----
 
-* The `ReadTransaction` interface supports the ability to set transaction options.
+* The ``ReadTransaction`` interface supports the ability to set transaction options.
 
 Other Changes
 -------------

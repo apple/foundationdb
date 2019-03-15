@@ -23,7 +23,9 @@
 #pragma once
 
 #include <cinttypes>
-#include "IRandom.h"
+#include "flow/IRandom.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 
 #include <random>
 
@@ -35,7 +37,7 @@ private:
 	uint64_t gen64() {
 		uint64_t curr = next;
 		next = (uint64_t(random()) << 32) ^ random();
-		if (TRACE_SAMPLE()) TraceEvent(SevSample, "random");
+		if (TRACE_SAMPLE()) TraceEvent(SevSample, "Random");
 		return curr;
 	}
 
@@ -89,6 +91,14 @@ public:
 	}
 
 	uint32_t randomUInt32() { return gen64(); }
+
+	uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
+		std::uniform_real_distribution<double> distribution( std::log(min), std::log(maxPlusOne-1) );
+		double logpower = distribution(random);
+		uint32_t loguniform = static_cast<uint32_t>( std::pow( 10, logpower ) );
+		// doubles can be imprecise, so let's make sure we don't violate an edge case.
+		return std::max(std::min(loguniform, maxPlusOne-1), min);
+	}
 
 	UID randomUniqueID() {
 		uint64_t x,y;

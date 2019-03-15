@@ -1,0 +1,84 @@
+version: "3"
+
+services:
+  common: &common
+    image: foundationdb/foundationdb-build:0.0.5
+
+  build-setup: &build-setup
+    <<: *common
+    depends_on: [common]
+    volumes:
+      - ..:/foundationdb
+    working_dir: /foundationdb
+    environment:
+      - MAKEJOBS=1
+      - BUILD_DIR=./work
+
+  release-setup: &release-setup
+    <<: *build-setup
+    environment:
+      - MAKEJOBS=1
+      - RELEASE=true
+      - BUILD_DIR=./work
+
+  snapshot-setup: &snapshot-setup
+    <<: *build-setup
+
+  build-docs:
+    <<: *build-setup
+    command: bash -c 'make -j "$${MAKEJOBS}" docpackage'
+
+
+  release-packages: &release-packages
+    <<: *release-setup
+    command: bash -c 'make -j "$${MAKEJOBS}" packages'
+
+  snapshot-packages: &snapshot-packages
+    <<: *build-setup
+    command: bash -c 'make -j "$${MAKEJOBS}" packages'
+
+  prb-packages:
+    <<: *snapshot-packages
+
+
+  release-bindings: &release-bindings
+    <<: *release-setup
+    command: bash -c 'make -j "$${MAKEJOBS}" bindings'
+
+  snapshot-bindings: &snapshot-bindings
+    <<: *build-setup
+    command: bash -c 'make -j "$${MAKEJOBS}" bindings'
+
+  prb-bindings:
+    <<: *snapshot-bindings
+
+
+  snapshot-cmake: &snapshot-cmake
+    <<: *build-setup
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}"; fi'
+
+  prb-cmake:
+    <<: *snapshot-cmake
+
+
+  snapshot-ctest: &snapshot-ctest
+    <<: *build-setup
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure; fi'
+
+  prb-ctest:
+    <<: *snapshot-ctest
+
+
+  snapshot-correctness: &snapshot-correctness
+    <<: *build-setup
+    command: bash -c 'if [ -f CMakeLists.txt ]; then mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake .. && make -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure; fi'
+
+  prb-correctness:
+    <<: *snapshot-correctness
+
+
+  shell:
+    <<: *build-setup
+    volumes:
+      - ..:/foundationdb
+    entrypoint: /bin/bash

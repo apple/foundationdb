@@ -2,6 +2,20 @@
 Release Notes
 #############
 
+5.0.8
+=====
+
+Features
+--------
+
+* Support upgrades from 3.0 versions.
+
+Fixes
+-----
+
+* Blob backups didn't retry 429 errors. 429 errors do not count against the retry limit.
+* Status was not correctly populating all configuration fields.
+
 5.0.7
 =====
 

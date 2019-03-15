@@ -22,10 +22,10 @@
 #define FLOW_INDEXEDSET_H
 #pragma once
 
-#include "Platform.h"
-#include "FastAlloc.h"
-#include "Trace.h"
-#include "Error.h"
+#include "flow/Platform.h"
+#include "flow/FastAlloc.h"
+#include "flow/Trace.h"
+#include "flow/Error.h"
 
 #include <deque>
 #include <vector>
@@ -96,8 +96,8 @@ public:
 
 	IndexedSet() : root(NULL) {};
 	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) noexcept(true) : root(r.root) { r.root = NULL; }
-	IndexedSet& operator=(IndexedSet&& r) noexcept(true) { delete root; root = r.root; r.root = 0; return *this; }
+	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = NULL; }
+	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
 
 	iterator begin() const;
 	iterator end() const { return iterator(); }
@@ -243,10 +243,11 @@ public:
 	void operator= ( MapPair const& rhs ) { key = rhs.key; value = rhs.value; }
 	MapPair( MapPair const& rhs ) : key(rhs.key), value(rhs.value) {}
 
-	MapPair(MapPair&& r) noexcept(true)  : key(std::move(r.key)), value(std::move(r.value)) {}
-	void operator=(MapPair&& r) noexcept(true) { key = std::move(r.key); value = std::move(r.value); }
+	MapPair(MapPair&& r) BOOST_NOEXCEPT  : key(std::move(r.key)), value(std::move(r.value)) {}
+	void operator=(MapPair&& r) BOOST_NOEXCEPT { key = std::move(r.key); value = std::move(r.value); }
 
 	bool operator<(MapPair<Key,Value> const& r) const { return key < r.key; }
+	bool operator<=(MapPair<Key,Value> const& r) const { return key <= r.key; }
 	bool operator==(MapPair<Key,Value> const& r) const { return key == r.key; }
 	bool operator!=(MapPair<Key,Value> const& r) const { return key != r.key; }
 
@@ -316,8 +317,8 @@ public:
 
 	static int getElementBytes() { return IndexedSet< Pair, Metric >::getElementBytes(); }
 
-	Map(Map&& r) noexcept(true) : set(std::move(r.set)) {}
-	void operator=(Map&& r) noexcept(true) { set = std::move(r.set); }
+	Map(Map&& r) BOOST_NOEXCEPT : set(std::move(r.set)) {}
+	void operator=(Map&& r) BOOST_NOEXCEPT { set = std::move(r.set); }
 
 private:
 	Map( Map<Key,Value,Pair> const& ); // unimplemented
@@ -1086,8 +1087,8 @@ Metric IndexedSet<T,Metric>::sumTo(typename IndexedSet<T,Metric>::iterator end) 
 	return m;
 }
 
-#include "flow.h"
-#include "IndexedSet.actor.h"
+#include "flow/flow.h"
+#include "flow/IndexedSet.actor.h"
 
 template <class T, class Metric>
 void IndexedSet<T,Metric>::erase(typename IndexedSet<T,Metric>::iterator begin, typename IndexedSet<T,Metric>::iterator end) {

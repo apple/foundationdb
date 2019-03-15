@@ -18,47 +18,47 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+// There's something in one of the files below that defines a macros
+// a macro that makes boost interprocess break on Windows.
+#define BOOST_DATE_TIME_NO_LIB
+#include <boost/interprocess/managed_shared_memory.hpp>
+
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/PerfMetric.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FailureMonitorClient.h"
-#include "CoordinationInterface.h"
-#include "WorkerInterface.h"
-#include "ClusterRecruitmentInterface.h"
-#include "ServerDBInfo.h"
-#include "MoveKeys.h"
-#include "ConflictSet.h"
-#include "DataDistribution.h"
-#include "NetworkTest.h"
-#include "IKeyValueStore.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/RestoreInterface.h"
+#include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/NetworkTest.h"
+#include "fdbserver/IKeyValueStore.h"
+#include <algorithm>
 #include <stdarg.h>
 #include <stdio.h>
 #include <fstream>
-#include "pubsub.h"
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#undef min
-#undef max
-#endif
-#include "SimulatedCluster.h"
-#include "TesterInterface.h"
-#include "workloads/workloads.h"
+#include "fdbserver/pubsub.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
-#include "Status.h"
+#include "fdbserver/Status.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
-#include "CoroFlow.h"
+#include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
-
-#define BOOST_DATE_TIME_NO_LIB
-#include <boost/interprocess/managed_shared_memory.hpp>
+#if defined(CMAKE_BUILD) || !defined(WIN32)
+#include "versions.h"
+#endif
 
 #ifdef  __linux__
 #include <execinfo.h>
@@ -68,15 +68,18 @@
 #endif
 #endif
 
-#ifndef WIN32
-#include "versions.h"
+#ifdef WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #endif
 
 #include "flow/SimpleOpt.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE };
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
@@ -150,8 +153,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_METRICSPREFIX,        "--metrics_prefix",            SO_REQ_SEP },
 	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
+	{ OPT_TRACE_FORMAT      ,   "--trace_format",              SO_REQ_SEP },
 
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
+#endif
 
 	SO_END_OF_OPTIONS
 };
@@ -164,7 +170,7 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
-extern uint32_t determinePublicIPAutomatically( ClusterConnectionString const& ccs );
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 extern const char* getHGVersion();
 
@@ -244,75 +250,6 @@ bool debugKeyRange( const char* context, Version version, KeyRangeRef const& key
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) { return false; }
 bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return false; }
 #endif
-
-Future<Void> debugQueryServer( DebugQueryRequest const& req ) {
-	Standalone<VectorRef<DebugEntryRef>> reply;
-
-	for(auto v = debugEntries.begin(); v != debugEntries.end(); ++v)
-		for(auto m = v->begin(); m != v->end(); ++m) {
-			if (m->mutation.type == m->mutation.ClearRange || m->mutation.type == m->mutation.DebugKeyRange) {
-				if (!KeyRangeRef(m->mutation.param1, m->mutation.param2).contains( req.search ))
-					continue;
-			} else if (m->mutation.type == m->mutation.SetValue) {
-				if (m->mutation.param1 != req.search)
-					continue;
-			}
-			reply.push_back( reply.arena(), *m );
-		}
-
-	req.reply.send(reply);
-	return Void();
-}
-
-auto sortByTime = [](DebugEntryRef const& a, DebugEntryRef const& b) { return a.time < b.time; };
-
-/*ACTOR Future<Void> debugSearchMutationCluster( ZookeeperInterface zk, Key key ) {
-	state ZKWatch<ClusterControllerFullInterface> ccWatch(zk, LiteralStringRef("ClusterController"));
-	state ClusterControllerFullInterface cc = wait( ccWatch.get() );
-
-	ASSERT( ccWatch.getLastVersion() );
-
-	Optional<vector<WorkerInterface>> workerList = wait( cc.getWorkers.tryGetReply( GetWorkersRequest() ) );
-	if( !workerList.present() ) {
-		printf("ERROR: CC interface not in ZK\n");
-		return Void();
-	}
-	state vector<WorkerInterface> workers = workerList.get();
-
-	state vector<Future<Standalone<VectorRef<DebugEntryRef>>>> replies( workers.size() );
-	for(int w=0; w<workers.size(); w++) {
-		DebugQueryRequest req;
-		req.search = key;
-		replies[w] = timeoutError(workers[w].debugQuery.getReply( req ), 5.0);
-	}
-	//state vector<Standalone<VectorRef<DebugEntryRef>>> result = wait( getAll( replies ) );
-	Void _ = wait(waitForAllReady( replies ));
-	state vector<Standalone<VectorRef<DebugEntryRef>>> result( workers.size() );
-	for(int r=0; r<result.size(); r++) {
-		if (replies[r].isError())
-			printf("ERROR: Couldn't get results from '%s'\n", workers[r].debugQuery.getEndpoint().address.toString().c_str());
-		else
-			result[r] = replies[r].get();
-	}
-	ASSERT( result.size() == workers.size() );
-
-	Standalone<VectorRef<DebugEntryRef>> all;
-	for(int r=0; r<result.size(); r++)
-		all.append( all.arena(), &result[r][0], result[r].size() );
-	std::sort( all.begin(), all.end(), sortByTime );
-	printf("\n\n");
-	for(auto e = all.begin(); e != all.end(); ++e) {
-		const char* type =
-			e->mutation.type == MutationRef::SetValue ? "SetValue" :
-			e->mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			e->mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			"UnknownMutation";
-		printf("%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", e->time, e->address.toString().c_str(), e->context.toString().c_str(), e->version, type, printable(e->mutation.param1).c_str(), printable(e->mutation.param2).c_str());
-	}
-	printf("\n\n");
-
-	return Void();
-}*/
 
 #ifdef _WIN32
 #include <sddl.h>
@@ -394,7 +331,7 @@ UID getSharedMemoryMachineId() {
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
 		}
-		catch (boost::interprocess::interprocess_exception &) {
+		catch (boost::interprocess::interprocess_exception &e) {
 			try {
 				//If the shared memory already exists, open it read-only in case it was created by another user
 				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, "fdbserver");
@@ -415,7 +352,7 @@ UID getSharedMemoryMachineId() {
 
 
 ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess() ) {
-	Void _ = wait( trigger );
+	wait( trigger );
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator.killProcess( m, ISimulator::KillInstantly );
@@ -534,11 +471,11 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				return Void();
 			} catch (Error& e) {
 				fclose(output);
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError,"dumpDatabaseError").error(e).detail("Filename", outputFilename);
+		TraceEvent(SevError,"DumpDatabaseError").error(e).detail("Filename", outputFilename);
 		throw;
 	}
 }
@@ -617,6 +554,8 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Delete the oldest log file when the total size of all log\n"
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
+	printf("  --trace_format FORMAT\n"
+		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
 		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
 		   "                 to a random value shared by all fdbserver processes on this\n"
@@ -624,15 +563,18 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
-		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
+		   "                 Machine class (valid options are storage, transaction,\n"
+		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
+		   "                 and cluster_controller).\n");
+#ifndef TLS_DISABLED
 	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
 	if( devhelp ) {
 		printf("  -r ROLE, --role ROLE\n"
 			   "                 Server role (valid options are fdbd, test, multitest,\n");
-		printf("                 simulation, networktestclient, networktestserver,\n");
+		printf("                 simulation, networktestclient, networktestserver, restore\n");
 		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
 #ifdef _WIN32
 		printf("  -n, --newconsole\n"
@@ -796,6 +738,103 @@ Optional<bool> checkBuggifyOverride(const char *testFile) {
 	return Optional<bool>();
 }
 
+// Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress objects.
+std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
+                                                                        const vector<std::string>& publicAddressStrs,
+                                                                        vector<std::string>& listenAddressStrs) {
+	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
+		fprintf(stderr,
+		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+	listenAddressStrs.resize(publicAddressStrs.size(), "public");
+
+	if (publicAddressStrs.size() > 2) {
+		fprintf(stderr, "ERROR: maximum 2 public/listen addresses are allowed\n");
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+
+	NetworkAddressList publicNetworkAddresses;
+	NetworkAddressList listenNetworkAddresses;
+
+	const NetworkAddressList& coordinators = connectionFile.getConnectionString().coordinators();
+	ASSERT(coordinators.size() > 0);
+
+	int numTLSAddress = 0;
+
+	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
+		const std::string& publicAddressStr = publicAddressStrs[ii];
+		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
+
+		if (autoPublicAddress) {
+			try {
+				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				publicNetworkAddresses.emplace_back(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
+			} catch (Error& e) {
+				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
+				throw;
+			}
+		} else {
+			try {
+				publicNetworkAddresses.push_back(NetworkAddress::parse(publicAddressStr));
+			} catch (Error&) {
+				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", publicAddressStr.c_str());
+				throw;
+			}
+		}
+
+		const NetworkAddress& currentPublicAddress = publicNetworkAddresses.back();
+		if (!currentPublicAddress.isValid()) {
+			fprintf(stderr, "ERROR: %s is not a valid IP address\n", currentPublicAddress.toString().c_str());
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (currentPublicAddress.isTLS()) {
+			numTLSAddress += 1;
+		}
+
+		const std::string& listenAddressStr = listenAddressStrs[ii];
+		if (listenAddressStr == "public") {
+			listenNetworkAddresses.push_back(currentPublicAddress);
+		} else {
+			try {
+				listenNetworkAddresses.push_back(NetworkAddress::parse(listenAddressStr));
+			} catch (Error&) {
+				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
+				throw;
+			}
+
+			if (listenNetworkAddresses.back().isTLS() != currentPublicAddress.isTLS()) {
+				fprintf(stderr,
+				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
+				        listenAddressStr.c_str(), publicAddressStr.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+
+		bool hasSameCoord =
+		    std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+			    if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+				    return address.isTLS() == currentPublicAddress.isTLS();
+			    }
+			    return true;
+		    });
+		if (!hasSameCoord) {
+			fprintf(stderr, "ERROR: TLS state of public address %s does not match in coordinator list.\n",
+			        publicAddressStr.c_str());
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+	}
+
+	if (numTLSAddress > 1 || publicNetworkAddresses.size() - numTLSAddress > 1) {
+		fprintf(stderr, "ERROR: only one public address of each TLS state is allowed.\n");
+		flushAndExit(FDB_EXIT_ERROR);
+	}
+
+	return std::make_pair(publicNetworkAddresses, listenNetworkAddresses);
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -812,7 +851,7 @@ int main(int argc, char* argv[]) {
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-		
+
 		std::string commandLine;
 		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
@@ -833,6 +872,7 @@ int main(int argc, char* argv[]) {
 			CreateTemplateDatabase,
 			NetworkTestClient,
 			NetworkTestServer,
+			Restore,
 			KVFileIntegrityCheck,
 			KVFileGenerateIOLogChecksums,
 			ConsistencyCheck
@@ -844,11 +884,10 @@ int main(int argc, char* argv[]) {
 
 		const char *testFile = "tests/default.txt";
 		std::string kvFile;
-		std::string publicAddressStr, listenAddressStr = "public";
 		std::string testServersStr;
-		NetworkAddress publicAddress, listenAddress;
+		std::vector<std::string> publicAddressStrs, listenAddressStrs;
 		const char *targetKey = NULL;
-		uint64_t memLimit = 8LL << 30;
+		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
 		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
@@ -966,6 +1005,7 @@ int main(int argc, char* argv[]) {
 					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
 					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
 					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
+					else if (!strcmp(sRole, "restore")) role = Restore;
 					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
 					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
 					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
@@ -976,10 +1016,10 @@ int main(int argc, char* argv[]) {
 					}
 					break;
 				case OPT_PUBLICADDR:
-					publicAddressStr = args.OptionArg();
+					publicAddressStrs.push_back(args.OptionArg());
 					break;
 				case OPT_LISTEN:
-					listenAddressStr = args.OptionArg();
+					listenAddressStrs.push_back(args.OptionArg());
 					break;
 				case OPT_CONNFILE:
 					connFile = args.OptionArg();
@@ -1106,7 +1146,7 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_RANDOMSEED: {
 					char* end;
-					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 10 );
+					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
 					if( *end ) {
 						fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
 						printHelpTeaser(argv[0]);
@@ -1190,14 +1230,14 @@ int main(int argc, char* argv[]) {
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
 					break;
-				case TLSOptions::OPT_TLS_PLUGIN:
-					try {
-						tlsOptions->set_plugin_name_or_path( args.OptionArg() );
-					} catch (Error& e) {
-						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
+				case OPT_TRACE_FORMAT:
+					if (!selectTraceFormatter(args.OptionArg())) {
+						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 					}
+					break;
+#ifndef TLS_DISABLED
+				case TLSOptions::OPT_TLS_PLUGIN:
+					args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
@@ -1214,6 +1254,7 @@ int main(int argc, char* argv[]) {
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers.push_back(args.OptionArg());
 					break;
+#endif
 			}
 		}
 
@@ -1237,8 +1278,10 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
-
+		bool autoPublicAddress = std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
+											 [](const std::string& addr) {
+												 return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+											 });
 		Reference<ClusterConnectionFile> connectionFile;
 		if ( (role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck && role != KVFileGenerateIOLogChecksums) || autoPublicAddress ) {
 
@@ -1278,76 +1321,30 @@ int main(int argc, char* argv[]) {
 			// failmon?
 		}
 
-		if (publicAddressStr != "") {
-			if (autoPublicAddress) {
-				try {
-					NetworkAddress parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-					auto publicIP = determinePublicIPAutomatically( connectionFile->getConnectionString() );
-					publicAddress = NetworkAddress( publicIP, parsedAddress.port, true, parsedAddress.isTLS() );
-				} catch (Error& e) {
-					fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
-					throw;
-				}
-			} else {
-				try {
-					publicAddress = NetworkAddress::parse(publicAddressStr);
-				} catch (Error&) {
-					fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", publicAddressStr.c_str());
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
-				}
+		NetworkAddressList publicAddresses, listenAddresses;
+		try {
+			if (!publicAddressStrs.empty()) {
+				std::tie(publicAddresses, listenAddresses) = buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
 			}
-
-			bool clusterIsTLS = connectionFile->getConnectionString().coordinators()[0].isTLS();
-
-			// Decide whether or not to use TLS based on if we see any of the coordinators have TLS enabled.
-			//  Note that we are not supporting mixed clusters, but are defaulting to using TLS based on
-			//  the contents of the cluster file. Note that we look at all the servers in the cluster file
-			//  and if ANY of them are TLS, we turn TLS on.
-			if( !StringRef(publicAddressStr).endsWith(LiteralStringRef(":tls")) ) {
-				publicAddress = NetworkAddress( publicAddress.ip, publicAddress.port, true, clusterIsTLS );
-			} else if( publicAddress.isTLS() != clusterIsTLS ) {
-				fprintf(stderr, "ERROR: public address must not specify TLS if coordinators are non-TLS\n");
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
+		} catch (Error&) {
+			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if( role == FDBD && publicAddress.ip == 0 ) {
-			if (publicAddressStr == "")
-				fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
-			else
-				fprintf(stderr, "ERROR: cannot use 0.0.0.0 as a public ip address\n");
+		if( role == FDBD && publicAddresses.empty()) {
+			fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if(role == ConsistencyCheck) {
-			if(publicAddressStr != "") {
+			if(!publicAddresses.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddress = NetworkAddress(publicIP, ::getpid());
-		}
-
-		if (listenAddressStr == "public")
-			listenAddress = publicAddress;
-		else {
-			try {
-				listenAddress = NetworkAddress::parse(listenAddressStr);
-			} catch (Error&) {
-				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-		}
-
-		if (role == FDBD && !publicAddress.isValid()) {
-			fprintf(stderr, "ERROR: Public address not specified\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
+			publicAddresses.push_back(NetworkAddress(publicIP, ::getpid()));
 		}
 
 		if (role==Simulation)
@@ -1388,7 +1385,9 @@ int main(int argc, char* argv[]) {
 		CLIENT_KNOBS = clientKnobs;
 
 		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
-
+		if (role != Simulation) {
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+		}
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
@@ -1406,6 +1405,7 @@ int main(int argc, char* argv[]) {
 				throw;
 			}
 		}
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1434,8 +1434,6 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		Future<Void> listenError;
-
 		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code path
 		if (maxLogsSet) {
 			if (maxLogsSizeSet) {
@@ -1458,18 +1456,21 @@ int main(int argc, char* argv[]) {
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		TraceEvent::setNetworkThread();
+
+		std::vector<Future<Void>> listenErrors;
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(NetworkAddress(), useThreadPool, true);
+			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(1);
 
-			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);
+			openTraceFile(publicAddresses[0], rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
+#ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
 				tlsOptions->set_cert_file( tlsCertPath );
 			if (tlsCAPath.size())
@@ -1484,16 +1485,22 @@ int main(int argc, char* argv[]) {
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
 			tlsOptions->register_network();
-
-			if (role == FDBD || role == NetworkTestServer) {
-				try {
-					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
-					if (listenError.isReady()) listenError.get();
-				} catch (Error& e) {
-					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s\n", publicAddress.toString().c_str(), listenAddress.toString().c_str());
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
+#endif
+			if (role == FDBD || role == NetworkTestServer || role == Restore) {
+				for (int ii = 0; ii < publicAddresses.size(); ++ii) {
+					const NetworkAddress& publicAddress = publicAddresses[ii];
+					const NetworkAddress& listenAddress = listenAddresses[ii];
+					try {
+						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
+						listenErrors.push_back(errorF);
+						if (errorF.isReady()) errorF.get();
+					} catch (Error& e) {
+						TraceEvent("BindError").error(e);
+						fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n",
+								publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
 				}
 			}
 
@@ -1597,7 +1604,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1605,11 +1612,9 @@ int main(int argc, char* argv[]) {
 			setupSlowTaskProfiler();
 
 			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddress.port);  // SOMEDAY: Better default
+				dataFolder = format("fdb/%d/", publicAddresses[0].port);  // SOMEDAY: Better default
 
-			vector<Future<Void>> actors;
-			actors.push_back( listenError );
-
+			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
@@ -1636,12 +1641,23 @@ int main(int argc, char* argv[]) {
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
+		} else if (role == Restore) {
+			f = stopAfter( restoreWorker(connectionFile, localities) );
+			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter( KVFileCheck(kvFile, true) );
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
-			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
-			g_network->run();
+			Optional<Void> result;
+			try {
+				GenerateIOLogChecksumFile(kvFile);
+				result = Void();
+			}
+			catch(Error &e) {
+				fprintf(stderr, "Fatal Error: %s\n", e.what());
+			}
+
+			f = result;
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
@@ -1726,7 +1742,8 @@ int main(int argc, char* argv[]) {
 				<< FastAllocator<512>::pageCount << " "
 				<< FastAllocator<1024>::pageCount << " "
 				<< FastAllocator<2048>::pageCount << " "
-				<< FastAllocator<4096>::pageCount << std::endl;
+				<< FastAllocator<4096>::pageCount << " "
+				<< FastAllocator<8192>::pageCount << std::endl;
 
 			vector< std::pair<std::string, const char*> > typeNames;
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
@@ -1773,7 +1790,7 @@ int main(int argc, char* argv[]) {
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}

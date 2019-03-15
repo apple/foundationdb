@@ -3,4 +3,4 @@ testName=UnitTests
 startDelay=0
 useDB=false
 maxTestCases=1
-testsMatching=
+testsMatching=/

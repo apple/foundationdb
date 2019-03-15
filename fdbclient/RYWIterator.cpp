@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "RYWIterator.h"
-#include "KeyRangeMap.h"
+#include "fdbclient/RYWIterator.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "flow/UnitTest.h"
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = { 
@@ -48,16 +48,24 @@ bool RYWIterator::is_unreadable() { return writes.is_unreadable(); }
 ExtStringRef RYWIterator::beginKey() { return begin_key_cmp <= 0 ? writes.beginKey() : cache.beginKey(); }
 ExtStringRef RYWIterator::endKey() { return end_key_cmp <= 0 ? cache.endKey() : writes.endKey(); }
 
-KeyValueRef const& RYWIterator::kv( Arena& arena ) {
+const KeyValueRef* RYWIterator::kv(Arena& arena) {
 	if(is_unreadable())
 		throw accessed_unreadable();
-	
-	if (writes.is_unmodified_range())
+
+	if (writes.is_unmodified_range()) {
 		return cache.kv( arena );
-	else if (writes.is_independent() || cache.is_empty_range())
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), Optional<ValueRef>(), arena ).value.get() );
-	else
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), cache.kv(arena).value, arena ).value.get() );
+	}
+
+	auto result = (writes.is_independent() || cache.is_empty_range())
+	                  ? WriteMap::coalesceUnder(writes.op(), Optional<ValueRef>(), arena)
+	                  : WriteMap::coalesceUnder(writes.op(), cache.kv(arena)->value, arena);
+
+	if (!result.value.present()) {
+		// Key is now deleted, which can happen because of CompareAndClear.
+		return nullptr;
+	}
+	temp = KeyValueRef(writes.beginKey().assertRef(), result.value.get());
+	return &temp;
 }
 
 RYWIterator& RYWIterator::operator++() {
@@ -208,7 +216,11 @@ void testSnapshotCache() {
 	RYWIterator it(&cache, &writes);
 	it.skip(searchKeys.begin);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv(arena).value).c_str() : "");
+		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		        printable(it.endKey().toStandaloneStringRef()).c_str(),
+		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
+		        it.is_kv() ? printable(it.kv(arena)->value).c_str() : "");
 		if (it.endKey() >= searchKeys.end) break;
 		++it;
 	}
@@ -216,7 +228,11 @@ void testSnapshotCache() {
 
 	it.skip(searchKeys.end);
 	while (true) {
-		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n", printable(it.beginKey().toStandaloneStringRef()).c_str(), printable(it.endKey().toStandaloneStringRef()).c_str(), it.is_empty_range() ? "empty" : ( it.is_kv() ? "keyvalue" : "unknown" ), it.is_kv() ? printable(it.kv(arena).value).c_str() : "" );
+		fprintf(stderr, "b: '%s' e: '%s' type: %s value: '%s'\n",
+		        printable(it.beginKey().toStandaloneStringRef()).c_str(),
+		        printable(it.endKey().toStandaloneStringRef()).c_str(),
+		        it.is_empty_range() ? "empty" : (it.is_kv() ? "keyvalue" : "unknown"),
+		        it.is_kv() ? printable(it.kv(arena)->value).c_str() : "");
 		if (it.beginKey() <= searchKeys.begin) break;
 		--it;
 	}
@@ -354,7 +370,7 @@ static int getWriteMapCount(WriteMap *p) {
 	return count;
 }
 
-TEST_CASE("fdbclient/WriteMap/emptiness") {
+TEST_CASE("/fdbclient/WriteMap/emptiness") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -363,7 +379,7 @@ TEST_CASE("fdbclient/WriteMap/emptiness") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/clear") {
+TEST_CASE("/fdbclient/WriteMap/clear") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -380,7 +396,7 @@ TEST_CASE("fdbclient/WriteMap/clear") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
+TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -453,7 +469,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
+TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -526,7 +542,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/addValue") {
+TEST_CASE("/fdbclient/WriteMap/addValue") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -541,7 +557,7 @@ TEST_CASE("fdbclient/WriteMap/addValue") {
 	return Void();
 }
 
-TEST_CASE("fdbclient/WriteMap/random") {
+TEST_CASE("/fdbclient/WriteMap/random") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
@@ -558,7 +574,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
 			writes.addConflictRange(range);
 			conflictMap.insert(range, true);
-			TraceEvent("RWMT_addConflictRange").detail("range", printable(range));
+			TraceEvent("RWMT_AddConflictRange").detail("Range", printable(range));
 		}
 		else if(r == 1) {
 			KeyRangeRef range = RandomTestImpl::getRandomRange(arena);
@@ -567,7 +583,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			conflictMap.insert(range, false);
 			clearMap.insert(range, false);
 			unreadableMap.insert(range, true);
-			TraceEvent("RWMT_addUnmodifiedAndUnreadableRange").detail("range", printable(range));
+			TraceEvent("RWMT_AddUnmodifiedAndUnreadableRange").detail("Range", printable(range));
 		}
 		else if (r == 2) {
 			bool addConflict = g_random->random01() < 0.5;
@@ -578,7 +594,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 				conflictMap.insert(range, true);
 			clearMap.insert(range, true);
 			unreadableMap.insert(range, false);
-			TraceEvent("RWMT_clear").detail("range", printable(range)).detail("addConflict", addConflict);
+			TraceEvent("RWMT_Clear").detail("Range", printable(range)).detail("AddConflict", addConflict);
 		}
 		else if (r == 3) {
 			bool addConflict = g_random->random01() < 0.5;
@@ -590,7 +606,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
-			TraceEvent("RWMT_setVersionstampedValue").detail("key", printable(key)).detail("value", value.size()).detail("addConflict", addConflict);
+			TraceEvent("RWMT_SetVersionstampedValue").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else if (r == 4) {
 			bool addConflict = g_random->random01() < 0.5;
@@ -602,7 +618,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
 			unreadableMap.insert(key, true);
-			TraceEvent("RWMT_setVersionstampedKey").detail("key", printable(key)).detail("value", value.size()).detail("addConflict", addConflict);
+			TraceEvent("RWMT_SetVersionstampedKey").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else if (r == 5) {
 			bool addConflict = g_random->random01() < 0.5;
@@ -622,7 +638,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			if (addConflict)
 				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
-			TraceEvent("RWMT_and").detail("key", printable(key)).detail("value", value.size()).detail("addConflict", addConflict);
+			TraceEvent("RWMT_And").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 		else {
 			bool addConflict = g_random->random01() < 0.5;
@@ -636,7 +652,7 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			if (addConflict)
 				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
-			TraceEvent("RWMT_set").detail("key", printable(key)).detail("value", value.size()).detail("addConflict", addConflict);
+			TraceEvent("RWMT_Set").detail("Key", printable(key)).detail("Value", value.size()).detail("AddConflict", addConflict);
 		}
 	}
 
@@ -648,23 +664,23 @@ TEST_CASE("fdbclient/WriteMap/random") {
 	for (; it.beginKey() < allKeys.end; ++it) {
 		if (it.is_operation()) {
 			ASSERT(setIter != setEnd);
-			TraceEvent("RWMT_checkOperation")
-				.detail("wm_key", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("wm_size", it.op().size())
-				.detail("wm_value", it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
-				.detail("wm_type", (int)it.op().top().type)
-				.detail("sm_key", printable(setIter->first))
-				.detail("sm_size", setIter->second.size())
-				.detail("sm_value", setIter->second.top().value.present() ? std::to_string(setIter->second.top().value.get().size()) : "Not Found")
-				.detail("sm_type", (int)setIter->second.top().type);
+			TraceEvent("RWMT_CheckOperation")
+				.detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
+				.detail("WmSize", it.op().size())
+				.detail("WmValue", it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
+				.detail("WmType", (int)it.op().top().type)
+				.detail("SmKey", printable(setIter->first))
+				.detail("SmSize", setIter->second.size())
+				.detail("SmValue", setIter->second.top().value.present() ? std::to_string(setIter->second.top().value.get().size()) : "Not Found")
+				.detail("SmType", (int)setIter->second.top().type);
 			ASSERT(it.beginKey() == setIter->first && it.op() == setIter->second);
 			++setIter;
 		}
 	}
 
-	TraceEvent("RWMT_checkOperationFinal")
-		.detail("wm_key", printable(it.beginKey().toStandaloneStringRef()))
-		.detail("sm_iter", setIter == setEnd);
+	TraceEvent("RWMT_CheckOperationFinal")
+		.detail("WmKey", printable(it.beginKey().toStandaloneStringRef()))
+		.detail("SmIter", setIter == setEnd);
 
 	ASSERT(it.beginKey() >= allKeys.end && setIter == setEnd);
 
@@ -711,11 +727,11 @@ TEST_CASE("fdbclient/WriteMap/random") {
 	auto unreadableEnd = unreadableRanges.end();
 
 	while (it.beginKey() < allKeys.end && unreadableIter != unreadableEnd) {
-		TraceEvent("RWMT_checkUnreadable")
-			.detail("writeMapRange", printable(KeyRangeRef(it.beginKey().toStandaloneStringRef(), it.endKey().toStandaloneStringRef())))
-			.detail("unreadableMapRange", printable(unreadableIter.range()))
-			.detail("writeMapValue", it.is_unreadable())
-			.detail("unreadableMapValue", unreadableIter.value());
+		TraceEvent("RWMT_CheckUnreadable")
+			.detail("WriteMapRange", printable(KeyRangeRef(it.beginKey().toStandaloneStringRef(), it.endKey().toStandaloneStringRef())))
+			.detail("UnreadableMapRange", printable(unreadableIter.range()))
+			.detail("WriteMapValue", it.is_unreadable())
+			.detail("UnreadableMapValue", unreadableIter.value());
 		ASSERT(unreadableIter.value() == it.is_unreadable());
 		if (unreadableIter.range().end < it.endKey()) {
 			++unreadableIter;

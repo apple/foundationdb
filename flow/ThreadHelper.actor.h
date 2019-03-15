@@ -24,11 +24,12 @@
 // version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_THREADHELPER_ACTOR_G_H)
 		#define FLOW_THREADHELPER_ACTOR_G_H
-		#include "ThreadHelper.actor.g.h"
+		#include "flow/ThreadHelper.actor.g.h"
 #elif !defined(FLOW_THREADHELPER_ACTOR_H)
 		#define FLOW_THREADHELPER_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // template <class F>
 // void onMainThreadVoid( F f ) {
@@ -461,7 +462,7 @@ public:
 	ThreadFuture( const ThreadFuture<T>& rhs ) : sav(rhs.sav) {
 		if (sav) sav->addref();
 	}
-	ThreadFuture(ThreadFuture<T>&& rhs) noexcept(true) : sav(rhs.sav) {
+	ThreadFuture(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
 		rhs.sav = 0;
 	}
 	ThreadFuture( const T& presentValue ) 
@@ -486,7 +487,7 @@ public:
 		if (sav) sav->delref();
 		sav = rhs.sav;
 	}
-	void operator=(ThreadFuture<T>&& rhs) noexcept(true) {
+	void operator=(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
 			if (sav) sav->delref();
 			sav = rhs.sav;
@@ -552,12 +553,12 @@ Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 
 ACTOR template <class R, class F> Future<Void> doOnMainThread( Future<Void> signal, F f, ThreadSingleAssignmentVar<R> *result ) {
 	try {
-		Void _ = wait( signal );
+		wait( signal );
 		R r = wait( f() );
 		result->send(r);
 	} catch (Error& e) {
 		if(!result->canBeSet()) {
-			TraceEvent(SevError, "onMainThreadSetTwice").error(e,true);
+			TraceEvent(SevError, "OnMainThreadSetTwice").error(e,true);
 		}
 		result->sendError(e);
 	}
@@ -567,7 +568,7 @@ ACTOR template <class R, class F> Future<Void> doOnMainThread( Future<Void> sign
 }
 
 ACTOR template <class F> void doOnMainThreadVoid( Future<Void> signal, F f, Error *err ) {
-	Void _ = wait( signal );
+	wait( signal );
 	if (err && err->code() != invalid_error_code)
 		return;
 	try {
@@ -629,4 +630,5 @@ private:
 	ThreadSpinLock lock;
 };
 
+#include "flow/unactorcompiler.h"
 #endif

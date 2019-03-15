@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {
 	Value probeWorkload;
@@ -95,7 +95,7 @@ struct PerformanceWorkload : TestWorkload {
 		TraceEvent start("PerformaceSetupStarting");
 		for(int i = 0; i < options.size(); i++) {
 			for(int j = 0; j < options[i].size(); j++) {
-				start.detail(format("option-%d-%d", i, j).c_str(), 
+				start.detail(format("Option-%d-%d", i, j).c_str(), 
 					printable( options[i][j].key ) + "=" + printable( options[i][j].value ) );
 			}
 		}
@@ -103,21 +103,21 @@ struct PerformanceWorkload : TestWorkload {
 
 	//FIXME: does not use testers which are recruited on workers
 	ACTOR Future<vector<TesterInterface>> getTesters( PerformanceWorkload *self) {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers;
+		state vector<WorkerDetails> workers;
 
 		loop {
 			choose {
-				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
+				when( vector<WorkerDetails> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
 					workers = w;
 					break; 
 				}
-				when( Void _ = wait( self->dbInfo->onChange() ) ) {}
+				when( wait( self->dbInfo->onChange() ) ) {}
 			}
 		}
 
 		vector<TesterInterface> ts;
 		for(int i=0; i<workers.size(); i++)
-			ts.push_back(workers[i].first.testerInterface);
+			ts.push_back(workers[i].interf.testerInterface);
 		return ts;
 	}
 
@@ -131,7 +131,7 @@ struct PerformanceWorkload : TestWorkload {
 		TestSpec spec( LiteralStringRef("PerformanceSetup"), false, false );
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait( runWorkload( cx, testers, self->dbName, spec ) );
+		DistributedTestResults results = wait( runWorkload( cx, testers, spec ) );
 
 		return Void();
 	}
@@ -157,7 +157,7 @@ struct PerformanceWorkload : TestWorkload {
 			start.detail("RateTarget", tps);
 			for(int i = 0; i < options.size(); i++) {
 				for(int j = 0; j < options[i].size(); j++) {
-					start.detail(format("option-%d-%d", i, j).c_str(), 
+					start.detail(format("Option-%d-%d", i, j).c_str(), 
 						printable( options[i][j].key ) + "=" + printable( options[i][j].value ) );
 				}
 			}
@@ -166,10 +166,10 @@ struct PerformanceWorkload : TestWorkload {
 				TestSpec spec( LiteralStringRef("PerformanceRun"), false, false );
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait( runWorkload( cx, self->testers, self->dbName, spec ) );
+				DistributedTestResults r = wait( runWorkload( cx, self->testers, spec ) );
 				results = r;
 			} catch(Error& e) {
-				TraceEvent("PerformanceRunError").detail("Workload", printable(self->probeWorkload)).error(e, true);
+				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));
 				break;
 			}
 			PerfMetric tpsMetric = self->getNamedMetric( "Transactions/sec", results.metrics );
@@ -213,7 +213,7 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start( Database cx, PerformanceWorkload *self ) {
-		Void _ = wait( self->getSaturation( cx, self ) );
+		wait( self->getSaturation( cx, self ) );
 		TraceEvent("PerformanceSaturation").detail("SaturationRate", self->maxAchievedTPS.value())
 			.detail("SaturationLatency", self->latencySaturation.value());
 		return Void();

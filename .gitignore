@@ -16,7 +16,9 @@ packaging/msi/FDBInstaller.msi
 *.pom
 bindings/java/pom*.xml
 bindings/java/src*/main/overview.html
-bindings/java/src*/main/com/apple/foundationdb/*Options.java
+bindings/java/src*/main/com/apple/foundationdb/NetworkOptions.java
+bindings/java/src*/main/com/apple/foundationdb/DatabaseOptions.java
+bindings/java/src*/main/com/apple/foundationdb/TransactionOptions.java
 bindings/java/src*/main/com/apple/foundationdb/StreamingMode.java
 bindings/java/src*/main/com/apple/foundationdb/MutationType.java
 bindings/java/src*/main/com/apple/foundationdb/ConflictRangeType.java
@@ -42,12 +44,14 @@ packaging/msi/FDBInstaller.wix*
 .ccache
 .deps/
 .objs/
+.cmds/
 bindings/c/fdb_c.symbols
 bindings/go/build
 bindings/go/godoc
 bindings/java/.classstamp*
 bindings/java/classes*/
 bindings/java/javadoc*/
+packaging/docker/website
 
 # Testing and logging
 packaging/msi/*.log
@@ -66,10 +70,14 @@ trace.*.xml
 .project
 .pydevproject
 .vscode
+.vs/
 FoundationDB.xcodeproj
 foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
+compile_commands.json
+flow/actorcompiler/obj
+flow/coveragetool/obj
 
 # Temporary and user configuration files
 *~
@@ -79,3 +87,5 @@ ipch/
 .envrc
 .DS_Store
 temp/
+/compile_commands.json
+/.ccls-cache

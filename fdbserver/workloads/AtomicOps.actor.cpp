@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "BulkSetup.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
@@ -45,7 +45,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version (500) with a 10% probability
 		// Actual change of api Version happens in setup
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
-		TraceEvent("AtomicOpsApiVersion500").detail("apiVersion500", apiVersion500);
+		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
 		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
@@ -87,14 +87,14 @@ struct AtomicOpsWorkload : TestWorkload {
 		default:
 			ASSERT(false);
 		}
-		TraceEvent("AtomicWorkload").detail("opType", opType);
+		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
 
 	virtual std::string description() { return "AtomicOps"; }
 
 	virtual Future<Void> setup( Database const& cx ) {
 		if (apiVersion500)
-			cx->cluster->apiVersion = 500;
+			cx->apiVersion = 500;
 
 		if(clientId != 0)
 			return Void();
@@ -122,7 +122,6 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
 		state int g = 0;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "AtomicOps");
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
@@ -131,10 +130,10 @@ struct AtomicOpsWorkload : TestWorkload {
 						uint64_t intValue = 0;
 						tr.set(StringRef(format("ops%08x%08x",g,i)), StringRef((const uint8_t*) &intValue, sizeof(intValue)));
 					}
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -144,7 +143,7 @@ struct AtomicOpsWorkload : TestWorkload {
 	ACTOR Future<Void> atomicOpWorker( Database cx, AtomicOpsWorkload* self, double delay ) {
 		state double lastTime = now();
 		loop {
-			Void _ = wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
@@ -153,10 +152,10 @@ struct AtomicOpsWorkload : TestWorkload {
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
 					tr.atomicOp(StringRef(format("ops%08x%08x",group,g_random->randomInt(0,self->nodeCount/100))), val, self->opType);
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -166,49 +165,55 @@ struct AtomicOpsWorkload : TestWorkload {
 		state int g = 0;
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
+			state Standalone<RangeResultRef> log;
 			loop {
 				try {
-					Key begin(format("log%08x", g));
-					state Standalone<RangeResultRef> log = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
-					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
-					for(auto& kv : log) {
-						uint64_t intValue = 0;
-						memcpy(&intValue, kv.value.begin(), kv.value.size());
-						tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
-					}
-
-					Key begin(format("ops%08x", g));
-					Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
-					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
-					for(auto& kv : ops) {
-						uint64_t intValue = 0;
-						memcpy(&intValue, kv.value.begin(), kv.value.size());
-						tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
-					}
-
-					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-						TraceEvent(SevError, "LogMismatch").detail("logResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("opsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
-					}
-
-					if( self->opType == MutationRef::AddValue ) {
-						uint64_t opsResult=0;
-						Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
-						memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
-						uint64_t logResult=0;
+					{
+						Key begin(format("log%08x", g));
+						Standalone<RangeResultRef> log_ = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+						log = log_;
+						uint64_t zeroValue = 0;
+						tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
 						for(auto& kv : log) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
-							logResult += intValue;
-						}
-						if(logResult != opsResult) {
-							TraceEvent(SevError, "LogAddMismatch").detail("logResult", logResult).detail("opResult", opsResult).detail("opsResultStr", printable(opsResultStr)).detail("size", opsResultStr.size());
+							tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
 						}
 					}
-					break;
+
+					{
+						Key begin(format("ops%08x", g));
+						Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+						uint64_t zeroValue = 0;
+						tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
+						for(auto& kv : ops) {
+							uint64_t intValue = 0;
+							memcpy(&intValue, kv.value.begin(), kv.value.size());
+							tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
+						}
+
+						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
+							TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+						}
+
+						if( self->opType == MutationRef::AddValue ) {
+							uint64_t opsResult=0;
+							Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
+							memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
+							uint64_t logResult=0;
+							for(auto& kv : log) {
+								uint64_t intValue = 0;
+								memcpy(&intValue, kv.value.begin(), kv.value.size());
+								logResult += intValue;
+							}
+							if(logResult != opsResult) {
+								TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
+							}
+						}
+						break;
+					}
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

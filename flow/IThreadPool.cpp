@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "IThreadPool.h"
+#include "flow/IThreadPool.h"
 
 #include <algorithm>
 #define BOOST_SYSTEM_NO_LIB

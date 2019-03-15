@@ -38,6 +38,8 @@ public:
 	double FAILURE_MIN_DELAY;
 	double FAILURE_TIMEOUT_DELAY;
 	double CLIENT_FAILURE_TIMEOUT_DELAY;
+	double FAILURE_EMERGENCY_DELAY;
+	double FAILURE_MAX_GENERATIONS;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -46,12 +48,15 @@ public:
 	double DEFAULT_BACKOFF;
 	double DEFAULT_MAX_BACKOFF;
 	double BACKOFF_GROWTH_RATE;
+	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
+	int PROXY_COMMIT_OVERHEAD_BYTES;
 
 	int64_t TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
 	int64_t SYSTEM_KEY_SIZE_LIMIT;
 	int64_t VALUE_SIZE_LIMIT;
 	int64_t SPLIT_KEY_SIZE_LIMIT;
+	int METADATA_VERSION_CACHE_SIZE;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -65,6 +70,8 @@ public:
 	int STORAGE_METRICS_SHARD_LIMIT;
 	double STORAGE_METRICS_UNFAIR_SPLIT_LIMIT;
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
+	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
+	double DETAILED_HEALTH_METRICS_MAX_STALENESS;
 
 	//KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
@@ -73,6 +80,9 @@ public:
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
 	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
+	double NO_RECENT_UPDATES_DURATION;
+	double FAST_WATCH_TIMEOUT;
+	double WATCH_TIMEOUT;
 
 	double IS_ACCEPTABLE_DELAY;
 
@@ -145,6 +155,7 @@ public:
 	int HTTP_SEND_SIZE;
 	int HTTP_READ_SIZE;
 	int HTTP_VERBOSE_LEVEL;
+	std::string HTTP_REQUEST_ID_HEADER;
 	int BLOBSTORE_CONNECT_TRIES;
 	int BLOBSTORE_CONNECT_TIMEOUT;
 	int BLOBSTORE_MAX_CONNECTION_LIFE;
@@ -168,8 +179,12 @@ public:
 	int BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	int BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 
-	int CONSISTENCY_CHECK_RATE_LIMIT;
+	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
+	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 	int CONSISTENCY_CHECK_RATE_WINDOW;
+
+	// TLS related
+	int CHECK_CONNECTED_COORDINATOR_NUM_DELAY;
 
 	ClientKnobs(bool randomize = false);
 };

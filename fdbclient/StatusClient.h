@@ -22,7 +22,7 @@
 #define FDBCLIENT_STATUSCLIENT_H
 
 #include "flow/flow.h"
-#include "Status.h"
+#include "fdbclient/Status.h"
 
 class StatusClient {
 public:

@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbserver/MoveKeys.h"
-#include "fdbclient/NativeAPI.h"
-#include "workloads.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MoveKeysWorkload : TestWorkload {
 	bool enabled;
@@ -45,7 +45,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 	virtual std::string description() { return "MoveKeysWorkload"; }
 	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) { 
+	virtual Future<Void> start( Database const& cx ) {
 		return _start( cx, this );
 	}
 
@@ -53,7 +53,6 @@ struct MoveKeysWorkload : TestWorkload {
 		if( self->enabled ) {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
-			state Future<Void> disabler = disableConnectionFailuresAfter(300, "moveKeys");
 			loop {
 				try {
 					Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, 1000) );
@@ -62,16 +61,16 @@ struct MoveKeysWorkload : TestWorkload {
 						self->configuration.set(res[i].key,res[i].value);
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 
 			state int oldMode = wait( setDDMode( cx, 0 ) );
 			TraceEvent("RMKStartModeSetting");
-			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "moveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
+			wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
-			int _ = wait( setDDMode( cx, oldMode ) );
+			wait(success( setDDMode( cx, oldMode ) ));
 			TraceEvent("RMKDoneModeSetting");
 		}
 		return Void();
@@ -115,8 +114,7 @@ struct MoveKeysWorkload : TestWorkload {
 		return vector<StorageServerInterface>(t.begin(), t.end());
 	}
 
-	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload *self, KeyRange keys, vector<StorageServerInterface> destinationTeam, 
-			MoveKeysLock lock, std::string dbName ) {
+	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload *self, KeyRange keys, vector<StorageServerInterface> destinationTeam, MoveKeysLock lock ) {
 		state TraceInterval relocateShardInterval("RelocateShard");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
@@ -132,12 +130,10 @@ struct MoveKeysWorkload : TestWorkload {
 			.detail("Priority", 0)
 			.detail("Source", "RandomMoveKeys")
 			.detail("DestinationTeam", desc);
-			
+
 		try {
 			state Promise<Void> signal;
-			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, lock, 
-										self->configuration.durableStorageQuorum, 
-										signal, &fl1, &fl2, relocateShardInterval.pairID ) );
+			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false, relocateShardInterval.pairID ) );
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {
@@ -163,9 +159,9 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure( Database cx, MoveKeysWorkload *self ) {
 		ASSERT( g_network->isSimulated() );
 		loop {
-			if( g_simulator.killMachine( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, false, true ) )
+			if( g_simulator.killZone( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
 				return Void();
-			Void _ = wait( delay(1.0) );
+			wait( delay(1.0) );
 		}
 	}
 
@@ -176,14 +172,18 @@ struct MoveKeysWorkload : TestWorkload {
 
 		ASSERT( self->configuration.storageTeamSize > 0 );
 
-		loop { 
+		if(self->configuration.usableRegions > 1) { //FIXME: add support for generating random teams across DCs
+			return Void();
+		}
+
+		loop {
 			try {
 				state MoveKeysLock lock = wait( takeMoveKeysLock(cx, UID()) );
 				state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 				eliminateDuplicates(storageServers);
 
 				loop {
-					Void _ = wait( poisson( &lastTime, self->meanDelay ) );
+					wait( poisson( &lastTime, self->meanDelay ) );
 
 					KeyRange keys = self->getRandomKeys();
 					vector<StorageServerInterface> team = self->getRandomTeam(storageServers, self->configuration.storageTeamSize);
@@ -195,13 +195,13 @@ struct MoveKeysWorkload : TestWorkload {
 					inFlight.insert( keys, team );
 					for(int r=0; r<ranges.size(); r++) {
 						auto& rTeam = inFlight.rangeContaining(ranges[r].begin)->value();
-						inFlightActors.insert( ranges[r], self->doMoveKeys( cx, self, ranges[r], rTeam, lock, self->dbName.toString() ) );
+						inFlightActors.insert( ranges[r], self->doMoveKeys( cx, self, ranges[r], rTeam, lock ) );
 					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed )
 					throw;
-				Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+				wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 				// Keep trying to get the moveKeysLock
 			}
 		}

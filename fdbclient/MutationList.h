@@ -22,8 +22,8 @@
 #define FLOW_FDBCLIENT_MUTATIONLIST_H
 #pragma once
 
-#include "FDBTypes.h"
-#include "CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/CommitTransaction.h"
 
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and
@@ -132,7 +132,7 @@ public:
 
 	template <class Ar>
 	void serialize_load( Ar& ar ) {
-		ar & totalBytes;
+		serializer(ar, totalBytes);
 
 		if(totalBytes > 0) {
 			blob_begin = blob_end = new (ar.arena()) Blob;
@@ -142,7 +142,7 @@ public:
 	}
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
-		ar & totalBytes;
+		serializer(ar, totalBytes);
 		for(auto b = blob_begin; b; b=b->next)
 			ar.serializeBytes(b->data);
 	}

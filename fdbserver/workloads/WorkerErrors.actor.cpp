@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "workloads.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 
 struct WorkerErrorsWorkload : TestWorkload {
@@ -42,27 +42,27 @@ struct WorkerErrorsWorkload : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {}
 
 
-	ACTOR Future< std::vector< std::string > > latestEventOnWorkers( std::vector<std::pair<WorkerInterface, ProcessClass>> workers ) {
-		state vector<Future<Standalone<StringRef>>> eventTraces;
+	ACTOR Future< std::vector< TraceEventFields > > latestEventOnWorkers( std::vector<WorkerDetails> workers ) {
+		state vector<Future<TraceEventFields>> eventTraces;
 		for(int c = 0; c < workers.size(); c++) {
-			eventTraces.push_back( workers[c].first.eventLogRequest.getReply( EventLogRequest() ) );
+			eventTraces.push_back( workers[c].interf.eventLogRequest.getReply( EventLogRequest() ) );
 		}
 
-		Void _ = wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
+		wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
 
-		vector<std::string> results;
+		vector<TraceEventFields> results;
 		for(int i = 0; i < eventTraces.size(); i++) {
-			results.push_back( eventTraces[i].get().toString() );
+			results.push_back( eventTraces[i].get() );
 		}
 
 		return results;
 	}
 
 	ACTOR Future<Void> _start(Database cx, WorkerErrorsWorkload *self) {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
-		std::vector<std::string> errors = wait( self->latestEventOnWorkers( workers ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		std::vector<TraceEventFields> errors = wait( self->latestEventOnWorkers( workers ) );
 		for(auto e : errors) {
-			printf("%s\n", e.c_str());
+			printf("%s\n", e.toString().c_str());
 		}
 		return Void();
 	}

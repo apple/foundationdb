@@ -22,21 +22,22 @@
 #define FLOW_SYSTEM_MONITOR_H
 #pragma once
 
-#include "Platform.h"
-#include "TDMetric.actor.h"
+#include "flow/Platform.h"
+#include "flow/TDMetric.actor.h"
 
 struct SystemMonitorMachineState {
 	Optional<std::string> folder;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> machineId;
-	Optional<uint32_t> ip;
+	Optional<IPAddress> ip;
 
 	double monitorStartTime;
 
 	SystemMonitorMachineState() : monitorStartTime(0) {}
-	SystemMonitorMachineState(uint32_t ip) : ip(ip), monitorStartTime(0) {}
-	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId, uint32_t ip) 
-		: folder(folder), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
+	explicit SystemMonitorMachineState(const IPAddress& ip) : ip(ip), monitorStartTime(0) {}
+	SystemMonitorMachineState(std::string folder, Optional<Standalone<StringRef>> zoneId,
+	                          Optional<Standalone<StringRef>> machineId, const IPAddress& ip)
+	  : folder(folder), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
 };
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);
@@ -133,5 +134,6 @@ struct StatisticsState {
 
 void systemMonitor();
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics = false);
+SystemStatistics getSystemStatistics();
 
 #endif /* FLOW_SYSTEM_MONITOR_H */

@@ -94,8 +94,8 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	private static final byte[] UNSET_TRANSACTION_VERSION = {(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff,
 	                                                         (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff};
 
-	private boolean complete;
-	private byte[] versionBytes;
+	private final boolean complete;
+	private final byte[] versionBytes;
 
 	/**
 	 * From a byte array, unpack the user version starting at the given position.
@@ -107,7 +107,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 * @return the unpacked user version included in the array
 	 */
 	public static int unpackUserVersion(byte[] bytes, int pos) {
-		return ((int)bytes[pos] & 0xff << 8) | ((int)bytes[pos + 1] & 0xff);
+		return (((int)bytes[pos] & 0xff) << 8) | ((int)bytes[pos + 1] & 0xff);
 	}
 
 	/**

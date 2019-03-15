@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/FastRef.h"
-#undef ERROR
-#include "flow/actorcompiler.h"
-#include "simulator.h"
-#include "ActorFuzz.h"
-#include "flow/DeterministicRandom.h"
-#include "flow/ThreadHelper.actor.h"
 #include <iostream>
 #include <algorithm>
+#include "flow/FastRef.h"
+#undef ERROR
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/ActorFuzz.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::cout;
 using std::endl;
@@ -378,7 +378,7 @@ void fastAllocTest() {
 				}
 				return true;
 			}));
-	Void _ = waitForAll( results ).getBlocking();
+	waitForAll( results ).getBlocking();
 	t = timer()-t;
 	cout << "Threaded Allocate/Release TestB interleaved (100): " << results.size() << " x " << (1/t) << "M/sec" << endl;
 	#endif
@@ -463,12 +463,12 @@ Future<Void> threadSafetySender( vector<PromiseT>& v, Event &start, Event &ready
 }
 
 ACTOR void threadSafetyWaiter( Future<Void> f, int32_t* count ) {
-	Void _ = wait(f);
+	wait(f);
 	interlockedIncrement(count);
 }
 ACTOR void threadSafetyWaiter( FutureStream<Void> f, int n, int32_t* count ) {
 	while (n--) {
-		Void _ = waitNext(f);
+		waitNext(f);
 		interlockedIncrement(count);
 	}
 }
@@ -546,7 +546,7 @@ volatile int32_t cancelled = 0, returned = 0;
 
 ACTOR Future<Void> returnCancelRacer( Future<Void> f ) {
 	try {
-		Void _ = wait(f);
+		wait(f);
 	} catch ( Error& ) {
 		interlockedIncrement( &cancelled );
 		throw;
@@ -693,7 +693,7 @@ ACTOR Future<Void> actorTest4(bool b) {
 		if (b)
 			throw operation_failed();
 	} catch (...) {
-		Void _ = wait( delay(1) );
+		wait( delay(1) );
 	}
 	if (now() < tstart + 1)
 		printf("actorTest4 failed");
@@ -783,13 +783,13 @@ ACTOR Future<bool> actorTest9A(Future<Void> setAfterCalling) {
 		if (count && count!=4) { printf("\nactorTest9 failed\n"); return false; }
 		loop {
 			loop {
-				Void _ = wait( setAfterCalling );
+				wait( setAfterCalling );
 				loop {
 					loop {
 						count++;
 						break;
 					}
-					Void _ = wait( Future<Void>(Void()) );
+					wait( Future<Void>(Void()) );
 					count++;
 					break;
 				}
@@ -813,7 +813,7 @@ Future<bool> actorTest9() {
 ACTOR Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) {
 	state int i;
 	for(i = 0; i < 5; i++) {
-		Void _ = wait( go );
+		wait( go );
 		int input = waitNext( inputStream );
 	}
 	return Void();
@@ -835,7 +835,7 @@ void actorTest10() {
 }
 
 ACTOR Future<Void> cancellable() {
-	Void _ = wait( Never() );
+	wait( Never() );
 	return Void();
 }
 
@@ -844,7 +844,7 @@ ACTOR Future<Void> simple() {
 }
 
 ACTOR Future<Void> simpleWait() {
-	Void _ = wait( Future<Void>(Void()) );
+	wait( Future<Void>(Void()) );
 	return Void();
 }
 
@@ -868,7 +868,7 @@ template<> Future<int> chain<0>( Future<int> const& x ) {
 	return x;
 }
 
-Future<int> chain2( Future<int> const& x, int const& i );
+ACTOR Future<int> chain2(Future<int> x, int i);
 
 ACTOR Future<int> chain2( Future<int> x, int i ) {
 	if (i>1) {
@@ -882,7 +882,7 @@ ACTOR Future<int> chain2( Future<int> x, int i ) {
 
 ACTOR Future<Void> cancellable2() {
 	try {
-		Void _ = wait( Never() );
+		wait( Never() );
 		return Void();
 	} catch (Error& e) {
 		throw;
@@ -925,7 +925,7 @@ struct AddReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & sum;
+		serializer(ar, sum);
 	}
 };
 
@@ -938,7 +938,7 @@ struct AddRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & a & b & reply;
+		serializer(ar, a, b, reply);
 	}
 };
 
@@ -1015,9 +1015,9 @@ void chainTest() {
 
 ACTOR void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal){
 	loop{
-		Void _ = waitNext(in);
+		waitNext(in);
 		(*ptotal)++;
-		out.send(_);
+		out.send(Void());
 	}
 }
 
@@ -1032,7 +1032,7 @@ ACTOR Future<Void> cycleTime(int nodes, int times){
 	state double startT = timer();
 	n[1].send(Void());
 	loop {
-		Void _ = waitNext(n[0].getFuture());
+		waitNext(n[0].getFuture());
 		if (!--times) break;
 		n[1].send(Void());
 	}

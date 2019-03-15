@@ -3,5 +3,5 @@ testName=UnitTests
 startDelay=0
 useDB=false
 maxTestCases=0
-testsMatching=backup/containers/
+testsMatching=/backup/containers/
 

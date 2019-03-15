@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/SystemMonitor.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogMetricsWorkload : TestWorkload {
 	std::string dataFolder;
@@ -54,14 +54,14 @@ struct LogMetricsWorkload : TestWorkload {
 	ACTOR Future<Void> setSystemRate( LogMetricsWorkload *self, Database cx, uint32_t rate ) {
 		// set worker interval and ss interval
 		state BinaryWriter br(Unversioned());
-		vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		//vector<Future<Void>> replies;
 		TraceEvent("RateChangeTrigger");
 		SetMetricsLogRateRequest req(rate);
 		for(int i = 0; i < workers.size(); i++) {
-			workers[i].first.setMetricsRate.send( req );
+			workers[i].interf.setMetricsRate.send( req );
 		}
-		//Void _ = wait( waitForAll( replies ) );
+		//wait( waitForAll( replies ) );
 
 		br << rate;
 		loop {
@@ -70,10 +70,10 @@ struct LogMetricsWorkload : TestWorkload {
 				Version v = wait( tr.getReadVersion() );
 				tr.set(fastLoggingEnabled, br.toStringRef());
 				tr.makeSelfConflicting();
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch(Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -81,13 +81,13 @@ struct LogMetricsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start( Database cx, LogMetricsWorkload *self ) {
-		Void _ = wait( delay( self->logAt ) );
+		wait( delay( self->logAt ) );
 
-		Void _ = wait( self->setSystemRate( self, cx, self->logsPerSecond ) );
-		Void _ = wait( timeout( recurring( &systemMonitor, 1.0 / self->logsPerSecond ), self->logDuration, Void() ) );
+		wait( self->setSystemRate( self, cx, self->logsPerSecond ) );
+		wait( timeout( recurring( &systemMonitor, 1.0 / self->logsPerSecond ), self->logDuration, Void() ) );
 
 		// We're done, set everything back
-		Void _ = wait( self->setSystemRate( self, cx, 1.0 ) );
+		wait( self->setSystemRate( self, cx, 1.0 ) );
 
 		return Void();
 	}

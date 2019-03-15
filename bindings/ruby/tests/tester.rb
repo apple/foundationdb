@@ -466,7 +466,8 @@ class Tester
               tr.options.set_retry_limit(50)
               tr.options.set_max_retry_delay(100)
               tr.options.set_used_during_commit_protection_disable
-              tr.options.set_transaction_logging_enable('my_transaction')
+              tr.options.set_debug_transaction_identifier('my_transaction')
+              tr.options.set_log_transaction()
               tr.options.set_read_lock_aware()
               tr.options.set_lock_aware()
 

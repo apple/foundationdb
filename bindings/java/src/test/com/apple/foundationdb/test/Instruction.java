@@ -72,16 +72,21 @@ class Instruction extends Stack {
 		readTcx = isDatabase ? context.db : readTr;
 	}
 
-	void setTransaction(Transaction newTr) {
+	boolean setTransaction(Transaction newTr) {
 		if(!isDatabase) {
 			context.updateCurrentTransaction(newTr);
+			return true;
 		}
+
+		return false;
 	}
 
-	void setTransaction(Transaction oldTr, Transaction newTr) {
+	boolean setTransaction(Transaction oldTr, Transaction newTr) {
 		if(!isDatabase) {
-			context.updateCurrentTransaction(oldTr, newTr);
+			return context.updateCurrentTransaction(oldTr, newTr);
 		}
+
+		return false;
 	}
 
 	void releaseTransaction() {

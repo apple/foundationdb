@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
-#include "MonitorLeader.h"
-#include "CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/Platform.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
 	if (filename.length())
@@ -59,8 +60,9 @@ std::string ClusterConnectionFile::getErrorString( std::pair<std::string, bool> 
 }
 
 ClusterConnectionFile::ClusterConnectionFile( std::string const& filename ) {
-	if( !fileExists( filename ) )
+	if( !fileExists( filename ) ) {
 		throw no_cluster_file_found();
+	}
 
 	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
 	this->filename = filename;
@@ -73,7 +75,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 	setConn = true;
 }
 
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() {
+ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
 	return cs;
 }
 
@@ -99,7 +101,7 @@ bool ClusterConnectionFile::fileContentsUpToDate(ClusterConnectionString &fileCo
 		return fileConnectionString.toString() == cs.toString();
 	}
 	catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ClusterFileError").detail("Filename", filename).error(e);
+		TraceEvent(SevWarnAlways, "ClusterFileError").error(e).detail("Filename", filename);
 		return false; // Swallow the error and report that the file is out of date
 	}
 }
@@ -118,7 +120,7 @@ bool ClusterConnectionFile::writeFile() {
 
 			return true;
 		} catch( Error &e ) {
-			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile").detail("Filename", filename).detail("ConnStr", cs.toString()).error(e);
+			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile").error(e).detail("Filename", filename).detail("ConnStr", cs.toString());
 		}
 	}
 
@@ -174,19 +176,13 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 	coord = NetworkAddress::parseList(addrs);
 	ASSERT( coord.size() > 0 );  // parseList() always returns at least one address if it doesn't throw
 
-	bool isTLS = coord[0].isTLS();
-	for( auto const& server : coord ) {
-		if( server.isTLS() != isTLS )
-			throw connection_string_invalid();
-	}
-
 	std::sort( coord.begin(), coord.end() );
 	// Check that there are no duplicate addresses
 	if ( std::unique( coord.begin(), coord.end() ) != coord.end() )
 		throw connection_string_invalid();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 	std::string input;
 
 	{
@@ -212,10 +208,32 @@ TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/basic") {
 		ASSERT( input == cs.toString() );
 	}
 
+	{
+		input = "0xxdeadbeef:100100100@[::1]:1234,[::1]:1235";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(input == cs.toString());
+	}
+
+	{
+		input = "0xxdeadbeef:100100100@[abcd:dcba::1]:1234,[abcd:dcba::abcd:1]:1234";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(input == cs.toString());
+	}
+
 	return Void();
 }
 
-TEST_CASE("fdbclient/MonitorLeader/parseConnectionString/fuzz") {
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	// For a static connection string, add in fuzzed comments and whitespace
 	// SOMEDAY: create a series of random connection strings, rather than the one we started with
 	std::string connectionString = "0xxdeadbeef:100100100@1.1.1.1:34534,5.1.5.3:23443";
@@ -298,7 +316,7 @@ ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
 UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
-	: getLeader( Endpoint(remote, WLTOKEN_CLIENTLEADERREG_GETLEADER) )
+	: getLeader( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_GETLEADER) )
 {
 }
 
@@ -306,64 +324,80 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 	getLeader.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskCoordination );
 }
 
-ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation ) {
+// Nominee is the worker among all workers that are considered as leader by a coordinator
+// This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
+// is a nominee)
+ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
+	state bool hasCounted = false;
 	loop {
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
-		Void _ = wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
+		if (li.present() && !hasCounted && connectedCoordinatorsNum.isValid()) {
+			connectedCoordinatorsNum->set(connectedCoordinatorsNum->get() + 1);
+			hasCounted = true;
+		}
+		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
-		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
+		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
 
 		if (li != *info) {
 			*info = li;
 			nomineeChange->trigger();
 
 			if( li.present() && li.get().forward )
-				Void _ = wait( Future<Void>(Never()) );
-			Void _ = wait( Future<Void>(Void()) );
+				wait( Future<Void>(Never()) );
+			wait( Future<Void>(Void()) );
 		}
 	}
 }
 
 // Also used in fdbserver/LeaderElection.actor.cpp!
-Optional<LeaderInfo> getLeader( vector<Optional<LeaderInfo>> nominees ) {
+// bool represents if the LeaderInfo is a majority answer or not.
+// This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
+Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees ) {
+	vector<LeaderInfo> maskedNominees;
+	maskedNominees.reserve(nominees.size());
+	for (auto &nominee : nominees) {
+		if (nominee.present()) {
+			maskedNominees.push_back(nominee.get());
+			maskedNominees.back().changeID = UID(maskedNominees.back().changeID.first() & LeaderInfo::mask, maskedNominees.back().changeID.second());
+		}
+	}
+
 	// If any coordinator says that the quorum is forwarded, then it is
-	for(int i=0; i<nominees.size(); i++)
-		if (nominees[i].present() && nominees[i].get().forward)
-			return nominees[i].get();
+	for(int i=0; i<maskedNominees.size(); i++)
+		if (maskedNominees[i].forward)
+			return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
 
-	if(!nominees.size())
-		return Optional<LeaderInfo>();
-	// There is a leader if a majority of the nominees are the same.
-	// If there is a majority, the median item is in it.
+	if(!maskedNominees.size())
+		return Optional<std::pair<LeaderInfo, bool>>();
+
+	std::sort(maskedNominees.begin(), maskedNominees.end(),
+		[](const LeaderInfo& l, const LeaderInfo& r) { return l.changeID < r.changeID; });
+
 	int bestCount = 0;
-	Optional<LeaderInfo> currentNominee;
-	for(int i=0; i<nominees.size(); i++) {
-		if( (nominees[i].present() != currentNominee.present()) || (currentNominee.present() && !currentNominee.get().equalInternalId(nominees[i].get()) ) ) {
-			if(bestCount > 0) {
-				bestCount--;
-			} else {
-				bestCount = 1;
-				currentNominee = nominees[i];
+	LeaderInfo bestNominee;
+	LeaderInfo currentNominee;
+	int curCount = 0;
+	for (int i = 0; i < maskedNominees.size(); i++) {
+		if (currentNominee == maskedNominees[i]) {
+			curCount++;
+		}
+		else {
+			if (curCount > bestCount) {
+				bestNominee = currentNominee;
+				bestCount = curCount;
 			}
-		} else {
-			bestCount++;
+			currentNominee = maskedNominees[i];
+			curCount = 1;
 		}
 	}
-
-	if(!currentNominee.present())
-		return Optional<LeaderInfo>();
-
-	int amountBest = 0;
-	for(int i=0; i<nominees.size(); i++) {
-		if( nominees[i].present() && currentNominee.get().equalInternalId(nominees[i].get()) ) {
-			amountBest++;
-		}
+	if (curCount > bestCount) {
+		bestNominee = currentNominee;
+		bestCount = curCount;
 	}
 
-	if(amountBest >= nominees.size()/2 + 1) {
-		return currentNominee;
-	}
-	return Optional<LeaderInfo>();
+	bool majority = bestCount >= nominees.size() / 2 + 1;
+	return std::pair<LeaderInfo, bool>(bestNominee, majority);
 }
 
 struct MonitorLeaderInfo {
@@ -375,7 +409,8 @@ struct MonitorLeaderInfo {
 	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false), generation(0) {}
 };
 
-ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info ) {
+// Leader is the process that will be elected by coordinators as the cluster controller
+ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info,  Reference<AsyncVar<int>> connectedCoordinatorsNum) {
 	state ClientCoordinators coordinators( info.intermediateConnFile );
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -384,17 +419,18 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	nominees.resize(coordinators.clientLeaderServers.size());
 
 	std::vector<Future<Void>> actors;
+	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
 	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], info.generation ) );
+		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], info.generation, connectedCoordinatorsNum) );
 	allActors = waitForAll(actors);
 
 	loop {
-		Optional<LeaderInfo> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().changeID : UID(1,1));
+		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1));
 		if (leader.present()) {
-			if( leader.get().forward ) {
-				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().serializedInfo.toString())));
+			if( leader.get().first.forward ) {
+				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString())));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -410,17 +446,20 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 			info.hasConnected = true;
 			connFile->notifyConnected();
 
-			outSerializedLeaderInfo->set( leader.get().serializedInfo );
+			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
-		Void _ = wait( nomineeChange.onTrigger() || allActors );
+		wait( nomineeChange.onTrigger() || allActors );
 	}
 }
 
-ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
+ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info) );
+		// set the AsyncVar to 0
+		if (connectedCoordinatorsNum.isValid()) connectedCoordinatorsNum->set(0);
+		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info, connectedCoordinatorsNum) );
 		info = _info;
 		info.generation++;
+
 	}
 }

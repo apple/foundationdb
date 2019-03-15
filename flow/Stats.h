@@ -33,8 +33,18 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 
 */
 
-#include "flow.h"
-#include "TDMetric.actor.h"
+#include <cstdint>
+#include <cstddef>
+#include "flow/flow.h"
+#include "flow/TDMetric.actor.h"
+
+struct TimedRequest {
+	double requestTime;
+
+	TimedRequest() {
+		requestTime = timer();
+	}
+};
 
 struct ICounter {
 	// All counters have a name and value
@@ -60,7 +70,7 @@ struct CounterCollection {
 	std::string id;
 };
 
-struct Counter : ICounter {
+struct Counter : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
@@ -88,7 +98,7 @@ private:
 };
 
 template <class F>
-struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>> {
+struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F && f) : name(name), f(f) { collection.counters.push_back(this); collection.counters_to_remove.push_back(this); }
 	virtual void remove() { delete this; }
 
@@ -110,4 +120,68 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 
 Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
 
+class LatencyBands {
+public:
+	LatencyBands(std::string name, UID id, double loggingInterval) : name(name), id(id), loggingInterval(loggingInterval), cc(nullptr), filteredCount(nullptr) {}
+
+	void addThreshold(double value) {
+		if(value > 0 && bands.count(value) == 0) {
+			if(bands.size() == 0) {
+				ASSERT(!cc && !filteredCount);
+				cc = new CounterCollection(name, id.toString());
+				logger = traceCounters(name, id, loggingInterval, cc, id.toString() + "/" + name);
+				filteredCount = new Counter("Filtered", *cc);
+				insertBand(std::numeric_limits<double>::infinity());
+			}
+
+			insertBand(value);
+		}
+	}
+
+	void addMeasurement(double measurement, bool filtered=false) {
+		if(filtered && filteredCount) {
+			++(*filteredCount);
+		}
+		else if(bands.size() > 0) {
+			auto itr = bands.upper_bound(measurement);
+			ASSERT(itr != bands.end());
+			++(*itr->second);
+		}
+	}
+
+	void clearBands() {
+		logger = Void();
+
+		for(auto itr : bands) {
+			delete itr.second;
+		}
+		
+		bands.clear();
+
+		delete filteredCount;
+		delete cc;
+
+		filteredCount = nullptr;
+		cc = nullptr;
+	}
+
+	~LatencyBands() {
+		clearBands();
+	}
+
+private:
+	std::map<double, Counter*> bands;
+	Counter *filteredCount;
+
+	std::string name;
+	UID id;
+	double loggingInterval;
+
+	CounterCollection *cc;
+	Future<Void> logger;
+
+	void insertBand(double value) {
+		bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc)));
+	}
+};
 #endif

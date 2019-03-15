@@ -22,8 +22,8 @@
 #define FDBCLIENT_ICLIENTAPI_H
 #pragma once
 
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -74,18 +74,9 @@ public:
 class IDatabase {
 public:
 	virtual ~IDatabase() {}
+
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
-class ICluster {
-public:
-	virtual ~ICluster() {}
-	virtual ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName) = 0;
-	virtual void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -103,7 +94,7 @@ public:
 	virtual void runNetwork() = 0;
 	virtual void stopNetwork() = 0;
 
-	virtual ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath) = 0;
+	virtual Reference<IDatabase> createDatabase(const char *clusterFilePath) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) = 0;
 };

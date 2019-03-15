@@ -26,9 +26,9 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, InvalidClass = -1 };
-	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, ExcludeFit, NeverAssign };
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, ClusterController };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RateKeeperClass, InvalidClass = -1 };
+	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, RateKeeper, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -46,7 +46,11 @@ public:
 		else if (s=="unset") _class = UnsetClass;
 		else if (s=="stateless") _class = StatelessClass;
 		else if (s=="log") _class = LogClass;
+		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
+		else if (s=="data_distributor") _class = DataDistributorClass;
+		else if (s=="coordinator") _class = CoordinatorClass;
+		else if (s=="ratekeeper") _class = RateKeeperClass;
 		else _class = InvalidClass;
 	}
 
@@ -60,7 +64,11 @@ public:
 		else if (classStr=="unset") _class = UnsetClass;
 		else if (classStr=="stateless") _class = StatelessClass;
 		else if (classStr=="log") _class = LogClass;
+		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
+		else if (classStr=="data_distributor") _class = DataDistributorClass;
+		else if (classStr=="coordinator") _class = CoordinatorClass;
+		else if (classStr=="ratekeeper") _class = RateKeeperClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -89,7 +97,11 @@ public:
 			case TesterClass: return "test";
 			case StatelessClass: return "stateless";
 			case LogClass: return "log";
+			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
+			case DataDistributorClass: return "data_distributor";
+			case CoordinatorClass: return "coordinator";
+			case RateKeeperClass: return "ratekeeper";
 			default: return "invalid";
 		}
 	}
@@ -107,7 +119,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & _class & _source;
+		serializer(ar, _class, _source);
 	}
 };
 
@@ -157,10 +169,13 @@ public:
 
 	std::string describeZone() const { return describeValue(keyZoneId); }
 	std::string describeDataHall() const { return describeValue(keyDataHallId); }
+	std::string describeDcId() const { return describeValue(keyDcId); }
+	std::string describeMachineId() const { return describeValue(keyMachineId); }
+	std::string describeProcessId() const { return describeValue(keyProcessId); }
 
 	Optional<Standalone<StringRef>> processId() const { return get(keyProcessId); }
 	Optional<Standalone<StringRef>> zoneId() const { return get(keyZoneId); }
-	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); }
+	Optional<Standalone<StringRef>> machineId() const { return get(keyMachineId); } // default is ""
 	Optional<Standalone<StringRef>> dcId() const { return get(keyDcId); }
 	Optional<Standalone<StringRef>> dataHallId() const { return get(keyDataHallId); }
 
@@ -182,10 +197,10 @@ public:
 			Standalone<StringRef> key;
 			Optional<Standalone<StringRef>> value;
 			uint64_t mapSize = (uint64_t)_data.size();
-			ar & mapSize;
+			serializer(ar, mapSize);
 			if (ar.isDeserializing) {
 				for (size_t i = 0; i < mapSize; i++) {
-					ar & key & value;
+					serializer(ar, key, value);
 					_data[key] = value;
 				}
 			}
@@ -193,24 +208,24 @@ public:
 				for (auto it = _data.begin(); it != _data.end(); it++) {
 					key = it->first;
 					value = it->second;
-					ar & key & value;
+					serializer(ar, key, value);
 				}
 			}
 		}
 		else {
 			ASSERT(ar.isDeserializing);
 			UID	zoneId, dcId, processId;
-			ar & zoneId & dcId;
+			serializer(ar, zoneId, dcId);
 			set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
 			set(keyDcId, Standalone<StringRef>(dcId.toString()));
 
 			if (ar.protocolVersion() >= 0x0FDB00A340000001LL) {
-				ar & processId;
+				serializer(ar, processId);
 				set(keyProcessId, Standalone<StringRef>(processId.toString()));
 			}
 			else {
 				int _machineClass = ProcessClass::UnsetClass;
-				ar & _machineClass;
+				serializer(ar, _machineClass);
 			}
 		}
 	}
@@ -252,7 +267,7 @@ struct ProcessData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & locality & processClass & address;
+		serializer(ar, locality, processClass, address);
 	}
 
 	struct sort_by_address {
@@ -265,6 +280,7 @@ struct LBLocalityData {
 	enum { Present = 0 };
 	static LocalityData getLocality( Interface const& ) { return LocalityData(); }
 	static NetworkAddress getAddress( Interface const& ) { return NetworkAddress(); }
+	static bool alwaysFresh() { return true; }
 };
 
 // Template specialization that only works for interfaces with a .locality member.
@@ -274,6 +290,7 @@ struct LBLocalityData<Interface, typename std::enable_if< Interface::LocationAwa
 	enum { Present = 1 };
 	static LocalityData getLocality( Interface const& i ) { return i.locality; }
 	static NetworkAddress getAddress( Interface const& i ) { return i.address(); }
+	static bool alwaysFresh() { return Interface::AlwaysFresh; }
 };
 
 struct LBDistance {

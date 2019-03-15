@@ -22,7 +22,7 @@
 #define FLOW_FDBCLIENT_ATOMIC_H
 #pragma once
 
-#include "CommitTransaction.h"
+#include "fdbclient/CommitTransaction.h"
 
 static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
@@ -218,6 +218,15 @@ static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const
 		return existingValue;
 
 	return otherOperand;
+}
+
+static Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingValueOptional,
+                                            const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present() || existingValueOptional.get() == otherOperand) {
+		// Clear the value.
+		return Optional<ValueRef>();
+	}
+	return existingValueOptional; // No change required.
 }
 
 /*

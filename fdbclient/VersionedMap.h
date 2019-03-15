@@ -24,9 +24,9 @@
 
 #include "flow/flow.h"
 #include "flow/IndexedSet.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
-#include "VersionedMap.actor.h"
+#include "fdbclient/VersionedMap.actor.h"
 
 // PTree is a persistent balanced binary tree implementation. It is based on a treap as a way to guarantee O(1) space for node insertion (rotating is asymptotically cheap), 
 // but the constant factors are very large.
@@ -489,10 +489,10 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
 		latestRoot = &roots[0];
 	}
-	VersionedMap( VersionedMap&& v ) noexcept(true) : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
+	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
 		latestRoot = &roots[latestVersion];
 	}
-	void operator = (VersionedMap && v) noexcept(true) {
+	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);
@@ -515,10 +515,19 @@ public:
 		roots[newOldestVersion] = getRoot(newOldestVersion);
 
 		vector<Tree> toFree;
+		toFree.reserve(10000);
 		auto newBegin = roots.lower_bound(newOldestVersion);
-		for(auto root = roots.begin(); root != roots.end() && root != newBegin; ++root) {
-			if(root->second && root->second->isSoleOwner())
-				toFree.push_back(root->second);
+		Tree *lastRoot = nullptr;
+		for(auto root = roots.begin(); root != newBegin; ++root) {
+			if(root->second) {
+				if(lastRoot != nullptr && root->second == *lastRoot) {
+					(*lastRoot).clear();
+				}
+				if(root->second->isSoleOwner()) {
+					toFree.push_back(root->second);
+				}
+				lastRoot = &root->second;
+			}
 		}
 
 		roots.erase(roots.begin(), newBegin);
@@ -635,7 +644,7 @@ public:
 			int count=0, height=0;
 			PTreeImpl::validate<MapPair<K,std::pair<T,Version>>>( root, at, NULL, NULL, count, height );
 			if ( height > 100 )
-				TraceEvent(SevWarnAlways, "DiabolicalPTreeSize").detail("size", count).detail("height", height);
+				TraceEvent(SevWarnAlways, "DiabolicalPTreeSize").detail("Size", count).detail("Height", height);
 		}
 	private:
 		Tree root;

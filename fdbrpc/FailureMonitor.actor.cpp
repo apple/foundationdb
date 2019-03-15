@@ -18,22 +18,22 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "FailureMonitor.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> waitForStateEqual( IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status ) {
 	loop {
 		Future<Void> change = monitor->onStateChanged(endpoint);
 		if (monitor->getState(endpoint) == status)
 			return Void();
-		Void _ = wait( change );
+		wait( change );
 	}
 }
 
 ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint endpoint, double sustainedFailureDuration, double slope ) {
 	state double startT = now();
 	loop {
-		Void _ = wait( monitor->onFailed( endpoint ) );
+		wait( monitor->onFailed( endpoint ) );
 		if(monitor->permanentlyFailed(endpoint))
 			return Void();
 
@@ -44,8 +44,8 @@ ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint 
 		if(waitDelay < std::min(FLOW_KNOBS->CLIENT_REQUEST_INTERVAL, FLOW_KNOBS->SERVER_REQUEST_INTERVAL)) //We will not get a failure monitoring update in this amount of time, so there is no point in waiting for changes
 			waitDelay = 0;
 		choose {
-			when (Void _ = wait( monitor->onStateEqual( endpoint, FailureStatus(false) ) )) {}  // SOMEDAY: Use onStateChanged() for efficiency
-			when (Void _ = wait( delay(waitDelay) )) {
+			when (wait( monitor->onStateEqual( endpoint, FailureStatus(false) ) )) {}  // SOMEDAY: Use onStateChanged() for efficiency
+			when (wait( delay(waitDelay) )) {
 				return Void();
 			}
 		}
@@ -77,7 +77,7 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 	if (it == addressStatus.end()) {
 		if (status != FailureStatus()) {
 			addressStatus[address]=status;
-			endpointKnownFailed.triggerRange( Endpoint(address, UID()), Endpoint(address, UID(-1,-1)) );
+			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 		}
 	} else {
 		bool triggerEndpoint = status != it->value;
@@ -86,26 +86,26 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 		else
 			addressStatus.erase(it);
 		if(triggerEndpoint)
-			endpointKnownFailed.triggerRange( Endpoint(address, UID()), Endpoint(address, UID(-1,-1)) );
+			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 	}
 }
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
-	TraceEvent("EndpointNotFound").detail("Address", endpoint.address).detail("Token", endpoint.token).suppressFor(1.0);
+	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }
 
 void SimpleFailureMonitor::notifyDisconnect( NetworkAddress const& address ) {
 	//TraceEvent("NotifyDisconnect").detail("Address", address);
-	endpointKnownFailed.triggerRange( Endpoint(address, UID()), Endpoint(address, UID(-1,-1)) );
+	endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 }
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure( Endpoint const& endpoint ) {
 	// If the endpoint or address is already failed, return right away
-	auto i = addressStatus.find(endpoint.address);
+	auto i = addressStatus.find(endpoint.getPrimaryAddress());
 	if (i == addressStatus.end() || i->value.isFailed() || endpointKnownFailed.get(endpoint)) {
-		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.address).detail("Tok", endpoint.token);
+		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
 	}
 
@@ -131,7 +131,7 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 	if (endpointKnownFailed.get(endpoint))
 		return FailureStatus(true);
 	else {
-		auto a = addressStatus.find(endpoint.address);
+		auto a = addressStatus.find(endpoint.getPrimaryAddress());
 		if (a == addressStatus.end()) return FailureStatus();
 		else return a->value;
 		//printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.address.toString(), a.failed ? "FAILED" : "OK", this);
@@ -141,7 +141,7 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
 	if(!endpointKnownFailed.get(endpoint))
 		return false;
-	auto a = addressStatus.find(endpoint.address);
+	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end()) return true;
 	else return !a->value.failed;
 }

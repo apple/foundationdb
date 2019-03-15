@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ActorCompiler Include="ClusterController.actor.cpp" />
@@ -25,6 +25,9 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\KillRegion.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\ReadWrite.actor.cpp">
@@ -75,6 +78,9 @@
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
     <ActorCompiler Include="Status.actor.cpp" />
     <ActorCompiler Include="workloads\ConflictRange.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Throttling.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\Throughput.actor.cpp">
@@ -195,9 +201,6 @@
     </ActorCompiler>
     <ActorCompiler Include="TagPartitionedLogSystem.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
-    <ActorCompiler Include="workloads\RestartRecovery.actor.cpp">
-      <Filter>workloads</Filter>
-    </ActorCompiler>
     <ActorCompiler Include="workloads\UnitTests.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -259,7 +262,16 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="MemoryPager.actor.cpp" />
+    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ActorCompiler Include="LogRouter.actor.cpp" />
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\LowLatency.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -272,6 +284,7 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="OldTLogServer.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />
@@ -285,7 +298,6 @@
       <Filter>sqlite</Filter>
     </ClCompile>
     <ClCompile Include="VFSAsync.cpp" />
-    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ClCompile Include="workloads\AsyncFile.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
@@ -293,24 +305,25 @@
     <ClCompile Include="workloads\MemoryKeyValueStore.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
+    <ClCompile Include="LatencyBandConfig.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
-    <ClInclude Include="DataDistribution.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ClInclude Include="DataDistribution.actor.h" />
+    <ClInclude Include="DataDistributorInterface.h" />
+    <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
-    <ClInclude Include="workloads\workloads.h">
+    <ClInclude Include="TesterInterface.actor.h" />
+    <ClInclude Include="workloads\workloads.actor.h">
       <Filter>workloads</Filter>
     </ClInclude>
     <ClInclude Include="IKeyValueStore.h" />
     <ClInclude Include="ClusterRecruitmentInterface.h" />
     <ClInclude Include="MasterInterface.h" />
     <ClInclude Include="TLogInterface.h" />
-    <ClInclude Include="DatabaseConfiguration.h" />
     <ClInclude Include="sqlite\sqlite3.h">
       <Filter>sqlite</Filter>
     </ClInclude>
@@ -331,7 +344,7 @@
     </ClInclude>
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="StorageMetrics.h" />
-    <ClInclude Include="Ratekeeper.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="CoroFlow.h" />
@@ -355,7 +368,12 @@
     <ClInclude Include="ApplyMetadataMutation.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="LogProtocolMessage.h" />
+    <ClInclude Include="IPager.h" />
+    <ClInclude Include="IVersionedStore.h" />
+    <ClInclude Include="MemoryPager.h" />
+    <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="template_fdb.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">

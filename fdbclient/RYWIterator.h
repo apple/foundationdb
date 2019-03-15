@@ -22,8 +22,8 @@
 #define FDBCLIENT_RYWITERATOR_H
 #pragma once
 
-#include "SnapshotCache.h"
-#include "WriteMap.h"
+#include "fdbclient/SnapshotCache.h"
+#include "fdbclient/WriteMap.h"
 
 class RYWIterator {
 public:
@@ -43,7 +43,7 @@ public:
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
 
-	KeyValueRef const& kv( Arena& arena );
+	const KeyValueRef* kv(Arena& arena);
 
 	RYWIterator& operator++();
 

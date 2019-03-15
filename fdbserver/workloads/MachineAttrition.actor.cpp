@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
-#include "workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
 	static std::set<int> s;
@@ -122,11 +122,8 @@ struct MachineAttritionWorkload : TestWorkload {
 
 		ASSERT( g_network->isSimulated() );
 
-		TEST(g_simulator.killableMachines > 0);    // Some machines can be killed
-		TEST(g_simulator.killableDatacenters > 0); // Some processes can be killed
-
 		if( self->killDc ) {
-			Void _ = wait( delay( delayBeforeKill ) );
+			wait( delay( delayBeforeKill ) );
 
 			// decide on a machine to kill
 			ASSERT( self->machines.size() );
@@ -147,12 +144,12 @@ struct MachineAttritionWorkload : TestWorkload {
 			g_simulator.killDataCenter( target, kt );
 		} else {
 			while ( killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
-				TraceEvent("WorkerKillBegin").detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size());
+				TraceEvent("WorkerKillBegin").detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size());
 				TEST(true);  // Killing a machine
 
-				Void _ = wait( delay( delayBeforeKill ) );
+				wait( delay( delayBeforeKill ) );
 				TraceEvent("WorkerKillAfterDelay");
 
 				if(self->waitForVersion) {
@@ -161,10 +158,10 @@ struct MachineAttritionWorkload : TestWorkload {
 						try {
 							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							Version _ = wait(tr.getReadVersion());
+							wait(success(tr.getReadVersion()));
 							break;
 						} catch( Error &e ) {
-							Void _ = wait( tr.onError(e) );
+							wait( tr.onError(e) );
 						}
 					}
 				}
@@ -173,26 +170,26 @@ struct MachineAttritionWorkload : TestWorkload {
 				LocalityData targetMachine = self->machines.back();
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detailext("zoneId", targetMachine.zoneId())
-					.detail("Reboot", self->reboot).detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size()).detail("Replace", self->replacement);
+					.detailext("ZoneId", targetMachine.zoneId())
+					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);
 
 				if (self->reboot) {
 					if( g_random->random01() > 0.5 ) {
 						g_simulator.rebootProcess( targetMachine.zoneId(), g_random->random01() > 0.5 );
 					} else {
-						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::Reboot );
+						g_simulator.killZone( targetMachine.zoneId(), ISimulator::Reboot );
 					}
 				} else {
 					auto randomDouble = g_random->random01();
 					TraceEvent("WorkerKill").detail("MachineCount", self->machines.size()).detail("RandomValue", randomDouble);
 					if (randomDouble < 0.33 ) {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::RebootAndDelete );
+						g_simulator.killZone( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {
 						auto kt = (g_random->random01() < 0.5 || !self->allowFaultInjection) ? ISimulator::KillInstantly : ISimulator::InjectFaults;
-						g_simulator.killMachine( targetMachine.zoneId(), kt );
+						g_simulator.killZone( targetMachine.zoneId(), kt );
 					}
 				}
 
@@ -200,7 +197,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				if(!self->replacement)
 					self->machines.pop_back();
 
-				Void _ = wait( delay( meanDelay - delayBeforeKill ) );
+				wait( delay( meanDelay - delayBeforeKill ) );
 				delayBeforeKill = g_random->random01() * meanDelay;
 				TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 			}

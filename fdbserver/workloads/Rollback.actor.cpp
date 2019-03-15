@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RollbackWorkload : TestWorkload {
 	bool enableFailures, multiple, enabled;
@@ -47,7 +47,7 @@ struct RollbackWorkload : TestWorkload {
 	virtual Future<Void> start( Database const& cx ) {
 		if (&g_simulator == g_network && enabled)
 			return timeout( 
-				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "rollbackFailureWorkerError" ), 
+				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "RollbackFailureWorkerError" ), 
 				testDuration, Void() );
 		return Void();
 	}
@@ -56,7 +56,7 @@ struct RollbackWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
-		auto system = self->dbInfo->get();
+		state ServerDBInfo system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
 		
 		if( tlogs.empty() || system.client.proxies.empty() ) {
@@ -89,8 +89,8 @@ struct RollbackWorkload : TestWorkload {
 				//g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ), self->clogDuration, ClogAll );
 
 		// While the clogged machines are still clogged...
-		Void _ = wait( delay( self->clogDuration/3 ) );
-		auto system = self->dbInfo->get();
+		wait( delay( self->clogDuration/3 ) );
+		system = self->dbInfo->get();
 
 		// Kill the proxy and the unclogged tlog
 		if (self->enableFailures) {
@@ -108,12 +108,12 @@ struct RollbackWorkload : TestWorkload {
 		if (self->multiple) {
 			state double lastTime = now();
 			loop {
-				Void _ = wait( poisson( &lastTime, delay ) );
-				Void _ = wait( self->simulateFailure( cx, self ) );
+				wait( poisson( &lastTime, delay ) );
+				wait( self->simulateFailure( cx, self ) );
 			}
 		} else {
-			Void _ = wait( ::delay( g_random->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
-			Void _ = wait( self->simulateFailure(cx, self) );
+			wait( ::delay( g_random->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
+			wait( self->simulateFailure(cx, self) );
 		}
 		return Void();
 	}

@@ -23,7 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "ReplicationTypes.h"
+#include "fdbrpc/ReplicationTypes.h"
 
 
 typedef std::string	repTestType;
@@ -34,22 +34,22 @@ extern repTestType	convertToTestType(int	iValue);
 extern int testReplication();
 
 extern double ratePolicy(
-	LocalitySetRef &					localitySet,
-	IRepPolicyRef	const&			policy,
+	Reference<LocalitySet> &					localitySet,
+	Reference<IReplicationPolicy>	const&			policy,
 	unsigned int							nSelectTests);
 
 extern bool findBestPolicySet(
 	std::vector<LocalityEntry>&	bestResults,
-	LocalitySetRef &						localitySet,
-	IRepPolicyRef	const&				policy,
+	Reference<LocalitySet> &						localitySet,
+	Reference<IReplicationPolicy>	const&				policy,
 	unsigned int								nMinItems,
 	unsigned int								nSelectTests,
 	unsigned int								nPolicyTests);
 
 extern bool findBestUniquePolicySet(
 	std::vector<LocalityEntry>&	bestResults,
-	LocalitySetRef &						localitySet,
-	IRepPolicyRef	const&				policy,
+	Reference<LocalitySet> &						localitySet,
+	Reference<IReplicationPolicy>	const&				policy,
 	StringRef										localityUniquenessKey,
 	unsigned int								nMinItems,
 	unsigned int								nSelectTests,
@@ -60,20 +60,20 @@ extern bool findBestUniquePolicySet(
 extern bool validateAllCombinations(
 	std::vector<LocalityData> &				offendingCombo,
 	LocalityGroup const&							localitySet,
-	IRepPolicyRef	const&							policy,
+	Reference<IReplicationPolicy>	const&							policy,
 	std::vector<LocalityData> const&	newItems,
 	unsigned int											nCombinationSize,
 	bool															bCheckIfValid = true);
 
 extern bool validateAllCombinations(
 	LocalityGroup const&							localitySet,
-	IRepPolicyRef	const&							policy,
+	Reference<IReplicationPolicy>	const&							policy,
 	std::vector<LocalityData> const&	newItems,
 	unsigned int											nCombinationSize,
 	bool															bCheckIfValid = true);
 
 /// Remove all pieces of locality information from the LocalityData that will not be used when validating the policy.
-void filterLocalityDataForPolicy(IRepPolicyRef policy, LocalityData* ld);
-void filterLocalityDataForPolicy(IRepPolicyRef policy, std::vector<LocalityData>* vld);
+void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld);
+void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, std::vector<LocalityData>* vld);
 
 #endif

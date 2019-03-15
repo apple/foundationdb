@@ -18,6 +18,7 @@
 # limitations under the License.
 #
 
+import math
 import sys
 import os
 
@@ -25,7 +26,7 @@ sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 
 
 import util
 
-FDB_API_VERSION = 520
+FDB_API_VERSION = 610
 
 LOGGING = {
     'version': 1,
@@ -58,14 +59,37 @@ class Result:
         self.key_tuple = subspace.unpack(key)
         self.values = values
 
-    def matches(self, rhs, specification):
+    def key(self, specification):
+        return self.key_tuple[specification.key_start_index:]
+
+    @staticmethod
+    def elements_equal(el1, el2):
+        if type(el1) != type(el2):
+            return False
+
+        if isinstance(el1, tuple):
+            return Result.tuples_match(el1, el2)
+
+        if isinstance(el1, float) and math.isnan(el1):
+            return math.isnan(el2)
+
+        return el1 == el2
+
+    @staticmethod
+    def tuples_match(t1, t2):
+        if len(t1) != len(t2):
+            return False
+
+        return all([Result.elements_equal(x,y) for x,y in zip(t1, t2)])        
+
+    def matches_key(self, rhs, specification):
         if not isinstance(rhs, Result):
             return False
 
-        left_key = self.key_tuple[specification.key_start_index:]
-        right_key = self.key_tuple[specification.key_start_index:]
+        return Result.tuples_match(self.key(specification), rhs.key(specification))
 
-        if len(left_key) != len(right_key) or left_key != right_key:
+    def matches(self, rhs, specification):
+        if not self.matches_key(rhs, specification):
             return False
 
         for value in self.values:

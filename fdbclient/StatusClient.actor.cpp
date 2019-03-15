@@ -19,14 +19,40 @@
  */
 
 #include "flow/flow.h"
-#include "CoordinationInterface.h"
-#include "MonitorLeader.h"
-#include "FailureMonitorClient.h"
-#include "ClusterInterface.h"
-#include "StatusClient.h"
-#include "Status.h"
-#include "json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/MonitorLeader.h"
+#include "fdbclient/FailureMonitorClient.h"
+#include "fdbclient/ClusterInterface.h"
+#include "fdbclient/StatusClient.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
+
+json_spirit::mValue readJSONStrictly(const std::string &s) {
+	json_spirit::mValue val;
+	std::string::const_iterator i = s.begin();
+	if(!json_spirit::read_range(i, s.end(), val)) {
+		if(g_network->isSimulated()) {
+			printf("MALFORMED: %s\n", s.c_str());
+		}
+		throw json_malformed();
+	}
+
+	// Allow trailing whitespace
+	while(i != s.end()) {
+		if(!isspace(*i)) {
+			if(g_network->isSimulated()) {
+				printf("EXPECTED EOF: %s\n^^^\n%s\n", std::string(s.begin(), i).c_str(), std::string(i, s.end()).c_str());
+			}
+			throw json_eof_expected();
+		}
+		++i;
+	}
+
+	return val;
+}
 
 uint64_t JSONDoc::expires_reference_version = std::numeric_limits<uint64_t>::max();
 
@@ -267,7 +293,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskCoordinationReply));
 
-		Void _ = wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
+		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
 
 		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
@@ -275,7 +301,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().address.toString();
+			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
 			
 			if (leaderServers[i].isReady()){
 				coordStatus["reachable"] = true;
@@ -338,7 +364,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 	state Future<Void> clusterTimeout = delay(30.0);
 	state Optional<StatusObject> oStatusObj;
 
-	Void _ = wait(delay(0.0)); //make sure the cluster controller is marked as not failed
+	wait(delay(0.0)); //make sure the cluster controller is marked as not failed
 
 	state Future<ErrorOr<StatusReply>> statusReply = cI.databaseStatus.tryGetReply(req);
 	loop{
@@ -348,6 +374,9 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 					if (result.getError().code() == error_code_request_maybe_delivered)
 						messages->push_back(makeMessage("unreachable_cluster_controller", 
 							("Unable to communicate with the cluster controller at " + cI.address().toString() + " to get status.").c_str()));
+					else if (result.getError().code() == error_code_server_overloaded)
+						messages->push_back(makeMessage("server_overloaded",
+							"The cluster controller is currently processing too many status requests and is unable to respond"));
 					else
 						messages->push_back(makeMessage("status_incomplete_error", "Cluster encountered an error fetching status."));
 				}
@@ -356,7 +385,7 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 				}
 				break;
 			}
-			when(Void _ = wait(clusterTimeout)){
+			when(wait(clusterTimeout)){
 				messages->push_back(makeMessage("status_incomplete_timeout", "Timed out fetching cluster status."));
 				break;
 			}
@@ -377,8 +406,9 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	try {
 		// Lots of the JSON reads in this code could throw, and that's OK, isAvailable and isHealthy will be
 		// at the states we want them to be in (currently)
+		std::string recoveryStateName = cluster.at("recovery_state.name").get_str();
 		isAvailable = client.at("coordinators.quorum_reachable").get_bool()
-			&& cluster.at("recovery_state.name") == "fully_recovered"
+			&& ( recoveryStateName == "accepting_commits" || recoveryStateName == "all_logs_recruited" || recoveryStateName == "storage_recovered" || recoveryStateName == "fully_recovered" )
 			&& cluster.at("database_available").get_bool();
 
 		if (isAvailable)
@@ -432,11 +462,11 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	// This could be read from the JSON but doing so safely is ugly so using a real var.
 	state bool quorum_reachable = false;
 	state int coordinatorsFaultTolerance = 0;
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 
 	try {
 		state int64_t clientTime = time(0);
 
-		state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
@@ -483,8 +513,8 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 					break;
 				}
 				choose{
-					when(Void _ = wait(clusterInterface->onChange())) {}
-					when(Void _ = wait(interfaceTimeout)) {
+					when(wait(clusterInterface->onChange())) {}
+					when(wait(interfaceTimeout)) {
 						clientMessages.push_back(makeMessage("no_cluster_controller", "Unable to locate a cluster controller within 2 seconds.  Check that there are server processes running."));
 						break;
 					}

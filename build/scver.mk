@@ -98,8 +98,12 @@ endif
 GITPRESENT := $(wildcard $(FDBDIR)/.git)
 HGPRESENT := $(wildcard $(FDBDIR)/.hg)
 
+# Do not override version IDs if already set
+ifneq ($(VERSION_ID),)
+# Noop
+
 # Use Git, if not missing
-ifneq ($(GITPRESENT),)
+else ifneq ($(GITPRESENT),)
 	SCVER := $(shell cd "$(FDBDIR)" && git --version 2>/dev/null)
 	ifneq ($(SCVER),)
 		VERSION_ID := $(shell cd "$(FDBDIR)" && git rev-parse --verify HEAD)
@@ -108,22 +112,22 @@ ifneq ($(GITPRESENT),)
 	else
 $(error Missing git executable on $(PLATFORM) )
 	endif
+
 # Otherwise, use Mercurial
-else
-	# Otherwise, use Mercurial, if not missing
-	ifneq ($(HGPRESENT),)
-		SCVER := $(shell cd "$(FDBDIR)" && hg --version 2>/dev/null)
-		ifdef SCVER
-			VERSION_ID := $(shell cd "$(FDBDIR)" && hg id -n)
-			SOURCE_CONTROL := MERCURIAL
-			SCBRANCH := $(shell cd "$(FDBDIR)" && hg branch)
-		else
-$(error Missing hg executable on $(PLATFORM))
-		endif
+else ifneq ($(HGPRESENT),)
+	SCVER := $(shell cd "$(FDBDIR)" && hg --version 2>/dev/null)
+	ifdef SCVER
+		VERSION_ID := $(shell cd "$(FDBDIR)" && hg id -n)
+		SOURCE_CONTROL := MERCURIAL
+		SCBRANCH := $(shell cd "$(FDBDIR)" && hg branch)
 	else
-	FDBFILES := (shell ls -la $(FDBDIR))
-$(error Missing source control information for source on $(PLATFORM) in directory: $(FDBDIR) with files: $(FDBFILES))
+$(error Missing hg executable on $(PLATFORM))
 	endif
+
+# No version control system
+else
+	FDBFILES := $(shell ls -la $(FDBDIR))
+$(error Missing source control information for source on $(PLATFORM) in directory: $(FDBDIR) with files: $(FDBFILES))
 endif
 
 # Set the RELEASE variable based on the KVRELEASE variable.
@@ -155,4 +159,9 @@ info:
 	@echo "User:           ($(USERID)) $(USER)"
 	@echo "Java Version:   ($(JAVAVERMAJOR).$(JAVAVERMINOR)) $(JAVAVER)"
 	@echo "Platform:       $(PLATFORM)"
+ifdef TLS_DISABLED
+	@echo "TLS:            Disabled"
+else
+	@echo "TLS:            Enabled"
+endif
 	@echo ""

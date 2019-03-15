@@ -63,4 +63,44 @@ public:
 	void clear( bool returnWhenEmptied ) { m_out.cancel(); m_out = actorCollection(m_add.getFuture(), NULL, NULL, NULL, NULL, returnWhenEmptied ); }
 };
 
+class SignalableActorCollection : NonCopyable {
+	PromiseStream<Future<Void>> m_add;
+	Promise<Void> stopSignal;
+	Future<Void> m_out;
+
+	void init() {
+		PromiseStream<Future<Void>> addStream;
+		m_out = actorCollection(addStream.getFuture(), NULL, NULL, NULL, NULL, true);
+		m_add = addStream;
+		stopSignal = Promise<Void>();
+		m_add.send(stopSignal.getFuture());
+	}
+
+public:
+	explicit SignalableActorCollection() {
+		init();
+	}
+
+	Future<Void> signal() {
+		stopSignal.send(Void());
+		Future<Void> result = holdWhile(m_add, m_out);
+		return result;
+	}
+
+	Future<Void> signalAndReset() {
+		Future<Void> result = signal();
+		clear();
+		return result;
+	}
+
+	Future<Void> signalAndCollapse() {
+		Future<Void> result = signalAndReset();
+		add(result);
+		return result;
+	}
+
+	void add(Future<Void> a) { m_add.send(a); }
+	void clear() { init(); }
+};
+
 #endif

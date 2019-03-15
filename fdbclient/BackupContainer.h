@@ -22,9 +22,9 @@
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "FDBTypes.h"
-#include "fdbclient/NativeAPI.h"
-#include "ReadYourWrites.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
@@ -89,6 +89,21 @@ struct KeyspaceSnapshotFile {
 	std::string fileName;
 	int64_t totalSize;
 	Optional<bool> restorable;  // Whether or not the snapshot can be used in a restore, if known
+	bool isSingleVersion() const {
+		return beginVersion == endVersion;
+	}
+	double expiredPct(Optional<Version> expiredEnd) const {
+		double pctExpired = 0;
+		if(expiredEnd.present() && expiredEnd.get() > beginVersion) {
+			if(isSingleVersion()) {
+				pctExpired = 1;
+			}
+			else {
+				pctExpired = double(std::min(endVersion, expiredEnd.get()) - beginVersion) / (endVersion - beginVersion);
+			}
+		}
+		return pctExpired * 100;
+	}
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const KeyspaceSnapshotFile &rhs) const {
@@ -96,10 +111,12 @@ struct KeyspaceSnapshotFile {
 	}
 };
 
-struct FullBackupListing {
+struct BackupFileList {
 	std::vector<RangeFile> ranges;
 	std::vector<LogFile> logs;
 	std::vector<KeyspaceSnapshotFile> snapshots;
+
+	void toStream(FILE *fout) const;
 };
 
 // The byte counts here only include usable log files and byte counts from kvrange manifests
@@ -108,10 +125,19 @@ struct BackupDescription {
 	std::string url;
 	std::vector<KeyspaceSnapshotFile> snapshots;
 	int64_t snapshotBytes;
+	// The version before which everything has been deleted by an expire
+	Optional<Version> expiredEndVersion;
+	// The latest version before which at least some data has been deleted by an expire
+	Optional<Version> unreliableEndVersion;
+	// The minimum log version in the backup
 	Optional<Version> minLogBegin;
+	// The maximum log version in the backup
 	Optional<Version> maxLogEnd;
+	// The maximum log version for which there is contiguous log version coverage extending back to minLogBegin
 	Optional<Version> contiguousLogEnd;
+	// The maximum version which this backup can be used to restore to
 	Optional<Version> maxRestorableVersion;
+	// The minimum version which this backup can be used to restore to
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail;  // Freeform container-specific info.
 
@@ -121,6 +147,7 @@ struct BackupDescription {
 	std::map<Version, int64_t> versionTimeMap;
 
 	std::string toString() const;
+	std::string toJSON() const;
 };
 
 struct RestorableFileSet {
@@ -153,10 +180,11 @@ public:
 
 	// Create the container
 	virtual Future<Void> create() = 0;
+	virtual Future<bool> exists() = 0;
 
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
-	virtual Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) = 0;
+	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
@@ -165,23 +193,32 @@ public:
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
 
+	struct ExpireProgress {
+		std::string step;
+		int total;
+		int done;
+		std::string toString() const;
+	};
 	// Delete backup files which do not contain any data at or after (more recent than) expireEndVersion.
 	// If force is false, then nothing will be deleted unless there is a restorable snapshot which
 	//   - begins at or after expireEndVersion
 	//   - ends at or before restorableBeginVersion
 	// If force is true, data is deleted unconditionally which could leave the backup in an unusable state.  This is not recommended.
 	// Returns true if expiration was done.
-	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
+	virtual Future<Void> expireData(Version expireEndVersion, bool force = false, ExpireProgress *progress = nullptr, Version restorableBeginVersion = std::numeric_limits<Version>::max()) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted = nullptr) = 0;
 
-	// Return key details about a backup's contents, possibly using cached or stored metadata
-	// unless deepScan is true.
-	virtual Future<BackupDescription> describeBackup(bool deepScan = false) = 0;
+	// Return key details about a backup's contents.
+	// Unless deepScan is true, use cached metadata, if present, as initial contiguous available log range.
+	// If logStartVersionOverride is given, log data prior to that version will be ignored for the purposes
+	// of this describe operation.  This can be used to calculate what the restorability of a backup would
+	// be after deleting all data prior to logStartVersionOverride.
+	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
-	virtual Future<FullBackupListing> dumpFileList() = 0;
+	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.

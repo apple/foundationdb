@@ -284,7 +284,10 @@ public class StackTester {
 				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
 
 				try {
-					inst.setTransaction(inst.tr.onError(err).join());
+					Transaction tr = inst.tr.onError(err).join();
+					if(!inst.setTransaction(tr)) {
+						tr.close();
+					}
 				}
 				catch(Throwable t) {
 					inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
@@ -365,9 +368,13 @@ public class StackTester {
 			else if (op == StackOperation.TUPLE_SORT) {
 				int listSize = StackUtils.getInt(inst.popParam().join());
 				List<Object> rawElements = inst.popParams(listSize).join();
-				List<Tuple> tuples = new ArrayList<Tuple>(listSize);
+				List<Tuple> tuples = new ArrayList<>(listSize);
 				for(Object o : rawElements) {
-					tuples.add(Tuple.fromBytes((byte[])o));
+					// Unpacking a tuple keeps around the serialized representation and uses
+					// it for comparison if it's available. To test semantic comparison, recreate
+					// the tuple from the item list.
+					Tuple t = Tuple.fromBytes((byte[])o);
+					tuples.add(Tuple.fromList(t.getItems()));
 				}
 				Collections.sort(tuples);
 				for(Tuple t : tuples) {
@@ -433,7 +440,8 @@ public class StackTester {
 						tr.options().setRetryLimit(50);
 						tr.options().setMaxRetryDelay(100);
 						tr.options().setUsedDuringCommitProtectionDisable();
-						tr.options().setTransactionLoggingEnable("my_transaction");
+						tr.options().setDebugTransactionIdentifier("my_transaction");
+						tr.options().setLogTransaction();
 						tr.options().setReadLockAware();
 						tr.options().setLockAware();
 

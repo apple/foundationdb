@@ -20,12 +20,12 @@
 
 // Unit tests for the flow language and libraries
 
-#include "flow/actorcompiler.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
-#include "fdbrpc.h"
-#include "IAsyncFile.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
 
@@ -75,17 +75,17 @@ ACTOR static Future<Void> emptyActor() {
 }
 
 ACTOR static void oneWaitVoidActor(Future<Void> f) {
-	Void _ = wait(f);
+	wait(f);
 }
 
 ACTOR static Future<Void> oneWaitActor(Future<Void> f) {
-	Void _ = wait(f);
+	wait(f);
 	return Void();
 }
 
 Future<Void> g_cheese;
 ACTOR static Future<Void> cheeseWaitActor() {
-	Void _ = wait(g_cheese);
+	wait(g_cheese);
 	return Void();
 }
 
@@ -109,8 +109,8 @@ ACTOR static Future<int> addOneActor(Future<int> in) {
 
 ACTOR static Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
 	choose{
-		when(Void _ = wait(f)) {}
-		when(Void _ = wait(g)) {}
+		when(wait(f)) {}
+		when(wait(g)) {}
 	}
 	return Void();
 }
@@ -209,11 +209,11 @@ ACTOR static Future<NonserializableThing> testNonserializableThing() {
 
 ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
 	try {
-		Void _ = wait(Future<Void>(Never()));
+		wait(Future<Void>(Never()));
 	} catch( Error &e ) {
 		state Error err = e;
 		try {
-			Void _ = wait(Future<Void>(Never()));
+			wait(Future<Void>(Never()));
 		} catch( Error &e ) {
 			*exits = true;
 			throw;
@@ -223,7 +223,7 @@ ACTOR Future<Void> testCancelled(bool *exits, Future<Void> f) {
 	return Void();
 }
 
-TEST_CASE("flow/flow/cancel1")
+TEST_CASE("/flow/flow/cancel1")
 {
 	bool exits = false;
 	Promise<Void> p;
@@ -241,7 +241,7 @@ TEST_CASE("flow/flow/cancel1")
 ACTOR static Future<Void> noteCancel(int* cancelled) {
 	*cancelled = 0;
 	try {
-		Void _ = wait(Future<Void>(Never()));
+		wait(Future<Void>(Never()));
 		throw internal_error();
 	}
 	catch (...) {
@@ -251,7 +251,7 @@ ACTOR static Future<Void> noteCancel(int* cancelled) {
 	}
 }
 
-TEST_CASE("flow/flow/cancel2")
+TEST_CASE("/flow/flow/cancel2")
 {
 	int c1 = 0, c2 = 0, c3 = 0;
 
@@ -267,7 +267,7 @@ TEST_CASE("flow/flow/cancel2")
 	return Void();
 }
 
-TEST_CASE("flow/flow/nonserializable futures")
+TEST_CASE("/flow/flow/nonserializable futures")
 {
 	// Types no longer need to be statically serializable to make futures, promises, actors
 	{
@@ -301,7 +301,7 @@ TEST_CASE("flow/flow/nonserializable futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/networked futures")
+TEST_CASE("/flow/flow/networked futures")
 {
 	// RequestStream can be serialized
 	{
@@ -309,7 +309,7 @@ TEST_CASE("flow/flow/networked futures")
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
-		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() && locInt.getEndpoint().address == FlowTransport::transport().getLocalAddress());
+		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() && locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
 		BinaryReader rd(wr.toStringRef(), IncludeVersion());
 		RequestStream<int> remoteInt;
@@ -338,7 +338,7 @@ TEST_CASE("flow/flow/networked futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/quorum")
+TEST_CASE("/flow/flow/quorum")
 {
 	vector<Promise<int>> ps(5);
 	vector<Future<int>> fs;
@@ -357,7 +357,7 @@ TEST_CASE("flow/flow/quorum")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial futures")
+TEST_CASE("/flow/flow/trivial futures")
 {
 	Future<int> invalid;
 	ASSERT(!invalid.isValid());
@@ -372,7 +372,7 @@ TEST_CASE("flow/flow/trivial futures")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial promises")
+TEST_CASE("/flow/flow/trivial promises")
 {
 	Future<int> f;
 
@@ -405,7 +405,7 @@ TEST_CASE("flow/flow/trivial promises")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial promisestreams")
+TEST_CASE("/flow/flow/trivial promisestreams")
 {
 	FutureStream<int> f;
 
@@ -440,7 +440,7 @@ TEST_CASE("flow/flow/trivial promisestreams")
 	return Void();
 }
 
-TEST_CASE("flow/flow/callbacks")
+TEST_CASE("/flow/flow/callbacks")
 {
 	Promise<int> p;
 	Future<int> f = p.getFuture();
@@ -475,7 +475,7 @@ TEST_CASE("flow/flow/callbacks")
 	return Void();
 }
 
-TEST_CASE("flow/flow/promisestream callbacks")
+TEST_CASE("/flow/flow/promisestream callbacks")
 {
 	PromiseStream<int> p;
 
@@ -508,7 +508,7 @@ TEST_CASE("flow/flow/promisestream callbacks")
 
 //Incompatible with --crash, so we are commenting it out for now
 /*
-TEST_CASE("flow/flow/promisestream multiple wait error")
+TEST_CASE("/flow/flow/promisestream multiple wait error")
 {
 	state int result = 0;
 	state PromiseStream<int> p;
@@ -528,7 +528,7 @@ TEST_CASE("flow/flow/promisestream multiple wait error")
 }
 */
 
-TEST_CASE("flow/flow/trivial actors")
+TEST_CASE("/flow/flow/trivial actors")
 {
 	ASSERT(expectActorCount(0));
 
@@ -583,7 +583,7 @@ TEST_CASE("flow/flow/trivial actors")
 	return Void();
 }
 
-TEST_CASE("flow/flow/yieldedFuture/progress")
+TEST_CASE("/flow/flow/yieldedFuture/progress")
 {
 	// Check that if check_yield always returns true, the yieldedFuture will do nothing immediately but will
 	// get one thing done per "tick" (per delay(0) returning).
@@ -619,7 +619,7 @@ TEST_CASE("flow/flow/yieldedFuture/progress")
 	return Void();
 }
 
-TEST_CASE("flow/flow/yieldedFuture/random")
+TEST_CASE("/flow/flow/yieldedFuture/random")
 {
 	// Check expectations about exactly how yieldedFuture responds to check_yield results
 
@@ -666,7 +666,7 @@ TEST_CASE("flow/flow/yieldedFuture/random")
 }
 
 
-TEST_CASE("flow/perf/yieldedFuture")
+TEST_CASE("/flow/perf/yieldedFuture")
 {
 	double start;
 	int N = 1000000;
@@ -700,7 +700,7 @@ TEST_CASE("flow/perf/yieldedFuture")
 	return Void();
 }
 
-TEST_CASE("flow/flow/chooseTwoActor")
+TEST_CASE("/flow/flow/chooseTwoActor")
 {
 	ASSERT(expectActorCount(0));
 
@@ -714,7 +714,7 @@ TEST_CASE("flow/flow/chooseTwoActor")
 	return Void();
 }
 
-TEST_CASE("flow/flow/perf/actor patterns")
+TEST_CASE("/flow/flow/perf/actor patterns")
 {
 	double start;
 	int N = 1000000;
@@ -1063,29 +1063,29 @@ struct YAMRandom {
 	}
 };
 
-TEST_CASE("flow/flow/YieldedAsyncMap/randomized")
+TEST_CASE("/flow/flow/YieldedAsyncMap/randomized")
 {
 	state YAMRandom<YieldedAsyncMap<int, int>> yamr;
 	state int it;
 	for (it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		Void _ = wait(yield());
+		wait(yield());
 	}
 	return Void();
 }
 
-TEST_CASE("flow/flow/AsyncMap/randomized")
+TEST_CASE("/flow/flow/AsyncMap/randomized")
 {
 	state YAMRandom<AsyncMap<int, int>> yamr;
 	state int it;
 	for (it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		Void _ = wait(yield());
+		wait(yield());
 	}
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/basic")
+TEST_CASE("/flow/flow/YieldedAsyncMap/basic")
 {
 	state YieldedAsyncMap<int, int> yam;
 	state Future<Void> y0 = yam.onChange(1);
@@ -1098,16 +1098,16 @@ TEST_CASE("flow/flow/YieldedAsyncMap/basic")
 	//yam.triggerRange(0, 4);
 
 	state Future<Void> y2 = yam.onChange(1);
-	Void _ = wait(reportErrors(y0, "y0"));
-	Void _ = wait(reportErrors(y1, "y1"));
-	Void _ = wait(reportErrors(y1a, "y1a"));
-	Void _ = wait(reportErrors(y1b, "y1b"));
-	Void _ = wait(reportErrors(timeout(y2, 5, Void()), "y2"));
+	wait(reportErrors(y0, "Y0"));
+	wait(reportErrors(y1, "Y1"));
+	wait(reportErrors(y1a, "Y1a"));
+	wait(reportErrors(y1b, "Y1b"));
+	wait(reportErrors(timeout(y2, 5, Void()), "Y2"));
 
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/cancel")
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel")
 {
 	state YieldedAsyncMap<int, int> yam;
 	//ASSERT(yam.count(1) == 0);
@@ -1132,7 +1132,7 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel")
 	return Void();
 }
 
-TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
+TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2")
 {
 	state YieldedAsyncMap<int, int> yam;
 
@@ -1147,14 +1147,14 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
 		},
 		delay(1)));
 
-	Void _ = wait(y1);
+	wait(y1);
 	printf("Got y1\n");
 	y2.cancel();
 
 	return Void();
 }
 
-TEST_CASE("flow/flow/AsyncVar/basic")
+TEST_CASE("/flow/flow/AsyncVar/basic")
 {
 	AsyncVar<int> av;
 	Future<Void> ch = av.onChange();
@@ -1175,15 +1175,15 @@ TEST_CASE("flow/flow/AsyncVar/basic")
 ACTOR static Future<Void> waitAfterCancel( int* output ) {
 	*output = 0;
 	try {
-		Void _ = wait( Never() );
+		wait( Never() );
 	} catch (...) {
-		Void _ = wait( (*output=1, Future<Void>(Void())) );
+		wait( (*output=1, Future<Void>(Void())) );
 	}
 	ASSERT(false);
 	return Void();
 }
 
-TEST_CASE("fdbrpc/flow/wait_expression_after_cancel")
+TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 {
 	int a = -1;
 	Future<Void> f = waitAfterCancel(&a);

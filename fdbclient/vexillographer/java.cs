@@ -85,8 +85,6 @@ namespace vexillographer
             {
                 { Scope.NetworkOption, new ScopeOptions(true, 
                     "A set of options that can be set globally for the {@link FDB FoundationDB API}.") },
-                { Scope.ClusterOption, new ScopeOptions(true, 
-                    "A set of options that can be set on a {@link Cluster}.") },
                 { Scope.DatabaseOption, new ScopeOptions(true, 
                     "A set of options that can be set on a {@link Database}.") },
                 { Scope.TransactionOption, new ScopeOptions(true, 

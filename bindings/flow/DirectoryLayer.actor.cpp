@@ -216,7 +216,7 @@ namespace FDB {
 			throw directory_does_not_exist();
 		}
 
-		Void _ = wait(dirLayer->checkVersion(tr, true));
+		wait(dirLayer->checkVersion(tr, true));
 
 		state Standalone<StringRef> newPrefix = wait(getPrefix(dirLayer, tr, prefix));
 		bool isFree = wait(isPrefixFree(dirLayer, tr, newPrefix, !prefix.present()));
@@ -238,7 +238,7 @@ namespace FDB {
 		Standalone<StringRef> layer, Optional<Standalone<StringRef>> prefix, bool allowCreate, bool allowOpen)
 	{
 		ASSERT(!prefix.present() || allowCreate);
-		Void _ = wait(dirLayer->checkVersion(tr, false));
+		wait(dirLayer->checkVersion(tr, false));
 
 		if(prefix.present() && !dirLayer->allowManualPrefixes) {
 			if(!dirLayer->getPath().size()) {
@@ -287,7 +287,7 @@ namespace FDB {
 	}
 
 	ACTOR Future<Standalone<VectorRef<StringRef>>> listInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
-		Void _ = wait(dirLayer->checkVersion(tr, false));
+		wait(dirLayer->checkVersion(tr, false));
 
 		state DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
 
@@ -346,7 +346,7 @@ namespace FDB {
 	}
 
 	ACTOR Future<Reference<DirectorySubspace>> moveInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path oldPath, IDirectory::Path newPath) {
-		Void _ = wait(dirLayer->checkVersion(tr, true));
+		wait(dirLayer->checkVersion(tr, true));
 
 		if(oldPath.size() <= newPath.size()) {
 			if(pathsEqual(oldPath, newPath, oldPath.size())) {
@@ -386,7 +386,7 @@ namespace FDB {
 		}
 
 		tr->set(parentNode.subspace.get().get(DirectoryLayer::SUB_DIR_KEY).get(newPath.back(), true).key(), dirLayer->nodeSubspace.unpack(oldNode.subspace.get().key()).getString(0));
-		Void _ = wait(removeFromParent(dirLayer, tr, oldPath));
+		wait(removeFromParent(dirLayer, tr, oldPath));
 
 		return dirLayer->contentsOfNode(oldNode.subspace.get(), newPath, oldNode.layer);
 	}
@@ -420,7 +420,7 @@ namespace FDB {
 		}
 
 		// waits are done concurrently
-		Void _ = wait(waitForAll(futures));
+		wait(waitForAll(futures));
 
 		Standalone<StringRef> nodePrefix = dirLayer->nodeSubspace.unpack(nodeSub.key()).getString(0);
 
@@ -432,7 +432,7 @@ namespace FDB {
 
 	Future<bool> removeInternal(Reference<DirectoryLayer> const&, Reference<Transaction> const&, IDirectory::Path const&, bool const&);
 	ACTOR Future<bool> removeInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path, bool failOnNonexistent) {
-		Void _ = wait(dirLayer->checkVersion(tr, true));
+		wait(dirLayer->checkVersion(tr, true));
 
 		if(path.empty()) {
 			throw cannot_modify_root_directory();
@@ -459,7 +459,7 @@ namespace FDB {
 		futures.push_back(removeRecursive(dirLayer, tr, node.subspace.get()));
 		futures.push_back(removeFromParent(dirLayer, tr, path));
 
-		Void _ = wait(waitForAll(futures));
+		wait(waitForAll(futures));
 
 		return true;
 	}
@@ -473,7 +473,7 @@ namespace FDB {
 	}
 
 	ACTOR Future<bool> existsInternal(Reference<DirectoryLayer> dirLayer, Reference<Transaction> tr, IDirectory::Path path) {
-		Void _ = wait(dirLayer->checkVersion(tr, false));
+		wait(dirLayer->checkVersion(tr, false));
 
 		DirectoryLayer::Node node = wait(find(dirLayer, tr, path));
 

@@ -14,7 +14,7 @@ Documentation
 
 FoundationDB is a robust choice for a broad range of use cases:
 
-**Developers can store all types of data.** FoundationDB is multi-model, meaning you can store many types data in a single database. All data is safely stored, distributed, and replicated in FoundationDB.
+**Developers can store all types of data.** FoundationDB is multi-model, meaning you can store many types of data in a single database. All data is safely stored, distributed, and replicated in FoundationDB.
 
 **Administrators easily scale and handle hardware failures.** FoundationDB is easy to install, grow, and manage. It has a distributed architecture that gracefully scales out and handles faults while acting like a single ACID database.
 

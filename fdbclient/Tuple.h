@@ -24,12 +24,16 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "FDBTypes.h"
+#include "fdbclient/FDBTypes.h"
 
 struct Tuple {
 	Tuple() {}
 
-	static Tuple unpack(StringRef const& str);
+	// Tuple parsing normally does not care of the final value is a numeric type and is incomplete.
+	// The exclude_incomplete will exclude such incomplete final numeric tuples from the result.
+	// Note that strings can't be incomplete because they are parsed such that the end of the packed
+	// byte string is considered the end of the string in lieu of a specific end.
+	static Tuple unpack(StringRef const& str, bool exclude_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);
 	Tuple& append(StringRef const& str, bool utf8=false);
@@ -50,14 +54,18 @@ struct Tuple {
 
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
-	int64_t getInt(size_t index) const;
+	int64_t getInt(size_t index, bool allow_incomplete = false) const;
 
 	KeyRange range(Tuple const& tuple = Tuple()) const;
 
 	Tuple subTuple(size_t beginIndex, size_t endIndex = std::numeric_limits<size_t>::max()) const;
 
+	// Return packed data with the arena it resides in
+	Standalone<VectorRef<uint8_t>> getData() { return data; }
+	Standalone<StringRef> getDataAsStandalone() { return Standalone<StringRef>(pack(), data.arena()); }
+
 private:
-	Tuple(const StringRef& data);
+	Tuple(const StringRef& data, bool exclude_incomplete = false);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;
 };

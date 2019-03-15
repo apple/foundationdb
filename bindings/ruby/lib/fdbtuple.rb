@@ -35,8 +35,8 @@ module FDB
     @@STRING_CODE     = 0x02
     @@NESTED_CODE     = 0x05
     @@INT_ZERO_CODE   = 0x14
-    @@POS_INT_END     = 0x1c
-    @@NEG_INT_START   = 0x0c
+    @@POS_INT_END     = 0x1d
+    @@NEG_INT_START   = 0x0b
     @@FLOAT_CODE      = 0x20
     @@DOUBLE_CODE     = 0x21
     @@FALSE_CODE      = 0x26
@@ -117,12 +117,28 @@ module FDB
       elsif code == @@STRING_CODE
         epos = find_terminator(v, pos+1)
         [v.slice(pos+1, epos-pos-1).gsub("\x00\xFF", "\x00").force_encoding("UTF-8"), epos+1]
-      elsif code >= @@INT_ZERO_CODE && code <= @@POS_INT_END
+      elsif code >= @@INT_ZERO_CODE && code < @@POS_INT_END
         n = code - @@INT_ZERO_CODE
         [("\x00" * (8-n) + v.slice(pos+1, n)).unpack("Q>")[0], pos+n+1]
-      elsif code >= @@NEG_INT_START and code < @@INT_ZERO_CODE
+      elsif code > @@NEG_INT_START and code < @@INT_ZERO_CODE
         n = @@INT_ZERO_CODE - code
         [("\x00" * (8-n) + v.slice(pos+1, n)).unpack("Q>")[0]-@@size_limits[n], pos+n+1]
+      elsif code == @@POS_INT_END
+        length = v.getbyte(pos+1)
+        val = 0
+        length.times do |i|
+          val = val << 8
+          val += v.getbyte(pos+2+i)
+        end
+        [val, pos+length+2]
+      elsif code == @@NEG_INT_START
+        length = v.getbyte(pos+1) ^ 0xff
+        val = 0
+        length.times do |i|
+          val = val << 8
+          val += v.getbyte(pos+2+i)
+        end
+        [val - (1 << (length*8)) + 1, pos+length+2]
       elsif code == @@FALSE_CODE
         [false, pos+1]
       elsif code == @@TRUE_CODE
@@ -182,15 +198,34 @@ module FDB
           raise ArgumentError, "unsupported encoding #{v.encoding.name}"
         end
       elsif v.kind_of? Integer
-        raise RangeError, "value outside inclusive range -2**64+1 to 2**64-1" if v < -2**64+1 || v > 2**64-1
+        raise RangeError, "Integer magnitude is too large (more than 255 bytes)" if v < -2**2040+1 || v > 2**2040-1
         if v == 0
           @@INT_ZERO_CODE.chr
         elsif v > 0
-          n = bisect_left( @@size_limits, v )
-          (20+n).chr + [v].pack("Q>").slice(8-n, n)
+          if v > @@size_limits[-1]
+            length = (v.bit_length + 7) / 8
+            result = @@POS_INT_END.chr + length.chr
+            length.times do |i|
+              result << ((v >> (8 * (length-i-1))) & 0xff)
+            end
+            result
+          else
+            n = bisect_left( @@size_limits, v )
+            (@@INT_ZERO_CODE+n).chr + [v].pack("Q>").slice(8-n, n)
+          end
         else
-          n = bisect_left( @@size_limits, -v )
-          (20-n).chr + [@@size_limits[n]+v].pack("Q>").slice(8-n, n)
+          if -v > @@size_limits[-1]
+            length = ((-v).bit_length + 7) / 8
+            v += (1 << (length * 8)) - 1
+            result = @@NEG_INT_START.chr + (length ^ 0xff).chr
+            length.times do |i|
+              result << ((v >> (8 * (length-i-1))) & 0xff)
+            end
+            result
+          else
+            n = bisect_left( @@size_limits, -v )
+            (@@INT_ZERO_CODE-n).chr + [@@size_limits[n]+v].pack("Q>").slice(8-n, n)
+          end
         end
       elsif v.kind_of? TrueClass
         @@TRUE_CODE.chr

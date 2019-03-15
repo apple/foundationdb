@@ -25,53 +25,29 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "TLogInterface.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/TLogInterface.h"
 
 typedef uint64_t DBRecoveryCount;
 
 struct MasterInterface {
 	LocalityData locality;
 	RequestStream< ReplyPromise<Void> > waitFailure;
-	RequestStream< struct GetRateInfoRequest > getRateInfo;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
 
-	NetworkAddress address() const { return changeCoordinators.getEndpoint().address; }
+	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & locality & waitFailure & getRateInfo & tlogRejoin & changeCoordinators & getCommitVersion;
+		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
 		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
-	}
-};
-
-struct GetRateInfoRequest {
-	UID requesterID;
-	int64_t totalReleasedTransactions;
-	ReplyPromise<struct GetRateInfoReply> reply;
-
-	GetRateInfoRequest() {}
-	GetRateInfoRequest( UID const& requesterID, int64_t totalReleasedTransactions ) : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar & requesterID & totalReleasedTransactions & reply;
-	}
-};
-
-struct GetRateInfoReply {
-	double transactionRate;
-	double leaseDuration;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		ar & transactionRate & leaseDuration;
 	}
 };
 
@@ -83,7 +59,7 @@ struct TLogRejoinRequest {
 	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & myInterface & reply;
+		serializer(ar, myInterface, reply);
 	}
 };
 
@@ -96,7 +72,7 @@ struct ChangeCoordinatorsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & newConnectionString & reply;
+		serializer(ar, newConnectionString, reply);
 	}
 };
 
@@ -121,7 +97,7 @@ struct ResolverMoveRef {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & range & dest;
+		serializer(ar, range, dest);
 	}
 };
 
@@ -137,7 +113,7 @@ struct GetCommitVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & resolverChanges & resolverChangesVersion & version & prevVersion & requestNum;
+		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum);
 	}
 };
 
@@ -153,7 +129,7 @@ struct GetCommitVersionRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & requestNum & mostRecentProcessedRequestNum & requestingProxy & reply;
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
 	}
 };
 
@@ -175,7 +151,7 @@ struct LifetimeToken {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & ccID & count;
+		serializer(ar, ccID, count);
 	}
 };
 

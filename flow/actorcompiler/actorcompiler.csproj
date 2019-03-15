@@ -12,7 +12,6 @@
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <OutputPath>$(SolutionDir)bin\$(Configuration)\</OutputPath>
-    <IntermediateOutputPath>$(SystemDrive)\temp\msvcfdb\$(Configuration)\actorcompiler\</IntermediateOutputPath>
     <PublishUrl>publish\</PublishUrl>
     <Install>true</Install>
     <InstallFrom>Disk</InstallFrom>

@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "NetworkTest.h"
+#include "fdbserver/NetworkTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 
 NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
-	: test( Endpoint(remote, WLTOKEN_NETWORKTEST) )
+	: test( Endpoint({remote}, WLTOKEN_NETWORKTEST) )
 {
 }
 
@@ -45,7 +45,7 @@ ACTOR Future<Void> networkTestServer() {
 				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
 				sent++;
 			}
-			when( Void _ = wait( logging ) ) {
+			when( wait( logging ) ) {
 				auto spd = sent / (now() - lastTime);
 				fprintf( stderr, "responses per second: %f (%f us)\n", spd, 1e6/spd );
 				lastTime = now();
@@ -68,7 +68,7 @@ ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* s
 ACTOR Future<Void> logger( int* sent ) {
 	state double lastTime = now();
 	loop {
-		Void _ = wait( delay(1.0) );
+		wait( delay(1.0) );
 		auto spd = *sent / (now() - lastTime);
 		fprintf( stderr, "messages per second: %f\n", spd);
 		lastTime = now();
@@ -97,7 +97,7 @@ static void networkTestnanosleep()
 	printf("\nnanosleep(10) latency after 5ms spin:");
 	for (int i = 0; i < 10; i++) {
 		double a = timer_monotonic() + 5e-3;
-		while (timer_monotonic() < a) 0;
+		while (timer_monotonic() < a) {}
 
 		double before = timer_monotonic();
 		timespec tv;
@@ -154,6 +154,6 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 		clients.push_back( testClient( interfs, &sent ) );
 	clients.push_back( logger( &sent ) );
 
-	Void _ = wait( waitForAll( clients ) );
+	wait( waitForAll( clients ) );
 	return Void();
 }

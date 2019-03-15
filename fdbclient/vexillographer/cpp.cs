@@ -72,7 +72,7 @@ namespace vexillographer
                 outFile.WriteLine("#define FDBCLIENT_FDBOPTIONS_G_H");
                 outFile.WriteLine("#pragma once");
                 outFile.WriteLine();
-                outFile.WriteLine("#include \"FDBOptions.h\"");
+                outFile.WriteLine("#include \"fdbclient/FDBOptions.h\"");
                 outFile.WriteLine();
                 foreach (Scope s in Enum.GetValues(typeof(Scope)))
                 {
@@ -88,7 +88,7 @@ namespace vexillographer
             {
                 TextWriter outFile = new StreamWriter(cFile);
                 outFile.NewLine = "\n";
-                outFile.WriteLine("#include \"FDBOptions.g.h\"");
+                outFile.WriteLine("#include \"fdbclient/FDBOptions.g.h\"");
                 outFile.WriteLine();
                 foreach (Scope s in Enum.GetValues(typeof(Scope))) 
                 {

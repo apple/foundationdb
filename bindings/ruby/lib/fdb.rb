@@ -36,7 +36,7 @@ module FDB
     end
   end
   def self.api_version(version)
-    header_version = 520
+    header_version = 610
     if self.is_api_version_selected?()
       if @@chosen_version != version
         raise "FDB API already loaded at version #{@@chosen_version}."
@@ -70,8 +70,15 @@ module FDB
       raise "FoundationDB API version error"
     end
 
+    FDBC.init_c_api()
+
     require_relative 'fdbtuple'
     require_relative 'fdbdirectory'
+
+    if version < 610
+      require_relative 'fdbimpl_v609'
+    end
+
     if version > 22
       require_relative 'fdblocality'
     end

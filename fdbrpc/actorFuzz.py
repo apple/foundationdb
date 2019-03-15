@@ -347,7 +347,7 @@ class throwF2(throwF):
 
 class throwF3(throwF):
     def __str__(self):
-        return indent(self.cx) + "Void _ = wait( error ); // throw operation_failed()\n"
+        return indent(self.cx) + "wait( error ); // throw operation_failed()\n"
 
     def unreachable(self):
         return False         # The actor compiler doesn't know that 'error' always contains an error

@@ -36,6 +36,19 @@ namespace actorcompiler
         }
     };
 
+    class ErrorMessagePolicy
+    {
+        public bool DisableActorWithoutWaitWarning = false;
+        public void HandleActorWithoutWait(String sourceFile, Actor actor)
+        {
+            if (!DisableActorWithoutWaitWarning && !actor.isTestCase)
+            {
+                // TODO(atn34): Once cmake is the only build system we can make this an error instead of a warning.
+                Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+            }
+        }
+    }
+
     class Token
     {
         public string Value;
@@ -166,6 +179,12 @@ namespace actorcompiler
         }
         public Token[] GetAllTokens() { return tokens; }
 
+        public int Length {
+            get {
+                return endPos - beginPos;
+            }
+        }
+
         Token[] tokens;
         int beginPos;
         int endPos;
@@ -194,10 +213,12 @@ namespace actorcompiler
 
         Token[] tokens;
         string sourceFile;
+        ErrorMessagePolicy errorMessagePolicy;
 
-        public ActorParser(string text, string sourceFile)
+        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy)
         {
             this.sourceFile = sourceFile;
+            this.errorMessagePolicy = errorMessagePolicy;
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -263,7 +284,7 @@ namespace actorcompiler
                     int end;
                     var descr = ParseDescr(i, out end);
                     int lines;
-                    new DescrCompiler(descr, sourceFile, inBlocks == 0, tokens[i].BraceDepth).Write(writer, out lines);
+                    new DescrCompiler(descr, tokens[i].BraceDepth).Write(writer, out lines);
                     i = end;
                     outLine += lines;
                     if (i != tokens.Length && LineNumbersEnabled)
@@ -493,9 +514,11 @@ namespace actorcompiler
         WhenStatement ParseWhenStatement(TokenRange toks)
         {
             var expr = toks.Consume("when")
-                           .First(NonWhitespace)
+                           .SkipWhile(Whitespace)
+                           .First()
                            .Assert("Expected (", t => t.Value == "(")
-                           .GetMatchingRangeIn(toks);
+                           .GetMatchingRangeIn(toks)
+                           .SkipWhile(Whitespace);
 
             return new WhenStatement {
                 wait = ParseWaitStatement(expr),
@@ -538,24 +561,40 @@ namespace actorcompiler
                 ws.resultIsState = true;
                 toks = toks.Consume("state");
             }
-
-            Token name;
-            TokenRange type, initializer;
-            bool constructorSyntax;
-            ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
-
-            ws.result = new VarDeclaration
+            TokenRange initializer;
+            if (toks.First().Value == "wait" || toks.First().Value == "waitNext")
             {
-                name = name.Value,
-                type = str(NormalizeWhitespace(type)),
-                initializer = "",
-                initializerConstructorSyntax = false
-            };
+                initializer = toks.RevSkipWhile(t=>t.Value==";");
+                ws.result = new VarDeclaration {
+                        name = "_",
+                        type = "Void",
+                        initializer = "",
+                        initializerConstructorSyntax = false
+                };
+            } else {
+                Token name;
+                TokenRange type;
+                bool constructorSyntax;
+                ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
 
-            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration");
+                string typestring = str(NormalizeWhitespace(type));
+                if (typestring == "Void") {
+                    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
+                }
+
+                ws.result = new VarDeclaration
+                {
+                    name = name.Value,
+                    type = str(NormalizeWhitespace(type)),
+                    initializer = "",
+                    initializerConstructorSyntax = false
+                };
+            }
+
+            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
 
             var waitParams = initializer
-                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.", 
+                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1", 
                         t=> {
                             if (t.Value=="wait") return true;
                             if (t.Value=="waitNext") { ws.isWaitNext = true; return true; }
@@ -563,8 +602,9 @@ namespace actorcompiler
                         })
                 .SkipWhile(Whitespace).First().Assert("Expected (", t => t.Value == "(")
                 .GetMatchingRangeIn(initializer);
-            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace))
-                throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.");
+            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace)) {
+                throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.2");
+            }
 
             ws.futureExpression = str(NormalizeWhitespace(waitParams));
             return ws;
@@ -833,22 +873,38 @@ namespace actorcompiler
 
             var toks = range(pos+1, tokens.Length);
             var heading = toks.TakeWhile(t => t.Value != "{");
-            var body = range(heading.End+1, tokens.Length)
-                .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
+            var toSemicolon = toks.TakeWhile(t => t.Value != ";");
+            actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
+            if (actor.isForwardDeclaration) {
+                heading = toSemicolon;
+                if (head_token.Value == "ACTOR") {
+                    ParseActorHeading(actor, heading);
+                } else {
+                    head_token.Assert("ACTOR expected!", t => false);
+                }
+                end = heading.End + 1;
+            } else {
+                var body = range(heading.End+1, tokens.Length)
+                    .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-            if (head_token.Value == "ACTOR")
-                ParseActorHeading(actor, heading);
-            else if (head_token.Value == "TEST_CASE")
-                ParseTestCaseHeading(actor, heading);
-            else
-                head_token.Assert("ACTOR or TEST_CASE expected!", t => false);
+                if (head_token.Value == "ACTOR")
+                {
+                    ParseActorHeading(actor, heading);
+                }
+                else if (head_token.Value == "TEST_CASE") {
+                    ParseTestCaseHeading(actor, heading);
+                    actor.isTestCase = true;
+                }
+                else
+                    head_token.Assert("ACTOR or TEST_CASE expected!", t => false);
 
-            actor.body = ParseCodeBlock(body);
+                actor.body = ParseCodeBlock(body);
 
-            if (!actor.body.containsWait())
-                Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+                if (!actor.body.containsWait())
+                    this.errorMessagePolicy.HandleActorWithoutWait(sourceFile, actor);
 
-            end = body.End + 1;
+                end = body.End + 1;
+            }
             return actor;
         }
 

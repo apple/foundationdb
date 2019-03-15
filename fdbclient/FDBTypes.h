@@ -22,7 +22,7 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include "flow/flow.h"
-#include "Knobs.h"
+#include "fdbclient/Knobs.h"
 
 using std::vector;
 using std::pair;
@@ -31,8 +31,48 @@ typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
-typedef int16_t Tag;
 typedef int64_t Generation;
+
+enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
+
+#pragma pack(push, 1)
+struct Tag {
+	int8_t locality;
+	uint16_t id;
+
+	Tag() : locality(tagLocalitySpecial), id(0) {}
+	Tag(int8_t locality, uint16_t id) : locality(locality), id(id) {}
+
+	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
+	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
+	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	std::string toString() const {
+		return format("%d:%d", locality, id);
+	}
+
+	template <class Ar>
+	force_inline void serialize_unversioned(Ar& ar) { 
+		serializer(ar, locality, id);
+	}
+};
+#pragma pack(pop)
+
+template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
+
+static const Tag invalidTag {tagLocalitySpecial, 0};
+static const Tag txsTag {tagLocalitySpecial, 1};
+
+enum { txsTagOld = -1, invalidTagOld = -100 };
+
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+
+	TagsAndMessage() {}
+	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+};
 
 struct KeyRangeRef;
 struct KeyValueRef;
@@ -44,13 +84,23 @@ void uniquify( Collection& c ) {
 }
 
 static std::string describe( const Tag item ) {
+	return format("%d:%d", item.locality, item.id);
+}
+
+static std::string describe( const int item ) {
 	return format("%d", item);
+}
+
+template <class T>
+static std::string describe( Reference<T> const& item ) {
+	return item->toString();
 }
 
 template <class T>
 static std::string describe( T const& item ) {
 	return item.toString();
 }
+
 template <class K, class V>
 static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
@@ -95,12 +145,17 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
-std::string printable( const Optional<StringRef>& val );
-std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
+
+template <class T>
+std::string printable( const Optional<T>& val ) {
+	if( val.present() )
+		return printable( val.get() );
+	return "[not set]";
+}
 
 inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
 	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )
@@ -143,7 +198,7 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		ar & const_cast<KeyRef&>(begin) & const_cast<KeyRef&>(end);
+		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		if( begin > end ) {
 			throw inverted_range();
 		};
@@ -177,7 +232,7 @@ struct KeyValueRef {
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
 	template <class Ar>
-	force_inline void serialize(Ar& ar) { ar & key & value; }
+	force_inline void serialize(Ar& ar) { serializer(ar, key, value); }
 
 	struct OrderByKey {
 		bool operator()(KeyValueRef const& a, KeyValueRef const& b) const {
@@ -212,10 +267,9 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+typedef Standalone<struct KeySelectorRef> KeySelector; 
 
 enum { invalidVersion = -1, latestVersion = -2 };
-enum { invalidTag = -100, txsTag = -1 };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))
@@ -336,7 +390,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & orEqual & offset;
+		serializer(ar, key, orEqual, offset);
 	}
 };
 
@@ -369,7 +423,7 @@ struct KeyRangeWith : KeyRange {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((KeyRange&)*this) & value;
+		serializer(ar, ((KeyRange&)*this), value);
 	}
 };
 template <class Val>
@@ -421,7 +475,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 };
 
@@ -431,6 +485,7 @@ struct KeyValueStoreType {
 		SSD_BTREE_V1,
 		MEMORY,
 		SSD_BTREE_V2,
+		SSD_REDWOOD_V1,
 		END
 	};
 
@@ -442,15 +497,92 @@ struct KeyValueStoreType {
 	operator StoreType() const { return StoreType(type); }
 
 	template <class Ar>
-	void serialize(Ar& ar) { ar & type; }
+	void serialize(Ar& ar) { serializer(ar, type); }
 
 	std::string toString() const {
 		switch( type ) {
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
+			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
 			default: return "unknown";
 		}
+	}
+
+private:
+	uint32_t type;
+};
+
+struct TLogVersion {
+	enum Version {
+		UNSET = 0,
+		// Everything between BEGIN and END should be densely packed, so that we
+		// can iterate over them easily.
+		// V1 = 1,  // 4.6 is dispatched to via 6.0
+		V2 = 2, // 6.0
+		V3 = 3, // 6.1
+		MIN_SUPPORTED = V2,
+		MAX_SUPPORTED = V3,
+		MIN_RECRUITABLE = V2,
+		DEFAULT = V2,
+	} version;
+
+	TLogVersion() : version(UNSET) {}
+	TLogVersion( Version v ) : version(v) {}
+
+	operator Version() const {
+		return version;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		uint32_t v = (uint32_t)version;
+		serializer(ar, v);
+		version = (Version)v;
+	}
+
+	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
+		if (s == LiteralStringRef("2")) return V2;
+		if (s == LiteralStringRef("3")) return V3;
+		return default_error_or();
+	}
+};
+
+struct TLogSpillType {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	enum SpillType {
+		UNSET = 0,
+		DEFAULT = 1,
+		VALUE = 1,
+		REFERENCE = 2,
+		END = 3,
+	};
+
+	TLogSpillType() : type(DEFAULT) {}
+	TLogSpillType( SpillType type ) : type(type) {
+		if ((uint32_t)type >= END) {
+			this->type = UNSET;
+		}
+	}
+	operator SpillType() const { return SpillType(type); }
+
+	template <class Ar>
+	void serialize(Ar& ar) { serializer(ar, type); }
+
+	std::string toString() const {
+		switch( type ) {
+			case VALUE: return "value";
+			case REFERENCE: return "reference";
+			case UNSET: return "unset";
+			default: ASSERT(false);
+		}
+		return "";
+	}
+
+	static ErrorOr<TLogSpillType> FromStringRef( StringRef s ) {
+		if ( s == LiteralStringRef("1") ) return VALUE;
+		if ( s == LiteralStringRef("2") ) return REFERENCE;
+		return default_error_or();
 	}
 
 private:
@@ -469,7 +601,7 @@ struct StorageBytes {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & free & total & used & available;
+		serializer(ar, free, total, used, available);
 	}
 };
 
@@ -501,33 +633,21 @@ struct LogMessageVersion {
 };
 
 struct AddressExclusion {
-	uint32_t ip;
+	IPAddress ip;
 	int port;
 
 	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion( uint32_t ip ) : ip(ip), port(0) {}
-	explicit AddressExclusion( uint32_t ip, int port ) : ip(ip), port(port) {}
+	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
+	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
 
-	explicit AddressExclusion (std::string s) {
-		int a,b,c,d,p,count=-1;
-		if (sscanf(s.c_str(), "%d.%d.%d.%d:%d%n", &a,&b,&c,&d, &p, &count) == 5 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = p;
-		}
-		else if (sscanf(s.c_str(), "%d.%d.%d.%d%n", &a,&b,&c,&d, &count) == 4 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = 0;
-		}
-		else {
-			throw connection_string_invalid();
-		}
+	bool operator<(AddressExclusion const& r) const {
+		if (ip != r.ip) return ip < r.ip;
+		return port < r.port;
 	}
-
-	bool operator< (AddressExclusion const& r) const { if (ip != r.ip) return ip < r.ip; return port<r.port; }
-	bool operator== (AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
+	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
 
 	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip != 0 || port != 0; }
+	bool isValid() const { return ip.isValid() || port != 0; }
 
 	bool excludes( NetworkAddress const& addr ) const {
 		if(isWholeMachine())
@@ -537,22 +657,130 @@ struct AddressExclusion {
 
 	// This is for debugging and IS NOT to be used for serialization to persistant state
 	std::string toString() const {
-		std::string as = format( "%d.%d.%d.%d", (ip>>24)&0xff, (ip>>16)&0xff, (ip>>8)&0xff, ip&0xff );
 		if (!isWholeMachine())
-			as += format(":%d", port);
-		return as;
+			return formatIpPort(ip, port);
+		return ip.toString();
 	}
 
 	static AddressExclusion parse( StringRef const& );
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		serializer(ar, ip, port);
 	}
 };
 
 static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
+
+struct ClusterControllerPriorityInfo {
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+		if(!dcPriority.size()) {
+			return FitnessUnknown;
+		} else if(dcPriority.size() == 1) {
+			if(dcId == dcPriority[0]) {
+				return FitnessPreferred;
+			} else {
+				return FitnessUnknown;
+			}
+		} else {
+			if(dcId == dcPriority[0]) {
+				return FitnessPrimary;
+			} else if(dcId == dcPriority[1]) {
+				return FitnessRemote;
+			} else {
+				return FitnessBad;
+			}
+		}
+	}
+
+	uint8_t processClassFitness;
+	bool isExcluded;
+	uint8_t dcFitness;
+
+	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+
+	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, processClassFitness, isExcluded, dcFitness);
+	}
+};
+
+struct HealthMetrics {
+	struct StorageStats {
+		int64_t storageQueue;
+		int64_t storageDurabilityLag;
+		double diskUsage;
+		double cpuUsage;
+
+		bool operator==(StorageStats const &r) const {
+			return (
+				(storageQueue == r.storageQueue) &&
+				(storageDurabilityLag == r.storageDurabilityLag) &&
+				(diskUsage == r.diskUsage) &&
+				(cpuUsage == r.cpuUsage)
+			);
+		}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, storageQueue, storageDurabilityLag, diskUsage, cpuUsage);
+		}
+	};
+
+	int64_t worstStorageQueue;
+	int64_t worstStorageDurabilityLag;
+	int64_t worstTLogQueue;
+	double tpsLimit;
+	bool batchLimited;
+	std::map<UID, StorageStats> storageStats;
+	std::map<UID, int64_t> tLogQueue;
+
+	HealthMetrics()
+		: worstStorageQueue(0)
+		, worstStorageDurabilityLag(0)
+		, worstTLogQueue(0)
+		, tpsLimit(0.0)
+		, batchLimited(false)
+	{}
+
+	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
+	{
+		worstStorageQueue = hm.worstStorageQueue;
+		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
+		worstTLogQueue = hm.worstTLogQueue;
+		tpsLimit = hm.tpsLimit;
+		batchLimited = hm.batchLimited;
+
+		if (!detailedOutput) {
+			storageStats.clear();
+			tLogQueue.clear();
+		} else if (detailedInput) {
+			storageStats = hm.storageStats;
+			tLogQueue = hm.tLogQueue;
+		}
+	}
+
+	bool operator==(HealthMetrics const& r) const {
+		return (
+			worstStorageQueue == r.worstStorageQueue &&
+			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
+			worstTLogQueue == r.worstTLogQueue &&
+			storageStats == r.storageStats &&
+			tLogQueue == r.tLogQueue &&
+			batchLimited == r.batchLimited
+		);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+	}
+};
 
 #endif

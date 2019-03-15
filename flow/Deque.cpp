@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "UnitTest.h"
-#include "Deque.h"
+#include "flow/UnitTest.h"
+#include "flow/Deque.h"
 
-TEST_CASE("flow/Deque/12345") {
+TEST_CASE("/flow/Deque/12345") {
 	Deque<int> q;
 	q.push_back(1);
 	q.push_back(2);
@@ -37,7 +37,7 @@ TEST_CASE("flow/Deque/12345") {
 	return Void();
 }
 
-TEST_CASE("flow/Deque/queue") {
+TEST_CASE("/flow/Deque/queue") {
 	std::queue<int, Deque<int>> q;
 	
 	int to_push = 0, to_pop = 0;
@@ -53,7 +53,7 @@ TEST_CASE("flow/Deque/queue") {
 	return Void();
 }
 
-TEST_CASE("flow/Deque/max_size") {
+TEST_CASE("/flow/Deque/max_size") {
 	Deque<uint8_t> q;
 	double begin = timer();
 	for (int i = 0; i < 10; i++)

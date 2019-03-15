@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "Error.h"
-#include "Trace.h"
-#include "Knobs.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
+#include "flow/Knobs.h"
 #include <iostream>
 using std::cout;
 using std::endl;
@@ -40,7 +40,7 @@ extern void flushTraceFileVoid();
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
 		Error e = Error::fromCode(error_code_unknown_error);
-		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").detail("OriginalCode", code).error(e);
+		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").error(e).detail("OriginalCode", code);
 		return e;
 	}
 	else
@@ -115,5 +115,9 @@ void ErrorCodeTable::addCode(int code, const char *name, const char *description
 }
 
 bool isAssertDisabled(int line) {
-	return FLOW_KNOBS->DISABLE_ASSERTS == -1 || FLOW_KNOBS->DISABLE_ASSERTS == line;
+	return FLOW_KNOBS && (FLOW_KNOBS->DISABLE_ASSERTS == -1 || FLOW_KNOBS->DISABLE_ASSERTS == line);
+}
+
+void breakpoint_me() {
+	return;
 }

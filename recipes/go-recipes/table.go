@@ -144,7 +144,7 @@ func (tbl Table) TableGetCol(tr fdb.ReadTransactor, col int) ([]interface{}, err
 }
 
 func main() {
-	fdb.MustAPIVersion(520)
+	fdb.MustAPIVersion(610)
 
 	db := fdb.MustOpenDefault()
 

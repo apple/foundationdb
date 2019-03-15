@@ -22,7 +22,7 @@
 #define FLOW_ITHREADPOOL_H
 #pragma once
 
-#include "flow.h"
+#include "flow/flow.h"
 
 // The IThreadPool interface represents a thread pool suitable for doing blocking disk-intensive work
 // (as opposed to a one-thread-per-core pool for CPU-intensive work)

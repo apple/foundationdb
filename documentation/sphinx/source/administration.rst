@@ -9,14 +9,17 @@ Administration
    :hidden:
    :titlesonly:
 
+   configuration
    moving-a-cluster
    tls
-   
+
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
 .. note:: In FoundationDB, a "cluster" refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.
 
 To administer an externally accessible cluster, you need to understand basic system tasks. You should begin with how to :ref:`start and stop the database <administration-running-foundationdb>`. Next, you should review management of a cluster, including :ref:`adding <adding-machines-to-a-cluster>` and :ref:`removing <removing-machines-from-a-cluster>` machines, and monitoring :ref:`cluster status <administration-monitoring-cluster-status>` and the basic :ref:`server processes <administration_fdbmonitor>`. You should be familiar with :ref:`managing trace files <administration-managing-trace-files>` and :ref:`other administrative concerns <administration-other-administrative-concerns>`. Finally, you should know how to :ref:`uninstall <administration-removing>` or :ref:`upgrade <upgrading-foundationdb>` the database.
+
+FoundationDB also provides a number of different :doc:`configuration <configuration>` options which you should know about when setting up a FoundationDB database.
 
 .. _administration-running-foundationdb:
 
@@ -82,7 +85,7 @@ Specifying the cluster file
 All FoundationDB components can be configured to use a specified cluster file: 
 
 * The ``fdbcli`` tool allows a cluster file to be passed on the command line using the ``-C`` option.
-* The :doc:`client APIs <api-reference>` allow a cluster file to be passed when connecting to a cluster, usually via ``open()`` or ``create_cluster()``.
+* The :doc:`client APIs <api-reference>` allow a cluster file to be passed when connecting to a cluster, usually via ``open()``.
 * A FoundationDB server or ``backup-agent`` allow a cluster file to be specified in :ref:`foundationdb.conf <foundationdb-conf>`.
 
 In addition, FoundationDB allows you to use the environment variable ``FDB_CLUSTER_FILE`` to specify a cluster file. This approach is helpful if you operate or access more than one cluster.
@@ -137,6 +140,21 @@ Any client connected to FoundationDB can access information about its cluster fi
 
 * To get the path to the cluster file, read the key ``\xFF\xFF/cluster_file_path``.
 * To get the contents of the cluster file, read the key ``\xFF\xFF/connection_string``.
+
+.. _ipv6-support:
+
+IPv6 Support
+============
+
+FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as ``[IP]:PORT``, e.g. "[::1]:4800", "[abcd::dead:beef]:4500".
+
+1) The cluster file can contain mix of IPv6 and IPv6 addresses. For example::
+
+     description:ID@127.0.0.1:4500,[::1]:4500,...
+
+2) Starting ``fdbserver`` with IPv6::
+
+     $ /path/to/fdbserver -C fdb.cluster -p \[::1\]:4500
 
 .. _adding-machines-to-a-cluster:
 
@@ -547,11 +565,20 @@ Virtual machines
 Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the ``locality_machineid`` parameter in :ref:`foundationdb.conf <foundationdb-conf>`. All processes on VMs that share hardware should specify the same ``locality_machineid``.
 
 Datacenters
-------------
+-----------
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
 If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+
+(Re)creating a database
+-----------------------
+
+Installing FoundationDB packages usually creates a new database on the cluster automatically. However, if a cluster does not have a database configured (because the package installation failed to create it, you deleted your data files, or you did not install from the packages, etc.), then you may need to create it manually using the ``configure new`` command in ``fdbcli`` with the desired redundancy mode and storage engine::
+
+    > configure new single memory
+
+.. warning:: In a cluster that hasn't been configured, running ``configure new`` will cause the processes in the cluster to delete all data files in their data directories. If a process is reusing an existing data directory, be sure to backup any files that you want to keep. Do not use ``configure new`` to fix a previously working cluster that reports itself missing unless you are certain any necessary data files are safe.
 
 .. _administration-removing:
 
@@ -634,24 +661,24 @@ You can now remove old client library versions from your clients. This is only t
 Version-specific notes on upgrading
 ===================================
 
+Upgrading from 6.0.x
+--------------------
+
+Upgrades from 6.0.x will keep all your old data and configuration settings. 
+
 Upgrading from 5.2.x
 --------------------
 
 Upgrades from 5.2.x will keep all your old data and configuration settings. 
 
-Upgrading from 4.4.x - 5.1.x
+Upgrading from 5.0.x - 5.1.x
 ----------------------------
 
-Upgrades from versions between 4.4.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted. 
-
-Upgrading from 3.0.x - 4.3.x
-----------------------------
-
-Backup and DR must be stopped before upgrading. Upgrades from versions between 3.0.x and 4.3.x will keep all your old data and configuration settings.
+Upgrades from versions between 5.0.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted. 
 
 .. _upgrading-from-older-versions:
 
 Upgrading from Older Versions
 -----------------------------
 
-Upgrades from versions older than 3.0.0 are no longer supported.
+Upgrades from versions older than 5.0.0 are no longer supported.

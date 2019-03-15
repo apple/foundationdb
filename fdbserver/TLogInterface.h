@@ -30,6 +30,8 @@
 
 struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
+
 	LocalityData locality;
 	UID uniqueID;
 	UID sharedTLogID;
@@ -43,14 +45,15 @@ struct TLogInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
-	TLogInterface() { }
+	TLogInterface() {}
+	explicit TLogInterface(LocalityData locality) : uniqueID( g_random->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
 	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
 	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
-	NetworkAddress address() const { return peekMessages.getEndpoint().address; }
+	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
 		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
 		popMessages.getEndpoint( TaskTLogPop );
@@ -61,8 +64,9 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
-		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
+		ASSERT(ar.isDeserializing || uniqueID != UID());
+		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
+		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
 	}
 };
 
@@ -73,18 +77,17 @@ struct TLogRecoveryFinishedRequest {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
 struct TLogLockResult {
 	Version end;
 	Version knownCommittedVersion;
-	std::vector<Tag> tags;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & end & knownCommittedVersion & tags;
+		serializer(ar, end, knownCommittedVersion);
 	}
 };
 
@@ -97,7 +100,7 @@ struct TLogConfirmRunningRequest {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & debugID & reply;
+		serializer(ar, debugID, reply);
 	}
 };
 
@@ -113,7 +116,7 @@ struct VersionUpdateRef {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & version & mutations & isPrivateData;
+		serializer(ar, version, mutations, isPrivateData);
 	}
 };
 
@@ -126,9 +129,9 @@ struct VerUpdateRef {
 	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
-	template <class Ar> 
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & version & mutations & isPrivateData;
+		serializer(ar, version, mutations, isPrivateData);
 	}
 };
 
@@ -138,10 +141,12 @@ struct TLogPeekReply {
 	Version end;
 	Optional<Version> popped;
 	Version maxKnownVersion;
+	Version minKnownCommittedVersion;
+	Optional<Version> begin;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & messages & end & popped & maxKnownVersion;
+		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin);
 	}
 };
 
@@ -158,22 +163,23 @@ struct TLogPeekRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & begin & tag & returnIfBlocked & sequence & reply;
+		serializer(ar, arena, begin, tag, returnIfBlocked, sequence, reply);
 	}
 };
 
 struct TLogPopRequest {
 	Arena arena;
 	Version to;
+	Version durableKnownCommittedVersion;
 	Tag tag;
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest( Version to, Tag tag ) : to(to), tag(tag) {}
+	TLogPopRequest( Version to, Version durableKnownCommittedVersion, Tag tag ) : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & to & tag & reply;
+		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
 	}
 };
 
@@ -190,26 +196,25 @@ struct TagMessagesRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & tag & messageOffsets;
+		serializer(ar, tag, messageOffsets);
 	}
 };
 
 struct TLogCommitRequest {
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion;
+	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
-	StringRef messages;  // Each message prefixed by a 4-byte length
-	VectorRef< TagMessagesRef > tags;
+	StringRef messages;// Each message prefixed by a 4-byte length
 
-	ReplyPromise<Void> reply;
+	ReplyPromise<Version> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, VectorRef< TagMessagesRef > tags, Optional<UID> debugID ) 
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), tags(tags), debugID(debugID) {}
-	template <class Ar> 
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & prevVersion & version & knownCommittedVersion & messages & tags & reply & arena & debugID;
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
 	}
 };
 
@@ -218,7 +223,7 @@ struct TLogQueuingMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & reply;
+		serializer(ar, reply);
 	}
 };
 
@@ -231,7 +236,7 @@ struct TLogQueuingMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & localTime & instanceID & bytesDurable & bytesInput & storageBytes & v;
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
 	}
 };
 

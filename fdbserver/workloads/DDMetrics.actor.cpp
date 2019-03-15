@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DDMetricsWorkload : TestWorkload {
 	double startDelay, ddDone;
@@ -40,22 +40,22 @@ struct DDMetricsWorkload : TestWorkload {
 	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
-		TraceEvent("getHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
-		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData" ) ) ), 1.0 ) );
+		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+			EventLogRequest( LiteralStringRef( "MovingData" ) ) ), 1.0 ) );
 		int relocations;
-		sscanf(extractAttribute(md.toString(), "HighPriorityRelocations").c_str(), "%d", &relocations);
+		sscanf(md.getValue("HighPriorityRelocations").c_str(), "%d", &relocations);
 		return relocations;
 	}
 
 	ACTOR Future<Void> work( Database cx, DDMetricsWorkload *self ) {
 		try {
-			TraceEvent("DDMetricsWaiting").detail("startDelay", self->startDelay);
-			Void _ = wait( delay( self->startDelay ) );
+			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
+			wait( delay( self->startDelay ) );
 			TraceEvent("DDMetricsStarting");
 			state double startTime = now();
 			loop {
-				Void _ = wait( delay( 2.5 ) );
+				wait( delay( 2.5 ) );
 				int dif = wait( self->getHighPriorityRelocationsInFlight( cx, self ) );
 				TraceEvent("DDMetricsCheck").detail("DIF", dif);
 				if( dif == 0 ) {

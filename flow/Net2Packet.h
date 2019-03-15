@@ -22,7 +22,7 @@
 #define FLOW_NET2PACKET_H
 #pragma once
 
-#include "flow.h"
+#include "flow/flow.h"
 
 // PacketWriter and PacketBuffer are in serialize.h because they are needed by the SerializeSource<> template
 

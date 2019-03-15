@@ -24,7 +24,8 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "Knobs.h"
+#include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -72,12 +73,12 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarnAlways, "CannotSplitLastSampleKey").detail("range", printable(range)).detail("offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
 
-TEST_CASE("fdbserver/StorageMetricSample/simple") {
+TEST_CASE("/fdbserver/StorageMetricSample/simple") {
 	StorageMetricSample s( 1000 );
 	s.sample.insert(LiteralStringRef("Apple"), 1000);
 	s.sample.insert(LiteralStringRef("Banana"), 2000);
@@ -349,10 +350,10 @@ struct StorageServerMetrics {
 
 		if (sb.free < 1e9 && g_random->random01() < 0.1)
 			TraceEvent(SevWarn, "PhysicalDiskMetrics")
-				.detail("free", sb.free)
-				.detail("total", sb.total)
-				.detail("available", sb.available)
-				.detail("load", rep.load.bytes);
+				.detail("Free", sb.free)
+				.detail("Total", sb.total)
+				.detail("Available", sb.available)
+				.detail("Load", rep.load.bytes);
 
 		rep.free.bytes = sb.free;
 		rep.free.iosPerKSecond = 10e6;
@@ -402,3 +403,5 @@ struct ByteSampleInfo {
 //Determines whether a key-value pair should be included in a byte sample
 //Also returns size information about the sample
 ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+
+#include "flow/unactorcompiler.h"

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DiskDurabilityTest : TestWorkload {
 	bool enabled;
@@ -82,13 +82,14 @@ struct DiskDurabilityTest : TestWorkload {
 
 		state int64_t size = wait( file->size() );
 		state bool failed = false;
+		state int verifyPages;
 
 		// Verify
 		state Transaction tr(db);
 		loop {
 			try {
 				state Standalone<RangeResultRef> r = wait( tr.getRange( self->range, GetRangeLimits(1000000) ) );
-				state int verifyPages = r.size();
+				verifyPages = r.size();
 				state int i;
 				for(i=0; i<r.size(); i++) {
 					int bytesRead = wait( file->read( page, 4096, self->decodeKey(r[i].key)*4096 ) );
@@ -100,7 +101,7 @@ struct DiskDurabilityTest : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -140,10 +141,10 @@ struct DiskDurabilityTest : TestWorkload {
 						tr.set( LiteralStringRef("syncs").withPrefix(self->metrics.begin), self->encodeValue( count ) );
 					}
 
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 			tr.reset();
@@ -157,18 +158,18 @@ struct DiskDurabilityTest : TestWorkload {
 				fresults.push_back( file->write( p, 4096, targetPages[i]*4096 ) );
 			}
 
-			Void _ = wait( waitForAll( fresults ) );
+			wait( waitForAll( fresults ) );
 
-			Void _ = wait( file->sync() );
+			wait( file->sync() );
 
 			loop {
 				try {
 					for(int i=0; i<targetPages.size(); i++)
 						tr.set( self->encodeKey(targetPages[i]), self->encodeValue(targetValues[i]) );
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 

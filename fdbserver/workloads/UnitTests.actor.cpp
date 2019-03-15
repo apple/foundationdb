@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
@@ -77,7 +78,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		state std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
-			auto test = *t;
+			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
 
 			state Error result = success();
@@ -85,7 +86,7 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_timer = timer();
 
 			try {
-				Void _ = wait(test->func());
+				wait(test->func());
 			}
 			catch (Error& e) {
 				++self->testsFailed;
@@ -97,12 +98,10 @@ struct UnitTestWorkload : TestWorkload {
 
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
-
-			auto test = *t;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
+				.error(result, true)
 				.detail("Name", test->name)
 				.detail("File", test->file).detail("Line", test->line)
-				.error(result, true)
 				.detail("WallTime", wallTime)
 				.detail("FlowTime", simTime);
 		}
@@ -113,7 +112,7 @@ struct UnitTestWorkload : TestWorkload {
 
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
-TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
-	Void _ = wait(delay(60));
+TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
+	wait(delay(60));
 	return Void();
 }

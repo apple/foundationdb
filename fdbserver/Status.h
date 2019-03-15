@@ -23,15 +23,23 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "WorkerInterface.h"
-#include "MasterInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
 typedef std::map< NetworkAddress, std::pair<std::string,UID> > ProcessIssuesMap;
 typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > ClientVersionMap;
 
-std::string extractAttribute( std::string const& expanded, std::string const& attributeToExtract );
-Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<std::pair<WorkerInterface, ProcessClass>> const& workers,
-	ProcessIssuesMap const& workerIssues, ProcessIssuesMap const& clientIssues, ClientVersionMap const& clientVersionMap, std::map<NetworkAddress, std::string> const& traceLogGroupMap, ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections );
+struct ClientStatusInfo {
+	std::string traceLogGroup;
+	int connectedCoordinatorsNum;
+
+	ClientStatusInfo() : connectedCoordinatorsNum(0) {}
+	ClientStatusInfo(std::string const& traceLogGroup, int const connectedCoordinatorsNum) : traceLogGroup(traceLogGroup), connectedCoordinatorsNum(connectedCoordinatorsNum) {}
+};
+
+Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<WorkerDetails> const& workers,
+	ProcessIssuesMap const& workerIssues, ProcessIssuesMap const& clientIssues, ClientVersionMap const& clientVersionMap, std::map<NetworkAddress, struct ClientStatusInfo> const& clientStatusInfoMap,
+	ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
 
 #endif

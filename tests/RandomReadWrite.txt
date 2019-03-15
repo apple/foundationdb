@@ -7,7 +7,7 @@ writesPerTransactionA=0
 readsPerTransactionA=10
 writesPerTransactionB=10
 readsPerTransactionB=1
-; Transactions A/B
+; Fraction of transactions that will be of type B
 alpha=0.1
 ; Produces 12TB
 nodeCount=20000000000

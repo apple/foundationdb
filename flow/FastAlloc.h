@@ -22,8 +22,8 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
-#include "Error.h"
-#include "Platform.h"
+#include "flow/Error.h"
+#include "flow/Platform.h"
 
 // ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by scripts/alloc.pl
 //#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
@@ -37,7 +37,7 @@
 #include <memcheck.h>
 #endif
 
-#include "Hash3.h"
+#include "flow/Hash3.h"
 
 #include <vector>
 #include <cstdlib>
@@ -54,7 +54,7 @@
 #ifdef ALLOC_INSTRUMENTATION
 #include <map>
 #include <algorithm>
-#include "ThreadPrimitives.h"
+#include "flow/ThreadPrimitives.h"
 struct AllocInstrInfo {
 	int64_t allocCount;
 	int64_t deallocCount;
@@ -106,8 +106,9 @@ public:
 	static void release(void* ptr);
 	static void check( void* ptr, bool alloc );
 
-	static long long getMemoryUsed();
-	static long long getMemoryUnused();
+	static long long getTotalMemory();
+	static long long getApproximateMemoryUnused();
+	static long long getActiveThreads();
 
 	static void releaseThreadMagazines();
 
@@ -129,6 +130,7 @@ private:
 		void* alternate;  // alternate is either a full magazine, or an empty one
 	};
 	static thread_local ThreadData threadData;
+	static thread_local bool threadInitialized;
 	static GlobalData* globalData() {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
@@ -144,11 +146,13 @@ private:
 	static void* freelist;
 
 	FastAllocator();  // not implemented
-	static void getMagazine();   // sets threadData.freelist and threadData.count
+	static void initThread();
+	static void getMagazine();   
 	static void releaseMagazine(void*);
 };
 
 void releaseAllThreadMagazines();
+int64_t getTotalUnusedAllocatedMemory();
 void setFastAllocatorThreadInitFunction( void (*)() );  // The given function will be called at least once in each thread that allocates from a FastAllocator.  Currently just one such function is tracked.
 
 template<int X>
