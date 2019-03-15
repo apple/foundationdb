@@ -117,7 +117,7 @@ then
                 fi
                 docker_buid_logs="${log_dir}/docker_build_${curr_name}"
                 docker build . -t ${curr_name} 1> "${docker_buid_logs}.log" 2> "${docker_buid_logs}.err"
-                successOr "Building Docker image ${name} failed - see ${docker_buid_logs}.log and ${docker_buid_logs}.err"
+                successOr "Building Docker image ${curr_name} failed - see ${docker_buid_logs}.log and ${docker_buid_logs}.err"
             done
             if [ ! -z "${tests_to_run+x}"]
             then

@@ -28,7 +28,7 @@
 # build directory can be found in `/build`, the
 # source code will be located in `/foundationdb`
 
-if [ -z "${tests_sh_included}" ]
+if [ -z "${tests_sh_included+x}" ]
 then
    tests_sh_included=1
 
