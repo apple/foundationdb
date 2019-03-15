@@ -301,7 +301,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default"
+                         "log_group":"default",
+                         "connected_coordinators":2
                      }
                  ],
                  "count" : 1,

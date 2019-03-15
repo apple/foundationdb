@@ -94,7 +94,7 @@ enum {
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN, OPT_DUMP_END,
+	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -251,6 +251,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_JSON,            "--json",           SO_NONE},
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -470,6 +471,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
+	{ OPT_JSON,            "--json",           SO_NONE},
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -875,7 +877,7 @@ static void printBackupUsage(bool devhelp) {
 		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.  See below for more details.\n");
 	printf("  --expire_before_timestamp DATETIME\n"
 		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
-		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
+		   "                 in the database to obtain a cutoff version very close to the timestamp given in %s.\n", BackupAgentBase::timeFormat().c_str());
 	printf("  --expire_before_version VERSION\n"
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
 	printf("  --delete_before_days NUM_DAYS\n"
@@ -953,7 +955,7 @@ static void printRestoreUsage(bool devhelp ) {
 	printf(TLS_HELP);
 #endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
-	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in YYYY-MM-DD.HH:MI:SS format (UTC)\n");
+	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
 	printf("                 and it will be converted to a version from that time using metadata in orig_cluster_file.\n");
 	printf("  --orig_cluster_file CONNFILE\n");
 	printf("                 The cluster file for the original database from which the backup was created.  The original database\n");
@@ -1296,8 +1298,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("current_status") = statusText;
 			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
 			tagRoot.create("last_restorable_seconds_behind") = last_restorable_seconds_behind;
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
-			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
+			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || status == BackupAgentBase::STATE_RUNNING);
+			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
@@ -1340,8 +1342,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)backupStatus[i].get();
 
 			JSONDoc tagRoot = tagsRoot.create(tagName);
-			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_DIFFERENTIAL || status == BackupAgentBase::STATE_BACKUP);
-			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
+			tagRoot.create("running_backup") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || status == BackupAgentBase::STATE_RUNNING);
+			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytesDR[i].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytesDR[i].get();
 			tagRoot.create("mutation_stream_id") = drTagUids[i].toString();
@@ -1748,12 +1750,12 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 	return Void();
 }
 
-ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors) {
+ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors, bool json) {
 	try
 	{
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, showErrors, tagName));
+		std::string statusText = wait(json ? backupAgent.getStatusJSON(db, tagName) : backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	}
 	catch (Error& e) {
@@ -2163,13 +2165,13 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx) {
+ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx, bool json) {
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		state BackupDescription desc = wait(c->describeBackup(deep));
 		if(cx.present())
 			wait(desc.resolveVersionTimes(cx.get()));
-		printf("%s\n", desc.toString().c_str());
+		printf("%s\n", (json ? desc.toJSON() : desc.toString()).c_str());
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -2685,6 +2687,7 @@ int main(int argc, char* argv[]) {
 		Version dumpEnd = std::numeric_limits<Version>::max();
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
+		bool jsonOutput = false;
 
 		BackupModifyOptions modifyOptions;
 
@@ -2998,6 +3001,9 @@ int main(int argc, char* argv[]) {
 				case OPT_DUMP_END:
 					dumpEnd = parseVersion(args->OptionArg());
 					break;
+				case OPT_JSON:
+					jsonOutput = true;
+					break;
 			}
 		}
 
@@ -3308,7 +3314,7 @@ int main(int argc, char* argv[]) {
 			case BACKUP_STATUS:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter( statusBackup(db, tagName, true) );
+				f = stopAfter( statusBackup(db, tagName, true, jsonOutput) );
 				break;
 
 			case BACKUP_ABORT:
@@ -3363,7 +3369,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 
 				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
-				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
+				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>(), jsonOutput) );
 				break;
 
 			case BACKUP_LIST:

@@ -1097,7 +1097,12 @@ public:
 			return Void(); 
 		} catch( Error &e ) {
 			if ( !ryw->resetPromise.isSet() ) {
-				ryw->resetRyow();
+				if(ryw->tr.apiVersionAtLeast(610)) {
+					ryw->resetPromise.sendError(transaction_cancelled());
+				}
+				else {
+					ryw->resetRyow();
+				}
 			}
 			if( e.code() == error_code_broken_promise )
 				throw transaction_cancelled();

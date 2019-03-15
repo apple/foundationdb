@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
@@ -66,15 +68,6 @@ void BackupFileList::toStream(FILE *fout) const {
 	for(const KeyspaceSnapshotFile &f : snapshots) {
 		fprintf(fout, "snapshotManifest %lld %s\n", f.totalSize, f.fileName.c_str());
 	}
-}
-
-std::string formatTime(int64_t t) {
-	time_t curTime = (time_t)t;
-	char buffer[128];
-	struct tm timeinfo;
-	getLocalTime(&curTime, &timeinfo);
-	strftime(buffer, 128, "%Y-%m-%d %H:%M:%S", &timeinfo);
-	return buffer;
 }
 
 Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Version, int64_t> *pVersionTimeMap) {
@@ -127,7 +120,7 @@ std::string BackupDescription::toString() const {
 		if(!versionTimeMap.empty()) {
 			auto i = versionTimeMap.find(v);
 			if(i != versionTimeMap.end())
-				s = format("%lld (%s)", v, formatTime(i->second).c_str());
+				s = format("%lld (%s)", v, BackupAgentBase::formatTime(i->second).c_str());
 			else
 				s = format("%lld (unknown)", v);
 		}
@@ -142,8 +135,8 @@ std::string BackupDescription::toString() const {
 	};
 
 	for(const KeyspaceSnapshotFile &m : snapshots) {
-		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s\n",
-			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false"));
+		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
+			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false", m.expiredPct(expiredEndVersion)));
 	}
 
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
@@ -167,6 +160,65 @@ std::string BackupDescription::toString() const {
 		info.append("ExtendedDetail: ").append(extendedDetail);
 
 	return info;
+}
+
+std::string BackupDescription::toJSON() const {
+	JsonBuilderObject doc;
+
+	doc.setKey("SchemaVersion", "1.0.0");
+	doc.setKey("URL", url.c_str());
+	doc.setKey("Restorable", maxRestorableVersion.present());
+
+	auto formatVersion = [&](Version v) {
+		JsonBuilderObject doc;
+		doc.setKey("Version", v);
+		if(!versionTimeMap.empty()) {
+			auto i = versionTimeMap.find(v);
+			if(i != versionTimeMap.end()) {
+				doc.setKey("Timestamp", BackupAgentBase::formatTime(i->second));
+				doc.setKey("EpochSeconds", i->second);
+			}
+		}
+		else if(maxLogEnd.present()) {
+			double days = double(v - maxLogEnd.get()) / (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 60 * 60);
+			doc.setKey("RelativeDays", days);
+		}
+		return doc;
+	};
+
+	JsonBuilderArray snapshotsArray;
+	for(const KeyspaceSnapshotFile &m : snapshots) {
+		JsonBuilderObject snapshotDoc;
+		snapshotDoc.setKey("Start", formatVersion(m.beginVersion));
+		snapshotDoc.setKey("End", formatVersion(m.endVersion));
+		snapshotDoc.setKey("Restorable", m.restorable.orDefault(false));
+		snapshotDoc.setKey("TotalBytes", m.totalSize);
+		snapshotDoc.setKey("PercentageExpired", m.expiredPct(expiredEndVersion));
+		snapshotsArray.push_back(snapshotDoc);
+	}
+	doc.setKey("Snapshots", snapshotsArray);
+
+	doc.setKey("TotalSnapshotBytes", snapshotBytes);
+
+	if(expiredEndVersion.present())
+		doc.setKey("ExpiredEnd", formatVersion(expiredEndVersion.get()));
+	if(unreliableEndVersion.present())
+		doc.setKey("UnreliableEnd", formatVersion(unreliableEndVersion.get()));
+	if(minLogBegin.present())
+		doc.setKey("MinLogBegin", formatVersion(minLogBegin.get()));
+	if(contiguousLogEnd.present())
+		doc.setKey("ContiguousLogEnd", formatVersion(contiguousLogEnd.get()));
+	if(maxLogEnd.present())
+		doc.setKey("MaxLogEnd", formatVersion(maxLogEnd.get()));
+	if(minRestorableVersion.present())
+		doc.setKey("MinRestorablePoint", formatVersion(minRestorableVersion.get()));
+	if(maxRestorableVersion.present())
+		doc.setKey("MaxRestorablePoint", formatVersion(maxRestorableVersion.get()));
+
+	if(!extendedDetail.empty())
+		doc.setKey("ExtendedDetail", extendedDetail);
+
+	return doc.getJson();
 }
 
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
@@ -1578,20 +1630,11 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
 
-	int year, month, day, hour, minute, second;
-	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
-		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
+	state int64_t time = BackupAgentBase::parseTime(datetime);
+	if(time < 0) {
+		fprintf(stderr, "ERROR: Incorrect date/time or format.  Format is %s.\n", BackupAgentBase::timeFormat().c_str());
 		throw backup_error();
 	}
-	struct tm expDateTime = {0};
-	expDateTime.tm_year = year - 1900;
-	expDateTime.tm_mon = month - 1;
-	expDateTime.tm_mday = day;
-	expDateTime.tm_hour = hour;
-	expDateTime.tm_min = minute;
-	expDateTime.tm_sec = second;
-	expDateTime.tm_isdst = -1;
-	state int64_t time = (int64_t) mktime(&expDateTime);
 
 	loop {
 		try {

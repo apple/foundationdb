@@ -61,7 +61,7 @@ struct TLogSet {
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	TLogVersion tLogVersion;
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 	bool isLocal;
 	int8_t locality;
 	Version startVersion;

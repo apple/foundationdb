@@ -38,7 +38,7 @@ void DatabaseConfiguration::resetInternal() {
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	usableRegions = 1;
 	regions.clear();
-	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
+	tLogPolicy = storagePolicy = remoteTLogPolicy = Reference<IReplicationPolicy>();
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 }
@@ -48,7 +48,7 @@ void parse( int* i, ValueRef const& v ) {
 	*i = atoi(v.toString().c_str());
 }
 
-void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
+void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
 	BinaryReader reader(v, IncludeVersion());
 	serializeReplicationPolicy(reader, *policy);
 }
@@ -91,35 +91,35 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 					info.satelliteTLogReplicationFactor = 1;
 					info.satelliteTLogUsableDcs = 1;
 					info.satelliteTLogWriteAntiQuorum = 0;
-					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyOne());
+					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
 				} else if(satelliteReplication == "one_satellite_double") {
 					info.satelliteTLogReplicationFactor = 2;
 					info.satelliteTLogUsableDcs = 1;
 					info.satelliteTLogWriteAntiQuorum = 0;
-					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 				} else if(satelliteReplication == "one_satellite_triple") {
 					info.satelliteTLogReplicationFactor = 3;
 					info.satelliteTLogUsableDcs = 1;
 					info.satelliteTLogWriteAntiQuorum = 0;
-					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 				} else if(satelliteReplication == "two_satellite_safe") {
 					info.satelliteTLogReplicationFactor = 4;
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 0;
-					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
+					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "dcid", Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 					info.satelliteTLogReplicationFactorFallback = 2;
 					info.satelliteTLogUsableDcsFallback = 1;
 					info.satelliteTLogWriteAntiQuorumFallback = 0;
-					info.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+					info.satelliteTLogPolicyFallback = Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 				} else if(satelliteReplication == "two_satellite_fast") {
 					info.satelliteTLogReplicationFactor = 4;
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 2;
-					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
+					info.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "dcid", Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 					info.satelliteTLogReplicationFactorFallback = 2;
 					info.satelliteTLogUsableDcsFallback = 1;
 					info.satelliteTLogWriteAntiQuorumFallback = 0;
-					info.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+					info.satelliteTLogPolicyFallback = Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 				} else {
 					throw invalid_option();
 				}
@@ -141,20 +141,20 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	if(!storagePolicy) {
-		storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(storageTeamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	}
 	if(!tLogPolicy) {
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+		tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(tLogReplicationFactor, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	}
 	if(remoteTLogReplicationFactor > 0 && !remoteTLogPolicy) {
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	}
 	for(auto& r : regions) {
 		if(r.satelliteTLogReplicationFactor > 0 && !r.satelliteTLogPolicy) {
-			r.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(r.satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+			r.satelliteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(r.satelliteTLogReplicationFactor, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		}
 		if(r.satelliteTLogReplicationFactorFallback > 0 && !r.satelliteTLogPolicyFallback) {
-			r.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(r.satelliteTLogReplicationFactorFallback, "zoneid", IRepPolicyRef(new PolicyOne())));
+			r.satelliteTLogPolicyFallback = Reference<IReplicationPolicy>(new PolicyAcross(r.satelliteTLogReplicationFactorFallback, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		}
 	}
 }

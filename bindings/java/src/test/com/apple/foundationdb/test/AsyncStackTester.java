@@ -412,7 +412,11 @@ public class AsyncStackTester {
 				return inst.popParams(listSize).thenAcceptAsync(rawElements -> {
 					List<Tuple> tuples = new ArrayList<>(listSize);
 					for(Object o : rawElements) {
-						tuples.add(Tuple.fromBytes((byte[])o));
+						// Unpacking a tuple keeps around the serialized representation and uses
+						// it for comparison if it's available. To test semantic comparison, recreate
+						// the tuple from the item list.
+						Tuple t = Tuple.fromBytes((byte[])o);
+						tuples.add(Tuple.fromList(t.getItems()));
 					}
 					Collections.sort(tuples);
 					for(Tuple t : tuples) {
