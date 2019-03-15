@@ -1310,17 +1310,21 @@ struct ConsistencyCheckWorkload : TestWorkload
 			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
 		}
 
+		if(!db.master.present()) {
+			TraceEvent("ConsistencyCheck_MasterNotDBInfo");
+			return false;
+		}
 		if (!allWorkerProcessMap.count(db.clusterInterface.clientInterface.address())) {
 			TraceEvent("ConsistencyCheck_CCNotInWorkerList").detail("CCAddress", db.clusterInterface.clientInterface.address().toString());
 			return false;
 		}
-		if (!allWorkerProcessMap.count(db.master.address())) {
-			TraceEvent("ConsistencyCheck_MasterNotInWorkerList").detail("MasterAddress", db.master.address().toString());
+		if (!allWorkerProcessMap.count(db.master.get().address())) {
+			TraceEvent("ConsistencyCheck_MasterNotInWorkerList").detail("MasterAddress", db.master.get().address().toString());
 			return false;
 		}
 
 		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].interf.locality._data[LocalityData::keyDcId];
-		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].interf.locality._data[LocalityData::keyDcId];
+		Optional<Key> masterDcId = allWorkerProcessMap[db.master.get().address()].interf.locality._data[LocalityData::keyDcId];
 
 		if (ccDcId != masterDcId) {
 			TraceEvent("ConsistencyCheck_CCAndMasterNotInSameDC").detail("ClusterControllerDcId", getOptionalString(ccDcId)).detail("MasterDcId", getOptionalString(masterDcId));
@@ -1364,8 +1368,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
-		if ((!nonExcludedWorkerProcessMap.count(db.master.address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
-			TraceEvent("ConsistencyCheck_MasterNotBest").detail("BestMasterFitness", bestMasterFitness).detail("ExistingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) : -1);
+		if ((!nonExcludedWorkerProcessMap.count(db.master.get().address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.get().address()].processClass.machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
+			TraceEvent("ConsistencyCheck_MasterNotBest").detail("BestMasterFitness", bestMasterFitness).detail("ExistingMasterFit", nonExcludedWorkerProcessMap.count(db.master.get().address()) ? nonExcludedWorkerProcessMap[db.master.get().address()].processClass.machineClassFitness(ProcessClass::Master) : -1);
 			return false;
 		}
 

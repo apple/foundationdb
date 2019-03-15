@@ -42,17 +42,20 @@ struct ClusterInterface {
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskClusterController );
-		failureMonitoring.getEndpoint( TaskFailureMonitor );
-		databaseStatus.getEndpoint( TaskClusterController );
-		ping.getEndpoint( TaskClusterController );
-		getClientWorkers.getEndpoint( TaskClusterController );
-		forceRecovery.getEndpoint( TaskClusterController );
+		Endpoint base = openDatabase.initEndpoint(nullptr, TaskClusterController);
+		failureMonitoring.initEndpoint(&base, TaskFailureMonitor);
+		databaseStatus.initEndpoint(&base, TaskClusterController);
+		ping.initEndpoint(&base, TaskClusterController);
+		getClientWorkers.initEndpoint(&base, TaskClusterController);
+		forceRecovery.initEndpoint(&base, TaskClusterController);
+		TraceEvent("DumpToken", id()).detail("Name", "ClusterInterface").detail("Token", base.token);
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+		serializer(ar, openDatabase);
+		auto holder = FlowTransport::transport().setBaseEndpoint(openDatabase.getEndpoint());
+		serializer(ar, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
 	}
 };
 

@@ -870,7 +870,7 @@ public:
 		}
 
 		// Get master process
-		auto masterWorker = id_worker.find(dbi.master.locality.processId());
+		auto masterWorker = id_worker.find(dbi.master.get().locality.processId());
 		if(masterWorker == id_worker.end()) {
 			return false;
 		}
@@ -937,7 +937,7 @@ public:
 
 		// Check master fitness. Don't return false if master is excluded in case all the processes are excluded, we still need master for recovery.
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.details.processClass.machineClassFitness( ProcessClass::Master );
-		if(db.config.isExcludedServer(dbi.master.address())) {
+		if(db.config.isExcludedServer(dbi.master.get().address())) {
 			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
 		}
 
@@ -953,7 +953,7 @@ public:
 
 		if ( oldMasterFit < mworker.fitness )
 			return false;
-		if ( oldMasterFit > mworker.fitness || ( dbi.master.locality.processId() == clusterControllerProcessId && mworker.worker.interf.locality.processId() != clusterControllerProcessId ) )
+		if ( oldMasterFit > mworker.fitness || ( dbi.master.get().locality.processId() == clusterControllerProcessId && mworker.worker.interf.locality.processId() != clusterControllerProcessId ) )
 			return true;
 
 		std::set<Optional<Key>> primaryDC;
@@ -1112,7 +1112,7 @@ public:
 
 ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, ClusterControllerData::DBInfo* db )
 {
-	state MasterInterface iMaster;
+	state Optional<MasterInterface> iMaster;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
@@ -1179,11 +1179,11 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 
 				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
-				TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
+				TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.get().id());
 
 				// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we really don't want to have to start over
 				loop choose {
-					when (wait( waitFailureClient( iMaster.waitFailure, db->masterRegistrationCount ?
+					when (wait( waitFailureClient( iMaster.get().waitFailure, db->masterRegistrationCount ?
 						SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
 						db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) || db->forceMasterFailure.onTrigger() )) { break; }
 					when (wait( db->serverInfo->onChange() )) {}
@@ -1191,13 +1191,13 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				wait(spinDelay);
 
 				TEST(true); // clusterWatchDatabase() master failed
-				TraceEvent(SevWarn,"DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
+				TraceEvent(SevWarn,"DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.get().id());
 			} else {
 				TEST(true); //clusterWatchDatabas() !newMaster.present()
 				wait( delay(SERVER_KNOBS->MASTER_SPIN_DELAY) );
 			}
 		} catch (Error& e) {
-			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
+			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.present() ? iMaster.get().id() : UID());
 			if (e.code() == error_code_actor_cancelled) throw;
 
 			bool ok = e.code() == error_code_no_more_servers;
@@ -1355,7 +1355,7 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 		self->checkRecoveryStalled();
 		if (self->betterMasterExists()) {
 			self->db.forceMasterFailure.trigger();
-			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
+			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.get().id());
 		}
 	} catch( Error &e ) {
 		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
@@ -1646,8 +1646,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
-	if ( db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
-		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
+	if ( !db->serverInfo->get().master.present() || db->serverInfo->get().master.get().id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
+		TraceEvent("MasterRegistrationNotFound", self->id).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.present() ? db->serverInfo->get().master.get().id() : UID()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
 		return;
 	}
 
@@ -2512,7 +2512,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
 			vector<WorkerDetails> workers;
 
-			auto masterAddr = self.db.serverInfo->get().master.address();
 			for(auto& it : self.id_worker) {
 				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.details.interf.address()) ) {
 					continue;

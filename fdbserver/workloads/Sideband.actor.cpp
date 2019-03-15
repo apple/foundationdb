@@ -41,6 +41,11 @@ struct SidebandInterface {
 
 	UID id() const { return updates.getEndpoint().token; }
 
+	void initEndpoints() {
+		Endpoint base = updates.initEndpoint();
+		TraceEvent("DumpToken", id()).detail("Name", "SidebandInterface").detail("Token", base.token);
+	}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, updates);
@@ -61,6 +66,7 @@ struct SidebandWorkload : TestWorkload {
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		operationsPerSecond = getOption( options, LiteralStringRef("operationsPerSecond"), 50.0 );
+		interf.initEndpoints();
 	}
 
 	virtual std::string description() { return "SidebandWorkload"; }

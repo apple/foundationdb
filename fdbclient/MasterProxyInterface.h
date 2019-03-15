@@ -55,16 +55,21 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations,
-				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+		serializer(ar, locality, commit);
+		auto holder = FlowTransport::transport().setBaseEndpoint(commit.getEndpoint());
+		serializer(ar, getConsistentReadVersion, getKeyServersLocations, getStorageServerRejoinInfo, waitFailure, getRawCommittedVersion, txnState, getHealthMetrics);
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
-		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskProxyCommitDispatcher);
-		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		Endpoint base = commit.initEndpoint(nullptr, TaskProxyCommitDispatcher);
+		getConsistentReadVersion.initEndpoint(&base, TaskProxyGetConsistentReadVersion);
+		getKeyServersLocations.initEndpoint(&base); //(TaskProxyGetKeyServersLocations) do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		getStorageServerRejoinInfo.initEndpoint(&base);
+		waitFailure.initEndpoint(&base);
+		getRawCommittedVersion.initEndpoint(&base, TaskProxyGetRawCommittedVersion);
+		txnState.initEndpoint(&base);
+		getHealthMetrics.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "MasterProxyInterface").detail("Token", base.token);
 	}
 };
 

@@ -39,11 +39,22 @@ struct WorkloadInterface {
 	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 
+	void initEndpoints() {
+		Endpoint base = setup.initEndpoint();
+		start.initEndpoint(&base);
+		check.initEndpoint(&base);
+		metrics.initEndpoint(&base);
+		stop.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "WorkloadInterface").detail("Token", base.token);
+	}
+
 	UID id() const { return setup.getEndpoint().token; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, setup, start, check, metrics, stop);
+		serializer(ar, setup);
+		auto holder = FlowTransport::transport().setBaseEndpoint(setup.getEndpoint());
+		serializer(ar, start, check, metrics, stop);
 	}
 };
 
@@ -80,6 +91,11 @@ struct WorkloadRequest {
 
 struct TesterInterface {
 	RequestStream<WorkloadRequest> recruitments;
+
+	void initEndpoints() {
+		Endpoint base = recruitments.initEndpoint();
+		TraceEvent("DumpToken", id()).detail("Name", "TesterInterface").detail("Token", base.token);
+	}
 
 	UID id() const { return recruitments.getEndpoint().token; }
 

@@ -137,7 +137,7 @@ struct MoveKeysWorkload : TestWorkload {
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).error(e, true);
+			TraceEvent(relocateShardInterval.end()).error(e, true);
 			throw;
 		}
 	}
@@ -159,7 +159,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure( Database cx, MoveKeysWorkload *self ) {
 		ASSERT( g_network->isSimulated() );
 		loop {
-			if( g_simulator.killZone( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
+			if( self->dbInfo->get().master.present() && g_simulator.killZone( self->dbInfo->get().master.get().locality.zoneId(), ISimulator::Reboot, true ) )
 				return Void();
 			wait( delay(1.0) );
 		}

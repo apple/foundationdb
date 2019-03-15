@@ -496,6 +496,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 	state bool replied = false;
 	state Database cx;
 	try {
+		workIface.initEndpoints();
 		std::map<std::string, std::string> details;
 		details["WorkloadTitle"] = printable(work.title);
 		details["ClientId"] = format("%d", work.clientId);

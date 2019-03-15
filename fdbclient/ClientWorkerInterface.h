@@ -38,9 +38,17 @@ struct ClientWorkerInterface {
 	UID id() const { return reboot.getEndpoint().token; }
 	NetworkAddress address() const { return reboot.getEndpoint().getPrimaryAddress(); }
 
+	void initEndpoints() {
+		Endpoint base = reboot.initEndpoint();
+		profiler.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "ClientWorkerInterface").detail("Token", base.token);
+	}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, reboot, profiler);
+		serializer(ar, reboot);
+		auto holder = FlowTransport::transport().setBaseEndpoint(reboot.getEndpoint());
+		serializer(ar, profiler);
 	}
 };
 

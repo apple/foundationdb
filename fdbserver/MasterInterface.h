@@ -39,15 +39,21 @@ struct MasterInterface {
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
-	UID id() const { return changeCoordinators.getEndpoint().token; }
+	UID id() const { return waitFailure.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
+		serializer(ar, locality, waitFailure);
+		auto holder = FlowTransport::transport().setBaseEndpoint(waitFailure.getEndpoint());
+		serializer(ar, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
+		Endpoint base = waitFailure.initEndpoint();
+		tlogRejoin.initEndpoint(&base);
+		changeCoordinators.initEndpoint(&base);
+		getCommitVersion.initEndpoint(&base, TaskProxyGetConsistentReadVersion);
+		TraceEvent("DumpToken", id()).detail("Name", "MasterInterface").detail("Token", base.token);
 	}
 };
 

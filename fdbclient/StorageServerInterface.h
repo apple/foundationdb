@@ -69,18 +69,31 @@ struct StorageServerInterface {
 	void serialize( Ar& ar ) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
-		serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-
-		if( ar.protocolVersion() >= 0x0FDB00A200090001LL )
-			serializer(ar, watchValue);
+		if( ar.protocolVersion() >= 0x0FDB00B061040001LL ) {
+			serializer(ar, uniqueID, locality, getVersion);
+			auto holder = FlowTransport::transport().setBaseEndpoint(getVersion.getEndpoint());
+			serializer(ar, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType, watchValue);
+		} else if(ar.isDeserializing) {
+			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType, watchValue);
+		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
 	void initEndpoints() {
-		getValue.getEndpoint( TaskLoadBalancedEndpoint );
-		getKey.getEndpoint( TaskLoadBalancedEndpoint );
-		getKeyValues.getEndpoint( TaskLoadBalancedEndpoint );
+		Endpoint base = getVersion.initEndpoint();
+		getValue.initEndpoint(&base, TaskLoadBalancedEndpoint);
+		getKey.initEndpoint(&base, TaskLoadBalancedEndpoint);
+		getKeyValues.initEndpoint(&base, TaskLoadBalancedEndpoint);
+		getShardState.initEndpoint(&base);
+		waitMetrics.initEndpoint(&base);
+		splitMetrics.initEndpoint(&base);
+		getPhysicalMetrics.initEndpoint(&base);
+		waitFailure.initEndpoint(&base);
+		getQueuingMetrics.initEndpoint(&base);
+		getKeyValueStoreType.initEndpoint(&base);
+		watchValue.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "StorageServerInterface").detail("Token", base.token);
 	}
 };
 

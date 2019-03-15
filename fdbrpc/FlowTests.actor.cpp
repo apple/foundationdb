@@ -291,6 +291,7 @@ TEST_CASE("/flow/flow/nonserializable futures")
 
 	{
 		RequestStream<int> rsInt;
+		rsInt.initEndpoint();
 		FutureStream<int> f = rsInt.getFuture();
 		rsInt.send(1);
 		rsInt.send(2);
@@ -306,6 +307,7 @@ TEST_CASE("/flow/flow/networked futures")
 	// RequestStream can be serialized
 	{
 		RequestStream<int> locInt;
+		locInt.initEndpoint();
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
@@ -313,6 +315,7 @@ TEST_CASE("/flow/flow/networked futures")
 
 		BinaryReader rd(wr.toStringRef(), IncludeVersion());
 		RequestStream<int> remoteInt;
+		remoteInt.initEndpoint();
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());

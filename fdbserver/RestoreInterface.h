@@ -36,7 +36,8 @@ struct RestoreInterface {
 	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
-		test.getEndpoint( TaskClusterController );
+		Endpoint base = test.initEndpoint(nullptr, TaskClusterController);
+		TraceEvent("DumpToken", id()).detail("Name", "RestoreInterface").detail("Token", base.token);
 	}
 
 	template <class Ar>

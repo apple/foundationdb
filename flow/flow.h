@@ -872,12 +872,6 @@ public:
 	Future<X> getReply() const {
 		return getReply(Promise<X>());
 	}
-	template <class X>
-	Future<X> getReplyWithTaskID(int taskID) const {
-		Promise<X> reply;
-		reply.getEndpoint(taskID);
-		return getReply(reply);
-	}
 
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}

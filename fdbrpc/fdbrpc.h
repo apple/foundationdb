@@ -47,11 +47,23 @@ struct FlowReceiver : private NetworkMessageReceiver {
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
-	const Endpoint& getEndpoint(int taskID) {
-		if (!endpoint.isValid()) {
+	const Endpoint& initEndpoint(Endpoint* base, uint32_t taskID) {
+		ASSERT (!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		FlowTransport::transport().addEndpoint(base, endpoint, this, taskID);
+		return endpoint;
+	}
+
+	const Endpoint& getOrInitEndpoint() {
+		if (!endpoint.isValid() ) {
 			m_isLocalEndpoint = true;
-			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
+			FlowTransport::transport().addEndpoint(nullptr, endpoint, this, TaskDefaultEndpoint);
 		}
+		return endpoint;
+	}
+
+	const Endpoint& getEndpoint() {
+		ASSERT(endpoint.isValid());
 		return endpoint;
 	}
 
@@ -116,7 +128,8 @@ public:
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
-	const Endpoint& getEndpoint(int taskID = TaskDefaultPromiseEndpoint) const { return sav->getEndpoint(taskID); }
+	const Endpoint& initEndpoint(uint32_t taskID = TaskDefaultPromiseEndpoint) const { return sav->initEndpoint(nullptr, taskID); }
+	const Endpoint& getEndpoint() const { return sav->getOrInitEndpoint(); }
 
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav) rhs.sav->addPromiseRef();
@@ -176,19 +189,19 @@ template <class Reply>
 void resetReply(ReplyPromise<Reply> & p) { p.reset(); }
 
 template <class Request>
-void resetReply(Request& r, int taskID) { r.reply.reset(); r.reply.getEndpoint(taskID); }
+void resetReply(Request& r, int taskID) { r.reply.reset(); r.reply.initEndpoint(taskID); }
 
 template <class Reply>
-void resetReply(ReplyPromise<Reply> & p, int taskID) { p.reset(); p.getEndpoint(taskID); }
+void resetReply(ReplyPromise<Reply> & p, int taskID) { p.reset(); p.initEndpoint(taskID); }
 
 template <class Request>
-void setReplyPriority(Request& r, int taskID) { r.reply.getEndpoint(taskID); }
+void setReplyPriority(Request& r, int taskID) { r.reply.initEndpoint(taskID); }
 
 template <class Reply>
-void setReplyPriority(ReplyPromise<Reply> & p, int taskID) { p.getEndpoint(taskID); }
+void setReplyPriority(ReplyPromise<Reply> & p, int taskID) { p.initEndpoint(taskID); }
 
 template <class Reply>
-void setReplyPriority(const ReplyPromise<Reply> & p, int taskID) { p.getEndpoint(taskID); }
+void setReplyPriority(const ReplyPromise<Reply> & p, int taskID) { p.initEndpoint(taskID); }
 
 
 
@@ -257,7 +270,7 @@ public:
 	template <class X>
 	Future<X> getReplyWithTaskID(int taskID) const {
 		ReplyPromise<X> reply;
-		reply.getEndpoint(taskID);
+		reply.initEndpoint(taskID);
 		return getReply(reply);
 	}
 
@@ -270,17 +283,17 @@ public:
 	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value, int taskID) const {
 		setReplyPriority(value, taskID);
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
+			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID));
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p);
+			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p);
 		}
 		send(value);
 		auto& p = getReplyPromise(value);
-		return waitValueOrSignal(p.getFuture(), Never(), getEndpoint(taskID), p);
+		return waitValueOrSignal(p.getFuture(), Never(), getEndpoint(), p);
 	}
 
 	template <class X>
@@ -310,7 +323,7 @@ public:
 	//   See IFailureMonitor::onFailedFor() for an explanation of the duration and slope parameters.
 	template <class X>
 	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration, double sustainedFailureSlope, int taskID) const {
-		return waitValueOrSignal(getReply(value, taskID), makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(taskID), sustainedFailureDuration, sustainedFailureSlope), getEndpoint(taskID));
+		return waitValueOrSignal(getReply(value, taskID), makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope), getEndpoint());
 	}
 
 	template <class X>
@@ -342,7 +355,8 @@ public:
 		//queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	Endpoint getEndpoint(int taskID = TaskDefaultEndpoint) const { return queue->getEndpoint(taskID); }
+	Endpoint initEndpoint(Endpoint* base = nullptr, uint32_t taskID = TaskDefaultEndpoint) const { return queue->initEndpoint(base, taskID); }
+	Endpoint getEndpoint() const { return queue->getEndpoint(); }
 	void makeWellKnownEndpoint(Endpoint::Token token, int taskID) {
 		queue->makeWellKnownEndpoint(token, taskID);
 	}

@@ -83,7 +83,7 @@ void EndpointMap::realloc() {
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, uint32_t priority ) {
 	if (firstFree == uint32_t(-1)) realloc();
-	int index = firstFree;
+	uint32_t index = firstFree;
 	firstFree = data[index].nextFree;
 	token = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | index );
 	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | priority );
@@ -191,6 +191,7 @@ public:
 	uint64_t transportId;
 
 	Future<Void> multiVersionCleanup;
+	std::vector<Endpoint> baseEndpoints;
 };
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
@@ -954,8 +955,12 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 	}
 }
 
-void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.token = g_random->randomUniqueID();
+void FlowTransport::addEndpoint( Endpoint* base, Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
+	if(base) {
+		endpoint.token = base->token;
+	} else {
+		endpoint.token = g_random->randomUniqueID();
+	}
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses.empty() ? NetworkAddressList(1, NetworkAddress()) : self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
@@ -1119,4 +1124,27 @@ void FlowTransport::createInstance( uint64_t transportId )
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);
+}
+
+void FlowTransport::BaseEndpointHolder::release() {
+	if(!released) {
+		released = true;
+		FlowTransport::transport().self->baseEndpoints.pop_back();
+	}
+}
+
+FlowTransport::BaseEndpointHolder::~BaseEndpointHolder() {
+	release();
+}
+
+FlowTransport::BaseEndpointHolder FlowTransport::setBaseEndpoint(Endpoint const& endpoint) {
+	FlowTransport::transport().self->baseEndpoints.push_back(endpoint);
+	return FlowTransport::BaseEndpointHolder();
+}
+
+Endpoint* FlowTransport::getBaseEndpoint() {
+	if(self->baseEndpoints.size() == 0) {
+		return nullptr;
+	}
+	return &self->baseEndpoints.back();
 }

@@ -1083,15 +1083,15 @@ namespace oldTLog_4_6 {
 			}
 
 			if( registerWithMaster.isReady() ) {
-				if ( self->dbInfo->get().master.id() != lastMasterID) {
+				if ( self->dbInfo->get().master.present() && self->dbInfo->get().master.get().id() != lastMasterID) {
 					// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
 					TLogRejoinRequest req;
 					req.myInterface = tli;
-					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
+					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.get().id());
 					choose {
-						when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
+						when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.get().tlogRejoin.getReply( req ) ) ) ) {
 							if (success)
-								lastMasterID = self->dbInfo->get().master.id();
+								lastMasterID = self->dbInfo->get().master.get().id();
 						}
 						when ( wait( self->dbInfo->onChange() ) ) { }
 					}
@@ -1275,13 +1275,6 @@ namespace oldTLog_4_6 {
 
 			TLogInterface recruited(id1, self->dbgid, locality);
 			recruited.initEndpoints();
-
-			DUMPTOKEN( recruited.peekMessages );
-			DUMPTOKEN( recruited.popMessages );
-			DUMPTOKEN( recruited.commit );
-			DUMPTOKEN( recruited.lock );
-			DUMPTOKEN( recruited.getQueuingMetrics );
-			DUMPTOKEN( recruited.confirmRunning );
 
 			logData = Reference<LogData>( new LogData(self, recruited) );
 			logData->stopped = true;

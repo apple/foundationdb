@@ -485,6 +485,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 
 	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
 	parent->provisionalProxies = vector<MasterProxyInterface>(1);
+	parent->provisionalProxies[0].initEndpoints();
 	parent->provisionalProxies[0].locality = parent->myInterface.locality;
 	state Future<Void> waitFailure = waitFailureServer(parent->provisionalProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();
@@ -1423,7 +1424,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
-	TEST( !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() ) );  // Master born doomed
+	TEST( !lifetime.isStillValid( db->get().masterLifetime, db->get().master.present() && mi.id()==db->get().master.get().id() ) );  // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
 	try {
@@ -1432,7 +1433,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 			when (wait( core )) { break; }
 			when (wait( onDBChange )) {
 				onDBChange = db->onChange();
-				if (!lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() )) {
+				if (!lifetime.isStillValid( db->get().masterLifetime, db->get().master.present() && mi.id()==db->get().master.get().id() )) {
 					TraceEvent("MasterTerminated", mi.id()).detail("Reason", "LifetimeToken").detail("MyToken", lifetime.toString()).detail("CurrentToken", db->get().masterLifetime.toString());
 					TEST(true);  // Master replaced, dying
 					if (BUGGIFY) wait( delay(5) );

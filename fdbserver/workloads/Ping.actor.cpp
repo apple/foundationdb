@@ -32,6 +32,11 @@ struct PingWorkloadInterface {
 
 	UID id() const { return payloadPing.getEndpoint().token; }
 
+	void initEndpoints() {
+		Endpoint base = payloadPing.initEndpoint();
+		TraceEvent("DumpToken", id()).detail("Name", "PingWorkloadInterface").detail("Token", base.token);
+	}
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, payloadPing);
@@ -68,6 +73,7 @@ struct PingWorkload : TestWorkload {
 		payloadSize = getOption( options, LiteralStringRef("payloadSizeBack"), 1024 );
 		payloadBack = std::string( payloadSize, '.' );
 		actorCount = getOption( options, LiteralStringRef("actorCount"), 1 );
+		interf.initEndpoints();
 	}
 
 	virtual std::string description() { return "PingWorkload"; }

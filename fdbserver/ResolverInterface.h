@@ -29,27 +29,30 @@ struct ResolverInterface {
 	enum { AlwaysFresh = 1 };
 
 	LocalityData locality;
-	UID uniqueID;
 	RequestStream< struct ResolveTransactionBatchRequest > resolve;
 	RequestStream< struct ResolutionMetricsRequest > metrics;
 	RequestStream< struct ResolutionSplitRequest > split;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID( g_random->randomUniqueID() ) {}
-	UID id() const { return uniqueID; }
+	UID id() const { return resolve.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }
 	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		metrics.getEndpoint( TaskResolutionMetrics );
-		split.getEndpoint( TaskResolutionMetrics );
+		Endpoint base = resolve.initEndpoint();
+		metrics.initEndpoint(&base, TaskResolutionMetrics);
+		split.initEndpoint(&base, TaskResolutionMetrics);
+		waitFailure.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "ResolverInterface").detail("Token", base.token);
 	}
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure);
+		serializer(ar, locality, resolve);
+		auto holder = FlowTransport::transport().setBaseEndpoint(resolve.getEndpoint());
+		serializer(ar, metrics, split, waitFailure);
 	}
 };
 

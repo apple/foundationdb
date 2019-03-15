@@ -26,15 +26,19 @@
 #include "fdbrpc/Locality.h"
 
 struct RatekeeperInterface {
+	struct LocalityData locality;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
-	struct LocalityData locality;
 
 	RatekeeperInterface() {}
 	explicit RatekeeperInterface(const struct LocalityData& l) : locality(l) {}
 
-	void initEndpoints() {}
-	UID id() const { return getRateInfo.getEndpoint().token; }
+	void initEndpoints() {
+		Endpoint base = waitFailure.initEndpoint();
+		getRateInfo.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "RatekeeperInterface").detail("Token", base.token);
+	}
+	UID id() const { return waitFailure.getEndpoint().token; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
 	bool operator== (const RatekeeperInterface& r) const {
 		return id() == r.id();
@@ -45,7 +49,9 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, locality);
+		serializer(ar, locality, waitFailure);
+		auto holder = FlowTransport::transport().setBaseEndpoint(waitFailure.getEndpoint());
+		serializer(ar, getRateInfo);
 	}
 };
 

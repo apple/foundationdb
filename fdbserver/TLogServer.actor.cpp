@@ -1611,14 +1611,14 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		}
 
 		if( registerWithMaster.isReady() ) {
-			if ( self->dbInfo->get().master.id() != lastMasterID) {
+			if ( self->dbInfo->get().master.present() && self->dbInfo->get().master.get().id() != lastMasterID) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.get().id());
 				choose {
-					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
+					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.get().tlogRejoin.getReply( req ) ) ) ) {
 						if (success)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterID = self->dbInfo->get().master.get().id();
 					}
 					when ( wait( self->dbInfo->onChange() ) ) { }
 				}
@@ -2045,13 +2045,6 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		TLogInterface recruited(id1, self->dbgid, locality);
 		recruited.initEndpoints();
 
-		DUMPTOKEN( recruited.peekMessages );
-		DUMPTOKEN( recruited.popMessages );
-		DUMPTOKEN( recruited.commit );
-		DUMPTOKEN( recruited.lock );
-		DUMPTOKEN( recruited.getQueuingMetrics );
-		DUMPTOKEN( recruited.confirmRunning );
-
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID(), std::vector<Tag>()) );
 		logData->locality = id_locality[id1];
@@ -2211,13 +2204,6 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
 	state TLogInterface recruited(self->dbgid, locality);
 	recruited.initEndpoints();
-
-	DUMPTOKEN( recruited.peekMessages );
-	DUMPTOKEN( recruited.popMessages );
-	DUMPTOKEN( recruited.commit );
-	DUMPTOKEN( recruited.lock );
-	DUMPTOKEN( recruited.getQueuingMetrics );
-	DUMPTOKEN( recruited.confirmRunning );
 
 	for(auto it : self->id_data) {
 		if( !it.second->stopped ) {

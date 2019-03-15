@@ -50,19 +50,22 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskClusterController );
-		recruitRemoteFromConfiguration.getEndpoint( TaskClusterController );
-		recruitStorage.getEndpoint( TaskClusterController );
-		registerWorker.getEndpoint( TaskClusterController );
-		getWorkers.getEndpoint( TaskClusterController );
-		registerMaster.getEndpoint( TaskClusterController );
-		getServerDBInfo.getEndpoint( TaskClusterController );
+		Endpoint base = recruitFromConfiguration.initEndpoint(nullptr, TaskClusterController);
+		recruitRemoteFromConfiguration.initEndpoint(&base, TaskClusterController);
+		recruitStorage.initEndpoint(&base, TaskClusterController);
+		registerWorker.initEndpoint(&base, TaskClusterController);
+		getWorkers.initEndpoint(&base, TaskClusterController);
+		registerMaster.initEndpoint(&base, TaskClusterController);
+		getServerDBInfo.initEndpoint(&base, TaskClusterController);
+		TraceEvent("DumpToken", id()).detail("Name", "ClusterControllerFullInterface").detail("Token", base.token.toString());
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
+		serializer(ar, clientInterface, recruitFromConfiguration);
+		auto holder = FlowTransport::transport().setBaseEndpoint(recruitFromConfiguration.getEndpoint());
+		serializer(ar, recruitRemoteFromConfiguration, recruitStorage, registerWorker, getWorkers, registerMaster, getServerDBInfo);
 	}
 };
 

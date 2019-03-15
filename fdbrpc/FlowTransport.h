@@ -97,18 +97,7 @@ public:
 			return token < r.token;
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-			addresses.resize(1);
-			serializer(ar, addresses[0], token);
-		} else {
-			serializer(ar, addresses, token);
-			if (ar.isDeserializing) {
-				choosePrimaryAddress();
-			}
-		}
-	}
+	template <class Ar> void serialize(Ar& ar);
 };
 #pragma pack(pop)
 
@@ -155,7 +144,7 @@ public:
 	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addEndpoint( Endpoint* base, Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
@@ -191,6 +180,18 @@ public:
 		loadedEndpoint(e);
 	}
 
+	struct BaseEndpointHolder {
+		bool released;
+		
+		BaseEndpointHolder() : released(false) {}
+		
+		void release();
+		~BaseEndpointHolder();
+	};
+
+	BaseEndpointHolder setBaseEndpoint(Endpoint const& endpoint);
+
+	Endpoint* getBaseEndpoint();
 private:
 	class TransportData* self;
 
@@ -203,6 +204,32 @@ inline bool Endpoint::isLocal() const {
 		return addresses[0] == NetworkAddress();
 	}
 	return std::find(localAddrs.begin(), localAddrs.end(), addresses[0]) != localAddrs.end();
+}
+
+template <class Ar> 
+void Endpoint::serialize(Ar& ar) {
+	if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
+		addresses.resize(1);
+		serializer(ar, addresses[0], token);
+	} else {
+		auto base = FlowTransport::transport().getBaseEndpoint();
+		if(base) {
+			if (ar.isDeserializing) {
+				addresses = base->addresses;
+				uint32_t index;
+				serializer(ar, index);
+				token = UID(base->token.first(), (base->token.second()&0xffffffff00000000LL) | index);
+			} else {
+				uint32_t index = token.second();
+				serializer(ar, index);
+			}
+		} else {
+			serializer(ar, addresses, token);
+		}
+		if (ar.isDeserializing) {
+			choosePrimaryAddress();
+		}
+	}
 }
 
 #endif

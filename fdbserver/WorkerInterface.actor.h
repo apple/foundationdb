@@ -38,10 +38,9 @@
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/actorcompiler.h"
 
-#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
-
 struct WorkerInterface {
 	ClientWorkerInterface clientInterface;
+	TesterInterface testerInterface;
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
@@ -60,17 +59,39 @@ struct WorkerInterface {
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
 
-	TesterInterface testerInterface;
-
 	UID id() const { return tLog.getEndpoint().token; }
 	NetworkAddress address() const { return tLog.getEndpoint().getPrimaryAddress(); }
 
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
+	void initEndpoints() {
+		clientInterface.initEndpoints();
+		testerInterface.initEndpoints();
+
+		Endpoint base = tLog.initEndpoint();
+		master.initEndpoint(&base);
+		masterProxy.initEndpoint(&base);
+		dataDistributor.initEndpoint(&base);
+		ratekeeper.initEndpoint(&base);
+		resolver.initEndpoint(&base);
+		storage.initEndpoint(&base);
+		logRouter.initEndpoint(&base);
+		debugPing.initEndpoint(&base);
+		coordinationPing.initEndpoint(&base);
+		waitFailure.initEndpoint(&base);
+		setMetricsRate.initEndpoint(&base);
+		eventLogRequest.initEndpoint(&base);
+		traceBatchDumpRequest.initEndpoint(&base);
+		diskStoreRequest.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "WorkerInterface").detail("Token", base.token);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest);
+		serializer(ar, clientInterface, testerInterface, locality, tLog);
+		auto holder = FlowTransport::transport().setBaseEndpoint(tLog.getEndpoint());
+		serializer(ar, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, diskStoreRequest);
 	}
 };
 

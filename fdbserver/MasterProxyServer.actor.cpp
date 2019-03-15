@@ -1442,7 +1442,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	//TraceEvent("ProxyInit1", proxy.id());
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (!(db->get().master.id() == master.id() && db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
+	while (!(db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION && db->get().master.get().id() == master.id())) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(db->onChange());
 	}
@@ -1482,7 +1482,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	loop choose{
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			if(db->get().master.id() == master.id() && db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
+			if(db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION && db->get().master.get().id() == master.id()) {
 				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);

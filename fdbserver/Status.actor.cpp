@@ -605,7 +605,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	state RolesInfo roles;
 
-	roles.addRole("master", db->get().master);
+	if(db->get().master.present()) roles.addRole("master", db->get().master.get());
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
@@ -849,11 +849,15 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, 
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Optional<WorkerDetails> mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
 	state JsonBuilderObject message;
 
+	if(!mWorker.present()) {
+		incomplete_reasons->insert("Recovery Status unavailable.");
+		return message;
+	}
 	try {
-		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
+		TraceEventFields md = wait( timeoutError(mWorker.get().interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
 		state int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -1102,18 +1106,21 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker, int *minReplicasRemaining) {
+ACTOR static Future<JsonBuilderObject> dataStatusFetcher(Optional<WorkerDetails> ddWorker, int *minReplicasRemaining) {
 	state JsonBuilderObject statusObjData;
 
+	if(!ddWorker.present()) {
+		return statusObjData;
+	}
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
-		futures.push_back(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		futures.push_back(timeoutError(ddWorker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
@@ -1271,8 +1278,13 @@ ACTOR template <class iface>
 static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::vector<std::string> eventNames) {
 	state vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
-		for (auto name : eventNames) {
-			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
+		auto it = address_workers.find(s.address());
+			for (auto name : eventNames) {
+				if(it != address_workers.end()) {
+					futures.push_back(latestEventOnWorker(it->second, s.id().toString() + "/" + name));
+				} else {
+					futures.push_back(Optional<TraceEventFields>());
+				}
 		}
 	}
 
@@ -1389,7 +1401,7 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 	return perfLimit;
 }
 
-ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails rkWorker,
+ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<WorkerDetails> workers, Optional<WorkerDetails> rkWorker,
 	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
 {
 	state JsonBuilderObject statusObj;
@@ -1439,52 +1451,56 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		incomplete_reasons->insert("Unknown mutations, conflicts, and transactions state.");
 	}
 
-	// Transactions
-	try {
-		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
-		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
-
-		double tpsLimit = ratekeeper.getDouble("TPSLimit");
-		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
-		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
-		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
-		int ssCount = ratekeeper.getInt("StorageServers");
-		int tlogCount = ratekeeper.getInt("TLogs");
-		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
-		int64_t worstFreeSpaceTLog = ratekeeper.getInt64("WorstFreeSpaceTLog");
-		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",ratekeeper.getValue("TotalDiskUsageBytes"));
-
-		if(ssCount > 0) {
-			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
-			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
-			(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
-			(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
-			(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
-		}
-
-		if(tlogCount > 0) {
-			(*data_overlay)["least_operating_space_bytes_log_server"] = std::max(worstFreeSpaceTLog, (int64_t)0);
-			(*qos).setKeyRawNumber("worst_queue_bytes_log_server", ratekeeper.getValue("WorstTLogQueue"));
-		}
-
-		(*qos)["transactions_per_second_limit"] = tpsLimit;
-		(*qos)["batch_transactions_per_second_limit"] = batchTpsLimit;
-		(*qos)["released_transactions_per_second"] = transPerSec;
-		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
-
-		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
-		if(!perfLimit.empty()) {
-			(*qos)["performance_limited_by"] = perfLimit;
-		}
-
-		JsonBuilderObject batchPerfLimit = getPerfLimit(batchRatekeeper, transPerSec, batchTpsLimit);
-		if(!batchPerfLimit.empty()) {
-			(*qos)["batch_performance_limited_by"] = batchPerfLimit;
-		}
-	} catch (Error &e){
-		if (e.code() == error_code_actor_cancelled)
-			throw;
+	if(!rkWorker.present()) {
 		incomplete_reasons->insert("Unknown performance state.");
+	} else {
+		// Transactions
+		try {
+			state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.get().interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
+			TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.get().interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
+
+			double tpsLimit = ratekeeper.getDouble("TPSLimit");
+			double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
+			double transPerSec = ratekeeper.getDouble("ReleasedTPS");
+			double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
+			int ssCount = ratekeeper.getInt("StorageServers");
+			int tlogCount = ratekeeper.getInt("TLogs");
+			int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
+			int64_t worstFreeSpaceTLog = ratekeeper.getInt64("WorstFreeSpaceTLog");
+			(*data_overlay).setKeyRawNumber("total_disk_used_bytes",ratekeeper.getValue("TotalDiskUsageBytes"));
+
+			if(ssCount > 0) {
+				(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
+				(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
+				(*qos).setKeyRawNumber("limiting_queue_bytes_storage_server", ratekeeper.getValue("LimitingStorageServerQueue"));
+				(*qos).setKeyRawNumber("worst_version_lag_storage_server", ratekeeper.getValue("WorstStorageServerVersionLag"));
+				(*qos).setKeyRawNumber("limiting_version_lag_storage_server", ratekeeper.getValue("LimitingStorageServerVersionLag"));
+			}
+
+			if(tlogCount > 0) {
+				(*data_overlay)["least_operating_space_bytes_log_server"] = std::max(worstFreeSpaceTLog, (int64_t)0);
+				(*qos).setKeyRawNumber("worst_queue_bytes_log_server", ratekeeper.getValue("WorstTLogQueue"));
+			}
+
+			(*qos)["transactions_per_second_limit"] = tpsLimit;
+			(*qos)["batch_transactions_per_second_limit"] = batchTpsLimit;
+			(*qos)["released_transactions_per_second"] = transPerSec;
+			(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
+
+			JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
+			if(!perfLimit.empty()) {
+				(*qos)["performance_limited_by"] = perfLimit;
+			}
+
+			JsonBuilderObject batchPerfLimit = getPerfLimit(batchRatekeeper, transPerSec, batchTpsLimit);
+			if(!batchPerfLimit.empty()) {
+				(*qos)["batch_performance_limited_by"] = batchPerfLimit;
+			}
+		} catch (Error &e){
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			incomplete_reasons->insert("Unknown performance state.");
+		}
 	}
 
 	// Reads
@@ -1816,40 +1832,33 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	// Check if master worker is present
 	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
-	state WorkerDetails mWorker;
-	state WorkerDetails ddWorker; // DataDistributor worker
-	state WorkerDetails rkWorker; // RateKeeper worker
+	state Optional<WorkerDetails> mWorker;
+	state Optional<WorkerDetails> ddWorker; // DataDistributor worker
+	state Optional<WorkerDetails> rkWorker; // RateKeeper worker
 
 	try {
 		// Get the master Worker interface
-		Optional<WorkerDetails> _mWorker = getWorker( workers, db->get().master.address() );
-		if (_mWorker.present()) {
-			mWorker = _mWorker.get();
-		} else {
+		if (db->get().master.present()) {
+			mWorker = getWorker( workers, db->get().master.get().address() );
+		}
+		if (!db->get().master.present() || !mWorker.present()) {
 			messages.push_back(JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
 		}
-		// Get the DataDistributor worker interface
-		Optional<WorkerDetails> _ddWorker;
-		if (db->get().distributor.present()) {
-			_ddWorker = getWorker( workers, db->get().distributor.get().address() );
-		}
 
-		if (!db->get().distributor.present() || !_ddWorker.present()) {
+		// Get the DataDistributor worker interface
+		if (db->get().distributor.present()) {
+			ddWorker = getWorker( workers, db->get().distributor.get().address() );
+		}
+		if (!db->get().distributor.present() || !ddWorker.present()) {
 			messages.push_back(JsonString::makeMessage("unreachable_dataDistributor_worker", "Unable to locate the data distributor worker."));
-		} else {
-			ddWorker = _ddWorker.get();
 		}
 
 		// Get the RateKeeper worker interface
-		Optional<WorkerDetails> _rkWorker;
 		if (db->get().ratekeeper.present()) {
-			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );
+			rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );
 		}
-
-		if (!db->get().ratekeeper.present() || !_rkWorker.present()) {
+		if (!db->get().ratekeeper.present() || !rkWorker.present()) {
 			messages.push_back(JsonString::makeMessage("unreachable_ratekeeper_worker", "Unable to locate the ratekeeper worker."));
-		} else {
-			rkWorker = _rkWorker.get();
 		}
 
 		// Get latest events for various event types from ALL workers
@@ -1955,7 +1964,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(db, workers, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 

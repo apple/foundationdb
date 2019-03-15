@@ -55,18 +55,23 @@ struct TLogInterface {
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
-		popMessages.getEndpoint( TaskTLogPop );
-		peekMessages.getEndpoint( TaskTLogPeek );
-		confirmRunning.getEndpoint( TaskTLogConfirmRunning );
-		commit.getEndpoint( TaskTLogCommit );
+		Endpoint base = peekMessages.initEndpoint(nullptr, TaskTLogPeek);
+		popMessages.initEndpoint(&base, TaskTLogPop);
+		commit.initEndpoint(&base, TaskTLogCommit);
+		lock.initEndpoint(&base);
+		getQueuingMetrics.initEndpoint(&base, TaskTLogQueuingMetrics);
+		confirmRunning.initEndpoint(&base, TaskTLogConfirmRunning);
+		waitFailure.initEndpoint(&base);
+		recoveryFinished.initEndpoint(&base);
+		TraceEvent("DumpToken", id()).detail("Name", "TLogInterface").detail("Token", base.token);
 	}
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
 		ASSERT(ar.isDeserializing || uniqueID != UID());
-		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
+		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages);
+		auto holder = FlowTransport::transport().setBaseEndpoint(peekMessages.getEndpoint());
+		serializer(ar, popMessages, commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
 	}
 };
 

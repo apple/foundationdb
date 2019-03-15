@@ -3729,6 +3729,7 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		UID uid(id, 0);
 		StorageServerInterface interface;
 		interface.uniqueID = uid;
+		interface.initEndpoints();
 	 	interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
@@ -3759,6 +3760,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, IRepPolicyRef policy, 
 		UID uid(id, 0);
 		StorageServerInterface interface;
 		interface.uniqueID = uid;
+		interface.initEndpoints();
 		int process_id = id;
 		int dc_id = process_id / 1000;
 		int data_hall_id = process_id / 100;

@@ -25,13 +25,16 @@
 #include "fdbrpc/Locality.h"
 
 struct DataDistributorInterface {
-	RequestStream<ReplyPromise<Void>> waitFailure;
 	struct LocalityData locality;
+	RequestStream<ReplyPromise<Void>> waitFailure;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
 
-	void initEndpoints() {}
+	void initEndpoints() {
+		Endpoint base = waitFailure.initEndpoint();
+		TraceEvent("DumpToken", id()).detail("Name", "DataDistributorInterface").detail("Token", base.token);
+	}
 	UID id() const { return waitFailure.getEndpoint().token; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	bool operator== (const DataDistributorInterface& r) const {
@@ -43,7 +46,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, locality);
+		serializer(ar, locality, waitFailure);
 	}
 };
 

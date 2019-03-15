@@ -86,7 +86,7 @@ struct TargetedKillWorkload : TestWorkload {
 
 		NetworkAddress machine;
 		if( self->machineToKill == "master" ) {
-			machine = self->dbInfo->get().master.address();
+			machine = self->dbInfo->get().master.get().address();
 		}
 		else if( self->machineToKill == "masterproxy" ) {
 			auto proxies = cx->getMasterProxies();

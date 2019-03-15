@@ -48,17 +48,23 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 	loop {
 		state vector<WorkerDetails> workers = wait( getWorkers( dbInfo ) );
 
-		for( int i = 0; i < workers.size(); i++ ) {
-			if( workers[i].interf.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].interf.id());
-				return workers[i].interf;
-			}
-		}
-
-		TraceEvent(SevWarn, "GetMasterWorkerError")
+		if(dbInfo->get().master.present()) {
+			TraceEvent(SevWarn, "GetMasterWorkerError")
 			.detail("Error", "MasterWorkerNotFound")
-			.detail("Master", dbInfo->get().master.id()).detail("MasterAddress", dbInfo->get().master.address())
 			.detail("WorkerCount", workers.size());
+		} else {
+			for( int i = 0; i < workers.size(); i++ ) {
+				if( workers[i].interf.address() == dbInfo->get().master.get().address() ) {
+					TraceEvent("GetMasterWorker").detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.get().id()).detail("WorkerId", workers[i].interf.id());
+					return workers[i].interf;
+				}
+			}
+
+			TraceEvent(SevWarn, "GetMasterWorkerError")
+				.detail("Error", "MasterWorkerNotFound")
+				.detail("Master", dbInfo->get().master.get().id()).detail("MasterAddress", dbInfo->get().master.get().address())
+				.detail("WorkerCount", workers.size());
+		}
 
 		wait(delay(1.0));
 	}

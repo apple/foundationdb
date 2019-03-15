@@ -462,19 +462,6 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		recruited.locality = locality;
 		recruited.initEndpoints();
 
-		DUMPTOKEN(recruited.getVersion);
-		DUMPTOKEN(recruited.getValue);
-		DUMPTOKEN(recruited.getKey);
-		DUMPTOKEN(recruited.getKeyValues);
-		DUMPTOKEN(recruited.getShardState);
-		DUMPTOKEN(recruited.waitMetrics);
-		DUMPTOKEN(recruited.splitMetrics);
-		DUMPTOKEN(recruited.getPhysicalMetrics);
-		DUMPTOKEN(recruited.waitFailure);
-		DUMPTOKEN(recruited.getQueuingMetrics);
-		DUMPTOKEN(recruited.getKeyValueStoreType);
-		DUMPTOKEN(recruited.watchValue);
-
 		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>() );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
@@ -596,7 +583,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		choose {
 			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.present() ? ni.master.get().id() : UID())
 				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
 				ServerDBInfo localInfo = ni;
 				localInfo.myLocality = locality;
@@ -634,6 +621,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 
 	state WorkerInterface interf( locality );
+	interf.initEndpoints();
 
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
@@ -661,19 +649,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define
-		DUMPTOKEN(recruited.clientInterface.reboot);
-		DUMPTOKEN(recruited.clientInterface.profiler);
-		DUMPTOKEN(recruited.tLog);
-		DUMPTOKEN(recruited.master);
-		DUMPTOKEN(recruited.masterProxy);
-		DUMPTOKEN(recruited.resolver);
-		DUMPTOKEN(recruited.storage);
-		DUMPTOKEN(recruited.debugPing);
-		DUMPTOKEN(recruited.coordinationPing);
-		DUMPTOKEN(recruited.waitFailure);
-		DUMPTOKEN(recruited.setMetricsRate);
-		DUMPTOKEN(recruited.eventLogRequest);
-		DUMPTOKEN(recruited.traceBatchDumpRequest);
 	}
 
 	try {
@@ -696,19 +671,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
 				startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored" );
-
-				DUMPTOKEN(recruited.getVersion);
-				DUMPTOKEN(recruited.getValue);
-				DUMPTOKEN(recruited.getKey);
-				DUMPTOKEN(recruited.getKeyValues);
-				DUMPTOKEN(recruited.getShardState);
-				DUMPTOKEN(recruited.waitMetrics);
-				DUMPTOKEN(recruited.splitMetrics);
-				DUMPTOKEN(recruited.getPhysicalMetrics);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getQueuingMetrics);
-				DUMPTOKEN(recruited.getKeyValueStoreType);
-				DUMPTOKEN(recruited.watchValue);
 
 				Promise<Void> recovery;
 				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
@@ -817,11 +779,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				startRole( Role::MASTER, recruited.id(), interf.id() );
 
-				DUMPTOKEN( recruited.waitFailure );
-				DUMPTOKEN( recruited.tlogRejoin );
-				DUMPTOKEN( recruited.changeCoordinators );
-				DUMPTOKEN( recruited.getCommitVersion );
-
 				//printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER, recruited.id(), masterProcess )) );
@@ -836,7 +793,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					TEST(true);  // Recruited while already a data distributor.
 				} else {
 					startRole( Role::DATA_DISTRIBUTOR, recruited.id(), interf.id() );
-					DUMPTOKEN( recruited.waitFailure );
 
 					Future<Void> dataDistributorProcess = dataDistributor( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::DATA_DISTRIBUTOR, recruited.id(), setWhenDoneOrError( dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>() ) ) );
@@ -854,8 +810,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					TEST(true);  // Recruited while already a ratekeeper.
 				} else {
 					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
-					DUMPTOKEN( recruited.waitFailure );
-					DUMPTOKEN( recruited.getRateInfo );
 
 					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );
@@ -910,19 +864,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
 					startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details );
-
-					DUMPTOKEN(recruited.getVersion);
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getPhysicalMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
 					//printf("Recruited as storageServer\n");
 
 					std::string filename = filenameFromId( req.storeType, folder, fileStoragePrefix.toString(), recruited.id() );
@@ -948,14 +889,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				details["ForMaster"] = req.master.id().shortString();
 				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
 
-				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.getConsistentReadVersion);
-				DUMPTOKEN(recruited.getKeyServersLocations);
-				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getRawCommittedVersion);
-				DUMPTOKEN(recruited.txnState);
-
 				//printf("Recruited as masterProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
 						masterProxyServer( recruited, req, dbInfo ) ) ) );
@@ -969,11 +902,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				std::map<std::string, std::string> details;
 				startRole( Role::RESOLVER, recruited.id(), interf.id(), details );
 
-				DUMPTOKEN(recruited.resolve);
-				DUMPTOKEN(recruited.metrics);
-				DUMPTOKEN(recruited.split);
-				DUMPTOKEN(recruited.waitFailure);
-
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::RESOLVER, recruited.id(),
 						resolver( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
@@ -984,13 +912,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				startRole( Role::LOG_ROUTER, recruited.id(), interf.id(), details );
-
-				DUMPTOKEN( recruited.peekMessages );
-				DUMPTOKEN( recruited.popMessages );
-				DUMPTOKEN( recruited.commit );
-				DUMPTOKEN( recruited.lock );
-				DUMPTOKEN( recruited.getQueuingMetrics );
-				DUMPTOKEN( recruited.confirmRunning );
 
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
 						logRouter( recruited, req, dbInfo ) ) ) );
