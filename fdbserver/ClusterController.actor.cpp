@@ -2463,22 +2463,20 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 
 ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 	state std::map<Optional<Standalone<StringRef>>, WorkerInfo>::iterator masterWorker;
-	state std::map<Optional<Standalone<StringRef>>, ProcessClass>::iterator masterClassIter;
 
 	loop {
-		if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		state ServerDBInfo db = self->db.serverInfo->get();
+		masterWorker = self->id_worker.find(db.master.locality.processId());
+
+		// If the cluster controller is excluded, the master will change once the cluster controller is moved.
+		if (self->id_worker[self->clusterControllerProcessId].priorityInfo.isExcluded ||
+				masterWorker == self->id_worker.end()) {
 			wait(self->db.serverInfo->onChange());
 			continue;
 		}
 
-		state ServerDBInfo db = self->db.serverInfo->get();
-		masterWorker = self->id_worker.find(db.master.locality.processId());
-		masterClassIter = self->id_class.find(db.master.locality.processId());
-		if (masterWorker == self->id_worker.end() || masterClassIter == self->id_class.end()) {
-			wait(self->db.serverInfo->onChange());
-			continue;
-		}
-		auto masterFitness = masterClassIter->second.machineClassFitness(ProcessClass::Master);
+		auto masterFitness = masterWorker->second.details.processClass.machineClassFitness(ProcessClass::Master);
+		TraceEvent("CC_BDDRK", self->id).detail("MasterFitness", masterFitness);
 
 		if (db.ratekeeper.present()) {
 			auto rkClassIter = self->id_class.find(db.ratekeeper.get().locality.processId());
@@ -2486,6 +2484,8 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 				? rkClassIter->second.machineClassFitness(ProcessClass::RateKeeper)
 				: ProcessClass::BestFit;
 			if (rkFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
+				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitness);
 				db.ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
 			}
 		}
@@ -2496,6 +2496,8 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 				? ddClassIter->second.machineClassFitness(ProcessClass::DataDistributor)
 				: ProcessClass::BestFit;
 			if (ddFitness > masterFitness && masterFitness == ProcessClass::GoodFit) {
+				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
+				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitness);
 				db.distributor.get().haltDataDistributor.send(HaltDataDistributorRequest(self->id));
 			}
 		}
