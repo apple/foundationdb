@@ -59,6 +59,14 @@ then
        then
           fail "value was not cleared correctly"
        fi
+       PYTHON_TARGZ_NAME="$(ls /build/packages | grep 'foundationdb-[0-9.]*\.tar\.gz' | sed 's/\.tar\.gz$//')"
+       tar -C /tmp -xvf /build/packages/${PYTHON_TARGZ_NAME}.tar.gz
+       pushd /tmp/${PYTHON_TARGZ_NAME}
+       python setup.py install
+       successOr "Installing python bindings failed"
+       popd
+       python -c 'import fdb; fdb.api_version(600)'
+       successOr "Loading python bindings failed"
    }
 
    keep_config() {
