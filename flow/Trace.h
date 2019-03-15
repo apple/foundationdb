@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <string>
 #include <map>
+#include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 
@@ -133,9 +134,62 @@ private:
 };
 
 struct DynamicEventMetric;
-class StringRef;
-template <class T> class Standalone;
-template <class T> class Optional;
+
+// forward declare format from flow.h as we
+// can't include flow.h here
+std::string format(const char* form, ...);
+
+template<class T>
+struct Traceable : std::false_type {};
+
+#define FORMAT_TRACEABLE(type, fmt)					\
+	template<>										\
+	struct Traceable<type> : std::true_type {		\
+		static std::string toString(type value) {	\
+			return format(fmt, value);				\
+		}											\
+	}
+
+FORMAT_TRACEABLE(bool, "%d");
+FORMAT_TRACEABLE(signed char, "%d");
+FORMAT_TRACEABLE(unsigned char, "%d");
+FORMAT_TRACEABLE(short, "%d");
+FORMAT_TRACEABLE(unsigned short, "%d");
+FORMAT_TRACEABLE(int, "%d");
+FORMAT_TRACEABLE(unsigned, "%u");
+FORMAT_TRACEABLE(long int, "%ld");
+FORMAT_TRACEABLE(unsigned long int, "%lu");
+FORMAT_TRACEABLE(long long int, "%lld");
+FORMAT_TRACEABLE(unsigned long long int, "%llu");
+FORMAT_TRACEABLE(double, "%g");
+
+template<>
+struct Traceable<UID> : std::true_type {
+	static std::string toString(const UID& value) {
+		return format("%016llx", value.first());
+	}
+};
+
+
+
+template<class T>
+struct SpecialTraceMetricType
+	: std::conditional<std::is_integral<T>::value || std::is_enum<T>::value,
+					   std::true_type, std::false_type>::type {
+	static int64_t getValue(T v) {
+		return v;
+	}
+};
+
+#define TRACE_METRIC_TYPE(from, to)							\
+	template<>												\
+	struct SpecialTraceMetricType<from> : std::true_type {	\
+		static to getValue(from v) {						\
+			return v;										\
+		}													\
+	}
+
+TRACE_METRIC_TYPE(double, double);
 
 struct TraceEvent {
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
@@ -147,28 +201,86 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	//Must be called directly after constructing the trace event
-	TraceEvent& error(const class Error& e, bool includeCancelled=false);
+	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
+		if (enabled) {
+			return errorImpl(e, includeCancelled);
+		}
+		return *this;
+	}
 
-	TraceEvent& detail( std::string key, std::string value );
-	TraceEvent& detail( std::string key, double value );
-	TraceEvent& detail( std::string key, long int value );
-	TraceEvent& detail( std::string key, long unsigned int value );
-	TraceEvent& detail( std::string key, long long int value );
-	TraceEvent& detail( std::string key, long long unsigned int value );
-	TraceEvent& detail( std::string key, int value );
-	TraceEvent& detail( std::string key, unsigned value );
-	TraceEvent& detail( std::string key, const struct NetworkAddress& value );
-	TraceEvent& detail( std::string key, const IPAddress& value );
+	template<class T>
+	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type
+	detail( std::string&& key, const T& value ) {
+		if (enabled) {
+			init();
+			auto s = Traceable<T>::toString(value);
+			addMetric(key.c_str(), value, s);
+			return detailImpl(std::move(key), std::move(s));
+		}
+		return *this;
+	}
+
+	template<class T>
+	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type
+	detail( const char* key, const T& value ) {
+		if (enabled) {
+			init();
+			auto s = Traceable<T>::toString(value);
+			addMetric(key, value, s);
+			return detailImpl(std::string(key), std::move(s), false);
+		}
+		return *this;
+	}
+	template<class T>
+	typename std::enable_if<std::is_enum<T>::value, TraceEvent&>::type
+	detail(const char* key, T value) {
+		if (enabled) {
+			init();
+			setField(key, int64_t(value));
+			return detailImpl(std::string(key), format("%d", value), false);
+		}
+		return *this;
+	}
+	TraceEvent& detail(std::string key, std::string value) {
+		if (enabled) {
+			init();
+			addMetric(key.c_str(), value, value);
+			return detailImpl(std::string(key), std::move(value), false);
+		}
+		return *this;
+	}
+	TraceEvent& detail(const char* key, std::string value) {
+		if (enabled) {
+			init();
+			addMetric(key, value, value);
+			return detailImpl(std::string(key), std::move(value), false);
+		}
+		return *this;
+	}
 	TraceEvent& detailf( std::string key, const char* valueFormat, ... );
-	TraceEvent& detailext( std::string key, const StringRef& value );
-	TraceEvent& detailext( std::string key, const Optional<Standalone<StringRef>>& value );
 private:
+	template<class T>
+	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type
+	addMetric(const char* key, const T& value, const std::string&) {
+		setField(key, SpecialTraceMetricType<T>::getValue(value));
+	}
+
+	template<class T>
+	typename std::enable_if<!SpecialTraceMetricType<T>::value, void>::type
+	addMetric(const char* key, const T&, const std::string& value) {
+		setField(key, value);
+	}
+
+	void setField(const char* key, int64_t value);
+	void setField(const char* key, double value);
+	void setField(const char* key, const std::string& value);
+
+	TraceEvent& errorImpl(const class Error& e, bool includeCancelled=false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
 	TraceEvent& detailfNoMetric( std::string&& key, const char* valueFormat, ... );
 	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
-	TraceEvent& detail( std::string key, const UID& value );
 	TraceEvent& backtrace(const std::string& prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
@@ -249,8 +361,8 @@ public:
 	void setLatestError( const TraceEventFields& contents );
 	TraceEventFields getLatestError();
 private:
-	std::map<NetworkAddress, std::map<std::string, TraceEventFields>> latest;
-	std::map<NetworkAddress, TraceEventFields> latestErrors;
+	std::map<struct NetworkAddress, std::map<std::string, TraceEventFields>> latest;
+	std::map<struct NetworkAddress, TraceEventFields> latestErrors;
 };
 
 extern LatestEventCache latestEventCache;

@@ -89,8 +89,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("CachePageReadsMerged", netData.countFileCachePageReadsMerged - statState->networkState.countFileCachePageReadsMerged)
 				.detail("CacheWrites", netData.countFileCacheWrites - statState->networkState.countFileCacheWrites)
 				.detail("CacheReads", netData.countFileCacheReads - statState->networkState.countFileCacheReads)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 				.detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 				.detail("AIOSubmitLag", (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
@@ -153,8 +153,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("TotalMemory", currentStats.machineTotalRAM)
 				.detail("CommittedMemory", currentStats.machineCommittedRAM)
 				.detail("AvailableMemory", currentStats.machineAvailableRAM)
-				.detailext("ZoneID", machineState.zoneId)
-				.detailext("MachineID", machineState.machineId)
+				.detail("ZoneID", machineState.zoneId)
+				.detail("MachineID", machineState.machineId)
 				.trackLatest("MachineMetrics");
 		}
 	}

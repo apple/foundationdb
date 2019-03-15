@@ -513,6 +513,13 @@ private:
 	uint32_t type;
 };
 
+template<>
+struct Traceable<KeyValueStoreType> : std::true_type {
+	static std::string toString(KeyValueStoreType const& value) {
+		return value.toString();
+	}
+};
+
 struct TLogVersion {
 	enum Version {
 		UNSET = 0,
@@ -545,6 +552,13 @@ struct TLogVersion {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
 		return default_error_or();
+	}
+};
+
+template<>
+struct Traceable<TLogVersion> : std::true_type {
+	static std::string toString(TLogVersion const& value) {
+		return Traceable<Version>::toString(value.version);
 	}
 };
 

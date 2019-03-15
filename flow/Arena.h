@@ -652,6 +652,20 @@ private:
 };
 #pragma pack( pop )
 
+template<>
+struct Traceable<StringRef> : std::true_type {
+	static std::string toString(const StringRef& value) {
+		return value.toString();
+	}
+};
+
+template<class T>
+struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Standalone<T>& value) {
+		return Traceable<T>::toString(value);
+	}
+};
+
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later

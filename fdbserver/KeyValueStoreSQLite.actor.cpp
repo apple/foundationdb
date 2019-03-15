@@ -39,6 +39,10 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 	#define sqlite3_mutex_leave(x)
 #endif
 
+FORMAT_TRACEABLE(volatile long long, "%lld");
+FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
+FORMAT_TRACEABLE(volatile double, "%g");
+
 void hexdump(FILE *fout, StringRef val);
 
 /*#undef state
