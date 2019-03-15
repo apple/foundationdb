@@ -68,7 +68,7 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData() );
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
 	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
