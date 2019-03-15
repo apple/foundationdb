@@ -430,8 +430,15 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, const Red
 		// If flush then write a page using records from start to i.  It's guaranteed that pageUpperBound has been set above.
 		if(flush) {
 			end = i == iEnd;  // i could have been moved above
+
 			int count = i - start;
-			debug_printf("Flushing page start=%d i=%d\nlower: %s\nupper: %s\n", start, i, pageLowerBound.toString().c_str(), pageUpperBound.toString().c_str());
+			// If not writing the final page, reduce entry count of page by a third
+			if(!end) {
+				i -= count / 3;
+				pageUpperBound = entries[i];
+			}
+
+			debug_printf("Flushing page start=%d i=%d count=%d\nlower: %s\nupper: %s\n", start, i, count, pageLowerBound.toString().c_str(), pageUpperBound.toString().c_str());
 #if REDWOOD_DEBUG
 			for(int j = start; j < i; ++j) {
 				debug_printf(" %3d: %s\n", j, entries[j].toString().c_str());
@@ -527,19 +534,31 @@ public:
 			*this = Counts();
 		}
 
+		int64_t pageReads;
+		int64_t extPageReads;
+		int64_t setBytes;
 		int64_t pageWrites;
-		int64_t blockWrites;
+		int64_t extPageWrites;
 		int64_t sets;
 		int64_t clears;
 		int64_t commits;
+		int64_t gets;
+		int64_t getRanges;
+		int64_t commitToPage;
+		int64_t commitToPageStart;
 
-		std::string toString() const {
-			std::string s = format("sets=%lld clears=%lld commits=%lld pages=%lld blocks=%lld\n", sets, clears, commits, pageWrites, blockWrites);
+		std::string toString(bool clearAfter = false) {
+			std::string s = format("set=%lld clear=%lld get=%lld getRange=%lld commit=%lld pageRead=%lld extPageRead=%lld pageWrite=%lld extPageWrite=%lld commitPage=%lld commitPageStart=%lld", 
+				sets, clears, gets, getRanges, commits, pageReads, extPageReads, pageWrites, extPageWrites, commitToPage, commitToPageStart);
+			if(clearAfter) {
+				clear();
+			}
 			return s;
 		}
 	};
 
-	Counts counts;
+	// Using a static for metrics because a single process shouldn't normally have multiple storage engines
+	static Counts counts;
 
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
@@ -934,7 +953,7 @@ private:
 					newPage->extensionPages[e] = eid;
 					// If replacing the primary page below (version == 0) then pass the primary page's ID as the reference page ID
 					m_pager->writePage(eid, extPages[e], version, (version == 0) ? id : invalidLogicalPageID);
-					++counts.blockWrites;
+					++counts.extPageWrites;
 				}
 
 				debug_printf("%p: writePages(): Writing primary page op=write id=%u @%lld (+%lu extension pages)\n", actor_debug, id, version, extPages.size());
@@ -943,7 +962,6 @@ private:
 			else {
 				debug_printf("%p: writePages(): Writing normal page op=write id=%u @%lld\n", actor_debug, id, version);
 				writePage(id, pages[i].firstPage, version, &pages[i].lowerBound, (i == pages.size() - 1) ? upperBound : &pages[i + 1].lowerBound);
-				++counts.blockWrites;
 			}
 		}
 
@@ -1001,8 +1019,10 @@ private:
 
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, LogicalPageID id, int usablePageSize, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
 		debug_printf("readPage() op=read id=%u @%lld\n", id, snapshot->getVersion());
+		wait(delay(0, TaskDiskRead));
 
 		state Reference<const IPage> result = wait(snapshot->getPhysicalPage(id));
+		++counts.pageReads;
 		state const BTreePage *pTreePage = (const BTreePage *)result->begin();
 
 		if(pTreePage->extensionPageCount == 0) {
@@ -1018,6 +1038,7 @@ private:
 			}
 
 			std::vector<Reference<const IPage>> pages = wait(getAll(pageGets));
+			counts.extPageReads += pTreePage->extensionPageCount;
 			result = Reference<const IPage>(new SuperPage(pages, usablePageSize));
 			pTreePage = (const BTreePage *)result->begin();
 		}
@@ -1039,19 +1060,20 @@ private:
 	// TODO:  Probably should pass prev/next records by pointer in many places
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
 		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBound->toString().c_str(), upperBound->toString().c_str());
+		self->counts.commitToPageStart++;
+
+		// If the lower bound key and the upper bound key are the same then there can't be any changes to
+		// this subtree since changes would happen after the upper bound key as the mutated versions would
+		// necessarily be higher than all previous versions
+		if(lowerBound->key == upperBound->key) {
+			debug_printf("%p no changes, lower and upper bound keys are the same.\n", this);
+			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
+		}
 
 		// Find the slice of the mutation buffer that is relevant to this subtree
 		// TODO:  Rather than two lower_bound searches, perhaps just compare each mutation to the upperBound key while iterating
 		state MutationBufferT::const_iterator iMutationBoundary = mutationBuffer->lower_bound(lowerBound->key);
 		state MutationBufferT::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBound->key);
-
-		// If the lower bound key and the upper bound key are the same then there can't be any changes to
-		// this subtree since changes would happen after the upper bound key as the mutated versions would
-		// necessarily be higher.
-		if(lowerBound->key == upperBound->key) {
-			debug_printf("%p no changes, lower and upper bound keys are the same.\n", this);
-			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
-		}
 
 		// If the mutation buffer key found is greater than the lower bound key then go to the previous mutation
 		// buffer key because it may cover deletion of some keys at the start of this subtree.
@@ -1073,11 +1095,17 @@ private:
 		// subtree but have no changes in it
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
 		++iMutationBoundaryNext;
-		if(iMutationBoundaryNext == iMutationBoundaryEnd && iMutationBoundary->second.noChanges()) {
-			debug_printf("%p no changes because sole mutation range was empty\n", this);
+		if(iMutationBoundaryNext == iMutationBoundaryEnd && 
+			( iMutationBoundary->second.noChanges() || 
+			  ( !iMutationBoundary->second.rangeClearVersion.present() &&
+			    iMutationBoundary->first < lowerBound->key)
+			)
+		) {
+			debug_printf("%p no changes because sole mutation range was not cleared\n", this);
 			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 		}
 
+		self->counts.commitToPage++;
 		state Reference<const IPage> rawPage = wait(readPage(snapshot, root, self->m_usablePageSizeOverride, lowerBound, upperBound));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
 		debug_printf("%p commitSubtree(): %s\n", this, page->toString(false, root, snapshot->getVersion(), lowerBound, upperBound).c_str());
@@ -1089,16 +1117,18 @@ private:
 		if(page->flags & BTreePage::IS_LEAF) {
 			VersionedChildrenT results;
 			std::vector<RedwoodRecordRef> merged;
-			Arena mergedArena;
 
 			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", this);
-			self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
+			if(REDWOOD_DEBUG) {
+				self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
+			}
 
 			// It's a given that the mutation map is not empty so it's safe to do this
 			Key mutationRangeStart = iMutationBoundary->first;
 
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = invalidVersion;
+			int changes = 0;
 
 			// Now, process each mutation range and merge changes with existing data.
 			while(iMutationBoundary != iMutationBoundaryEnd) {
@@ -1134,12 +1164,14 @@ private:
 					if(m.isClear() || m.value.size() <= maxPartSize) {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
+						++changes;
 						merged.push_back(iMutations->second.toRecord(iMutationBoundary->first, iMutations->first));
 						debug_printf("%p: Added non-split %s [mutation, boundary start]\n", this, merged.back().toString().c_str());
 					}
 					else {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
+						++changes;
 						int bytesLeft = m.value.size();
 						int start = 0;
 						RedwoodRecordRef whole(iMutationBoundary->first, iMutations->first, m.value);
@@ -1177,6 +1209,7 @@ private:
 						Version clearVersion = clearRangeVersion.get();
 						if(clearVersion < minVersion || minVersion == invalidVersion)
 							minVersion = clearVersion;
+						++changes;
 						merged.push_back(RedwoodRecordRef(cursor.get().key, clearVersion));
 						debug_printf("%p: Added %s [existing, middle clear]\n", this, merged.back().toString().c_str());
 					}
@@ -1191,12 +1224,12 @@ private:
 				cursor.moveNext();
 			}
 
-			debug_printf("%p Done merging mutations into existing leaf contents\n", this);
+			debug_printf("%p Done merging mutations into existing leaf contents, made %d changes\n", this, changes);
 
-			// No changes were actually made.  This could happen if there is a clear which does not cover an entire leaf but also does
-			// not which turns out to not match any existing data in the leaf.
+			// No changes were actually made.  This could happen if the only mutations are clear ranges which do not match any records.
 			if(minVersion == invalidVersion) {
 				debug_printf("%p No changes were made during mutation merge\n", this);
+				ASSERT(changes == 0);
 				return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 			}
 
@@ -1265,7 +1298,8 @@ private:
 				childPageIDs.push_back(pageID);
 			}
 
-			//wait(waitForAll(futureChildren));
+			// Waiting one at a time makes debugging easier
+			// TODO:  Is it better to use waitForAll()?
 			state int k;
 			for(k = 0; k < futureChildren.size(); ++k) {
 				wait(success(futureChildren[k]));
@@ -1413,7 +1447,9 @@ private:
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
 		debug_printf("%s: pager latestVersion %lld\n", self->m_name.c_str(), latestVersion);
 
-		self->printMutationBuffer(mutations);
+		if(REDWOOD_DEBUG) {
+			self->printMutationBuffer(mutations);
+		}
 
 		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, &dbBegin, &dbEnd));
 
@@ -1922,6 +1958,7 @@ private:
 
 RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
 RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff"), std::numeric_limits<Version>::max());
+VersionedBTree::Counts VersionedBTree::counts;
 
 ACTOR template<class T>
 Future<T> catchError(Promise<Void> error, Future<T> f) {
@@ -2005,15 +2042,22 @@ public:
 	};
 
 	void clear(KeyRangeRef range, const Arena* arena = 0) {
+		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
 
     virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
-		//printf("SET write version %lld %s\n", m_tree->getWriteVersion(), printable(keyValue).c_str());
+		debug_printf("SET %s\n", keyValue.key.printable().c_str());
 		m_tree->set(keyValue);
 	}
 
+	virtual Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
+		debug_printf("READRANGE %s\n", printable(keys).c_str());
+		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
+	}
+
 	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRange keys, int rowLimit, int byteLimit) {
+		self->m_tree->counts.getRanges++;
 		state Standalone<VectorRef<KeyValueRef>> result;
 		state int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
@@ -2050,11 +2094,8 @@ public:
 		return result;
 	}
 
-	virtual Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
-		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
-	}
-
 	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, Key key, Optional< UID > debugID) {
+		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
@@ -2070,6 +2111,7 @@ public:
 	}
 
 	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, Key key, int maxLength, Optional< UID > debugID) {
+		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		wait(cur->findEqual(key));
@@ -2649,7 +2691,7 @@ TEST_CASE("!/redwood/correctness") {
 	state int mutationBytesTarget = randomSize(50e6);
 	state double clearChance = g_random->random01() * .001;  // at most 1 in 1000
 
-	printf("Using page size %d, max key size %d, max value size %d, clearchance %f total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
+	printf("Using page size %d, max key size %d, max value size %d, clearchance %f, total mutation byte target %d\n", pageSize, maxKeySize, maxValueSize, clearChance, mutationBytesTarget);
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
@@ -2844,6 +2886,25 @@ TEST_CASE("!/redwood/correctness") {
 	return Void();
 }
 
+ACTOR Future<Void> pointReads(VersionedBTree *btree, int count, int nodeCount) {
+	state Version readVer = wait(btree->getLatestVersion());
+	state int c = 0;
+	state double readStart = timer();
+	printf("Executing %d point reads\n", count);
+	state Key k = makeString(4);
+	state Reference<IStoreCursor> cur = btree->readAtVersion(readVer);
+	while(c < count) {
+		//cur = btree->readAtVersion(readVer);
+		*(uint32_t *)k.begin() = g_random->randomInt(0, nodeCount);
+		wait(success(cur->findFirstEqualOrGreater(k, true, 0)));
+		++c;
+	}
+	double elapsed = timer() - readStart;
+	printf("Point read speed %d/s\n", int(count / elapsed));
+	return Void();
+}
+
+	
 TEST_CASE("!/redwood/performance/set") {
 	state std::string pagerFile = "unittest_pageFile";
 	printf("Deleting old test data\n");
@@ -2854,22 +2915,23 @@ TEST_CASE("!/redwood/performance/set") {
 	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
 	wait(btree->init());
 
-	state int nodeCount = 10e6;
+	state int nodeCount = 1e9;
 	state int maxChangesPerVersion = 1000;
-	state int versions = 15000;
-	int maxKeySize = 25;
-	int maxValueSize = 75;
+	state int64_t kvBytesTarget = 100e6;
+	int maxKeySize = 19;
+	int maxValueSize = 1000;
 
 	state std::string key(maxKeySize, 'k');
-	state std::string value(maxKeySize, 'v');
+	state std::string value(maxValueSize, 'v');
 	state int64_t kvBytes = 0;
+	state int64_t kvBytesTotal = 0;
 	state int records = 0;
 	state Future<Void> commit = Void();
 
 	printf("Starting.\n");
 	state double intervalStart = timer();
 
-	while(--versions) {
+	while(kvBytesTotal < kvBytesTarget) {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
 		btree->setWriteVersion(version);
@@ -2882,10 +2944,11 @@ TEST_CASE("!/redwood/performance/set") {
 			kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
 			btree->set(kv);
 			kvBytes += kv.key.size() + kv.value.size();
+			kvBytesTotal += kv.key.size() + kv.value.size();
 			++records;
 		}
 
-		if(kvBytes > 5e6 || versions == 1) {
+		if(kvBytes > 1e6 || kvBytesTotal >= kvBytesTarget) {
 			wait(commit);
 			// Avoid capturing this to freeze counter values
 			int recs = records;
@@ -2902,6 +2965,9 @@ TEST_CASE("!/redwood/performance/set") {
 	}
 
 	wait(commit);
+
+	state int reads = 3e5;
+	wait(pointReads(btree, reads, nodeCount) && pointReads(btree, reads, nodeCount) && pointReads(btree, reads, nodeCount));
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
