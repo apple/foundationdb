@@ -518,7 +518,7 @@ namespace parallelFileRestore {
 
 // CMDUID implementation
 void CMDUID::initPhase(RestoreCommandEnum phase) {
-	printf("CMDID, current pahse:%d, new phase:%d", part[0], phase);
+	printf("CMDID, current pahse:%d, new phase:%d\n", part[0], phase);
 	part[0] = (uint64_t) phase;
 	part[1] = 0;
 }
@@ -581,17 +581,6 @@ RestoreCommandEnum getPreviousCmd(RestoreCommandEnum curCmd) {
 	return ret;
 }
 
-// Log error message when the command is unexpected
-void logUnexpectedCmd(RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdId) {
-	fprintf(stderr, "[Warning] Log Unexpected Cmd: CurrentCmd:%d(%s) Expected cmd:%d(%s), Received cmd:%d(%s) Received CmdUID:%s\n",
-			current, "[TODO]", getPreviousCmd(current), "[TODO]", received, "[TODO]", cmdId.toString().c_str());
-}
-
-// Log  message when we receive a command from the old phase
-void logExpectedOldCmd(RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdId) {
-	fprintf(stdout, "[Warning] Log Expected Old Cmd: CurrentCmd:%d(%s) Expected cmd:%d(%s), Received cmd:%d(%s) Received CmdUID:%s\n",
-			current, "[TODO]", getPreviousCmd(current), "[TODO]", received, "[TODO]", cmdId.toString().c_str());
-}
 
 #define DEBUG_FAST_RESTORE 1
 
@@ -703,6 +692,17 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 typedef RestoreData::LoadingStatus LoadingStatus;
 typedef RestoreData::LoadingState LoadingState;
 
+// Log error message when the command is unexpected
+void logUnexpectedCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdId) {
+	fprintf(stderr, "[ERROR]Node:%s Log Unexpected Cmd: CurrentCmd:%d(%s) Expected cmd:%d(%s), Received cmd:%d(%s) Received CmdUID:%s\n",
+			rd->describeNode().c_str(), current, "[TODO]", getPreviousCmd(current), "[TODO]", received, "[TODO]", cmdId.toString().c_str());
+}
+
+// Log  message when we receive a command from the old phase
+void logExpectedOldCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdId) {
+	fprintf(stdout, "[Warning]Node:%s Log Expected Old Cmd: CurrentCmd:%d(%s) Expected cmd:%d(%s), Received cmd:%d(%s) Received CmdUID:%s\n",
+			rd->describeNode().c_str(), current, "[TODO]", getPreviousCmd(current), "[TODO]", received, "[TODO]", cmdId.toString().c_str());
+}
 
 void printAppliersKeyRange(Reference<RestoreData> rd) {
 	printf("[INFO] The mapping of KeyRange_start --> Applier ID\n");
@@ -1698,9 +1698,9 @@ ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> rd, RestoreComma
 					break;
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Set_Role_Done) == req.cmd ) {
-						logExpectedOldCmd(RestoreCommandEnum::Set_Role_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Set_Role_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Set_Role_Done, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Set_Role_Done, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId)); // master node is waiting
 				}
@@ -1816,6 +1816,8 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
+			fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
+			break;
 		}
 
 	}
@@ -1856,9 +1858,9 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> rd, Re
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Assign_Applier_KeyRange_Done) != req.cmd && getPreviousCmd(RestoreCommandEnum::Set_Role_Done) != req.cmd) {
 						printf("Applier Node:%s receive commands from last phase. Check if this node is master applier\n", rd->describeNode().c_str());
-						logExpectedOldCmd(RestoreCommandEnum::Assign_Applier_KeyRange_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Assign_Applier_KeyRange_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Assign_Applier_KeyRange_Done, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Assign_Applier_KeyRange_Done, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId));
 				}
@@ -1919,6 +1921,8 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
+			fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
+			break;
 		}
 	}
 
@@ -2026,9 +2030,9 @@ ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreCom
 					break;
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done) != req.cmd ) {
-						logExpectedOldCmd(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId));
 				}
@@ -2137,9 +2141,9 @@ ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCo
 					break;
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Get_Applier_KeyRange_Done) != req.cmd ) {
-						logExpectedOldCmd(RestoreCommandEnum::Get_Applier_KeyRange_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Get_Applier_KeyRange_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Get_Applier_KeyRange_Done, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Get_Applier_KeyRange_Done, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId));
 				}
@@ -2195,9 +2199,9 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 					break;
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done) != req.cmd ) {
-						logExpectedOldCmd(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId)); // master is waiting on the previous command
 				}
@@ -2246,9 +2250,9 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 					break;
 				} else {
 					if ( getPreviousCmd(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation) != req.cmd ) {
-						logExpectedOldCmd(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
+						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdId);
 					} else {
-						logUnexpectedCmd(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, req.cmd, req.cmdId);
+						logUnexpectedCmd(rd, RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, req.cmd, req.cmdId);
 					}
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdId)); // master is waiting on the previous command
 				}
@@ -2621,15 +2625,17 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
+			fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
+			break;
 		}
 	}
 
 	// Signal the end of sampling for loaders
-	rd->cmdID.initPhase(RestoreCommandEnum::Sample_Range_File);
+	rd->cmdID.initPhase(RestoreCommandEnum::Sample_File_Done);
 	loaderIDs = getLoaderIDs(rd); // Reset loaderIDs
-	cmdReplies.clear();
 	loop {
 		try {
+			cmdReplies.clear();
 			for (auto &loaderID : loaderIDs) {
 				UID nodeID = loaderID;
 
@@ -2663,6 +2669,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
 						rd->cmdID.toString().c_str(), e.code(), e.what());
 			}
+			fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
+			break;
 		}
 	}
 
@@ -3155,9 +3163,9 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreCommandInter
 							break;
 					} else {
 						if ( getPreviousCmd(RestoreCommandEnum::Assign_Loader_File_Done) != req.cmd ) {
-							logExpectedOldCmd(RestoreCommandEnum::Assign_Loader_File_Done, req.cmd, req.cmdId);
+							logExpectedOldCmd(rd, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd, req.cmdId);
 						} else {
-							logUnexpectedCmd(RestoreCommandEnum::Assign_Loader_File_Done, req.cmd, req.cmdId);
+							logUnexpectedCmd(rd, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd, req.cmdId);
 						}
 //						printf("[ERROR][Loader] Expecting command:%d, %d, %d. Receive unexpected restore command %d. Directly reply to master to avoid stucking master\n",
 //								RestoreCommandEnum::Assign_Loader_Range_File, RestoreCommandEnum::Assign_Loader_Log_File, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd);
@@ -3198,7 +3206,7 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterf
 			//wait(delay(1.0));
 			choose {
 				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-					printf("[INFO][Loader] Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
+					printf("[INFO] Node:%s Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n", rd->describeNode().c_str(),
 							req.cmd, req.id.toString().c_str(), rd->localNodeStatus.role);
 					if ( interf.id() != req.id ) {
 							printf("[WARNING] node:%s receive request with a different id:%s\n",
@@ -4347,7 +4355,7 @@ void splitMutation(Reference<RestoreData> rd,  MutationRef m, Arena& mvector_are
 
 // MXNOTE: revise done
 ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
-	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d\n",
+	printf("[INFO][Loader] Node:%s rd->masterApplier:%s, hasApplierInterface:%d registerMutationsToApplier\n",
 			rd->describeNode().c_str(), rd->masterApplier.toString().c_str(),
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 	printAppliersKeyRange(rd);
@@ -4362,33 +4370,61 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 
 	printAppliersKeyRange(rd);
 
-	try {
-		state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
-		rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
-		for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
-			state uint64_t commitVersion = kvOp->first;
-			state int mIndex;
-			state MutationRef kvm;
-			for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-				kvm = kvOp->second[mIndex];
-				// Send the mutation to applier
-				if (isRangeMutation(kvm)) {
-					// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
-					// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-					state Standalone<VectorRef<MutationRef>> mvector;
-					state Standalone<VectorRef<UID>> nodeIDs;
-					splitMutation(rd, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
-					ASSERT(mvector.size() == nodeIDs.size());
+	loop {
+		try {
+			packMutationNum = 0;
+			splitMutationIndex = 0;
+			kvCount = 0;
+			state std::map<Version, Standalone<VectorRef<MutationRef>>>::iterator kvOp;
+			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier);
+			for ( kvOp = rd->kvOps.begin(); kvOp != rd->kvOps.end(); kvOp++) {
+				state uint64_t commitVersion = kvOp->first;
+				state int mIndex;
+				state MutationRef kvm;
+				for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
+					kvm = kvOp->second[mIndex];
+					// Send the mutation to applier
+					if (isRangeMutation(kvm)) {
+						// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
+						// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
+						state Standalone<VectorRef<MutationRef>> mvector;
+						state Standalone<VectorRef<UID>> nodeIDs;
+						splitMutation(rd, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
+						ASSERT(mvector.size() == nodeIDs.size());
 
-					for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++ ) {
-						MutationRef mutation = mvector[splitMutationIndex];
-						UID applierID = nodeIDs[splitMutationIndex];
+						for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++ ) {
+							MutationRef mutation = mvector[splitMutationIndex];
+							UID applierID = nodeIDs[splitMutationIndex];
+							applierCmdInterf = rd->workers_interface[applierID];
+
+							rd->cmdID.nextCmd();
+							cmdReplies.push_back(applierCmdInterf.cmd.getReply(
+									RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, rd->cmdID, applierID, commitVersion, mutation)));
+
+							packMutationNum++;
+							kvCount++;
+							if (packMutationNum >= packMutationThreshold) {
+								ASSERT( packMutationNum == packMutationThreshold );
+								//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+								std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+								cmdReplies.clear();
+								packMutationNum = 0;
+							}
+						}
+					} else { // mutation operates on a particular key
+						std::map<Standalone<KeyRef>, UID>::iterator itlow = rd->range2Applier.lower_bound(kvm.param1); // lower_bound returns the iterator that is >= m.param1
+						// make sure itlow->first <= m.param1
+						if ( itlow == rd->range2Applier.end() || itlow->first > kvm.param1 ) {
+							--itlow;
+						}
+						ASSERT( itlow->first <= kvm.param1 );
+						MutationRef mutation = kvm;
+						UID applierID = itlow->second;
 						applierCmdInterf = rd->workers_interface[applierID];
 
 						rd->cmdID.nextCmd();
 						cmdReplies.push_back(applierCmdInterf.cmd.getReply(
 								RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, rd->cmdID, applierID, commitVersion, mutation)));
-
 						packMutationNum++;
 						kvCount++;
 						if (packMutationNum >= packMutationThreshold) {
@@ -4399,50 +4435,31 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 							packMutationNum = 0;
 						}
 					}
-				} else { // mutation operates on a particular key
-					std::map<Standalone<KeyRef>, UID>::iterator itlow = rd->range2Applier.lower_bound(kvm.param1); // lower_bound returns the iterator that is >= m.param1
-					// make sure itlow->first <= m.param1
-					if ( itlow == rd->range2Applier.end() || itlow->first > kvm.param1 ) {
-						--itlow;
-					}
-					ASSERT( itlow->first <= kvm.param1 );
-					MutationRef mutation = kvm;
-					UID applierID = itlow->second;
-					applierCmdInterf = rd->workers_interface[applierID];
-
-					rd->cmdID.nextCmd();
-					cmdReplies.push_back(applierCmdInterf.cmd.getReply(
-							RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier, rd->cmdID, applierID, commitVersion, mutation)));
-					packMutationNum++;
-					kvCount++;
-					if (packMutationNum >= packMutationThreshold) {
-						ASSERT( packMutationNum == packMutationThreshold );
-						//printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
-						std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-						cmdReplies.clear();
-						packMutationNum = 0;
-					}
 				}
+
 			}
 
-		}
+			if (!cmdReplies.empty()) {
+				std::vector<RestoreCommandReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+				cmdReplies.clear();
+			}
+			printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
+					rd->describeNode().c_str(), rd->cmdID.toString().c_str(), kvCount);
 
-		if (!cmdReplies.empty()) {
-			std::vector<RestoreCommandReply> reps =  wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			cmdReplies.clear();
-		}
-		printf("[Summary][Loader] Node:%s Last CMDUID:%s produces %d mutation operations\n",
-				rd->describeNode().c_str(), rd->cmdID.toString().c_str(), kvCount);
+			break;
 
-	} catch (Error &e) {
-		// TODO: Handle the command reply timeout error
-		if (e.code() != error_code_io_timeout) {
-			fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
-		} else {
-			fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
-					rd->cmdID.toString().c_str(), e.code(), e.what());
+		} catch (Error &e) {
+			// TODO: Handle the command reply timeout error
+			if (e.code() != error_code_io_timeout) {
+				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s timeout\n", rd->describeNode().c_str(), rd->cmdID.toString().c_str());
+			} else {
+				fprintf(stderr, "[ERROR] Node:%s, Commands before cmdID:%s error. error code:%d, error message:%s\n", rd->describeNode().c_str(),
+						rd->cmdID.toString().c_str(), e.code(), e.what());
+			}
+			fprintf(stderr, "[ERROR] WE STOP HERE FOR DEBUG\n");
+			break;
 		}
-	}
+	};
 
 	return Void();
 }
