@@ -211,8 +211,7 @@ struct TraceEvent {
 	template<class T>
 	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type
 	detail( std::string&& key, const T& value ) {
-		if (enabled) {
-			init();
+		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
 			return detailImpl(std::move(key), std::move(s));
@@ -223,8 +222,7 @@ struct TraceEvent {
 	template<class T>
 	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type
 	detail( const char* key, const T& value ) {
-		if (enabled) {
-			init();
+		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key, value, s);
 			return detailImpl(std::string(key), std::move(s), false);
@@ -234,15 +232,14 @@ struct TraceEvent {
 	template<class T>
 	typename std::enable_if<std::is_enum<T>::value, TraceEvent&>::type
 	detail(const char* key, T value) {
-		if (enabled) {
-			init();
+		if (enabled && init()) {
 			setField(key, int64_t(value));
 			return detailImpl(std::string(key), format("%d", value), false);
 		}
 		return *this;
 	}
 	TraceEvent& detail(std::string key, std::string value) {
-		if (enabled) {
+		if (enabled && init()) {
 			init();
 			addMetric(key.c_str(), value, value);
 			return detailImpl(std::string(key), std::move(value), false);
@@ -250,8 +247,7 @@ struct TraceEvent {
 		return *this;
 	}
 	TraceEvent& detail(const char* key, std::string value) {
-		if (enabled) {
-			init();
+		if (enabled && init()) {
 			addMetric(key, value, value);
 			return detailImpl(std::string(key), std::move(value), false);
 		}
