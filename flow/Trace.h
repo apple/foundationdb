@@ -162,6 +162,12 @@ FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(double, "%g");
+FORMAT_TRACEABLE(volatile long, "%ld");
+FORMAT_TRACEABLE(volatile unsigned long, "%lu");
+FORMAT_TRACEABLE(volatile long long, "%lld");
+FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
+FORMAT_TRACEABLE(volatile double, "%g");
+
 
 template<>
 struct Traceable<UID> : std::true_type {
