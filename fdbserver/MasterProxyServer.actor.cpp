@@ -1156,7 +1156,8 @@ ACTOR static Future<Void> transactionStarter(
 
 		double leftToStart = 0;
 		double batchLeftToStart = 0;
-		while (!transactionQueue.empty()) {
+		int requestsToStart = 0;
+		while (!transactionQueue.empty() && requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
 			auto& req = transactionQueue.top().first;
 			int tc = req.transactionCount;
 
@@ -1182,6 +1183,7 @@ ACTOR static Future<Void> transactionStarter(
 
 			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue.pop();
+			requestsToStart++;
 		}
 
 		if (!transactionQueue.empty())
