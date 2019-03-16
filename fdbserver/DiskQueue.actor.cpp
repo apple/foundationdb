@@ -171,10 +171,15 @@ public:
 		// We issue reads into firstPages, so it needs to be 4k aligned.
 		firstPages.reserve(firstPages.arena(), 2);
 		void* pageMemory = operator new (sizeof(Page) * 3, firstPages.arena());
+		// firstPages is assumed to always be a valid page, and our initialization here is the only
+		// time that it would not contain a valid page.  Whenever DiskQueue reaches in to look at
+		// these bytes, it only cares about `seq`, and having that be all 0xFF's means uninitialized
+		// pages will look like the ultimate end of the disk queue, rather than the beginning of it.
+		// This makes code fail in more immediate and obvious ways.
 		firstPages[0] = (Page*)((((uintptr_t)pageMemory + 4095) / 4096) * 4096);
-		memset(firstPages[0], 0, sizeof(Page));
+		memset(firstPages[0], 0xFF, sizeof(Page));
 		firstPages[1] = (Page*)((uintptr_t)firstPages[0] + 4096);
-		memset(firstPages[1], 0, sizeof(Page));
+		memset(firstPages[1], 0xFF, sizeof(Page));
 		stallCount.init(LiteralStringRef("RawDiskQueue.StallCount"));
 	}
 
@@ -534,6 +539,10 @@ public:
 				std::swap( self->files[0], self->files[1] );
 			}
 
+			if ( !compare( self->firstPages[0], self->firstPages[0] ) ) {
+				memset(self->firstPages[0], 0xFF, sizeof(Page));
+			}
+
 			if ( !compare( self->firstPages[1], self->firstPages[1] ) ) {
 				// Both files are invalid... the queue is empty!
 				// Begin pushing at the beginning of files[1]
@@ -547,9 +556,9 @@ public:
 
 				wait(waitForAll(truncates));
 
-
 				self->files[0].popped = self->files[0].size;
 				self->files[1].popped = 0;
+				memset(self->firstPages[1], 0xFF, sizeof(Page));
 				self->writingPos = 0;
 				self->readingFile = 2;
 				return Standalone<StringRef>();
@@ -668,7 +677,7 @@ public:
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
 		state Reference<IAsyncFile> f = self->files[file].f;  // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
 		if (pos == 0) {
-			memset(self->firstPages[file], 0, _PAGE_SIZE);
+			memset(self->firstPages[file], 0xFF, _PAGE_SIZE);
 		}
 		wait( f->zeroRange( pos, self->files[file].size-pos ) );
 		wait(self->files[file].syncQueue->onSync());
@@ -947,9 +956,9 @@ private:
 		state int toFile;
 		state int64_t fromPage;
 		state int64_t toPage;
-		state uint64_t file0size = self->firstPages(1).seq - self->firstPages(0).seq;
+		state uint64_t file0size = self->rawQueue->files[0].size ? self->firstPages(1).seq - self->firstPages(0).seq : self->firstPages(1).seq;
 		ASSERT(end > start);
-		ASSERT(start.lo >= self->firstPages(0).seq);
+		ASSERT(start.lo >= self->firstPages(0).seq || start.lo >= self->firstPages(1).seq);
 		self->findPhysicalLocation(start.lo, &fromFile, &fromPage, nullptr);
 		self->findPhysicalLocation(end.lo-1, &toFile, &toPage, nullptr);
 		if (fromFile == 0) { ASSERT( fromPage < file0size / _PAGE_SIZE ); }
@@ -960,7 +969,7 @@ private:
 		if (fromFile == toFile) {
 			ASSERT(toPage >= fromPage);
 			Standalone<StringRef> pagedData = wait( self->rawQueue->read( fromFile, fromPage, toPage - fromPage + 1 ) );
-			if ( self->firstPages(0).seq > start.lo ) {
+			if ( std::min(self->firstPages(0).seq, self->firstPages(1).seq) > start.lo ) {
 				// Simulation allows for reads to be delayed and executed after overlapping subsequent
 				// write operations.  This means that by the time our read was executed, it's possible
 				// that both disk queue files have been completely overwritten.
@@ -979,7 +988,7 @@ private:
 			state Standalone<StringRef> secondChunk;
 			wait( store(firstChunk, self->rawQueue->read( fromFile, fromPage, ( file0size / sizeof(Page) ) - fromPage )) &&
 			      store(secondChunk, self->rawQueue->read( toFile, 0, toPage + 1 )) );
-			if ( self->firstPages(0).seq > start.lo ) {
+			if ( std::min(self->firstPages(0).seq, self->firstPages(1).seq) > start.lo ) {
 				// See above.
 				throw io_error();
 			}
