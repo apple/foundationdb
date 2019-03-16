@@ -79,6 +79,11 @@ public:
 template <class Ar> void load( Ar& ar, IDiskQueue::location& loc ) { loc.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, const IDiskQueue::location& loc ) { const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar); }
 
-IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
+enum class DiskQueueVersion : uint16_t {
+	V0 = 0,
+	V1 = 1,
+};
+
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

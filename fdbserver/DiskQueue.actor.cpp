@@ -22,6 +22,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -721,8 +722,8 @@ public:
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
-	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit )
+		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
 		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
 	{
 	}
@@ -864,36 +865,68 @@ public:
 private:
 	#pragma pack(push, 1)
 	struct PageHeader {
-		UID hash;
+		union {
+			UID hash;
+			struct {
+				uint32_t hash32;
+				uint32_t _unused;
+				uint16_t magic;
+				uint16_t implementationVersion;
+			};
+		};
 		uint64_t seq;
 		uint64_t popped;
 		int payloadSize;
 	};
 	// The on disk format depends on the size of PageHeader.
-	static_assert( sizeof(PageHeader) == 36, "PageHeader must be packed" );
+	static_assert( sizeof(PageHeader) == 36, "PageHeader must be 36 bytes" );
 
 	struct Page : PageHeader {
 		static const int maxPayload = _PAGE_SIZE - sizeof(PageHeader);
 		uint8_t payload[maxPayload];
 
+		DiskQueueVersion diskQueueVersion() const { return static_cast<DiskQueueVersion>(implementationVersion); }
 		int remainingCapacity() const { return maxPayload - payloadSize; }
 		uint64_t endSeq() const { return seq + sizeof(PageHeader) + payloadSize; }
-		void updateHash() {
+		UID checksum_hashlittle2() const {
 			// SOMEDAY: Better hash?
 			uint32_t part[2] = { 0x12345678, 0xbeefabcd };
-			hashlittle2( &seq, sizeof(Page)-sizeof(hash), &part[0], &part[1] );
-			hash = UID( (int64_t(part[0])<<32)+part[1], 0xfdb );
+			hashlittle2( &seq, sizeof(Page)-sizeof(UID), &part[0], &part[1] );
+			return UID( int64_t(part[0])<<32 | part[1], 0xFDB );
+		}
+		uint32_t checksum_crc32c() const {
+			return crc32c_append( 0xfdbeefdb, (uint8_t*)&_unused, sizeof(Page)-sizeof(uint32_t) );
+		}
+		void updateHash() {
+			switch (diskQueueVersion()) {
+			case DiskQueueVersion::V0: {
+				hash = checksum_hashlittle2();
+				return;
+			}
+			case DiskQueueVersion::V1:
+			default: {
+				hash32 = checksum_crc32c();
+				return;
+				}
+			}
 		}
 		bool checkHash() {
-			UID h = hash;
-			updateHash();
-			if (h != hash) { std::swap(h, hash); return false; }
-			return true;
+			switch (diskQueueVersion()) {
+			case DiskQueueVersion::V0: {
+				return hash == checksum_hashlittle2();
+			}
+			case DiskQueueVersion::V1: {
+				return hash32 == checksum_crc32c();
+			}
+			default:
+				return false;
+			}
 		}
 		void zeroPad() {
 			memset( payload+payloadSize, 0, maxPayload-payloadSize );
 		}
 	};
+	static_assert( sizeof(Page) == _PAGE_SIZE, "Page must be 4k" );
 	#pragma pack(pop)
 
 	loc_t endLocation() const { return pushedPageCount() ? backPage().endSeq() : nextPageSeq; }
@@ -913,6 +946,15 @@ private:
 
 		auto& p = backPage();
 		memset(&p, 0, sizeof(Page)); // FIXME: unnecessary?
+		p.magic = 0xFDB;
+		switch (diskQueueVersion) {
+		case DiskQueueVersion::V0:
+			p.implementationVersion = 0;
+			break;
+		case DiskQueueVersion::V1:
+			p.implementationVersion = 1;
+			break;
+		}
 		p.payloadSize = 0;
 		p.seq = nextPageSeq;
 		nextPageSeq += sizeof(Page);
@@ -1147,7 +1189,8 @@ private:
 		}
 
 		Page* lastPage = (Page*)lastPageData.begin();
-		self->nextReadLocation = self->poppedSeq = lastPage->popped;
+		self->poppedSeq = lastPage->popped;
+		self->nextReadLocation = lastPage->popped;
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);
@@ -1162,7 +1205,7 @@ private:
 		*/
 
 		int file; int64_t page;
-		self->findPhysicalLocation( self->poppedSeq, &file, &page, "poppedSeq" );
+		self->findPhysicalLocation( self->nextReadLocation, &file, &page, "FirstReadLocation" );
 		self->rawQueue->setStartPage( file, page );
 
 		self->readBufPos = self->nextReadLocation % sizeof(Page) - sizeof(PageHeader);
@@ -1230,6 +1273,7 @@ private:
 
 	RawDiskQueue_TwoFiles *rawQueue;
 	UID dbgid;
+	DiskQueueVersion diskQueueVersion;
 
 	bool anyPopped;  // pop() has been called since the most recent call to commit()
 	bool warnAlwaysForMemory;
@@ -1262,7 +1306,7 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, fileExtension, dbgid, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
+	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
 	Future<Void> getError() { return queue->getError(); }
@@ -1336,6 +1380,6 @@ private:
 	}
 };
 
-IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit ) {
-	return new DiskQueue_PopUncommitted( basename, ext, dbgid, fileSizeWarningLimit );
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion dqv, int64_t fileSizeWarningLimit ) {
+	return new DiskQueue_PopUncommitted( basename, ext, dbgid, dqv, fileSizeWarningLimit );
 }
