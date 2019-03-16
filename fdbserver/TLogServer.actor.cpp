@@ -1238,7 +1238,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			state std::vector<Future<Standalone<StringRef>>> messageReads;
 			messageReads.reserve( commitLocations.size() );
 			for (const auto& pair : commitLocations) {
-				messageReads.push_back( self->rawPersistentQueue->read(pair.first, pair.second) );
+				messageReads.push_back( self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::NO ) );
 			}
 			commitLocations.clear();
 			wait( waitForAll( messageReads ) );

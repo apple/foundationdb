@@ -25,6 +25,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IKeyValueStore.h"
 
+enum class CheckHashes {
+	NO,
+	YES,
+};
+
 class IDiskQueue : public IClosable {
 public:
 	struct location {
@@ -65,7 +70,7 @@ public:
 	virtual location getNextCommitLocation() = 0;  // If commit() were to be called, all buffered writes would be written starting at `location`.
 	virtual location getNextPushLocation() = 0;  // If push() were to be called, the pushed data would be written starting at `location`.
 
-	virtual Future<Standalone<StringRef>> read( location start, location end ) = 0;
+	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes vc ) = 0;
 	virtual location push( StringRef contents ) = 0;  // Appends the given bytes to the byte stream.  Returns a location token representing the *end* of the contents.
 	virtual void pop( location upTo ) = 0;            // Removes all bytes before the given location token from the byte stream.
 	virtual Future<Void> commit() = 0;  // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.

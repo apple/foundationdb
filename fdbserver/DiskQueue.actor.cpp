@@ -765,7 +765,7 @@ public:
 		}
 	}
 
-	virtual Future<Standalone<StringRef>> read(location from, location to) { return read(this, from, to); }
+	virtual Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) { return read(this, from, to, ch); }
 
 	int getMaxPayload() {
 		return Page::maxPayload;
@@ -1035,7 +1035,7 @@ private:
 		}
 	}
 
-	ACTOR static Future<Standalone<StringRef>> read(DiskQueue *self, location start, location end) {
+	ACTOR static Future<Standalone<StringRef>> read(DiskQueue *self, location start, location end, CheckHashes ch) {
 		// This `state` is unnecessary, but works around pagedData wrongly becoming const
 		// due to the actor compiler.
 		state Standalone<StringRef> pagedData = wait(readPages(self, start, end));
@@ -1052,13 +1052,18 @@ private:
 		if (pageFloor(end.lo-1) == pageFloor(start.lo)) {
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
+			Page *data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
+			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
 		} else {
 			// Reusing pagedData wastes # of pages * sizeof(PageHeader) bytes, but means
 			// we don't have to double allocate in a hot, memory hungry call.
 			uint8_t *buf = mutateString(pagedData);
-			const Page *data = reinterpret_cast<const Page*>(pagedData.begin());
+			Page *data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
+			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
 
 			// Only start copying from `start` in the first page.
 			if( data->payloadSize > startingOffset ) {
@@ -1067,6 +1072,8 @@ private:
 				buf += length;
 			}
 			data++;
+			if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
+			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
 
 			// Copy all the middle pages
 			while (data->seq != pageFloor(end.lo-1)) {
@@ -1076,6 +1083,8 @@ private:
 				memmove(buf, data->payload, length);
 				buf += length;
 				data++;
+				if (ch == CheckHashes::YES && !data->checkHash()) throw io_error();
+				if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload) throw io_error();
 			}
 
 			// Copy only until `end` in the last page.
@@ -1320,7 +1329,7 @@ public:
 
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
 
-	virtual Future<Standalone<StringRef>> read( location start, location end ) { return queue->read( start, end ); }
+	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes ch ) { return queue->read( start, end, ch ); }
 	virtual location getNextCommitLocation() { return queue->getNextCommitLocation(); }
 	virtual location getNextPushLocation() { return queue->getNextPushLocation(); }
 
