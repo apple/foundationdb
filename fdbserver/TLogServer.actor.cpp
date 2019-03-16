@@ -613,47 +613,6 @@ struct SpilledData {
 template <class Ar> void load( Ar& ar, SpilledData& data ) { data.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, const SpilledData& data ) { const_cast<SpilledData&>(data).serialize_unversioned(ar); }
 
-
-struct VerifyState {
-	std::vector<SpilledData> spilledData;
-	std::vector<Future<Standalone<StringRef>>> readfutures;
-};
-
-ACTOR void verifyPersistentData( TLogData* self, VerifyState* vs ) {
-	for (auto iter = vs->spilledData.begin(); iter != vs->spilledData.end(); iter++) {
-		vs->readfutures.push_back( self->rawPersistentQueue->read( iter->start, iter->start.lo + iter->length ) );
-	}
-	try {
-		wait( waitForAll(vs->readfutures) );
-	} catch (Error& e) {
-		if (e.code() != error_code_io_error) {
-			delete vs;
-			throw;
-		} else {
-			delete vs;
-			return;
-		}
-	}
-	state int i = 0;
-	for (; i < vs->readfutures.size(); i++) {
-		state TLogQueueEntry entry;
-		state StringRef rawdata = vs->readfutures[i].get();
-		state uint32_t length = *(uint32_t*)rawdata.begin();
-		state uint8_t valid;
-		rawdata = rawdata.substr( 4, rawdata.size() - 4);
-		try {
-			BinaryReader rd( rawdata, IncludeVersion() );
-			rd >> entry >> valid;
-		} catch (Error& e) {
-			ASSERT(false);
-		}
-		// ASSERT( length == rawdata.size() );
-		ASSERT( entry.version == vs->spilledData[i].version );
-		ASSERT( valid == 1 );
-	}
-	delete vs;
-}
-
 ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logData, Version newPersistentDataVersion ) {
 	state BinaryWriter wr( Unversioned() );
 	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
@@ -669,10 +628,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	// For all existing tags
 	state int tagLocality = 0;
 	state int tagId = 0;
-	state VerifyState *vs = nullptr;
-	if (g_network->isSimulated()) {
-		vs = new VerifyState;
-	}
 
 	for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
@@ -717,9 +672,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						SpilledData spilledData( currentVersion, begin, length, size );
 						wr << spilledData;
 
-						if (vs && (vs->spilledData.empty() || vs->spilledData.back().version != currentVersion)) {
-							vs->spilledData.push_back( spilledData );
-						}
 
 						Future<Void> f = yield(TaskUpdateStorage);
 						if(!f.isReady()) {
@@ -736,11 +688,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 				wait(yield(TaskUpdateStorage));
 			}
 		}
-	}
-
-	// FIXME remove temporary verification
-	if (vs) {
-		verifyPersistentData( self, vs );
 	}
 
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
