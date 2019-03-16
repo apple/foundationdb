@@ -31,7 +31,6 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/crc32c.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -555,8 +554,6 @@ void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
 
-// FIXME: Split pop into forgetBefore and pop, and maintain the poppedLocation per tag.
-// There's no need for us to remember spilled version locations, as we're spilling that information also.
 void TLogQueue::forgetBefore( Version upToVersion, Reference<LogData> logData ) {
 	// Keep only the given and all subsequent version numbers
 	// Find the first version >= upTo
@@ -565,6 +562,9 @@ void TLogQueue::forgetBefore( Version upToVersion, Reference<LogData> logData ) 
 
 	if(v == logData->versionLocation.end()) {
 		v = logData->versionLocation.lastItem();
+	}
+	else {
+		v.decrementNonEnd();
 	}
 
 	logData->versionLocation.erase( logData->versionLocation.begin(), v );  // ... and then we erase that previous version and all prior versions
@@ -644,6 +644,7 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 			// to assign.  Ideally, we'd use the most recent commit location, but that's surprisingly
 			// difficult to track.
 		}
+		return Void();
 	}
 
 	if (!data->requiresPoppedLocationUpdate) return Void();
@@ -664,11 +665,9 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 			BinaryReader r(kvrefs[0].value, AssumeVersion(logData->protocolVersion));
 			r >> spilledData;
 
-			Version effectivePop = 0;
 			for (const SpilledData& sd : spilledData) {
 				if (sd.version >= data->popped) {
 					data->poppedLocation = sd.start;
-					effectivePop = sd.version;
 					break;
 				}
 			}
@@ -752,10 +751,8 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 				state Version currentVersion = 0;
 				// Clear recently popped versions from persistentData if necessary
 				updatePersistentPopped( self, logData, tagData );
-				state Version firstVersion = std::numeric_limits<Version>::max();
 				state Version lastVersion = std::numeric_limits<Version>::min();
 				state IDiskQueue::location firstLocation = std::numeric_limits<IDiskQueue::location>::max();
-				state IDiskQueue::location lastLocation = std::numeric_limits<IDiskQueue::location>::min();
 				// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
 				state std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator msg = tagData->versionMessages.begin();
 				state int refSpilledTagCount = 0;
@@ -791,10 +788,8 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 						SpilledData spilledData( currentVersion, begin, length, size );
 						wr << spilledData;
 
-						firstVersion = std::min(currentVersion, firstVersion);
 						lastVersion = std::max(currentVersion, lastVersion);
 						firstLocation = std::min(begin, firstLocation);
-						lastLocation = std::max(end, lastLocation);
 
 						Future<Void> f = yield(TaskUpdateStorage);
 						if(!f.isReady()) {
@@ -1405,10 +1400,8 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				messages << int32_t(-1) << entry.version;
 
 				std::vector<StringRef> parsedMessages = wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
-				uint32_t checksum = 0;
 				for (StringRef msg : parsedMessages) {
 					messages << msg;
-					checksum = crc32c_append(checksum, msg.begin(), msg.size());
 				}
 
 				lastRefMessageVersion = entry.version;
@@ -2202,10 +2195,9 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state Future<Void> allRemoved = waitForAll(removed);
 	state UID lastId = UID(1,1); //initialized so it will not compare equal to a default UID
 	state double recoverMemoryLimit = SERVER_KNOBS->TLOG_RECOVER_MEMORY_LIMIT;
-	if (BUGGIFY) recoverMemoryLimit = std::max<double>({
+	if (BUGGIFY) recoverMemoryLimit = std::max<double>(
 			SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT,
-			(double)SERVER_KNOBS->TLOG_SPILL_THRESHOLD,
-			(double)SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT});
+			(double)SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 
 	try {
 		bool recoveryFinished = wait( self->persistentQueue->initializeRecovery(minimumRecoveryLocation) );
