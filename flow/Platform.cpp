@@ -1629,7 +1629,7 @@ std::string joinPath( std::string const& directory, std::string const& filename 
 	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
 		f = f.substr(1);
 	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
-		d = d.substr(0, d.size()-1);
+		d.resize(d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
 
@@ -1796,7 +1796,55 @@ bool createDirectory( std::string const& directory ) {
 
 }; // namespace platform
 
+const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
+StringRef separator(&separatorChar, 1);
+StringRef dotdot = LiteralStringRef("..");
+
+std::string cleanPath(std::string const &path) {
+	std::vector<StringRef> parts;
+	std::vector<StringRef> finalParts;
+	bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+
+	StringRef p(path);
+
+	while(p.size() != 0) {
+		StringRef part = p.eat(separator);
+		if(part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+			continue;
+		if(part == dotdot) {
+			if(!finalParts.empty() && finalParts.back() != dotdot) {
+				finalParts.pop_back();
+				continue;
+			}
+			if(absolute) {
+				TraceEvent(SevWarnAlways, "CleanPathError").detail("Path", path);
+				throw platform_error();
+			}
+		}
+		finalParts.push_back(part);
+	}
+
+	std::string result;
+	result.reserve(PATH_MAX);
+	if(absolute) {
+		result.append(1, CANONICAL_PATH_SEPARATOR);
+	}
+
+	for(int i = 0; i < finalParts.size(); ++i) {
+		if(i != 0) {
+			result.append(1, CANONICAL_PATH_SEPARATOR);
+		}
+		result.append((const char *)finalParts[i].begin(), finalParts[i].size());
+	}
+
+	return result;
+}
+
 std::string abspath( std::string const& filename ) {
+	if(filename.empty()) {
+		throw platform_error();
+	}
+
 	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
 	INJECT_FAULT( platform_error, "abspath" );
 
@@ -1817,13 +1865,11 @@ std::string abspath( std::string const& filename ) {
 	auto r = realpath( filename.c_str(), result );
 	if (!r) {
 		if (errno == ENOENT) {
-			int sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
-			if (sep != std::string::npos) {
-				return joinPath( abspath( filename.substr(0, sep) ), filename.substr(sep) );
+			bool absolute = !filename.empty() && filename.front() == CANONICAL_PATH_SEPARATOR;
+			if(absolute) {
+				return cleanPath(filename);
 			}
-			else if (filename.find("~") == std::string::npos) {
-				return joinPath( abspath( "." ), filename );
-			}
+			return cleanPath(joinPath(platform::getWorkingDirectory(), filename));
 		}
 		Error e = systemErrorCodeToError();
 		TraceEvent(SevError, "AbsolutePathError").detail("Filename", filename).GetLastError().error(e);
@@ -1843,20 +1889,22 @@ std::string basename( std::string const& filename ) {
 }
 
 std::string parentDirectory( std::string const& filename ) {
-	auto abs = abspath(filename);
-	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
-	if (sep == std::string::npos) {
-		TraceEvent(SevError, "GetParentDirectoryOfFile")
+	std::string abs = abspath(filename);
+
+	// Can't take the parent of empty, root, or anything ending in an unresolved ..
+	if(abs.empty()
+		|| (abs.size() == 1 && abs.front() == CANONICAL_PATH_SEPARATOR)
+		|| abs == ".."
+		|| (abs.size() > 2 && StringRef(abs).endsWith(dotdot) && abs[abs.size() - 3] == CANONICAL_PATH_SEPARATOR)
+	) {
+		TraceEvent(SevWarnAlways, "GetParentDirectoryOfFile")
 			.detail("File", filename)
 			.GetLastError();
 		throw platform_error();
 	}
 
-	while (abs.size() && (abs.back() == '/' || abs.back() == CANONICAL_PATH_SEPARATOR)) {
-		abs.resize(abs.size() - 1);
-	}
-
-	return abs.substr(0, sep+1);
+	abs.resize(abs.find_last_of( CANONICAL_PATH_SEPARATOR ) + 1);
+	return abs;
 }
 
 std::string getUserHomeDirectory() {
@@ -2839,6 +2887,85 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
 	}
 
+	return Void();
+}
+#endif
+
+int testAbsPath(std::string a, ErrorOr<std::string> b) {
+	ErrorOr<std::string> result;
+	try { result  = abspath(a); } catch(Error &e) { result = e; }
+
+	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());
+
+	printf("abspath('%s') -> %s", a.c_str(), result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
+	if(!r) {
+		printf("  ERROR expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
+	}
+	printf("\n");
+	return r ? 0 : 1;
+}
+
+int testPathFunction(const char *name, std::function<std::string(std::string)> fun, std::string a, ErrorOr<std::string> b) {
+	ErrorOr<std::string> result;
+	try { result  = fun(a); } catch(Error &e) { result = e; }
+	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());
+
+	printf("%s('%s') -> %s", name, a.c_str(), result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
+	if(!r) {
+		printf("  ERROR expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
+	}
+	printf("\n");
+	return r ? 0 : 1;
+}
+
+#ifdef __unixish__
+TEST_CASE("/flow/Platform/directoryOps") {
+	int errors = 0;
+
+	errors += testPathFunction("cleanPath", cleanPath, "", "");
+
+	errors += testPathFunction("cleanPath", cleanPath, "", "");
+	errors += testPathFunction("cleanPath", cleanPath, "/", "/");
+	errors += testPathFunction("cleanPath", cleanPath, "///.///", "/");
+	errors += testPathFunction("cleanPath", cleanPath, "/a/b/.././../c/./././////./d/..//", "/c");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//", "c");
+	errors += testPathFunction("cleanPath", cleanPath, "..", "..");
+	errors += testPathFunction("cleanPath", cleanPath, "../.././", "../..");
+	errors += testPathFunction("cleanPath", cleanPath, "../a/b/..//", "../a");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//..", "");
+	errors += testPathFunction("cleanPath", cleanPath, "/..", platform_error());
+	errors += testPathFunction("cleanPath", cleanPath, "/a/b/../.././../", platform_error());
+
+	errors += testPathFunction("abspath", abspath, "", platform_error());
+	errors += testPathFunction("abspath", abspath, "/", "/");
+	errors += testPathFunction("abspath", abspath, "/dev", "/dev");
+	errors += testPathFunction("abspath", abspath, "/dev/", "/dev");
+	errors += testPathFunction("abspath", abspath, "/dev/..", "/");
+	errors += testPathFunction("abspath", abspath, "/dev/../", "/");
+	errors += testPathFunction("abspath", abspath, "/dev/../", "/");
+	errors += testPathFunction("abspath", abspath, "/dev/..///", "/");
+	
+	errors += testPathFunction("abspath", abspath, "blahfoo", joinPath(platform::getWorkingDirectory(), "blahfoo"));
+	errors += testPathFunction("abspath", abspath, "blahfoo/bar", joinPath(platform::getWorkingDirectory(), "blahfoo/bar"));
+	errors += testPathFunction("abspath", abspath, "blahfoo/bar/", joinPath(platform::getWorkingDirectory(), "blahfoo/bar"));
+	errors += testPathFunction("abspath", abspath, "blahfoo/bar/..//", joinPath(platform::getWorkingDirectory(), "blahfoo"));
+	errors += testPathFunction("abspath", abspath, "blahfoo/bar/..//../", platform::getWorkingDirectory());
+
+	errors += testPathFunction("abspath", abspath, "/blahfoo", "/blahfoo");
+	errors += testPathFunction("abspath", abspath, "/blahfoo/bar", "/blahfoo/bar");
+	errors += testPathFunction("abspath", abspath, "/blahfoo/bar/", "/blahfoo/bar");
+	
+	errors += testPathFunction("parentDirectory", parentDirectory, "", platform_error());
+	errors += testPathFunction("parentDirectory", parentDirectory, "/", platform_error());
+	errors += testPathFunction("parentDirectory", parentDirectory, "//", platform_error());
+	errors += testPathFunction("parentDirectory", parentDirectory, "/a", "/");
+	errors += testPathFunction("parentDirectory", parentDirectory, "/a/", "/");
+	errors += testPathFunction("parentDirectory", parentDirectory, "/a/b", "/a/");
+	errors += testPathFunction("parentDirectory", parentDirectory, "/a/b/c/.././", "/a/");
+	errors += testPathFunction("parentDirectory", parentDirectory, "a/b/c/.././", joinPath(platform::getWorkingDirectory(), "a/"));
+
+	printf("%d errors.\n", errors);
+	ASSERT(errors == 0);
 	return Void();
 }
 #endif

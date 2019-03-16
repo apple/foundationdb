@@ -320,13 +320,17 @@ void writeFile(std::string const& filename, std::string const& content);
 
 std::string joinPath( std::string const& directory, std::string const& filename );
 
-// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
+// Removes ./, ../, and duplicate separators from path, converts all separators to CANONICAL_PATH_SEPARATOR,
+// but does NOT resolve symlinks and does not check the filesystem for the existence of any components
+std::string cleanPath( std::string const& filename );
+
+// Returns an cleaned path (see cleanPath()) that also has symbolic links resolved.
 std::string abspath( std::string const& filename );
 
 // Returns the portion of the path following the last path separator (e.g. the filename or directory name)
 std::string basename( std::string const& filename );
 
-// Returns the parent directory of the given file or directory
+// Returns the parent directory of the given file or directory with a single trailing separator
 std::string parentDirectory( std::string const& filename );
 
 // Returns the home directory of the current user

@@ -244,6 +244,8 @@ std::string abspath(std::string const& filename) {
 	return std::string(r);
 }
 
+// Get the parent directory of a filename *without* resolving symbolic links so that fdbmonitor can support
+// symbolic links updates as a way of atomitically changing the configuration file
 std::string parentDirectory(std::string filename) {
 	size_t sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {

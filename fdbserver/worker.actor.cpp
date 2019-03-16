@@ -635,6 +635,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 	state WorkerInterface interf( locality );
 
+	folder = abspath(folder);
+
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
 			try {
@@ -725,7 +727,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
-				ASSERT_WE_THINK( StringRef( parentDirectory(s.filename) ).endsWith( StringRef(folder) ) );
+				ASSERT_WE_THINK( abspath(parentDirectory(s.filename)) == folder );
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
 					joinPath( folder, logQueueBasename + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID,  10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
