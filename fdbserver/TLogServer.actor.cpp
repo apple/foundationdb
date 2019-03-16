@@ -191,8 +191,8 @@ private:
 // Immutable keys
 // persistFormat has been mostly invalidated by TLogVersion, and can probably be removed when
 // 4.6's TLog code is removed.
-static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/3"), LiteralStringRef("FoundationDB/LogServer/2/5") );
+static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/3/0") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/3/0"), LiteralStringRef("FoundationDB/LogServer/4/0") );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -2004,17 +2004,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	state std::vector<Future<ErrorOr<Void>>> removed;
 
-	if(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/3")) {
-		//FIXME: need for upgrades from 5.X to 6.0, remove once this upgrade path is no longer needed
-		if(recovered.canBeSet()) recovered.send(Void());
-		oldLog.send(Void());
-		while(!tlogRequests.isEmpty()) {
-			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
-		}
-
-		wait( oldTLog_4_6::tLog(self->persistentData, self->rawPersistentQueue, self->dbInfo, locality, self->dbgid) );
-		throw internal_error();
-	}
+	ASSERT(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/3/0"));
 
 	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
 
