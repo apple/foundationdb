@@ -165,6 +165,8 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store("simfdb/unittests/", //< FIXME
 		g_random->randomUniqueID());
+	reg.read.initEndpoint();
+	reg.write.initEndpoint();
 	state Future<Void> actor = localGenerationReg(reg, &store);
 	state Key the_key(g_random->randomAlphaNumeric( g_random->randomInt(0, 10)));
 
