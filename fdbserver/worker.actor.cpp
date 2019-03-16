@@ -543,10 +543,16 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
+	state bool hasClusterInterface = false;
 	ServerDBInfo localInfo;
+	localInfo.id = g_random->randomUniqueID();
 	localInfo.myLocality = locality;
+	if(ccInterface->get().present()) {
+		hasClusterInterface = true;
+		localInfo.clusterInterface = ccInterface->get().get();
+	}
 	dbInfo->set(localInfo);
-
+	
 	state Optional<double> incorrectTime;
 	loop {
 		GetServerDBInfoRequest req;
@@ -585,13 +591,23 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.present() ? ni.master.get().id() : UID())
 				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
+				hasClusterInterface = true;
 				ServerDBInfo localInfo = ni;
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
 			when( wait( ccInterface->onChange() ) ) {
-				if(ccInterface->get().present())
+				if(ccInterface->get().present()) {
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
+					if(!hasClusterInterface) {
+						hasClusterInterface = true;
+						ServerDBInfo localInfo;
+						localInfo.id = g_random->randomUniqueID();
+						localInfo.myLocality = locality;
+						localInfo.clusterInterface = ccInterface->get().get();
+						dbInfo->set(localInfo);
+					}
+				}
 			}
 		}
 	}
@@ -646,10 +662,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	filesClosed.add(stopping.getFuture());
 
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder, locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
-
-	{
-		auto recruited = interf;  //ghetto! don't we all love a good #define
-	}
 
 	try {
 		std::vector<DiskStore> stores = getDiskStores( folder );
