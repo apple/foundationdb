@@ -1578,7 +1578,7 @@ void setAffinity(int proc) {
 		printf("Set affinity mask\n");
 	else
 		printf("Failed to set affinity mask: error %d\n", GetLastError());*/
-	SetThreadAffinityMask( GetCurrentThread(), 1UL<<proc );
+	SetThreadAffinityMask( GetCurrentThread(), 1ULL<<proc );
 #elif defined(__linux__)
 	cpu_set_t set;
 	CPU_ZERO(&set);

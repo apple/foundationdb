@@ -220,7 +220,7 @@ void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue
 			try {
 				dst = mergeOperator<json_spirit::mValue>(op, aObj, bObj, a, b);
 				return;
-			} catch(std::exception &e) {
+			} catch(std::exception&) {
 			}
 
 			// Now try type and type pair specific operators
@@ -441,7 +441,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 							|| !client.at("cluster_file.up_to_date").get_bool());
 		}
 	}
-	catch(std::exception &e)
+	catch(std::exception&)
 	{
 		// As documented above, exceptions leave isAvailable and isHealthy in the right state
 	}

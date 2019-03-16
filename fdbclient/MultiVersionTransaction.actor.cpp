@@ -1436,7 +1436,7 @@ THREAD_FUNC releaseMem(void *arg) {
 		// Must get for releaseMemory to work
 		((ThreadSingleAssignmentVar<int>*)arg)->get();
 	}
-	catch(Error &e) {
+	catch(Error&) {
 		// Swallow
 	}
 	try {
