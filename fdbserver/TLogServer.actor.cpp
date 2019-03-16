@@ -119,6 +119,10 @@ public:
 		return readNext( this, tLog );
 	}
 
+	Future<bool> initializeRecovery( IDiskQueue::location recoverAt ) {
+		return queue->initializeRecovery( recoverAt );
+	}
+
 	template <class T>
 	void push( T const& qe, Reference<LogData> logData );
 	void forgetBefore( Version upToVersion, Reference<LogData> logData );
@@ -140,10 +144,6 @@ private:
 	ACTOR static Future<TLogQueueEntry> readNext( TLogQueue* self, TLogData* tLog ) {
 		state TLogQueueEntry result;
 		state int zeroFillSize = 0;
-
-		// FIXME: initializeRecovery should probably be called on its own by the caller of readNext.
-		bool recoveryFinished = wait( self->queue->initializeRecovery() );
-		if (recoveryFinished) throw end_of_stream();
 
 		loop {
 			state IDiskQueue::location startloc = self->queue->getNextReadLocation();
@@ -201,6 +201,7 @@ static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRe
 // Updated on updatePersistentData()
 static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
 static const KeyRangeRef persistKnownCommittedVersionKeys = KeyRangeRef( LiteralStringRef( "knownCommitted/" ), LiteralStringRef( "knownCommitted0" ) );
+static const KeyRef persistRecoveryLocationKey = KeyRef( LiteralStringRef( "recoveryLocation" ) );
 static const KeyRangeRef persistLocalityKeys = KeyRangeRef( LiteralStringRef( "Locality/" ), LiteralStringRef( "Locality0" ) );
 static const KeyRangeRef persistLogRouterTagsKeys = KeyRangeRef( LiteralStringRef( "LogRouterTags/" ), LiteralStringRef( "LogRouterTags0" ) );
 static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
@@ -526,6 +527,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
 			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
@@ -810,6 +812,11 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 				wait(yield(TaskUpdateStorage));
 			}
 		}
+	}
+
+	auto locationIter = logData->versionLocation.lower_bound(newPersistentDataVersion);
+	if (locationIter != logData->versionLocation.end()) {
+		self->persistentData->set( KeyValueRef( persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.second,Unversioned()) ) );
 	}
 
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
@@ -2032,6 +2039,9 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	TraceEvent("TLogCheckEmptyQueueBegin", self->dbgid);
 	try {
+		bool recoveryFinished = wait( self->persistentQueue->initializeRecovery(0) );
+		if (recoveryFinished)
+			return Void();
 		TLogQueueEntry r = wait( self->persistentQueue->readNext(self) );
 		throw internal_error();
 	} catch (Error& e) {
@@ -2059,6 +2069,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state IKeyValueStore *storage = self->persistentData;
 	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
+	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fLocality = storage->readRange(persistLocalityKeys);
@@ -2068,8 +2079,8 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	// FIXME: metadata in queue?
 
-	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fLocality, fLogRouterTags, fRecoverCounts, fProtocolVersions) ) );
+	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat, fRecoveryLocation ) ) );
+	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fLocality, fLogRouterTags, fRecoverCounts, fProtocolVersions ) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -2116,6 +2127,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		id_knownCommitted[ BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistKnownCommittedVersionKeys.begin), Unversioned())] = BinaryReader::fromStringRef<Version>( it.value, Unversioned() );
 	}
 
+	state IDiskQueue::location minimumRecoveryLocation = 0;
+	if (fRecoveryLocation.get().present()) {
+		minimumRecoveryLocation = BinaryReader::fromStringRef<IDiskQueue::location>(fRecoveryLocation.get().get(), Unversioned());
+	}
+
 	state int idx = 0;
 	state Promise<Void> registerWithMaster;
 	state std::map<UID, TLogInterface> id_interf;
@@ -2155,8 +2171,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.push_back(std::make_pair(ver, id1));
 
-		TraceEvent("TLogRestorePersistentStateVer", id1).detail("Ver", ver);
-
+		TraceEvent("TLogPersistentStateRestore", self->dbgid).detail("LogId", logData->logId).detail("Ver", ver);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion might be lost, but
 		// that is fine because we will get the corresponding data back, too.
 		tagKeys = prefixRange( rawId.withPrefix(persistTagPoppedKeys.begin) );
@@ -2193,6 +2208,9 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			(double)SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT});
 
 	try {
+		bool recoveryFinished = wait( self->persistentQueue->initializeRecovery(minimumRecoveryLocation) );
+		if (recoveryFinished)
+			throw end_of_stream();
 		loop {
 			if(allRemoved.isReady()) {
 				TEST(true); //all tlogs removed during queue recovery
@@ -2232,6 +2250,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 									when( wait( allRemoved ) ) { throw worker_removed(); }
 								}
 							}
+						} else {
+							// Updating persistRecoveryLocation and persistCurrentVersion at the same time,
+							// transactionally, should mean that we never read any TLogQueueEntry that has already
+							// been spilled.
+							ASSERT_WE_THINK(false);
 						}
 					}
 				}

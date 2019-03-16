@@ -79,7 +79,7 @@ public:
 	virtual void close();
 
 	// IDiskQueue interface
-	virtual Future<bool> initializeRecovery() { return false; }
+	virtual Future<bool> initializeRecovery(location recoverAt) { return false; }
 	virtual Future<Standalone<StringRef>> readNext( int bytes );
 	virtual IDiskQueue::location getNextReadLocation();
 	virtual IDiskQueue::location getNextCommitLocation() { ASSERT(false); throw internal_error(); }

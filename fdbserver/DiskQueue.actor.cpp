@@ -819,7 +819,7 @@ public:
 		rawQueue->stall();
 	}
 
-	virtual Future<bool> initializeRecovery() { return initializeRecovery( this ); }
+	virtual Future<bool> initializeRecovery(location recoverAt) { return initializeRecovery( this, recoverAt ); }
 	virtual Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
@@ -1118,7 +1118,7 @@ private:
 		ASSERT( !self->recovered );
 
 		if (!self->initialized) {
-			bool recoveryComplete = wait( initializeRecovery(self) );
+			bool recoveryComplete = wait( initializeRecovery(self, 0) );
 
 			if (recoveryComplete) {
 				ASSERT( self->poppedSeq <= self->endLocation() );
@@ -1182,7 +1182,7 @@ private:
 		return result.str;
 	}
 
-	ACTOR static Future<bool> initializeRecovery( DiskQueue* self ) {
+	ACTOR static Future<bool> initializeRecovery( DiskQueue* self, location recoverAt ) {
 		if (self->initialized) {
 			return self->recovered;
 		}
@@ -1199,7 +1199,11 @@ private:
 
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
-		self->nextReadLocation = lastPage->popped;
+		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
+			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
+		} else {
+			self->nextReadLocation = lastPage->popped;
+		}
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);
@@ -1219,7 +1223,7 @@ private:
 
 		self->readBufPos = self->nextReadLocation % sizeof(Page) - sizeof(PageHeader);
 		if (self->readBufPos < 0) { self->nextReadLocation -= self->readBufPos; self->readBufPos = 0; }
-		TraceEvent("DQRecStart", self->dbgid).detail("ReadBufPos", self->readBufPos).detail("NextReadLoc", self->nextReadLocation).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+		TraceEvent("DQRecStart", self->dbgid).detail("ReadBufPos", self->readBufPos).detail("NextReadLoc", self->nextReadLocation).detail("Popped", self->poppedSeq).detail("MinRecoverAt", recoverAt).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 
 		return false;
 	}
@@ -1324,7 +1328,7 @@ public:
 	void close() { queue->close(); delete this; }
 
 	//IDiskQueue
-	Future<bool> initializeRecovery() { return queue->initializeRecovery(); }
+	Future<bool> initializeRecovery(location recoverAt) { return queue->initializeRecovery(recoverAt); }
 	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
 	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
