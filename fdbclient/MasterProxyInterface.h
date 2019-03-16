@@ -88,8 +88,8 @@ struct CommitTransactionRequest : TimedRequest {
 		FLAG_FIRST_IN_BATCH = 0x2
 	};
 
-	bool isLockAware() const { return flags & FLAG_IS_LOCK_AWARE; }
-	bool firstInBatch() const { return flags & FLAG_FIRST_IN_BATCH; }
+	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
+	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 	
 	Arena arena;
 	CommitTransactionRef transaction;

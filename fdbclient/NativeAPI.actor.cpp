@@ -2505,7 +2505,7 @@ void Transaction::setupWatches() {
 
 		watches.clear();
 	}
-	catch(Error &e) {
+	catch(Error&) {
 		ASSERT(false); // The above code must NOT throw because commit has already occured.
 		throw internal_error();
 	}

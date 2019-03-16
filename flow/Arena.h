@@ -525,7 +525,7 @@ public:
 		return r;
 	}
 	StringRef eat(const char *sep) {
-		return eat(StringRef((const uint8_t *)sep, strlen(sep)));
+		return eat(StringRef((const uint8_t *)sep, (int)strlen(sep)));
 	}
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this

@@ -79,7 +79,7 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 
 template <class Archive>
 inline void load( Archive& ar, Reference<IReplicationPolicy>& value ) {
-	bool	present = (value.getPtr());
+	bool present;
 	ar >> present;
 	if (present) {
 		serializeReplicationPolicy(ar, value);
@@ -91,7 +91,7 @@ inline void load( Archive& ar, Reference<IReplicationPolicy>& value ) {
 
 template <class Archive>
 inline void save( Archive& ar, const Reference<IReplicationPolicy>& value ) {
-	bool	present = (value.getPtr());
+	bool present = (value.getPtr() != nullptr);
 	ar << present;
 	if (present) {
 		serializeReplicationPolicy(ar, (Reference<IReplicationPolicy>&) value);

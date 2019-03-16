@@ -170,7 +170,7 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 			// reverse sort, so we preserve the most recent files and delete the oldest
 			std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), FileTraceLogWriter::reverseCompareTraceFileName);
 
-			int64_t runningTotal = 0;
+			uint64_t runningTotal = 0;
 			std::vector<std::string>::iterator fileListIterator = existingTraceFiles.begin();
 
 			while(runningTotal < maxLogsSize && fileListIterator != existingTraceFiles.end()) {
