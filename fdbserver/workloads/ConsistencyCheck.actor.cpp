@@ -1294,7 +1294,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
 		for (auto worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
-			Optional<Key> dc = worker.getDcId();
+			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToAllClassTypes.count(dc))
 				dcToAllClassTypes.insert({});
 			dcToAllClassTypes[dc].push_back(worker.processClass.classType());
@@ -1304,7 +1304,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
 		for (auto worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
-			Optional<Key> dc = worker.getDcId();
+			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToNonExcludedClassTypes.count(dc))
 				dcToNonExcludedClassTypes.insert({});
 			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
@@ -1319,8 +1319,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].getDcId();
-		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].getDcId();
+		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].interf.locality.dcId();
+		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].interf.locality.dcId();
 
 		if (ccDcId != masterDcId) {
 			TraceEvent("ConsistencyCheck_CCAndMasterNotInSameDC").detail("ClusterControllerDcId", getOptionalString(ccDcId)).detail("MasterDcId", getOptionalString(masterDcId));

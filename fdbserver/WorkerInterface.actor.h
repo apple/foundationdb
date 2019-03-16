@@ -82,10 +82,6 @@ struct WorkerDetails {
 	WorkerDetails() : degraded(false) {}
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded) : interf(interf), processClass(processClass), degraded(degraded) {}
 
-	Optional<Key> getDcId() {
-		return interf.locality._data[LocalityData::keyDcId];
-	}
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, interf, processClass, degraded);

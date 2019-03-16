@@ -2473,23 +2473,20 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 	state std::map<Optional<Standalone<StringRef>>, WorkerInfo>::iterator masterWorker;
 
 	loop {
-		state ServerDBInfo db = self->db.serverInfo->get();
-		masterWorker = self->id_worker.find(db.master.locality.processId());
-
+		masterWorker = self->id_worker.find(self->db.serverInfo->get().master.locality.processId());
 		if (masterWorker == self->id_worker.end()) {
 			wait(self->db.serverInfo->onChange());
 			continue;
 		}
 
+		const ServerDBInfo& db = self->db.serverInfo->get();
 		auto masterFitness = masterWorker->second.details.processClass.machineClassFitness(ProcessClass::Master);
-		Optional<Key> masterDcId = masterWorker->second.details.getDcId();
+		Optional<Key> masterDcId = masterWorker->second.details.interf.locality.dcId();
 
 		if (db.ratekeeper.present()) {
-			auto rkIter = self->id_worker.find(db.ratekeeper.get().locality.processId());
-			auto rkFitness = (rkIter != self->id_worker.end())
-				? rkIter->second.details.processClass.machineClassFitness(ProcessClass::RateKeeper)
-				: ProcessClass::BestFit;
-			if (masterDcId != rkIter->second.details.getDcId() || rkFitness > masterFitness) {
+			auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
+			auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
+			if (masterDcId != rkWorker.details.interf.locality.dcId() || rkFitness > masterFitness) {
 				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitness);
 				db.ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
@@ -2497,11 +2494,9 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 		}
 
 		if (db.distributor.present()) {
-			auto ddIter = self->id_worker.find(db.distributor.get().locality.processId());
-			auto ddFitness = (ddIter != self->id_worker.end())
-				? ddIter->second.details.processClass.machineClassFitness(ProcessClass::DataDistributor)
-				: ProcessClass::BestFit;
-			if (masterDcId != ddIter->second.details.getDcId() || ddFitness > masterFitness) {
+			auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
+			auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
+			if (masterDcId != ddWorker.details.interf.locality.dcId() || ddFitness > masterFitness) {
 				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
 				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitness);
 				db.distributor.get().haltDataDistributor.send(HaltDataDistributorRequest(self->id));
