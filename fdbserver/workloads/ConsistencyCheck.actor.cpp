@@ -1294,7 +1294,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
 		for (auto worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
-			Optional<Key> dc = worker.interf.locality._data[LocalityData::keyDcId];
+			Optional<Key> dc = worker.getDcId();
 			if (!dcToAllClassTypes.count(dc))
 				dcToAllClassTypes.insert({});
 			dcToAllClassTypes[dc].push_back(worker.processClass.classType());
@@ -1304,7 +1304,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
 		for (auto worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
-			Optional<Key> dc = worker.interf.locality._data[LocalityData::keyDcId];
+			Optional<Key> dc = worker.getDcId();
 			if (!dcToNonExcludedClassTypes.count(dc))
 				dcToNonExcludedClassTypes.insert({});
 			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
@@ -1319,8 +1319,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].interf.locality._data[LocalityData::keyDcId];
-		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].interf.locality._data[LocalityData::keyDcId];
+		Optional<Key> ccDcId = allWorkerProcessMap[db.clusterInterface.clientInterface.address()].getDcId();
+		Optional<Key> masterDcId = allWorkerProcessMap[db.master.address()].getDcId();
 
 		if (ccDcId != masterDcId) {
 			TraceEvent("ConsistencyCheck_CCAndMasterNotInSameDC").detail("ClusterControllerDcId", getOptionalString(ccDcId)).detail("MasterDcId", getOptionalString(masterDcId));
@@ -1408,7 +1408,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		// Check DataDistributor
 		ProcessClass::Fitness bestDistributorFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::DataDistributor);
-		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) > bestDistributorFitness)) {
+		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) != bestDistributorFitness)) {
 			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("BestDataDistributorFitness", bestDistributorFitness)
 			.detail("ExistingDistributorFitness", nonExcludedWorkerProcessMap.count(db.distributor.get().address()) ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) : -1);
 			return false;
@@ -1416,7 +1416,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		// Check RateKeeper
 		ProcessClass::Fitness bestRateKeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::RateKeeper);
-		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::RateKeeper) > bestRateKeeperFitness)) {
+		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::RateKeeper) != bestRateKeeperFitness)) {
 			TraceEvent("ConsistencyCheck_RateKeeperNotBest").detail("BestRateKeeperFitness", bestRateKeeperFitness)
 			.detail("ExistingRateKeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::RateKeeper) : -1);
 			return false;
