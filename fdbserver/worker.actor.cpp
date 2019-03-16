@@ -728,8 +728,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				ASSERT_WE_THINK( StringRef( parentDirectory(s.filename) ).endsWith( StringRef(folder) ) );
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				const DiskQueueVersion dqv = s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+				const int64_t diskQueueWarnSize = s.tLogOptions.spillType == TLogSpillType::VALUE ? 10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
 				IDiskQueue* queue = openDiskQueue(
-					joinPath( folder, logQueueBasename + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID, dqv, 10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
+					joinPath( folder, logQueueBasename + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID, dqv, diskQueueWarnSize);
 				filesClosed.add( kv->onClosed() );
 				filesClosed.add( queue->onClosed() );
 

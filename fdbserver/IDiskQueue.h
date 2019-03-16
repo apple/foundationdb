@@ -84,6 +84,19 @@ public:
 template <class Ar> void load( Ar& ar, IDiskQueue::location& loc ) { loc.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, const IDiskQueue::location& loc ) { const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar); }
 
+namespace std {
+template<>
+struct numeric_limits<IDiskQueue::location> {
+	static IDiskQueue::location max() {
+		int64_t max64 = numeric_limits<int64_t>::max();
+		return IDiskQueue::location(max64, max64);
+	};
+	static IDiskQueue::location min() {
+		return IDiskQueue::location(0, 0);
+	}
+};
+}
+
 enum class DiskQueueVersion : uint16_t {
 	V0 = 0,
 	V1 = 1,
