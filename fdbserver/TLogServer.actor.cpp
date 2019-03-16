@@ -193,6 +193,7 @@ private:
 // 4.6's TLog code is removed.
 static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/3/0") );
 static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/3/0"), LiteralStringRef("FoundationDB/LogServer/4/0") );
+static const KeyRangeRef persistProtocolVersionKeys( LiteralStringRef( "ProtocolVersion/" ), LiteralStringRef( "ProtocolVersion0" ) );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -428,6 +429,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 
 	UID logId;
+	uint64_t protocolVersion;
 	Version newPersistentDataVersion;
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
@@ -445,8 +447,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::set<Tag> allTags;
 	Future<Void> terminated;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
-			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, uint64_t protocolVersion, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
@@ -491,6 +493,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
 			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
@@ -600,7 +603,7 @@ struct SpilledData {
 	}
 
 	template <class Ar>
-	void serialize_unversioned(Ar& ar) {
+	void serialize(Ar& ar) {
 		serializer(ar, version, start, length, mutationBytes);
 	}
 
@@ -609,9 +612,6 @@ struct SpilledData {
 	uint32_t length = 0;
 	uint32_t mutationBytes = 0;
 };
-// FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
-template <class Ar> void load( Ar& ar, SpilledData& data ) { data.serialize_unversioned(ar); }
-template <class Ar> void save( Ar& ar, const SpilledData& data ) { const_cast<SpilledData&>(data).serialize_unversioned(ar); }
 
 ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logData, Version newPersistentDataVersion ) {
 	state BinaryWriter wr( Unversioned() );
@@ -640,7 +640,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 				// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
 				state std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator msg = tagData->versionMessages.begin();
 				state int refSpilledTagCount = 0;
-				wr = BinaryWriter( Unversioned() );
+				wr = BinaryWriter( AssumeVersion(logData->protocolVersion) );
 				// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.
 				wr << uint32_t(0);
 				while(msg != tagData->versionMessages.end() && msg->first <= newPersistentDataVersion) {
@@ -1215,7 +1215,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			state uint64_t commitBytes = 0;
 			for (auto &kv : kvrefs) {
 				VectorRef<SpilledData> spilledData;
-				BinaryReader r(kv.value, Unversioned());
+				BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
 				r >> spilledData;
 				for (const SpilledData& sd : spilledData) {
 					if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -1509,6 +1509,7 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLocalityKeys.begin), BinaryWriter::toValue(logData->locality, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLogRouterTagsKeys.begin), BinaryWriter::toValue(logData->logRouterTags, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistProtocolVersionKeys.begin), BinaryWriter::toValue(logData->protocolVersion, Unversioned()) ) );
 
 	for(auto tag : logData->allTags) {
 		ASSERT(!logData->getTagData(tag));
@@ -1919,11 +1920,12 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state Future<Standalone<VectorRef<KeyValueRef>>> fLocality = storage->readRange(persistLocalityKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fLogRouterTags = storage->readRange(persistLogRouterTagsKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+	state Future<Standalone<VectorRef<KeyValueRef>>> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
 
 	// FIXME: metadata in queue?
 
 	wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fLocality, fLogRouterTags, fRecoverCounts) ) );
+	wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fLocality, fLogRouterTags, fRecoverCounts, fProtocolVersions) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -1989,8 +1991,10 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
 
+		uint64_t protocolVersion = BinaryReader::fromStringRef<uint64_t>( fProtocolVersions.get()[idx].value, Unversioned() );
+
 		//We do not need the remoteTag, because we will not be loading any additional data
-		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID(), std::vector<Tag>()) );
+		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID(), protocolVersion, std::vector<Tag>()) );
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
 		self->id_data[id1] = logData;
@@ -2173,7 +2177,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		it.second->stopCommit.trigger();
 	}
 
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.recruitmentID, req.allTags) );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.recruitmentID, currentProtocolVersion, req.allTags) );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
