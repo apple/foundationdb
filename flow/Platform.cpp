@@ -1817,7 +1817,7 @@ std::string cleanPath(std::string const &path) {
 				continue;
 			}
 			if(absolute) {
-				TraceEvent(SevWarnAlways, "CleanPathError").detail("Path", path);
+				TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "CleanPathError").detail("Path", path);
 				throw platform_error();
 			}
 		}
@@ -1897,7 +1897,7 @@ std::string parentDirectory( std::string const& filename ) {
 		|| abs == ".."
 		|| (abs.size() > 2 && StringRef(abs).endsWith(dotdot) && abs[abs.size() - 3] == CANONICAL_PATH_SEPARATOR)
 	) {
-		TraceEvent(SevWarnAlways, "GetParentDirectoryOfFile")
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "GetParentDirectoryOfFile")
 			.detail("File", filename)
 			.GetLastError();
 		throw platform_error();
@@ -2910,9 +2910,9 @@ int testPathFunction(const char *name, std::function<std::string(std::string)> f
 	try { result  = fun(a); } catch(Error &e) { result = e; }
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());
 
-	printf("%s('%s') -> %s", name, a.c_str(), result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
+	printf("%s: %s('%s') -> %s", r ? "PASS" : "FAIL", name, a.c_str(), result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
 	if(!r) {
-		printf("  ERROR expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
+		printf("  *ERROR* expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
 	}
 	printf("\n");
 	return r ? 0 : 1;
@@ -2921,8 +2921,6 @@ int testPathFunction(const char *name, std::function<std::string(std::string)> f
 #ifdef __unixish__
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
-
-	errors += testPathFunction("cleanPath", cleanPath, "", "");
 
 	errors += testPathFunction("cleanPath", cleanPath, "", "");
 	errors += testPathFunction("cleanPath", cleanPath, "/", "/");
