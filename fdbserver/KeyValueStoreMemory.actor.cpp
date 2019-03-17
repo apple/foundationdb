@@ -139,13 +139,6 @@ public:
 
 	virtual Future<Void> commit(bool sequential) {
 		if(getAvailableSize() <= 0) {
-			if(g_network->isSimulated()) { //FIXME: known bug in simulation we are supressing
-				int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
-				TraceEvent(SevWarnAlways, "KeyValueStoreMemory_OutOfSpace", id);
-				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)
-					.detail("RandomUnseed", unseed);
-				flushAndExit(0);
-			}
 			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
 			return Never();
 		}
