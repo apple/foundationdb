@@ -1801,7 +1801,6 @@ StringRef separator(&separatorChar, 1);
 StringRef dotdot = LiteralStringRef("..");
 
 std::string cleanPath(std::string const &path) {
-	std::vector<StringRef> parts;
 	std::vector<StringRef> finalParts;
 	bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
 
@@ -1837,7 +1836,7 @@ std::string cleanPath(std::string const &path) {
 		result.append((const char *)finalParts[i].begin(), finalParts[i].size());
 	}
 
-	return result;
+	return result.empty() ? "." : result;
 }
 
 std::string abspath( std::string const& filename ) {
@@ -1888,23 +1887,22 @@ std::string basename( std::string const& filename ) {
 	return abs.substr(sep+1);
 }
 
-std::string parentDirectory( std::string const& filename ) {
-	std::string abs = abspath(filename);
+std::string parentDirectory( std::string const& path ) {
+	std::string c = cleanPath(joinPath(path, ".."));
 
 	// Can't take the parent of empty, root, or anything ending in an unresolved ..
-	if(abs.empty()
-		|| (abs.size() == 1 && abs.front() == CANONICAL_PATH_SEPARATOR)
-		|| abs == ".."
-		|| (abs.size() > 2 && StringRef(abs).endsWith(dotdot) && abs[abs.size() - 3] == CANONICAL_PATH_SEPARATOR)
-	) {
+	if(StringRef(c).endsWith(dotdot)) {
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "GetParentDirectoryOfFile")
-			.detail("File", filename)
+			.detail("Path", path)
 			.GetLastError();
 		throw platform_error();
 	}
 
-	abs.resize(abs.find_last_of( CANONICAL_PATH_SEPARATOR ) + 1);
-	return abs;
+	if(c.back() != CANONICAL_PATH_SEPARATOR) {
+		c.append(1, CANONICAL_PATH_SEPARATOR);
+	}
+
+	return c;
 }
 
 std::string getUserHomeDirectory() {
@@ -2922,7 +2920,7 @@ int testPathFunction(const char *name, std::function<std::string(std::string)> f
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
 
-	errors += testPathFunction("cleanPath", cleanPath, "", "");
+	errors += testPathFunction("cleanPath", cleanPath, "", ".");
 	errors += testPathFunction("cleanPath", cleanPath, "/", "/");
 	errors += testPathFunction("cleanPath", cleanPath, "///.///", "/");
 	errors += testPathFunction("cleanPath", cleanPath, "/a/b/.././../c/./././////./d/..//", "/c");
@@ -2930,10 +2928,12 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction("cleanPath", cleanPath, "..", "..");
 	errors += testPathFunction("cleanPath", cleanPath, "../.././", "../..");
 	errors += testPathFunction("cleanPath", cleanPath, "../a/b/..//", "../a");
-	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//..", "");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//..", ".");
 	errors += testPathFunction("cleanPath", cleanPath, "/..", platform_error());
 	errors += testPathFunction("cleanPath", cleanPath, "/a/b/../.././../", platform_error());
+	errors += testPathFunction("cleanPath", cleanPath, ".", ".");
 
+	errors += testPathFunction("abspath", abspath, ".", platform::getWorkingDirectory());
 	errors += testPathFunction("abspath", abspath, "", platform_error());
 	errors += testPathFunction("abspath", abspath, "/", "/");
 	errors += testPathFunction("abspath", abspath, "/dev", "/dev");
@@ -2960,7 +2960,7 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction("parentDirectory", parentDirectory, "/a/", "/");
 	errors += testPathFunction("parentDirectory", parentDirectory, "/a/b", "/a/");
 	errors += testPathFunction("parentDirectory", parentDirectory, "/a/b/c/.././", "/a/");
-	errors += testPathFunction("parentDirectory", parentDirectory, "a/b/c/.././", joinPath(platform::getWorkingDirectory(), "a/"));
+	errors += testPathFunction("parentDirectory", parentDirectory, "a/b/c/.././", "a/");
 
 	printf("%d errors.\n", errors);
 	ASSERT(errors == 0);
