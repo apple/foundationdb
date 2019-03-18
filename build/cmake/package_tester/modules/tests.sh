@@ -43,17 +43,17 @@ then
        successOr "Fresh installation is not clean"
        # test that we can read from and write to fdb
        cd /
-       fdbcli --exec 'writemode on ; set foo bar'
+       timeout 2 fdbcli --exec 'writemode on ; set foo bar'
        successOr "Cannot write to database"
-       getresult="$(fdbcli --exec 'get foo')"
+       getresult="$(timeout 2 fdbcli --exec 'get foo')"
        successOr "Get on database failed"
        if [ "${getresult}" != "\`foo' is \`bar'" ]
        then
           fail "value was not set correctly"
        fi
-       fdbcli --exec 'writemode on ; clear foo'
+       timeout 2 fdbcli --exec 'writemode on ; clear foo'
        successOr "Deleting value failed"
-       getresult="$(fdbcli --exec 'get foo')"
+       getresult="$(timeout 2 fdbcli --exec 'get foo')"
        successOr "Get on database failed"
        if [ "${getresult}" != "\`foo': not found" ]
        then
@@ -88,10 +88,10 @@ then
        echo "Configure new database - Install isn't supposed to do this for us"
        echo "as there was an existing configuration"
        cd /
-       fdbcli --exec 'configure new single ssd'
+       timeout 2 fdbcli --exec 'configure new single ssd'
        successOr "Couldn't configure new database"
        tests_healthy
-       num_processes="$(fdbcli --exec 'status' | grep "FoundationDB processes" | sed -e 's/.*- //')"
+       num_processes="$(timeout 2 fdbcli --exec 'status' | grep "FoundationDB processes" | sed -e 's/.*- //')"
        if [ "${num_processes}" -ne 2 ]
        then
           fail Number of processes incorrect after config change
