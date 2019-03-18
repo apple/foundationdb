@@ -177,6 +177,7 @@ then
                     echo "    - ${t}"
                 done
                 echo -e "${NC}"
+                __res=1
             fi
         done
         exitfun
