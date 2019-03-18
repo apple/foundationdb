@@ -915,7 +915,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				outputString += "\n  Storage engine         - ";
 				if (statusObjConfig.get("storage_engine", strVal)){
-					if(strVal == "old_memory") {
+					if(strVal == "memory-1") {
 						isOldMemory = true;
 					}
 					outputString += strVal;
@@ -2214,7 +2214,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 

@@ -262,9 +262,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1 ) {
 			result["storage_engine"] = "ssd-redwood-experimental";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
-			result["storage_engine"] = "old_memory";
+			result["storage_engine"] = "memory-1";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
-			result["storage_engine"] = "memory";
+			result["storage_engine"] = "memory-2";
 		} else {
 			result["storage_engine"] = "custom";
 		}
