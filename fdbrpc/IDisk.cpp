@@ -22,7 +22,13 @@
 #include "fdbrpc/simulator.h"
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
-//#include "flow/actorcompiler.h" // This must be the last #include.
+
+#if defined(_WIN32)
+#include <io.h>
+#elif defined(__unixish__)
+#define _read ::read
+#define _write ::write
+#endif
 
 struct NormalDisk : public IDisk, public ReferenceCounted<NormalDisk> {
 	NormalDisk(int64_t iops, int64_t bandwidth) :
@@ -35,10 +41,10 @@ struct NormalDisk : public IDisk, public ReferenceCounted<NormalDisk> {
         return waitUntilDiskReady(size, sync, 1);
     }
     Future<int> override read(int h, void* data, int length) {
-        return ::read(h, data, static_cast<unsigned int>(length));
+        return _read(h, data, static_cast<unsigned int>(length));
     }
     Future<int> override write(int h, StringRef data) {
-        return ::write(h, static_cast<const void*>(data.begin()), data.size());
+        return _write(h, static_cast<const void*>(data.begin()), data.size());
     }
 
 protected:
