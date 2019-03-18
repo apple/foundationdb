@@ -1667,6 +1667,8 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		if(!f)
 			throw io_error();
 	#ifdef _WIN32
+		// In Windows case, ReplaceFile API is used which preserves the ownership,
+		// ACLs and other attributes of the original file
 	#elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
