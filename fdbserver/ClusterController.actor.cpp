@@ -1091,9 +1091,10 @@ public:
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
+	bool recruitingDistributor;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
-		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
+		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false), recruitingDistributor(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1783,18 +1784,20 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 	}
 
-	if ( req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() ) {
+	if (req.distributorInterf.present() && !self->db.serverInfo->get().distributor.present() &&
+			self->clusterControllerDcId == req.distributorInterf.get().locality.dcId() &&
+			!self->recruitingDistributor) {
 		const DataDistributorInterface& di = req.distributorInterf.get();
 		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
 		self->db.setDistributor(di);
 	}
 	if (req.ratekeeperInterf.present()) {
-		if (!self->db.serverInfo->get().ratekeeper.present()) {
+		if (!self->db.serverInfo->get().ratekeeper.present() && self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
 			self->db.setRatekeeper(rki);
 		} else {
-			TraceEvent("ClusterController_KillRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
+			TraceEvent("ClusterController_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
 			req.ratekeeperInterf.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
 		}
 	}
@@ -2407,7 +2410,9 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 			.detail("DataDistributorDied", self->db.serverInfo->get().distributor.get().id());
 			self->db.clearInterf(ProcessClass::DataDistributorClass);
 		} else {
+			self->recruitingDistributor = true;
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
+			self->recruitingDistributor = false;
 			self->db.setDistributor(distributorInterf);
 		}
 	}
@@ -2481,29 +2486,30 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 
 		const ServerDBInfo& db = self->db.serverInfo->get();
 		auto masterFitness = masterWorker->second.details.processClass.machineClassFitness(ProcessClass::Master);
-		Optional<Key> masterDcId = masterWorker->second.details.interf.locality.dcId();
 
+		state Future<Void> rkReply = Void();
 		if (db.ratekeeper.present()) {
 			auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 			auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
-			if (masterDcId != rkWorker.details.interf.locality.dcId() || rkFitness > masterFitness) {
+			if (self->clusterControllerDcId != rkWorker.details.interf.locality.dcId() || rkFitness > masterFitness) {
 				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitness);
-				db.ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
+				rkReply = db.ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id));
 			}
 		}
 
+		state Future<Void> ddReply = Void();
 		if (db.distributor.present()) {
 			auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 			auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
-			if (masterDcId != ddWorker.details.interf.locality.dcId() || ddFitness > masterFitness) {
+			if (self->clusterControllerDcId != ddWorker.details.interf.locality.dcId() || ddFitness > masterFitness) {
 				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
 				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitness);
-				db.distributor.get().haltDataDistributor.send(HaltDataDistributorRequest(self->id));
+				ddReply = db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id));
 			}
 		}
 
-		wait(delay(SERVER_KNOBS->STATELESS_SERVER_FITNESS_CHECK_INTERVAL));
+		wait(rkReply && ddReply && delay(SERVER_KNOBS->STATELESS_SERVER_FITNESS_CHECK_INTERVAL));
 	}
 }
 
