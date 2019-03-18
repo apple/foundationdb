@@ -1666,6 +1666,27 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
+	#ifdef _WIN32
+	#elif defined(__unixish__)
+		// get the uid/gid/mode bits of old file and set it on new file, else fail
+		struct stat info;
+		if (stat(path.c_str(), &info) < 0) {
+			TraceEvent("StatFailed").detail("path", path);
+			throw io_error();
+		}
+		if (chown(tempfilename.c_str(), info.st_uid, info.st_gid) < 0) {
+			deleteFile(tempfilename);
+			TraceEvent("ChownFailed").detail("tempfilename", tempfilename).detail("uid", info.st_uid).detail("gid", info.st_gid);
+			throw io_error();
+		}
+		if (chmod(tempfilename.c_str(), info.st_mode) < 0) {
+			deleteFile(tempfilename);
+			TraceEvent("ChmodFailed").detail("tempfilename", tempfilename).detail("mode", info.st_mode);
+			throw io_error();
+		}
+	#else
+	#error Port me!
+	#endif
 
 		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
 			throw io_error();
