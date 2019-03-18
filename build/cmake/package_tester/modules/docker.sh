@@ -135,12 +135,12 @@ then
                     then
                         docker_wait_any
                     fi
-                    echo "Starting Test ${curr_name}/${curr_test}"
                     log_file="${log_dir}/${curr_name}_${curr_test}.log"
                     err_file="${log_dir}/${curr_name}_${curr_test}.err"
                     docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
                         -v "${fdb_build}:/build"\
                         ${curr_name} /sbin/init )
+                    echo "Starting Test ${curr_name}/${curr_test} Docker-ID: ${docker_id}"
                     {
                         docker exec "${docker_id}" bash \
                             /foundationdb/build/cmake/package_tester/${curr_format}_tests.sh -n ${curr_test} ${curr_packages[@]}\
