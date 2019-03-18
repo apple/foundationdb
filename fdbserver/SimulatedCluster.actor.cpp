@@ -882,32 +882,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
-			StatusObject primarySatelliteObj;
-			primarySatelliteObj["id"] = "2";
-			primarySatelliteObj["priority"] = 1;
-			primarySatelliteObj["satellite"] = 1;
-			primaryDcArr.push_back(primarySatelliteObj);
-
-			StatusObject remoteSatelliteObj;
-			remoteSatelliteObj["id"] = "3";
-			remoteSatelliteObj["priority"] = 1;
-			remoteSatelliteObj["satellite"] = 1;
-			remoteDcArr.push_back(remoteSatelliteObj);
-
-			if(datacenters > 4) {
-				StatusObject primarySatelliteObjB;
-				primarySatelliteObjB["id"] = "4";
-				primarySatelliteObjB["priority"] = 1;
-				primarySatelliteObjB["satellite"] = 1;
-				primaryDcArr.push_back(primarySatelliteObjB);
-
-				StatusObject remoteSatelliteObjB;
-				remoteSatelliteObjB["id"] = "5";
-				remoteSatelliteObjB["priority"] = 1;
-				remoteSatelliteObjB["satellite"] = 1;
-				remoteDcArr.push_back(remoteSatelliteObjB);
-			}
-
 			if(datacenters > 4) {
 				//FIXME: we cannot use one satellite replication with more than one satellite per region because canKillProcesses does not respect usable_dcs
 				int satellite_replication_type = g_random->randomInt(0,3);
@@ -1013,6 +987,36 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
+
+			bool useNormalDCsAsSatellites = datacenters > 4 && minimumRegions < 2 && g_random->random01() < 0.3 ? true : false;
+			StatusObject primarySatelliteObj;
+			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
+			primarySatelliteObj["priority"] = 1;
+			primarySatelliteObj["satellite"] = 1;
+			primaryDcArr.push_back(primarySatelliteObj);
+
+			StatusObject remoteSatelliteObj;
+			remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
+			remoteSatelliteObj["priority"] = 1;
+			remoteSatelliteObj["satellite"] = 1;
+			remoteDcArr.push_back(remoteSatelliteObj);
+
+			if (datacenters > 4) {
+				StatusObject primarySatelliteObjB;
+				primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
+				primarySatelliteObjB["priority"] = 1;
+				primarySatelliteObjB["satellite"] = 1;
+				primaryDcArr.push_back(primarySatelliteObjB);
+
+				StatusObject remoteSatelliteObjB;
+				remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
+				remoteSatelliteObjB["priority"] = 1;
+				remoteSatelliteObjB["satellite"] = 1;
+				remoteDcArr.push_back(remoteSatelliteObjB);
+			}
+			if (useNormalDCsAsSatellites) {
+				datacenters = 3;
+			}
 		}
 
 		primaryObj["datacenters"] = primaryDcArr;
