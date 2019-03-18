@@ -5,6 +5,9 @@ import re
 
 output_filename='documentation/sphinx/source/mr-status-auto-gen.rst.inc'
 
+print "WARNING: This is a very simple script to help keep machine-readable JSON status document synchronize with Schemas.cpp"
+print "WARNING: THIS SCRIPT DOES NOT HANDLE COMMENTS FOR KEYS WITH THE SAME NAME!"
+
 # Read old machine-readable status document mr-status-old.rst to get the comment
 # Store the comment for each keyword into a dictionary
 print "Read comment from old mr status file documentation/sphinx/source/mr-status-json-old.rst";
@@ -86,10 +89,3 @@ with open(output_filename, 'w') as output_file:
         output_file.write(line);
 
     output_file.flush();
-
-
-
-
-
-
-
