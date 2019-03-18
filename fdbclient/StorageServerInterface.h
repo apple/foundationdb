@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/IDisk.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -56,6 +57,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetPhysicalMetricsRequest> getPhysicalMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
+	RequestStream<struct ChangeDiskRequest> changeDisk;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
@@ -70,7 +72,7 @@ struct StorageServerInterface {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
 		serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			splitMetrics, getPhysicalMetrics, waitFailure, getQueuingMetrics, changeDisk, getKeyValueStoreType);
 
 		if( ar.protocolVersion() >= 0x0FDB00A200090001LL )
 			serializer(ar, watchValue);
@@ -354,6 +356,29 @@ struct StorageQueuingMetricsReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
+	}
+};
+
+struct ChangeDiskRequest {
+	DiskType diskType;
+	ReplyPromise<struct ChangeDiskReply> reply;
+
+	ChangeDiskRequest(DiskType diskType = DiskType::Normal) : diskType(diskType) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct ChangeDiskReply {
+	bool success;
+
+	ChangeDiskReply(bool success = false) : success(success) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, success);
 	}
 };
 

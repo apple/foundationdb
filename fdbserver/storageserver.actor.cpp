@@ -3441,6 +3441,11 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 				getQueuingMetrics(self, req);
 			}
+			when (ChangeDiskRequest req = waitNext(ssi.changeDisk.getFuture())) {
+				ASSERT(g_network->isSimulated());
+				g_simulator.getCurrentProcess()->machine->changeDisk(req.diskType);
+				req.reply.send(ChangeDiskReply(true));
+			}
 			when( ReplyPromise<Version> reply = waitNext(ssi.getVersion.getFuture()) ) {
 				reply.send( self->version.get() );
 			}

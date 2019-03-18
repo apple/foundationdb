@@ -133,10 +133,10 @@ public:
 		Optional<Standalone<StringRef>>	machineId;
 		Reference<IDisk> disk;
 
-		MachineInfo() : machineProcess(0), disk(Reference<IDisk>(createSimSSD())) {}
+		MachineInfo() : machineProcess(0), disk(createSimulatedDisk(DiskType::Normal)) {}
 
-		void killDisk() {
-			disk = Reference<IDisk>(createNeverDisk());
+		void changeDisk(DiskType diskType) {
+			disk = createSimulatedDisk(diskType);
 		}
 	};
 

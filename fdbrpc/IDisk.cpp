@@ -24,18 +24,33 @@
 #include "flow/Knobs.h"
 //#include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SimSSD : public IDisk, public ReferenceCounted<SimSSD> {
-	SimSSD(int64_t iops, int64_t bandwidth) :
+struct NormalDisk : public IDisk, public ReferenceCounted<NormalDisk> {
+	NormalDisk(int64_t iops, int64_t bandwidth) :
         nextOperation(0),
         iops(iops),
         bandwidth(bandwidth) {}
-	void addref() override { ReferenceCounted<SimSSD>::addref(); }
-	void delref() override { ReferenceCounted<SimSSD>::delref(); }
+	void addref() override { ReferenceCounted<NormalDisk>::addref(); }
+	void delref() override { ReferenceCounted<NormalDisk>::delref(); }
     Future<Void> override waitUntilDiskReady(int64_t size, bool sync) {
+        return waitUntilDiskReady(size, sync, 1);
+    }
+    Future<int> override read(int h, void* data, int length) {
+        return ::read(h, data, static_cast<unsigned int>(length));
+    }
+    Future<int> override write(int h, StringRef data) {
+        return ::write(h, static_cast<const void*>(data.begin()), data.size());
+    }
+
+protected:
+    double nextOperation;
+    const int64_t iops;
+    const int64_t bandwidth;
+
+    Future<Void> override waitUntilDiskReady(int64_t size, bool sync, int numIops) {
         if (g_simulator.connectionFailuresDisableDuration > 1e4)
             return delay(0.0001);
         if (nextOperation < now()) nextOperation = now();
-        nextOperation += (1.0 / iops) + (size / bandwidth);
+        nextOperation += (numIops / iops) + (size / bandwidth);
 
         double randomLatency;
         if (sync) {
@@ -45,17 +60,6 @@ struct SimSSD : public IDisk, public ReferenceCounted<SimSSD> {
 
         return delayUntil(nextOperation + randomLatency);
     }
-    Future<int> override read(int h, void* data, int length) {
-        return ::read(h, data, static_cast<unsigned int>(length));
-    }
-    Future<int> override write(int h, StringRef data) {
-        return ::write(h, static_cast<const void*>(data.begin()), data.size());
-    }
-
-private:
-    double nextOperation;
-    int64_t iops;
-    int64_t bandwidth;
 };
 
 struct NeverDisk : public IDisk, public ReferenceCounted<NeverDisk> {
@@ -65,16 +69,48 @@ struct NeverDisk : public IDisk, public ReferenceCounted<NeverDisk> {
         return Never();
     }
     Future<int> override read(int h, void* data, int length) {
-        return ::read(h, data, static_cast<unsigned int>(length));
+        return Never();
     }
     Future<int> override write(int h, StringRef data) {
-        return ::write(h, static_cast<const void*>(data.begin()), data.size());
+        return Never();
     }
 };
 
-Reference<IDisk> createSimSSD() {
-    return Reference<IDisk>(new SimSSD(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
-}
-Reference<IDisk> createNeverDisk() {
-    return Reference<IDisk>(new NeverDisk());
+struct EmptyDisk : public NormalDisk, public ReferenceCounted<EmptyDisk> {
+    void addref() override { ReferenceCounted<EmptyDisk>::addref(); };
+    void delref() override { ReferenceCounted<EmptyDisk>::delref(); }
+    Future<int> override read(int h, void* data, int length) {
+        memset(data, 0, length);
+        return length;
+    }
+};
+
+struct EBSDisk : public NormalDisk, public ReferenceCounted<EBSDisk> {
+    static const int constexpr blockSize = 4096;
+    static const double constexpr epochLength = 1.0;
+
+    EBSDisk(int64_t iops, int64_t bandwidth) : NormalDisk(iops, bandwidth) {}
+    
+    void addref() override { ReferenceCounted<EBSDisk>::addref(); }
+    void delref() override { ReferenceCounted<EBSDisk>::delref(); }
+
+    Future<Void> waitUntilDiskReady(int64_t size, bool sync) {
+        int numIops = (size % blockSize) ? (size / blockSize + 1) : (size / blockSize);
+        return NormalDisk::waitUntilDiskReady(size, sync, numIops);
+    }
+};
+
+Reference<IDisk> createSimulatedDisk(DiskType diskType) {
+    switch(diskType) {
+        case DiskType::Normal:
+            return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
+        case DiskType::Slow:
+            return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS / 2, FLOW_KNOBS->SIM_DISK_BANDWIDTH / 2));
+        case DiskType::Dead:
+            return Reference<IDisk>(new NeverDisk());
+        case DiskType::EBS:
+            return Reference<IDisk>(new EBSDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
+        default:
+            return Reference<IDisk>();
+    }
 }

@@ -533,7 +533,7 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFR1 %s %s %s %d %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), length, offset );
 
-		wait( waitUntilDiskReady( self->diskParameters, length ) );
+		wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(length));
 
 		if( _lseeki64( self->h, offset, SEEK_SET ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
@@ -569,7 +569,7 @@ private:
 		}
 
 		if(self->delayOnWrite)
-			wait( waitUntilDiskReady( self->diskParameters, data.size() ) );
+			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(data.size()));;
 
 		if( _lseeki64( self->h, offset, SEEK_SET ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
@@ -605,7 +605,7 @@ private:
 			fprintf( randLog, "SFT1 %s %s %s %lld\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), size );
 
 		if(self->delayOnWrite)
-			wait( waitUntilDiskReady( self->diskParameters, 0 ) );
+			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0));
 
 		if( _chsize( self->h, (long) size ) == -1 ) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 6);
@@ -627,7 +627,7 @@ private:
 			fprintf( randLog, "SFC1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
 		if(self->delayOnWrite)
-			wait( waitUntilDiskReady( self->diskParameters, 0, true ) );
+			wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0, true));
 
 		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -659,7 +659,7 @@ private:
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		wait( waitUntilDiskReady( self->diskParameters, 0 ) );
+		wait(g_simulator.getCurrentProcess()->machine->disk->waitUntilDiskReady(0));
 
 		int64_t pos = _lseeki64( self->h, 0L, SEEK_END );
 		if( pos == -1 ) {

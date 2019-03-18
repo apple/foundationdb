@@ -31,12 +31,19 @@ struct IDisk {
 	virtual ~IDisk() = default;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
-	virtual Future<Void> waitUntilDiskReady(int64_t size, bool sync) = 0;
+	virtual Future<Void> waitUntilDiskReady(int64_t size, bool sync = false) = 0;
 	virtual Future<int> read(int h, void* data, int length) = 0;
 	virtual Future<int> write(int h, StringRef data) = 0;
 };
 
-Reference<IDisk> createSimSSD();
-Reference<IDisk> createNeverDisk();
+enum class DiskType {
+	Normal,
+	Slow,
+	Dead,
+	Empty,
+	EBS
+};
+
+Reference<IDisk> createSimulatedDisk(DiskType diskType);
 
 #endif
