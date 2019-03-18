@@ -115,7 +115,7 @@
           },
           "datacenter_id": <id_string>,
           "excluded": false,
-          "locality": { // This will contain any locality fields that are provided on the command line
+          "locality": {
             "machineid": <id_string>,
             "dcid": <id_string>
           },
@@ -224,7 +224,7 @@
         "worst_version_lag_storage_server": 0
       },
       "recovery_state": {
-        "name": <name_string>, // "fully_recovered" is the healthy state; other states are normal to transition through but not to persist in
+        "name": <name_string>, / "fully_recovered" is the healthy state; other states are normal to transition through but not to persist in
         "description": <description_string>,
         "required_logs": 3,
         "required_proxies": 1,

@@ -1,3 +1,6 @@
+.. -*- mode: rst; -*-
+
+.. |json-status-format| replace::
    "cluster":{
       "layers":{
          "_valid":true,
@@ -6,10 +9,8 @@
       "processes":{
          "$map":{
             "version":"3.0.0", // a process version will not be reported if it is not protocol-compatible; it will be absent from status
-
             "machine_id":"0ccb4e0feddb5583010f6b77d9d10ece",
             "locality":{ // This will contain any locality fields that are provided on the command line
-
                 "$map":"value"
             },
             "class_source":{
@@ -118,9 +119,7 @@
             "command_line":"-r simulation",
             "memory":{
                "available_bytes":0, //an estimate of the process' fair share of the memory available to fdbservers
-
                "limit_bytes":0, // memory limit per process
-
                "unused_allocated_memory":0,
                "used_bytes":0
             },
@@ -128,8 +127,7 @@
                {
                   "time":12345.12312,
                   "type":"x",
-                  "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+                  "name":{ // when not limiting
                      "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
@@ -150,26 +148,22 @@
             "address":"1.2.3.4:1234",
             "disk":{
                "free_bytes":3451233456234, // an estimate of how many bytes are free to allocate to fdbservers without swapping
-
                "reads":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
                },
                "busy":0.0, // from 0.0 (idle) to 1.0 (fully busy)
-
                "writes":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
                },
                "total_bytes":123412341234 // an estimate of total physical RAM
-
             },
             "uptime_seconds":1234.2345,
             "cpu":{
                "usage_cores":0.0 // average number of logical cores utilized by the process over the recent past; value may be > 1.0
-
             },
             "network":{
                "current_connections":0,
@@ -194,7 +188,6 @@
       "old_logs":[
          {
             "logs":[ // this field will be absent if a value has not been explicitly set
-
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
@@ -220,8 +213,7 @@
          "batch_performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
             "reason_id":0,
-            "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+            "name":{ // when not limiting
                "$enum":[
                   "workload",
                   "storage_server_write_queue_size",
@@ -240,8 +232,7 @@
          "performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
             "reason_id":0,
-            "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+            "name":{ // when not limiting
                "$enum":[
                   "workload",
                   "storage_server_write_queue_size",
@@ -267,7 +258,6 @@
          "worst_version_lag_storage_server":0
       },
       "incompatible_connections":[
-
       ],
       "datacenter_version_difference":0,
       "degraded_processes":0,
@@ -275,17 +265,11 @@
       "database_locked":false,
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
-
          "read_seconds":7, // time to perform a single read
-
          "immediate_priority_transaction_start_seconds":0.0, // time to start a sample transaction at system immediate priority
-
          "batch_priority_transaction_start_seconds":0.0, // time to start a sample transaction at batch priority
-
          "transaction_start_seconds":0.0, // time to start a sample transaction at normal priority
-
          "commit_seconds":0.02 // time to commit a sample transaction
-
       },
       "clients":{
          "count":1,
@@ -316,8 +300,7 @@
                   "address":"1.2.3.4:1234"
                }
             ],
-            "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+            "name":{ // when not limiting
                "$enum":[
                   "unreachable_master_worker",
                   "unreachable_dataDistributor_worker",
@@ -339,8 +322,7 @@
             },
             "issues":[
                {
-                  "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+                  "name":{ // when not limiting
                      "$enum":[
                         "incorrect_cluster_file_contents"
                      ]
@@ -354,8 +336,7 @@
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
-         "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+         "name":{ // when not limiting
             "$enum":[
                "reading_coordinated_state",
                "locking_coordinated_state",
@@ -397,7 +378,6 @@
             }
          },
          "bytes":{ // of operations (independent of hz). Perfectly spaced operations will have a roughness of 1.0 . Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
-
             "written":{
                "hz":0.0,
                "counter":0,
@@ -486,10 +466,8 @@
          "repopulate_anti_quorum":1,
          "storage_replicas":1,
          "resolvers":1, // this field will be absent if a value has not been explicitly set
-
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2, // this field will be absent if a value has not been explicitly set
-
          "log_version":2,
          "log_engine":1,
          "log_spill":1,
@@ -511,7 +489,6 @@
          "auto_resolvers":1,
          "auto_logs":3,
          "proxies":5 // this field will be absent if a value has not been explicitly set
-
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -519,8 +496,7 @@
          "state":{
             "healthy":true,
             "min_replicas_remaining":0,
-            "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+            "name":{ // when not limiting
                "$enum":[
                   "initializing",
                   "missing_data",
@@ -538,7 +514,6 @@
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0, // estimated
-
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,
@@ -554,8 +529,7 @@
                 "state":{
                     "healthy":true,
                     "min_replicas_remaining":0,
-                    "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+                    "name":{ // when not limiting
                        "$enum":[
                           "initializing",
                           "missing_data",
@@ -589,10 +563,8 @@
             },
             "memory":{
                "free_bytes":0, // an estimate of how many bytes are free to allocate to fdbservers without swapping
-
                "committed_bytes":0,
                "total_bytes":0 // an estimate of total physical RAM
-
             },
             "contributing_workers":4,
             "datacenter_id":"6344abf1813eb05b",
@@ -600,12 +572,10 @@
             "address":"1.2.3.4",
             "machine_id":"6344abf1813eb05b",
             "locality":{ // This will contain any locality fields that are provided on the command line
-
                 "$map":"value"
             },
             "cpu":{
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
-
             }
          }
       }
@@ -626,8 +596,7 @@
       },
       "messages":[
          {
-            "name":{ // is the healthy state; other states are normal to transition through but not to persist in
-
+            "name":{ // when not limiting
                "$enum":[
                   "inconsistent_cluster_file",
                   "unreachable_cluster_controller",

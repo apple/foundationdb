@@ -3,8 +3,11 @@ import os
 import sys
 import re
 
+output_filename='documentation/sphinx/source/mr-status-auto-gen.rst.inc'
+
 # Read old machine-readable status document mr-status-old.rst to get the comment
 # Store the comment for each keyword into a dictionary
+print "Read comment from old mr status file documentation/sphinx/source/mr-status-json-old.rst";
 comment_dict = {};
 mr_status_rst_filename = 'documentation/sphinx/source/mr-status-json-old.rst';
 with open(mr_status_rst_filename, 'r') as mr_status_rst:
@@ -26,10 +29,13 @@ with open(mr_status_rst_filename, 'r') as mr_status_rst:
                 comment = items[len(items)- 1]
                 #print items;
                 #print "Key:", key, "Comment:", comment
+                if key in comment_dict:
+                    print key, "is duplicate! Not support comments for duplicate key in automatically generating document!"
+                    print "You may consider removing the duplicate comment in mr-status-json-old.rst"
+                    sys.exit(1);
                 comment_dict[key] = comment;
 
 #print comment_dict;
-
 
 # Read Schemas.cpp file to get all status
 schema_cpp_filename = 'fdbclient/Schemas.cpp';
@@ -61,15 +67,27 @@ with open(schema_cpp_filename, 'r') as schema_cpp:
                key = items[1]
                if key in comment_dict:
                    line = line.strip('\n');
-                   line = line + " //" + comment_dict[key] + "\n";
+                   line = line + " //" + comment_dict[key];
+
+           if not line.strip():
+               continue; # rst replace comment only supports replacing to a single paragraph
 
            schema_doc_rawdata.append(line);
 
 
-for line in schema_doc_rawdata:
-    sys.stdout.write(line);
+print "Overwrite auto-generated status schema document", output_filename;
 
-sys.stdout.flush();
+
+with open(output_filename, 'w') as output_file:
+    output_file.write('.. -*- mode: rst; -*-\r\n');
+    output_file.write('\n');
+    output_file.write('.. |json-status-format| replace::\n');
+    for line in schema_doc_rawdata:
+        output_file.write(line);
+
+    output_file.flush();
+
+
 
 
 
