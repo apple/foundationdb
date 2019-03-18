@@ -763,7 +763,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", option.second).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();

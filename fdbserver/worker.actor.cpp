@@ -307,18 +307,18 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 			// Use the option string that's in the file rather than tLogOptions.toPrefix(),
 			// because they might be different if a new option was introduced in this version.
 			StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
-			TraceEvent("DiskStoreVersioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersioned").detail("Filename", filename);
 			ErrorOr<TLogOptions> tLogOptions = TLogOptions::FromStringRef(optionsString);
 			if (tLogOptions.isError()) {
-				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", printable(filename));
+				TraceEvent(SevWarn, "DiskStoreMalformedFilename").detail("Filename", filename);
 				continue;
 			}
-			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreVersionedSuccess").detail("Filename", filename);
 			store.tLogOptions = tLogOptions.get();
 			prefix = filename.substr(0, fileVersionedLogDataPrefix.size() + optionsString.size() + 1);
 		}
 		else if( filename.startsWith( fileLogDataPrefix ) ) {
-			TraceEvent("DiskStoreUnversioned").detail("Filename", printable(filename));
+			TraceEvent("DiskStoreUnversioned").detail("Filename", filename);
 			store.storedComponent = DiskStore::TLogData;
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;

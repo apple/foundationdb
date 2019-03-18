@@ -2561,8 +2561,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						if(g_random->random01() < 0.01) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
 								.detail("Team", team->getDesc())
-								.detail("KeyBegin", printable(rs.keys.begin))
-								.detail("KeyEnd", printable(rs.keys.end))
+								.detail("KeyBegin", rs.keys.begin)
+								.detail("KeyEnd", rs.keys.end)
 								.detail("Priority", rs.priority)
 								.detail("TeamFailedMachines", team->size() - serversLeft)
 								.detail("TeamOKMachines", serversLeft);
@@ -3259,14 +3259,14 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 
 	wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
 	wait(waitUntilHealthy(self));
-	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+	TraceEvent("DDUpdatingReplicas", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);
 	loop {
 		try {
 			Optional<Value> val = wait( tr.get(datacenterReplicasKeyFor(dcId)) );
 			state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 			if(oldReplicas == self->configuration.storageTeamSize) {
-				TraceEvent("DDUpdatedAlready", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
+				TraceEvent("DDUpdatedAlready", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize);
 				return Void();
 			}
 			if(oldReplicas < self->configuration.storageTeamSize) {
@@ -3274,7 +3274,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 			}
 			tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(self->configuration.storageTeamSize));
 			wait( tr.commit() );
-			TraceEvent("DDUpdatedReplicas", self->distributorId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
+			TraceEvent("DDUpdatedReplicas", self->distributorId).detail("DcId", dcId).detail("Replicas", self->configuration.storageTeamSize).detail("OldReplicas", oldReplicas);
 			return Void();
 		} catch( Error &e ) {
 			wait( tr.onError(e) );
@@ -3459,7 +3459,7 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 
 				for(int j = 0; j < ranges.size() - 2; j++)
 					if(ranges[j].value == ranges[j + 1].value)
-						TraceEvent(SevError, "UncoalescedValues", id).detail("Key1", printable(ranges[j].key)).detail("Key2", printable(ranges[j + 1].key)).detail("Value", printable(ranges[j].value));
+						TraceEvent(SevError, "UncoalescedValues", id).detail("Key1", ranges[j].key).detail("Key2", ranges[j + 1].key).detail("Value", ranges[j].value);
 			}
 
 			TraceEvent("DoneCheckingCoalescing");
@@ -3594,8 +3594,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				initData = initData_;
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
-					    .detail("B", printable(initData->shards.end()[-2].key))
-					    .detail("E", printable(initData->shards.end()[-1].key))
+					    .detail("B", initData->shards.end()[-2].key)
+					    .detail("E", initData->shards.end()[-1].key)
 					    .detail("Src", describe(initData->shards.end()[-2].primarySrc))
 					    .detail("Dest", describe(initData->shards.end()[-2].primaryDest))
 					    .trackLatest("InitialDD");
@@ -3643,7 +3643,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].remoteSrc, false));
 				}
 				if(g_network->isSimulated()) {
-					TraceEvent("DDInitShard").detail("Keys", printable(keys)).detail("PrimarySrc", describe(initData->shards[shard].primarySrc)).detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
+					TraceEvent("DDInitShard").detail("Keys", keys).detail("PrimarySrc", describe(initData->shards[shard].primarySrc)).detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
 					.detail("PrimaryDest", describe(initData->shards[shard].primaryDest)).detail("RemoteDest", describe(initData->shards[shard].remoteDest));
 				}
 

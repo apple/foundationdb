@@ -343,7 +343,7 @@ public:
 
 	void dump() {
 		for( auto it = entries.begin(); it != entries.end(); ++it ) {
-			TraceEvent("CacheDump").detail("Begin", printable(it->beginKey)).detail("End", printable(it->endKey.toStandaloneStringRef())).detail("Values", printable(it->values));
+			TraceEvent("CacheDump").detail("Begin", it->beginKey).detail("End", it->endKey.toStandaloneStringRef()).detail("Values", it->values);
 		}
 	}
 

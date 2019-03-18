@@ -128,7 +128,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 	// SOMEDAY: concurrent access to different keys?
 	loop choose {
 		when ( GenerationRegReadRequest _req = waitNext( interf.read.getFuture() ) ) {
-			TraceEvent("GenerationRegReadRequest").detail("From", _req.reply.getEndpoint().getPrimaryAddress()).detail("K", printable(_req.key));
+			TraceEvent("GenerationRegReadRequest").detail("From", _req.reply.getEndpoint().getPrimaryAddress()).detail("K", _req.key);
 			state GenerationRegReadRequest req = _req;
 			Optional<Value> rawV = wait( store->readValue( req.key ) );
 			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>( rawV.get(), IncludeVersion() ) : GenerationRegVal();
@@ -149,11 +149,11 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 				v.val = wrq.kv.value;
 				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
 				wait(store->commit());
-				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", printable(wrq.kv.key))
+				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", wrq.kv.key)
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
 				wrq.reply.send( v.writeGen );
 			} else {
-				TraceEvent("GenerationRegWriteFail").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", printable(wrq.kv.key))
+				TraceEvent("GenerationRegWriteFail").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", wrq.kv.key)
 					.detail("ReqGen", wrq.gen.generation).detail("ReadGen", v.readGen.generation).detail("WriteGen", v.writeGen.generation);
 				wrq.reply.send( std::max( v.readGen, v.writeGen ) );
 			}
@@ -267,7 +267,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				!currentNominee.present())
 			{
 				// Our state is back to the initial state, so we can safely stop this actor
-				TraceEvent("EndingLeaderNomination").detail("Key", printable(key));
+				TraceEvent("EndingLeaderNomination").detail("Key", key);
 				return Void();
 			} else {
 				Optional<LeaderInfo> nextNominee;
@@ -293,7 +293,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 				if ( !nextNominee.present() || !foundCurrentNominee || currentNominee.get().leaderChangeRequired(nextNominee.get()) ) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
-						.detail("Changed", nextNominee != currentNominee).detail("Key", printable(key));
+						.detail("Changed", nextNominee != currentNominee).detail("Key", key);
 					for(unsigned int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();

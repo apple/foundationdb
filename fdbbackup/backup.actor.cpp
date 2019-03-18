@@ -1387,7 +1387,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr, std::s
 				readMore = true;
 		} catch(Error &e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", printable(docs[i].key));
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if(limit == 1)

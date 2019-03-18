@@ -1751,7 +1751,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx, JsonBuilderArray
 							json.absorb(doc.get_obj());
 							wait(yield());
 						} catch(Error &e) {
-							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", printable(docs[j].key));
+							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}
 				}
