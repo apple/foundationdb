@@ -47,6 +47,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
+	init( FAST_ALLOC_LOGGING_CHANCE,          (128<<10)/10000000.0 ); //one backtrace every 10MB
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
