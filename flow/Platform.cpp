@@ -1671,17 +1671,24 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
 		if (stat(path.c_str(), &info) < 0) {
-			TraceEvent("StatFailed").detail("path", path);
+			TraceEvent("StatFailed").detail("Path", path);
 			throw io_error();
 		}
 		if (chown(tempfilename.c_str(), info.st_uid, info.st_gid) < 0) {
+			TraceEvent("ChownFailed")
+				.detail("TempFilename", tempfilename)
+				.detail("OriginalFile", path)
+				.detail("Uid", info.st_uid)
+				.detail("Gid", info.st_gid);
 			deleteFile(tempfilename);
-			TraceEvent("ChownFailed").detail("tempfilename", tempfilename).detail("uid", info.st_uid).detail("gid", info.st_gid);
 			throw io_error();
 		}
 		if (chmod(tempfilename.c_str(), info.st_mode) < 0) {
+			TraceEvent("ChmodFailed")
+				.detail("TempFilename", tempfilename)
+				.detail("OriginalFile", path)
+				.detail("Mode", info.st_mode);
 			deleteFile(tempfilename);
-			TraceEvent("ChmodFailed").detail("tempfilename", tempfilename).detail("mode", info.st_mode);
 			throw io_error();
 		}
 	#else
