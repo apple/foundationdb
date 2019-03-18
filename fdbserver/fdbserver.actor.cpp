@@ -1331,12 +1331,6 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if( role == FDBD && publicAddresses.empty()) {
-			fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
 		if(role == ConsistencyCheck) {
 			if(!publicAddresses.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
@@ -1468,6 +1462,17 @@ int main(int argc, char* argv[]) {
 			g_network = newNet2(useThreadPool, true);
 			FlowTransport::createInstance(1);
 
+			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
+			if (publicAddresses.empty()) {
+				if (expectsPublicAddress) {
+					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				} else {
+					publicAddresses.push_back(NetworkAddress());
+				}
+			}
+
 			openTraceFile(publicAddresses[0], rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
 #ifndef TLS_DISABLED
@@ -1486,7 +1491,7 @@ int main(int argc, char* argv[]) {
 
 			tlsOptions->register_network();
 #endif
-			if (role == FDBD || role == NetworkTestServer || role == Restore) {
+			if (expectsPublicAddress) {
 				for (int ii = 0; ii < publicAddresses.size(); ++ii) {
 					const NetworkAddress& publicAddress = publicAddresses[ii];
 					const NetworkAddress& listenAddress = listenAddresses[ii];
