@@ -173,13 +173,7 @@ public class TuplePerformanceTest {
 		System.out.println("Warming up test...");
 		for(int i = 0; i < ignoreIterations; i++) {
 			int length = r.nextInt(20);
-			Tuple t = createTuple(length);
-			try {
-				t.pack();
-			}
-			catch(IllegalArgumentException e) {
-				System.out.println("ah!");
-			}
+			createTuple(length).pack();
 		}
 
 		System.gc();
@@ -302,7 +296,7 @@ public class TuplePerformanceTest {
 	}
 
 	public static void main(String[] args) {
-		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000, GeneratedTypes.STRING_LIKE);
+		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000, GeneratedTypes.ALL);
 		tester.run();
 	}
 }
