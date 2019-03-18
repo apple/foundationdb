@@ -421,7 +421,7 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
-	if(FLOW_KNOBS && g_random && g_random->random01() < FLOW_KNOBS->FAST_ALLOC_LOGGING_CHANCE) {
+	if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < FLOW_KNOBS->FAST_ALLOC_LOGGING_CHANCE) {
 		TraceEvent("FastAllocator").detail("Size", Size).backtrace();
 	}
 	block = (void **)::allocate(magazine_size * Size, false);
