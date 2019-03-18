@@ -142,7 +142,11 @@ public class TuplePerformanceTest {
 				// Random Unicode codepoints
 				int[] codepoints = new int[r.nextInt(20)];
 				for(int x = 0; x < codepoints.length; x++) {
-					codepoints[x] = r.nextInt(0x10FFFF);
+					int codepoint = r.nextInt(0x10FFFF);
+					while(Character.isSurrogate((char)codepoint)) {
+						codepoint = r.nextInt(0x10FFFF);
+					}
+					codepoints[x] = codepoint;
 				}
 				values.add(new String(codepoints, 0, codepoints.length));
 			}
@@ -169,7 +173,13 @@ public class TuplePerformanceTest {
 		System.out.println("Warming up test...");
 		for(int i = 0; i < ignoreIterations; i++) {
 			int length = r.nextInt(20);
-			createTuple(length).pack();
+			Tuple t = createTuple(length);
+			try {
+				t.pack();
+			}
+			catch(IllegalArgumentException e) {
+				System.out.println("ah!");
+			}
 		}
 
 		System.gc();
@@ -292,7 +302,7 @@ public class TuplePerformanceTest {
 	}
 
 	public static void main(String[] args) {
-		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000, GeneratedTypes.ALL);
+		TuplePerformanceTest tester = new TuplePerformanceTest(new Random(), 100_000, 10_000_000, GeneratedTypes.STRING_LIKE);
 		tester.run();
 	}
 }
