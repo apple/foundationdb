@@ -1092,9 +1092,10 @@ public:
 	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
+	bool recruitingRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
-		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false), recruitingDistributor(false)
+		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false), recruitingDistributor(false), recruitingRatekeeper(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1791,7 +1792,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
 		self->db.setDistributor(di);
 	}
-	if (req.ratekeeperInterf.present()) {
+	if (req.ratekeeperInterf.present() && !self->recruitingRatekeeper) {
 		if (!self->db.serverInfo->get().ratekeeper.present() && self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
@@ -2468,7 +2469,9 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 			.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 			self->db.clearInterf(ProcessClass::RateKeeperClass);
 		} else {
+			self->recruitingRatekeeper = true;
 			RatekeeperInterface rkInterf = wait( startRatekeeper(self) );
+			self->recruitingRatekeeper = false;
 			self->db.setRatekeeper(rkInterf);
 		}
 	}
