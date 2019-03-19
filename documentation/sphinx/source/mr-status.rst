@@ -45,9 +45,9 @@ The following format informally describes the JSON containing the status data. T
 .. code-block:: javascript
 .. include:: mr-status-json-schemas.rst.inc
 
-.. mr-status-message:
-
 .. node:: |json-status-format|
+
+.. mr-status-message:
 
 Message components
 ------------------
