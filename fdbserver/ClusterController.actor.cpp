@@ -1042,7 +1042,10 @@ public:
 		return false;
 	}
 
-	bool onProxyOrResolver(Optional<Key> processId) {
+	bool isProxyOrResolver(Optional<Key> processId) {
+		ASSERT(masterProcessId.present());
+		if (processId == masterProcessId.get()) return false;
+
 		auto& dbInfo = db.serverInfo->get();
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
@@ -1111,6 +1114,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
+	AsyncTrigger recruitingRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()),
@@ -2387,7 +2391,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
-			state InitializeDataDistributorRequest req(g_random->randomUniqueID());
+			InitializeDataDistributorRequest req(g_random->randomUniqueID());
 			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
 			ErrorOr<DataDistributorInterface> distributor = wait( worker.interf.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
@@ -2444,8 +2448,8 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
-			state InitializeRatekeeperRequest req(g_random->randomUniqueID());
+			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
+			InitializeRatekeeperRequest req(g_random->randomUniqueID());
 			state WorkerDetails worker = rkWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::RateKeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2485,15 +2489,33 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 		}
 	}
 
+	state Future<Void> ratekeeperFailed = Never();
+	state Future<RatekeeperInterface> rkInterf = Never();
 	loop {
-		if ( self->db.serverInfo->get().ratekeeper.present() ) {
-			wait( waitFailureClient( self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME ) );
-			TraceEvent("ClusterController_RateKeeperDied", self->id)
-			.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
-			self->db.clearInterf(ProcessClass::RateKeeperClass);
+		if (self->db.serverInfo->get().ratekeeper.present()) {
+			ratekeeperFailed = waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME);
 		} else {
-			RatekeeperInterface rkInterf = wait( startRatekeeper(self) );
-			self->db.setRatekeeper(rkInterf);
+			ratekeeperFailed = Never();
+		}
+		choose {
+			when ( wait(self->recruitingRatekeeper.onTrigger()) ) {
+				RatekeeperInterface rki = wait(startRatekeeper(self));
+				if (self->db.serverInfo->get().ratekeeper.present()) {
+					self->addActor.send(brokenPromiseToNever(self->db.serverInfo->get().ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
+				}
+				self->db.setRatekeeper(rki);
+			}
+			when (wait(ratekeeperFailed)) {
+				ratekeeperFailed = Never();
+				TraceEvent("ClusterController_RateKeeperDied", self->id)
+				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+				self->db.clearInterf(ProcessClass::RateKeeperClass);
+				rkInterf = startRatekeeper(self);
+			}
+			when (RatekeeperInterface rki = wait(rkInterf)) {
+				rkInterf = Never();
+				self->db.setRatekeeper(rki);
+			}
 		}
 	}
 }
@@ -2510,23 +2532,22 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 		auto masterFitnessForRK = masterWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 		auto masterFitnessForDD = masterWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 
-		state Future<Void> rkReply = Void();
 		if (db.ratekeeper.present()) {
 			auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 			auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
-			if (self->onProxyOrResolver(rkWorker.details.interf.locality.processId()) ||
+			if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) ||
 					rkFitness > masterFitnessForRK) {
 				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitnessForRK);
-				rkReply = db.ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id));
+				self->recruitingRatekeeper.trigger();
 			}
 		}
 
-		state Future<Void> ddReply = Void();
+		Future<Void> ddReply = Void();
 		if (db.distributor.present()) {
 			auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 			auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
-			if (self->onProxyOrResolver(ddWorker.details.interf.locality.processId()) ||
+			if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) ||
 					ddFitness > masterFitnessForDD) {
 				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
 				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitnessForDD);
@@ -2534,7 +2555,7 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 			}
 		}
 
-		wait(rkReply && ddReply && delay(SERVER_KNOBS->STATELESS_SERVER_FITNESS_CHECK_INTERVAL));
+		wait(ddReply && delay(SERVER_KNOBS->STATELESS_SERVER_FITNESS_CHECK_INTERVAL));
 	}
 }
 
