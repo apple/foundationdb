@@ -111,7 +111,7 @@ FDB_TLS_LIB := lib/libFDBLibTLS.a
 TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
 endif
 
-CXXFLAGS += -Wno-deprecated
+CXXFLAGS += -Wno-deprecated -DBOOST_ERROR_CODE_HEADER_ONLY -DBOOST_SYSTEM_NO_DEPRECATED
 LDFLAGS :=
 LIBS :=
 STATIC_LIBS :=

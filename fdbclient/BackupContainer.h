@@ -89,6 +89,21 @@ struct KeyspaceSnapshotFile {
 	std::string fileName;
 	int64_t totalSize;
 	Optional<bool> restorable;  // Whether or not the snapshot can be used in a restore, if known
+	bool isSingleVersion() const {
+		return beginVersion == endVersion;
+	}
+	double expiredPct(Optional<Version> expiredEnd) const {
+		double pctExpired = 0;
+		if(expiredEnd.present() && expiredEnd.get() > beginVersion) {
+			if(isSingleVersion()) {
+				pctExpired = 1;
+			}
+			else {
+				pctExpired = double(std::min(endVersion, expiredEnd.get()) - beginVersion) / (endVersion - beginVersion);
+			}
+		}
+		return pctExpired * 100;
+	}
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const KeyspaceSnapshotFile &rhs) const {
@@ -132,6 +147,7 @@ struct BackupDescription {
 	std::map<Version, int64_t> versionTimeMap;
 
 	std::string toString() const;
+	std::string toJSON() const;
 };
 
 struct RestorableFileSet {

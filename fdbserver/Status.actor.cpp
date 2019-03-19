@@ -810,7 +810,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
+static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap,
+									std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap) {
 	JsonBuilderObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -834,7 +835,9 @@ static JsonBuilderObject clientStatusFetcher(ClientVersionMap clientVersionMap, 
 		for(auto client : cv.second) {
 			JsonBuilderObject cli;
 			cli["address"] = client.toString();
-			cli["log_group"] = traceLogGroupMap[client];
+			ASSERT(clientStatusInfoMap.find(client) != clientStatusInfoMap.end());
+			cli["log_group"] = clientStatusInfoMap[client].traceLogGroup;
+			cli["connected_coordinators"]  = (int) clientStatusInfoMap[client].connectedCoordinatorsNum;
 			clients.push_back(cli);
 		}
 
@@ -1806,7 +1809,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
-		std::map<NetworkAddress, std::string> traceLogGroupMap,
+		std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,
 		Version datacenterVersionDifference )
@@ -2039,7 +2042,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
+		statusObj["clients"] = clientStatusFetcher(clientVersionMap, clientStatusInfoMap);
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {

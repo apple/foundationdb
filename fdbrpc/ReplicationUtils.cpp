@@ -38,8 +38,7 @@ double ratePolicy(
 	std::map<LocalityEntry, int>	counterMap;
 	std::vector<LocalityEntry>		results;
 
-	for (auto testIndex = 0; testIndex < nTestTotal; testIndex ++)
-	{
+	for (auto testIndex = 0u; testIndex < nTestTotal; testIndex++) {
 		results.clear();
 		if (!policy->selectReplicas(localitySet, results)) {
 			printf("Failed to apply policy: %s to %d entries\n", policy->info().c_str(), localitySet->size());
@@ -101,8 +100,7 @@ bool findBestPolicySet(
 		localitySet->DisplayEntries();
 	}
 
-	for (auto policyTest=0; policyTest < nPolicyTests; policyTest ++)
-	{
+	for (auto policyTest = 0u; policyTest < nPolicyTests; policyTest++) {
 		results.clear();
 		if (!policy->selectReplicas(localitySet, results)) {
 			bSucceeded = false;
@@ -179,8 +177,7 @@ bool findBestUniquePolicySet(
 		localitySet->DisplayEntries();
 	}
 
-	for (auto policyTest=0; policyTest < nPolicyTests; policyTest ++)
-	{
+	for (auto policyTest = 0u; policyTest < nPolicyTests; policyTest++) {
 		results.clear();
 		if (!policy->selectReplicas(localitySet, results)) {
 			bSucceeded = false;
@@ -377,7 +374,7 @@ Reference<LocalitySet>	createTestLocalityMap(std::vector<repTestType>& indexes, 
 {
 	Reference<LocalitySet>			buildServer(new LocalityMap<repTestType>());
 	LocalityMap<repTestType>*		serverMap = (LocalityMap<repTestType>*) buildServer.getPtr();
-	int													serverValue, dcLoop, szLoop, rackLoop, slotLoop;
+	int serverValue;
 	std::string									dcText, szText, rackText, slotText, independentName, independentText;
 
 	// Determine the total size
@@ -465,7 +462,6 @@ bool	testPolicy(
 	std::string	outputText, includeText;
 	std::vector<LocalityEntry>	entryResults;
 	std::vector<repTestType*>		results;
-	int			resultsTotal;
 	bool		valid, solved;
 
 	if (g_replicationdebug > 1) {
@@ -513,7 +509,7 @@ bool	testPolicy(
 			outputText = policy->info() + includeText + ((solved) ? " -> None" : " -> No solution");
 		}
 
-		printf("%-5s:%3d  %s\n", (valid) ? "Valid" : "Error", resultsTotal, outputText.c_str());
+		printf("%-5s:%3d  %s\n", (valid) ? "Valid" : "Error", 0, outputText.c_str());
 	}
 
 	return valid;

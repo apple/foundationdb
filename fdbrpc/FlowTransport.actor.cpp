@@ -343,6 +343,7 @@ struct Peer : NonCopyable {
 				break;
 			}
 		}
+
 		if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
 			// Keep the new connection
 			TraceEvent("IncomingConnection", conn->getDebugID())
@@ -1110,7 +1111,7 @@ int FlowTransport::getEndpointCount() {
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
-	return self->numIncompatibleConnections;
+	return self->numIncompatibleConnections > 0;
 }
 
 void FlowTransport::createInstance( uint64_t transportId )

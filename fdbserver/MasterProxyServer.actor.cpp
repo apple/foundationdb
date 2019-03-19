@@ -1069,22 +1069,20 @@ ACTOR Future<Void> fetchVersions(ProxyCommitData *commitData) {
 
 struct TransactionRateInfo {
 	double rate;
-	double budget;
-
 	double limit;
 
-	TransactionRateInfo(double rate) : rate(rate), budget(0), limit(0) {}
+	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
 
 	void reset(double elapsed) {
-		this->limit = std::min(rate * elapsed, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START) + budget;
+		limit = std::min(0.0,limit) + std::min(rate * elapsed, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
 
-	bool canStart(int64_t numToStart, int64_t numAlreadyStarted) {
-		return numToStart + numAlreadyStarted < limit || numToStart * g_random->random01() + numAlreadyStarted < limit - std::max(0.0, budget);
+	bool canStart(int64_t numAlreadyStarted) {
+		return numAlreadyStarted < limit;
 	}
 
 	void updateBudget(int64_t numStarted) {
-		budget = std::max(std::min<double>(limit - numStarted, SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_SIZE), -SERVER_KNOBS->START_TRANSACTION_MAX_BUDGET_SIZE);
+		limit -= numStarted;
 	}
 };
 
@@ -1156,14 +1154,15 @@ ACTOR static Future<Void> transactionStarter(
 
 		double leftToStart = 0;
 		double batchLeftToStart = 0;
-		while (!transactionQueue.empty()) {
+		int requestsToStart = 0;
+		while (!transactionQueue.empty() && requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
 			auto& req = transactionQueue.top().first;
 			int tc = req.transactionCount;
 
-			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(tc, transactionsStarted[0] + transactionsStarted[1])) {
+			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
 				break;
 			}
-			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(tc, transactionsStarted[0] + transactionsStarted[1])) {
+			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
 				break;	
 			}
 
@@ -1182,6 +1181,7 @@ ACTOR static Future<Void> transactionStarter(
 
 			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue.pop();
+			requestsToStart++;
 		}
 
 		if (!transactionQueue.empty())

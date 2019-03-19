@@ -79,12 +79,12 @@ public:
 	virtual void close();
 
 	// IDiskQueue interface
-	virtual Future<bool> initializeRecovery() { return false; }
+	virtual Future<bool> initializeRecovery(location recoverAt) { return false; }
 	virtual Future<Standalone<StringRef>> readNext( int bytes );
 	virtual IDiskQueue::location getNextReadLocation();
 	virtual IDiskQueue::location getNextCommitLocation() { ASSERT(false); throw internal_error(); }
 	virtual IDiskQueue::location getNextPushLocation() { ASSERT(false); throw internal_error(); }
-	virtual Future<Standalone<StringRef>> read( location start, location end ) { ASSERT(false); throw internal_error(); }
+	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes ch ) { ASSERT(false); throw internal_error(); }
 	virtual IDiskQueue::location push( StringRef contents );
 	virtual void pop( IDiskQueue::location upTo );
 	virtual Future<Void> commit();

@@ -625,7 +625,7 @@ struct SendBuffer {
 
 struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 	int reference_count;
-	enum { DATA_SIZE = 4096 - 28 };
+	enum { DATA_SIZE = 4096 - 28 }; //28 is the size of the PacketBuffer fields
 	uint8_t data[ DATA_SIZE ];
 
 	PacketBuffer() : reference_count(1) {
