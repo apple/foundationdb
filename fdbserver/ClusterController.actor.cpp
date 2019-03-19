@@ -405,8 +405,8 @@ public:
 				// FIXME: If remote DC is used as satellite then this logic only ensures that required number of remote TLogs can be recruited. It does not balance the number of desired TLogs
 				// across the satellite and remote sides.
 				if (remoteDCUsedAsSatellite) {
-					std::map< Optional<Standalone<StringRef>>, int> tmpMap;
-					auto remoteLogs = getWorkersForTlogs(conf, conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogPolicy(), tmpMap, false, { remoteRegion.dcId }, {});
+					std::map< Optional<Standalone<StringRef>>, int> tmpIdUsed;
+					auto remoteLogs = getWorkersForTlogs(conf, conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogPolicy(), tmpIdUsed, false, { remoteRegion.dcId }, {});
 					std::transform(remoteLogs.begin(), remoteLogs.end(), std::back_inserter(exclusionWorkerIds), [](const WorkerDetails &in) { return in.interf.id(); });
 				}
 				if(satelliteFallback) {

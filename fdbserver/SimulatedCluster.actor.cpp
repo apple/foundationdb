@@ -988,7 +988,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 
-			bool useNormalDCsAsSatellites = datacenters > 4 && minimumRegions < 2 && g_random->random01() < 0.3 ? true : false;
+			bool useNormalDCsAsSatellites = datacenters > 4 && minimumRegions < 2 && g_random->random01() < 0.3;
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
 			primarySatelliteObj["priority"] = 1;
