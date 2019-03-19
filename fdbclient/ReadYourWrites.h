@@ -146,6 +146,7 @@ private:
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
+	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)
 	void updateConflictMap( KeyRangeRef const& keys, WriteMap::iterator& it ); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
 	void writeRangeToNativeTransaction( KeyRangeRef const& keys );

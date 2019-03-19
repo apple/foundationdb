@@ -1962,10 +1962,6 @@ Transaction::Transaction( Database const& cx )
 	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-	if(cx->lockAware) {
-		options.lockAware = true;
-	}
-	options.maxBackoff = cx->transactionMaxBackoff;
 }
 
 Transaction::~Transaction() {
@@ -2360,6 +2356,7 @@ double Transaction::getBackoff(int errCode) {
 void TransactionOptions::reset(Database const& cx) {
 	memset(this, 0, sizeof(*this));
 	maxBackoff = cx->transactionMaxBackoff;
+	lockAware = cx->lockAware;
 }
 
 void TransactionOptions::reset() {
@@ -2384,8 +2381,6 @@ void Transaction::reset() {
 	if(apiVersionAtLeast(16)) {
 		options.reset(cx);
 		setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-		if(cx->lockAware)
-			options.lockAware = true;
 	}
 }
 
