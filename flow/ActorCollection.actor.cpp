@@ -143,7 +143,7 @@ TEST_CASE("/flow/TraceEvent") {
 	}
 	TraceEvent("TraceDuration")
 		.detail("Time", g_network->now() - startTime);
-	printf("benchmark done\n", getpid());
+	printf("benchmark done\n");
 	wait(delay(10));
 	return Void();
 }
