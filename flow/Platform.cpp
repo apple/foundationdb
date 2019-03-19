@@ -1666,36 +1666,6 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
-	#ifdef _WIN32
-		// In Windows case, ReplaceFile API is used which preserves the ownership,
-		// ACLs and other attributes of the original file
-	#elif defined(__unixish__)
-		// get the uid/gid/mode bits of old file and set it on new file, else fail
-		struct stat info;
-		if (stat(path.c_str(), &info) < 0) {
-			TraceEvent("StatFailed").detail("Path", path);
-			throw io_error();
-		}
-		if (chown(tempfilename.c_str(), info.st_uid, info.st_gid) < 0) {
-			TraceEvent("ChownFailed")
-				.detail("TempFilename", tempfilename)
-				.detail("OriginalFile", path)
-				.detail("Uid", info.st_uid)
-				.detail("Gid", info.st_gid);
-			deleteFile(tempfilename);
-			throw io_error();
-		}
-		if (chmod(tempfilename.c_str(), info.st_mode) < 0) {
-			TraceEvent("ChmodFailed")
-				.detail("TempFilename", tempfilename)
-				.detail("OriginalFile", path)
-				.detail("Mode", info.st_mode);
-			deleteFile(tempfilename);
-			throw io_error();
-		}
-	#else
-	#error Port me!
-	#endif
 
 		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
 			throw io_error();
