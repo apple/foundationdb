@@ -50,6 +50,7 @@ enum {
 	TaskTLogPeek = 8590,
 	TaskTLogCommitReply = 8580,
 	TaskTLogCommit = 8570,
+	TaskTLogSpilledPeekReply = 8567,
 	TaskProxyGetRawCommittedVersion = 8565,
 	TaskProxyResolverReply = 8560,
 	TaskProxyCommitBatcher = 8550,
