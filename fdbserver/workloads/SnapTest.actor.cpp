@@ -330,7 +330,7 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					TraceEvent("SnapCreate").detail("SnapCreateErrorSnapTLogStorage", e.what());
-					throw;
+					wait(tr.onError(e));
 				}
 			}
 		} else if (self->testID == 7) {
@@ -357,7 +357,7 @@ public: // workload functions
 					break;
 				} catch (Error& e) {
 					TraceEvent("SnapCreate").detail("SnapCreateErrorSnapTLogStorage", e.what());
-					throw;
+					wait(tr.onError(e));
 				}
 			}
 		}

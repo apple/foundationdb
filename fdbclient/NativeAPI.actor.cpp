@@ -3370,6 +3370,14 @@ ACTOR Future<Void> snapCreate(Database inputCx, StringRef snapCmd, UID snapUID) 
 
 	TraceEvent("SnapCreateAfterSnappingTLogStorage").detail("UID", snapUID);
 
+	if (BUGGIFY) {
+		int32_t toDelay = g_random->randomInt(1, 30);
+		TraceEvent("SleepingBeforeEnablingPop")
+			.detail("duration", toDelay);
+		wait(delay(toDelay));
+		TraceEvent("DoneSleepingBeforeEnablingPop");
+	}
+
 	// enable popping of the TLog
 	loop {
 		tr.reset();

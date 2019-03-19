@@ -234,17 +234,6 @@ public:
 	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset,
 	                      bool allLocations = false) {
 		if(locality == tagLocalitySatellite) {
-			if (allLocations) {
-				// special handling for allLocations
-				TraceEvent("AllLocationsSet");
-				for (int i = 0; i < satelliteTagLocations.size(); i++) {
-					for (int j : satelliteTagLocations[i]) {
-						locations.push_back(locationOffset + j);
-					}
-				}
-				uniquify(locations);
-				return;
-			}
 			for(auto& t : tags) {
 				if(t == txsTag || t.locality == tagLocalityLogRouter) {
 					for(int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {

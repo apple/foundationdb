@@ -338,15 +338,17 @@ struct TLogData : NonCopyable {
                               // be able to match it up
 	std::string dataFolder; // folder where data is stored
 	Reference<AsyncVar<bool>> degraded;
+	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
+                                       // that came when ignorePopRequest was set
 
-	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded)
+	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
 			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0), queueCommitEnd(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
 			  peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS),
-			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder)
+			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped()
 		{
 		}
 };
@@ -1149,14 +1151,28 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
-	state Version upTo = req.to;
-	int8_t tagLocality = req.tag.locality;
+ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
+	if (self->ignorePopRequest && inputTag != txsTag) {
+		TraceEvent("IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+
+		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
+			|| to > self->toBePopped[inputTag]) {
+			self->toBePopped[inputTag] = to;
+		}
+		// add the pop to the toBePopped map
+		TraceEvent(SevDebug, "IgnoringPopRequest")
+			.detail("IgnorePopDeadline", self->ignorePopDeadline)
+			.detail("Tag", inputTag.toString())
+			.detail("Version", to);
+		return Void();
+	}
+	state Version upTo = to;
+	int8_t tagLocality = inputTag.locality;
 	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, req.to);
+		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
 		tagLocality = tagLocalityLogRouter;
 	}
-	state Tag tag(tagLocality, req.tag.id);
+	state Tag tag(tagLocality, inputTag.id);
 	auto tagData = logData->getTagData(tag);
 	if (!tagData) {
 		tagData = logData->createTagData(tag, upTo, true, true, false);
@@ -1178,6 +1194,34 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskTLogPop));
 		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
 	}
+	return Void();
+}
+
+ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
+	// timeout check for ignorePopRequest
+	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
+
+		TraceEvent("EnableTLogPlayAllIgnoredPops");
+		// use toBePopped and issue all the pops
+		state std::map<Tag, Version>::iterator it;
+		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+			TraceEvent("PlayIgnoredPop")
+				.detail("Tag", it->first.toString())
+				.detail("Version", it->second);
+			wait(tLogPopCore(self, it->first, it->second, logData));
+		}
+		self->toBePopped.clear();
+
+		self->ignorePopRequest = false;
+		self->ignorePopUid = "";
+		self->ignorePopDeadline = 0.0;
+		TraceEvent("ResetIgnorePopRequest")
+		    .detail("Now", g_network->now())
+		    .detail("IgnorePopRequest", self->ignorePopRequest)
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
+		    .trackLatest("DisableTLogPopTimedOut");
+	}
+	wait(tLogPopCore(self, req.tag, req.to, logData));
 	req.reply.send(Void());
 	return Void();
 }
@@ -1692,7 +1736,7 @@ ACTOR Future<Void> tLogCommit(
 
 					execArg.setCmdValueString(param2.toString());
 					execArg.dbgPrint();
-					auto uidStr = execArg.getBinaryArgValue("uid");
+					state std::string uidStr = execArg.getBinaryArgValue("uid");
 					execVersion = qe.version;
 					if (execCmd == execSnap) {
 						// validation check specific to snap request
@@ -1751,6 +1795,18 @@ ACTOR Future<Void> tLogCommit(
 							    .detail("UidStr", uidStr)
 							    .trackLatest("TLogPopDisableEnableUidMismatch");
 						}
+
+						TraceEvent("EnableTLogPlayAllIgnoredPops");
+						// use toBePopped and issue all the pops
+						state std::map<Tag, Version>::iterator it;
+						for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+							TraceEvent("PlayIgnoredPop")
+								.detail("Tag", it->first.toString())
+								.detail("Version", it->second);
+							wait(tLogPopCore(self, it->first, it->second, logData));
+						}
+						self->toBePopped.clear();
+
 						self->ignorePopRequest = false;
 						self->ignorePopDeadline = 0.0;
 						self->ignorePopUid = "";
