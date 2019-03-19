@@ -337,9 +337,9 @@ struct TLogData : NonCopyable {
                               // the set and for callers that unset will
                               // be able to match it up
 	std::string dataFolder; // folder where data is stored
-	Reference<AsyncVar<bool>> degraded;
 	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
                                        // that came when ignorePopRequest was set
+	Reference<AsyncVar<bool>> degraded;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
 			: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
