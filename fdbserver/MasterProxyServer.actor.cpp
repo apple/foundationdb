@@ -1584,7 +1584,7 @@ ACTOR Future<Void> masterProxyServerCore(
 			}
 
 			// get the list of workers
-			state std::vector<std::pair<WorkerInterface, ProcessClass>> workers =
+			state std::vector<WorkerDetails> workers =
 			    wait(db->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
 
 			// send the exec command to the list of workers which are
@@ -1592,10 +1592,10 @@ ACTOR Future<Void> masterProxyServerCore(
 			state int i = 0;
 			state int numSucc = 0;
 			for (; i < workers.size(); i++) {
-				if (coordinatorsAddrSet.find(workers[i].first.address()) != coordinatorsAddrSet.end()) {
-					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].first.address());
+				if (coordinatorsAddrSet.find(workers[i].interf.address()) != coordinatorsAddrSet.end()) {
+					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].interf.address());
 					try {
-						wait(timeoutError(workers[i].first.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 1.0));
+						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 1.0));
 						++numSucc;
 					} catch (Error& e) {
 						TraceEvent("ExecReqFailed").detail("what", e.what());

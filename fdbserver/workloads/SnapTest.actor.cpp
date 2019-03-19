@@ -371,11 +371,11 @@ public: // workload functions
 		state vector<WorkerInterface> tLogWorkers;
 		state std::vector<Future<TraceEventFields>> tLogMessages;
 
-		state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state std::map<NetworkAddress, WorkerInterface> address_workers;
 
 		for (auto const& worker : workers) {
-			address_workers[worker.first.address()] = worker.first;
+			address_workers[worker.interf.address()] = worker.interf;
 		}
 		vector<TLogInterface> tLogServers = self->dbInfo->get().logSystemConfig.allPresentLogs();
 
@@ -435,10 +435,10 @@ public: // workload functions
 
 	ACTOR Future<bool> verifyExecTraceVersion(Database cx, SnapTestWorkload* self) {
 		state std::vector<NetworkAddress> coordAddrs = wait(getCoordinators(cx));
-		state vector<std::pair<WorkerInterface, ProcessClass>> proxyWorkers = wait(getWorkers(self->dbInfo));
-		state vector<std::pair<WorkerInterface, ProcessClass>> storageWorkers = wait(getWorkers(self->dbInfo));
-		state vector<std::pair<WorkerInterface, ProcessClass>> tLogWorkers = wait(getWorkers(self->dbInfo));
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(getWorkers(self->dbInfo));
+		state vector<WorkerDetails> proxyWorkers = wait(getWorkers(self->dbInfo));
+		state vector<WorkerDetails> storageWorkers = wait(getWorkers(self->dbInfo));
+		state vector<WorkerDetails> tLogWorkers = wait(getWorkers(self->dbInfo));
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		state std::vector<Future<TraceEventFields>> proxyMessages;
 		state std::vector<Future<TraceEventFields>> tLogMessages;
@@ -459,21 +459,21 @@ public: // workload functions
 				std::string eventToken = "ExecTrace/Coordinators/" + self->snapUID.toString();
 				StringRef eventTokenRef(eventToken);
 				coordMessages.push_back(
-				    timeoutError(workers[i].first.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
+				    timeoutError(workers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
 			}
 
 			for (int i = 0; i < workers.size(); i++) {
 				std::string eventToken = "ExecTrace/Proxy/" + self->snapUID.toString();
 				StringRef eventTokenRef(eventToken);
 				proxyMessages.push_back(
-				    timeoutError(workers[i].first.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
+				    timeoutError(workers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
 			}
 
 			for (int i = 0; i < storageWorkers.size(); i++) {
 				std::string eventToken = "ExecTrace/storage/" + self->snapUID.toString();
 				StringRef eventTokenRef(eventToken);
 				storageMessages.push_back(timeoutError(
-				    storageWorkers[i].first.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
+				    storageWorkers[i].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
 			}
 
 			try {
@@ -573,7 +573,7 @@ public: // workload functions
 						std::string eventToken = "ExecTrace/TLog/" + tag.toString() + "/" + self->snapUID.toString();
 						StringRef eventTokenRef(eventToken);
 						tLogMessages.push_back(timeoutError(
-						    tLogWorkers[m].first.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
+						    tLogWorkers[m].interf.eventLogRequest.getReply(EventLogRequest(eventTokenRef)), 1.0));
 					}
 
 					try {
