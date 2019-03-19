@@ -167,7 +167,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
-		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
@@ -184,7 +183,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
-		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;

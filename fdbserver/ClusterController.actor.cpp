@@ -1042,11 +1042,29 @@ public:
 		return false;
 	}
 
+	bool onProxyOrResolver(Optional<Key> processId) {
+		auto& dbInfo = db.serverInfo->get();
+		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
+			if (interf.locality.processId() == processId) return true;
+		}
+		for (const ResolverInterface& interf: dbInfo.resolvers) {
+			if (interf.locality.processId() == processId) return true;
+		}
+		return false;
+	}
+
+	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) {
+		ASSERT(masterProcessId.present());
+		auto fitness = worker.processClass.machineClassFitness(role);
+		auto masterFitness = id_worker[masterProcessId.get()].details.processClass.machineClassFitness(role);
+		return fitness > masterFitness || (fitness == masterFitness && worker.interf.locality.processId() != masterProcessId.get());
+	}
+
 	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
 		updateKnownIds(&idUsed);
 
-		auto dbInfo = db.serverInfo->get();
+		auto& dbInfo = db.serverInfo->get();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
@@ -1092,10 +1110,13 @@ public:
 	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
-	bool recruitingRatekeeper;
+	Optional<UID> recruitingRatekeeperID;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
-		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false), recruitingDistributor(false), recruitingRatekeeper(false)
+		: clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()),
+			id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false),
+			gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0),
+			versionDifferenceUpdated(false), recruitingDistributor(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1124,10 +1145,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 		try {
 			state double recoveryStart = now();
 			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
-
-			while(!cluster->clusterControllerProcessId.present()) {
-				wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
-			}
 
 			//We must recruit the master in the same data center as the cluster controller.
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
@@ -1743,8 +1760,6 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 	}
 	if ( w.address() == g_network->getLocalAddress() ) {
-		self->clusterControllerProcessId = w.locality.processId();
-		self->clusterControllerDcId = w.locality.dcId();
 		if(self->changingDcIds.get().first) {
 			if(self->changingDcIds.get().second.present()) {
 				newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness( w.locality.dcId(), self->changingDcIds.get().second.get() );
@@ -1792,8 +1807,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		TraceEvent("ClusterController_RegisterDataDistributor", self->id).detail("DDID", di.id());
 		self->db.setDistributor(di);
 	}
-	if (req.ratekeeperInterf.present() && !self->recruitingRatekeeper) {
-		if (!self->db.serverInfo->get().ratekeeper.present() && self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId()) {
+	if (req.ratekeeperInterf.present()) {
+		if (!self->db.serverInfo->get().ratekeeper.present() &&
+				self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId() &&
+				(!self->recruitingRatekeeperID.present() || self->recruitingRatekeeperID.get() == req.ratekeeperInterf.get().id())) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
 			self->db.setRatekeeper(rki);
@@ -2330,10 +2347,6 @@ ACTOR Future<Void> doEmptyCommit(Database cx) {
 }
 
 ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterControllerFullInterface interf ) {
-	while(!self->clusterControllerProcessId.present()) {
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
-	}
-
 	loop {
 		state ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() );
 		TraceEvent("ForcedRecoveryStart", self->id).detail("ClusterControllerDcId", printable(self->clusterControllerDcId)).detail("DcId", req.dcId.printable());
@@ -2358,7 +2371,7 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 }
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
-	while ( !self->clusterControllerProcessId.present() || !self->masterProcessId.present() ) {
+	while (!self->masterProcessId.present() ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
@@ -2369,13 +2382,17 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			WorkerFitnessInfo data_distributor = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used);
+			state WorkerDetails worker = data_distributor.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
+				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
 			state InitializeDataDistributorRequest req(g_random->randomUniqueID());
-			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", data_distributor.worker.interf.address());
+			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
-			ErrorOr<DataDistributorInterface> distributor = wait( data_distributor.worker.interf.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
+			ErrorOr<DataDistributorInterface> distributor = wait( worker.interf.dataDistributor.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0) );
 			if (distributor.present()) {
-				TraceEvent("ClusterController_DataDistributorRecruited", self->id).detail("Addr", data_distributor.worker.interf.address());
+				TraceEvent("ClusterController_DataDistributorRecruited", self->id).detail("Addr", worker.interf.address());
 				return distributor.get();
 			}
 		}
@@ -2429,11 +2446,17 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 			state WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
 			state InitializeRatekeeperRequest req(g_random->randomUniqueID());
-			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", rkWorker.worker.interf.address());
+			state WorkerDetails worker = rkWorker.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::RateKeeper)) {
+				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
+			self->recruitingRatekeeperID = req.reqId;
+			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", worker.interf.address());
 
-			ErrorOr<RatekeeperInterface> interf = wait( rkWorker.worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
+			ErrorOr<RatekeeperInterface> interf = wait( worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
 			if (interf.present()) {
-				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", rkWorker.worker.interf.address());
+				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", worker.interf.address());
+				self->recruitingRatekeeperID = Optional<UID>();
 				return interf.get();
 			}
 		}
@@ -2469,34 +2492,32 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 			.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 			self->db.clearInterf(ProcessClass::RateKeeperClass);
 		} else {
-			self->recruitingRatekeeper = true;
 			RatekeeperInterface rkInterf = wait( startRatekeeper(self) );
-			self->recruitingRatekeeper = false;
 			self->db.setRatekeeper(rkInterf);
 		}
 	}
 }
 
 ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
-	state std::map<Optional<Standalone<StringRef>>, WorkerInfo>::iterator masterWorker;
-
 	loop {
-		masterWorker = self->id_worker.find(self->db.serverInfo->get().master.locality.processId());
-		if (masterWorker == self->id_worker.end()) {
+		if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			wait(self->db.serverInfo->onChange());
 			continue;
 		}
 
+		auto& masterWorker = self->id_worker[self->masterProcessId.get()];
 		const ServerDBInfo& db = self->db.serverInfo->get();
-		auto masterFitness = masterWorker->second.details.processClass.machineClassFitness(ProcessClass::Master);
+		auto masterFitnessForRK = masterWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
+		auto masterFitnessForDD = masterWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 
 		state Future<Void> rkReply = Void();
 		if (db.ratekeeper.present()) {
 			auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 			auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
-			if (self->clusterControllerDcId != rkWorker.details.interf.locality.dcId() || rkFitness > masterFitness) {
+			if (self->onProxyOrResolver(rkWorker.details.interf.locality.processId()) ||
+					rkFitness > masterFitnessForRK) {
 				TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
-				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitness);
+				.detail("Fitness", rkFitness).detail("MasterFitness", masterFitnessForRK);
 				rkReply = db.ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id));
 			}
 		}
@@ -2505,9 +2526,10 @@ ACTOR Future<Void> monitorBetterDDOrRK(ClusterControllerData* self) {
 		if (db.distributor.present()) {
 			auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 			auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
-			if (self->clusterControllerDcId != ddWorker.details.interf.locality.dcId() || ddFitness > masterFitness) {
+			if (self->onProxyOrResolver(ddWorker.details.interf.locality.processId()) ||
+					ddFitness > masterFitnessForDD) {
 				TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
-				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitness);
+				.detail("Fitness", ddFitness).detail("MasterFitness", masterFitnessForDD);
 				ddReply = db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id));
 			}
 		}

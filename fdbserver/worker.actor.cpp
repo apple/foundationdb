@@ -846,7 +846,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when ( InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture()) ) {
-				RatekeeperInterface recruited(locality);
+				RatekeeperInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (rkInterf->get().present()) {
