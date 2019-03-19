@@ -150,17 +150,21 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 
-	TransactionOptions() {
-		reset();
+	TransactionOptions(Database const& cx) {
+		reset(cx);
 		if (BUGGIFY) {
 			commitOnFirstProxy = true;
 		}
 	}
 
-	void reset() {
-		memset(this, 0, sizeof(*this));
-		maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	TransactionOptions() {
+		reset();
 	}
+
+	void reset(Database const& cx);
+
+private: 
+	void reset();
 };
 
 struct TransactionInfo {
@@ -301,7 +305,7 @@ public:
 
 	void checkDeferredError();
 
-	Database getDatabase(){
+	Database getDatabase() const {
 		return cx;
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);

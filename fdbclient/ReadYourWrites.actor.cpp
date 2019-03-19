@@ -1469,6 +1469,14 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 	}
 }
 
+void ReadYourWritesTransactionOptions::reset(Transaction const& tr) {
+		memset(this, 0, sizeof(*this));
+		Database cx = tr.getDatabase();
+		timeoutInSeconds = cx->transactionTimeout;
+		maxRetries = cx->transactionMaxRetries;
+		snapshotRywEnabled = cx->snapshotRywEnabled;
+}
+
 bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {
 	bool disabled = nextWriteDisableConflictRange;
 	nextWriteDisableConflictRange = false;
