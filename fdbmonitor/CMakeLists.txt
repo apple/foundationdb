@@ -11,7 +11,7 @@ target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
 
 fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
 
-# Create a local sanbox for quick manual testing without simulator
+# Create a local sandbox for quick manual testing without simulator
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sandbox/data)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sandbox/logs)
 configure_file(${CMAKE_SOURCE_DIR}/cmake/Sandbox.conf.cmake
