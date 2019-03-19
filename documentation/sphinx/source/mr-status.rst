@@ -43,7 +43,7 @@ JSON format
 The following format informally describes the JSON containing the status data. The possible values of ``<name_string>`` and ``<description_string>`` are described in :ref:`mr-status-message`. The format is representative: *any field can be missing at any time*, depending on the database state. Clients should be prepared to flexibly handle format variations resulting from different database states.
 
 .. code-block:: javascript
-.. include:: mr-status-auto-gen.rst.inc
+.. include:: mr-status-json-schemas.rst.inc
 
 .. mr-status-message:
 
