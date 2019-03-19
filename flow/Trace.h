@@ -347,7 +347,7 @@ struct TraceEvent {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
-			return detailImpl(std::move(key), std::move(s));
+			return detailImpl(std::move(key), std::move(s), false);
 		}
 		return *this;
 	}
