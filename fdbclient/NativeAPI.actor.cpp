@@ -2484,19 +2484,21 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 					Standalone<RangeResultRef> shouldBeEmpty = wait(
 						tr.getRange( it->range(), 1 ) );
 					if( shouldBeEmpty.size() ) {
-						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", it->range().begin.c_str())
-							.detail("KeyEnd", it->range().end.c_str());
+						TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Clear").detail("KeyBegin", it->range().begin)
+							.detail("KeyEnd", it->range().end);
 						return;
 					}
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed").detail("Class", "Set").detail("Key", it->range().begin.c_str())
-							.detail("Expected", m.setValue.c_str());
+						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
+							.detail("Class", "Set")
+							.detail("Key", it->range().begin)
+							.detail("Expected", m.setValue);
 						if( !val.present() )
 							evt.detail("Actual", "_Value Missing_");
 						else
-							evt.detail("Actual", val.get().c_str());
+							evt.detail("Actual", val.get());
 						return;
 					}
 				}

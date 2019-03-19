@@ -396,7 +396,7 @@ public:
 		} catch(Error &e) {
 			TraceEvent(SevWarn, "TB_ExecuteFailure")
 				.error(e)
-				.detail("TaskUID", task->key.)
+				.detail("TaskUID", task->key)
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
 				.detail("Priority", task->getPriority());
 			try {
