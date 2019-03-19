@@ -900,6 +900,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			// If there is a configuration message then there is no configuration information to display
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
+			bool isOldMemory = false;
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no configuration?
@@ -914,6 +915,9 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				outputString += "\n  Storage engine         - ";
 				if (statusObjConfig.get("storage_engine", strVal)){
+					if(strVal == "memory-1") {
+						isOldMemory = true;
+					}
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -1173,6 +1177,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			// Workload section
 			outputString += "\n\nWorkload:";
 			outputStringCache = outputString;
+			bool foundLogAndStorage = false;
 			try {
 				// Determine which rates are unknown
 				StatusObjectReader statusObjWorkload;
@@ -1225,6 +1230,22 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				std::vector<std::string> messagesAddrs;
 				for (auto proc : processesMap.obj()){
 					StatusObjectReader process(proc.second);
+					if(process.has("roles")) {
+						StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+						bool storageRole = false;
+						bool logRole = false;
+						for (StatusObjectReader role : rolesArray) {
+							if (role["role"].get_str() == "storage") {
+								storageRole = true;
+							}
+							else if (role["role"].get_str() == "log") {
+								logRole = true;
+							}
+						}
+						if(storageRole && logRole) {
+							foundLogAndStorage = true;
+						}
+					}
 					if (process.has("messages")) {
 						StatusArray processMessagesArr = process.last().get_array();
 						if (processMessagesArr.size()){
@@ -1408,6 +1429,14 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			if (clientTime != ""){
 				outputString += "\n\nClient time: " + clientTime;
 			}
+
+			if(processesMap.obj().size() > 1 && isOldMemory) {
+				outputString += "\n\nWARNING: type `configure memory' to switch to a safer method of persisting data on the transaction logs.";
+			}
+			if(processesMap.obj().size() > 9 && foundLogAndStorage) {
+				outputString += "\n\nWARNING: A single process is both a transaction log and a storage server.\n  For best performance use dedicated disks for the transaction logs by setting process classes.";
+			}
+
 			printf("%s\n", outputString.c_str());
 		}
 
@@ -2185,7 +2214,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 

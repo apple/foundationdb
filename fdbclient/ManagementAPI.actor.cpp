@@ -81,20 +81,29 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
+	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
 	if (mode == "ssd-1") {
-		storeType= KeyValueStoreType::SSD_BTREE_V1;
+		logType = KeyValueStoreType::SSD_BTREE_V1;
+		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
 	} else if (mode == "ssd-redwood-experimental") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-	} else if (mode == "memory") {
+	} else if (mode == "memory" || mode == "memory-2") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType= KeyValueStoreType::MEMORY;
+	} else if (mode == "memory-1") {
+		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
-		out[p+"log_engine"] = out[p+"storage_engine"] = format("%d", storeType.get());
+		out[p+"log_engine"] = format("%d", logType.get());
+		out[p+"storage_engine"] = format("%d", storeType.get());
 		return out;
 	}
 
