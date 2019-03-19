@@ -106,6 +106,7 @@ public:
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	bool useProvisionalProxies;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;

@@ -510,7 +510,7 @@ DatabaseContext::DatabaseContext(
 	Reference<Cluster> cluster, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, Standalone<StringRef> dbId, 
 	int taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, int apiVersion ) 
 	: cluster(cluster), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), dbId(dbId), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
-	lockAware(lockAware), apiVersion(apiVersion),
+	lockAware(lockAware), apiVersion(apiVersion), useProvisionalProxies(false),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
 	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
@@ -730,6 +730,13 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
 			server_interf.clear();
 			locationCache.insert( allKeys, Reference<LocationInfo>() );
+			break;
+		case FDBDatabaseOptions::USE_PROVISIONAL_PROXIES:
+			if( !useProvisionalProxies && clientInfo->get().proxies.size() && clientInfo->get().proxies[0].provisional ) {
+				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
+				masterProxiesChangeTrigger.trigger();
+			}
+			useProvisionalProxies = true;
 			break;
 	}
 }
@@ -1021,8 +1028,9 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies() {
 	if (masterProxiesLastChange != clientInfo->get().id) {
 		masterProxiesLastChange = clientInfo->get().id;
 		masterProxies.clear();
-		if( clientInfo->get().proxies.size() )
+		if( clientInfo->get().proxies.size() && ( useProvisionalProxies || !clientInfo->get().proxies[0].provisional ) ) {
 			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
+		}
 	}
 	return masterProxies;
 }

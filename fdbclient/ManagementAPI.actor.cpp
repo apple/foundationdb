@@ -280,6 +280,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 
 	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
@@ -712,6 +713,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 
 	if(!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; //FIXME: correct return type
@@ -858,6 +860,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
 	state int notEnoughMachineResults = 0;
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 
 	loop {
 		try {
@@ -1145,6 +1148,7 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1173,6 +1177,7 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1221,7 +1226,7 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass processClass ) {
 	state Transaction tr(cx);
-
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1285,7 +1290,7 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	state int oldMode = -1;
 	state BinaryWriter wr(Unversioned());
 	wr << mode;
-
+	cx->setOption(FDBDatabaseOptions::USE_PROVISIONAL_PROXIES, Optional<StringRef>());
 	loop {
 		try {
 			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );

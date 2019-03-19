@@ -945,6 +945,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
 				MasterProxyInterface recruited;
 				recruited.locality = locality;
+				recruited.provisional = false;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
