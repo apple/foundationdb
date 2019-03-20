@@ -1116,14 +1116,13 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
-	bool recruitingRatekeeper;
 	AsyncTrigger recruitRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()),
 			id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false),
 			gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0),
-			versionDifferenceUpdated(false), recruitingDistributor(false), recruitingRatekeeper(false)
+			versionDifferenceUpdated(false), recruitingDistributor(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1382,7 +1381,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	auto masterFitnessForRK = masterWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 	auto masterFitnessForDD = masterWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 
-	if (!self->recruitingRatekeeper && db.ratekeeper.present()) {
+	if (!self->recruitingRatekeeperID.present() && db.ratekeeper.present()) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) ||
@@ -1849,11 +1848,17 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		self->db.setDistributor(di);
 	}
 	if (req.ratekeeperInterf.present()) {
-		if (!self->db.serverInfo->get().ratekeeper.present() &&
-				self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId() &&
+		if (self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId() &&
 				(!self->recruitingRatekeeperID.present() || self->recruitingRatekeeperID.get() == req.ratekeeperInterf.get().id())) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
+			if (self->db.serverInfo->get().ratekeeper.present()) {
+				TraceEvent("ClusterController_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
+				self->db.serverInfo->get().ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
+			}
+			if (self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() == rki.id()) {
+				self->recruitingRatekeeperID = Optional<UID>();
+			}
 			self->db.setRatekeeper(rki);
 		} else {
 			TraceEvent("ClusterController_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
@@ -2427,8 +2432,6 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			state WorkerDetails worker = data_distributor.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
-				TraceEvent("CC_DataDistributor_UseMaster", self->id).detail("Master", worker.interf.address().toString())
-				.detail("Worker", worker.interf.address().toString());
 			}
 			InitializeDataDistributorRequest req(g_random->randomUniqueID());
 			TraceEvent("ClusterController_DataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
@@ -2479,7 +2482,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 	}
 }
 
-ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
+ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 	loop {
 		try {
 			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
@@ -2498,9 +2501,8 @@ ACTOR Future<RatekeeperInterface> startRatekeeper(ClusterControllerData *self) {
 
 			ErrorOr<RatekeeperInterface> interf = wait( worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
 			if (interf.present()) {
-				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", worker.interf.address()).detail("RKID", self->recruitingRatekeeperID.get());
-				self->recruitingRatekeeperID = Optional<UID>();
-				return interf.get();
+				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", worker.interf.address());
+				return Void();
 			}
 		}
 		catch (Error& e) {
@@ -2529,38 +2531,33 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	}
 
 	state Future<Void> ratekeeperFailed = Never();
-	state Future<RatekeeperInterface> rkInterf = Never();
-	if (self->db.serverInfo->get().ratekeeper.present()) {
-		ratekeeperFailed = waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME);
-	} else {
-		rkInterf = startRatekeeper(self);
-	}
+	state Future<Void> rkInterf = Never();
+	state bool recruitingRatekeeper = false;
 	loop {
+		if (self->db.serverInfo->get().ratekeeper.present()) {
+			ratekeeperFailed = waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME);
+		} else if (!recruitingRatekeeper) {
+			recruitingRatekeeper = true;
+			rkInterf = startRatekeeper(self);
+		}
 		choose {
 			when ( wait(self->recruitRatekeeper.onTrigger()) ) {
-				if (!self->recruitingRatekeeper) {
-					self->recruitingRatekeeper = true;
+				// Force recruiting even if we have a valid ratekeeper now.
+				if (!recruitingRatekeeper) {
+					recruitingRatekeeper = true;
 					rkInterf = startRatekeeper(self);
 				}
-				if (self->db.serverInfo->get().ratekeeper.present()) {
-					self->addActor.send(brokenPromiseToNever(self->db.serverInfo->get().ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
-				}
 			}
-			when (wait(ratekeeperFailed)) {
+			when ( wait(self->db.serverInfo->onChange()) ) {}
+			when ( wait(ratekeeperFailed) ) {
 				ratekeeperFailed = Never();
 				TraceEvent("ClusterController_RateKeeperDied", self->id)
 				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 				self->db.clearInterf(ProcessClass::RateKeeperClass);
-				if (!self->recruitingRatekeeper) {
-					self->recruitingRatekeeper = true;
-					rkInterf = startRatekeeper(self);
-				}
 			}
-			when (RatekeeperInterface rki = wait(rkInterf)) {
+			when ( wait(rkInterf) ) {
 				rkInterf = Never();
-				self->recruitingRatekeeper = false;
-				self->db.setRatekeeper(rki);
-				ratekeeperFailed = waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME);
+				recruitingRatekeeper = false;
 			}
 		}
 	}
