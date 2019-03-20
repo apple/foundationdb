@@ -38,9 +38,10 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	struct tm out;
 #ifdef _WIN32
+	// TODO:  Use this implementation for all platforms
 	// Windows does not support strptime, so we will use std::get_time
 	// Unfortunately, std::get_time() does not support %z (as strptime does) so we must read
-	// the date/time part separately from the timezone and then adjust tm.
+	// the date/time part separately from the timezone and then adjust the epoch seconds result.
 	std::istringstream s(timestamp.substr(0, 19));
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
 	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
@@ -57,16 +58,24 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	if(tzHH < 0) {
 		tzMM = -tzMM;
 	}
+	// tzOffset is the number of seconds EAST of GMT
 	int tzOffset = tzHH * 60 * 60 + tzMM * 60;
 
-	// timestamp was meant to be read in timezone tzOffset, but instead (for reasons stated above) was read without a timezone.
-	// mktime() will return epoch seconds and update out.tm_gmtoff to the local timezone (if it exists)
+	// The goal is to convert the timestamp string to epoch seconds assuming the date/time was expressed in the timezone at the end of the string.
+	// However, mktime() will ONLY return epoch seconds assuming the date/time is expressed in local time (based on locale / environment)
 	int64_t ts = mktime(&out);
 
-	// Add back the difference between the default timezone offset and the intended one.
-	ts += ((-_timezone) - tzOffset);  // Would like to use out.tm_gmtoff here but on Windows the negative of _timezone must be used instead.
+	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input string
+#ifdef _WIN32
+	// _get_timezone() returns the number of seconds WEST of GMT, so we negate it to match the orientation of tzOffset
+	ts += ((-_get_timezone()) - tzOffset);
+#else
+	// tm.tm_gmtoff is the number of seconds EAST of GMT
+	ts += (out.tm_gmtoff - tzOffset);
+#endif
 	return ts;
 #else
+	// strptime is able to read a timezone offset from the input string (which is required) and process it correctly.
 	if(strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
 		return -1;
 	}
