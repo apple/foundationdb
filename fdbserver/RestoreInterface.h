@@ -41,18 +41,32 @@ extern int FastRestore_Failure_Timeout;
 
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
-enum class RestoreCommandEnum {Init = -1,
-		Set_Role = 0, Set_Role_Done,
-		Assign_Applier_KeyRange = 2, Assign_Applier_KeyRange_Done,
-								Assign_Loader_Range_File = 4, Assign_Loader_Log_File = 5, Assign_Loader_File_Done = 6,
-								Loader_Send_Mutations_To_Applier = 7, Loader_Send_Mutations_To_Applier_Done = 8,
-								Apply_Mutation_To_DB = 9, Apply_Mutation_To_DB_Skip = 10,
-								Loader_Notify_Appler_To_Apply_Mutation = 11,
-								Notify_Loader_ApplierKeyRange = 12, Notify_Loader_ApplierKeyRange_Done = 13,
-								Sample_Range_File = 14, Sample_Log_File = 15, Sample_File_Done = 16,
-								Loader_Send_Sample_Mutation_To_Applier = 17, Loader_Send_Sample_Mutation_To_Applier_Done = 18,
-								Calculate_Applier_KeyRange = 19, Get_Applier_KeyRange=20, Get_Applier_KeyRange_Done = 21};
+enum class RestoreCommandEnum {Init = 0,
+		Set_Role = 1, Set_Role_Done,
+		Sample_Range_File, Sample_Log_File, Sample_File_Done,
+		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done,
+		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done,
+		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done,
+		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,
+		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,
+		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip,
+		Loader_Notify_Appler_To_Apply_Mutation,
+		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
+
+const char *RestoreCommandEnumStr[] = {"Init",
+		"Set_Role", "Set_Role_Done",
+		"Sample_Range_File", "Sample_Log_File", "Sample_File_Done",
+		"Loader_Send_Sample_Mutation_To_Applier", "Loader_Send_Sample_Mutation_To_Applier_Done",
+		"Calculate_Applier_KeyRange", "Get_Applier_KeyRange", "Get_Applier_KeyRange_Done",
+		"Assign_Applier_KeyRange", "Assign_Applier_KeyRange_Done",
+		"Assign_Loader_Range_File", "Assign_Loader_Log_File", "Assign_Loader_File_Done",
+		"Loader_Send_Mutations_To_Applier", "Loader_Send_Mutations_To_Applier_Done",
+		"Apply_Mutation_To_DB", "Apply_Mutation_To_DB_Skip",
+		"Loader_Notify_Appler_To_Apply_Mutation",
+		"Notify_Loader_ApplierKeyRange", "Notify_Loader_ApplierKeyRange_Done"
+
+};
 
 // Restore command's UID. uint64_t part[2];
 // part[0] is the phase id, part[1] is the command index in the phase.
