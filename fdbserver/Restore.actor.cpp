@@ -137,7 +137,8 @@ typedef FileBackupAgent::ERestoreState ERestoreState;
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val); // { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val); // { return (ERestoreState)val.getInt(0); }
 
-
+// RestoreConfig copied from FileBackupAgent.actor.cpp
+// We copy RestoreConfig instead of using (and potentially changing) it in place to avoid conflict with the existing code
 class RestoreConfig : public KeyBackedConfig, public ReferenceCounted<RestoreConfig> {
 public:
 	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
@@ -365,7 +366,7 @@ public:
 
 typedef RestoreConfig::RestoreFile RestoreFile;
 
-
+// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
 namespace parallelFileRestore {
 	// Helper class for reading restore data from a buffer and throwing the right errors.
 	struct StringRefReader {
@@ -517,33 +518,32 @@ namespace parallelFileRestore {
 }
 
 // CMDUID implementation
-void CMDUID::initPhase(RestoreCommandEnum phase) {
-	printf("CMDID, current pahse:%d, new phase:%d\n", part[0], phase);
-	part[0] = (uint64_t) phase;
-	part[1] = 0;
+void CMDUID::initPhase(RestoreCommandEnum newPhase) {
+	printf("CMDID, current phase:%d, new phase:%d\n", phase, newPhase);
+	phase = (uint64_t) newPhase;
+	cmdId = 0;
 }
 
 void CMDUID::nextPhase() {
-	part[0]++;
-	part[1] = 0;
+	phase++;
+	cmdId = 0;
 }
 
 void CMDUID::nextCmd() {
-	part[1]++;
+	cmdId++;
 }
 
 RestoreCommandEnum CMDUID::getPhase() {
-	return (RestoreCommandEnum) part[0];
+	return (RestoreCommandEnum) phase;
 }
 
 
 uint64_t CMDUID::getIndex() {
-	return part[1];
+	return cmdId;
 }
 
 std::string CMDUID::toString() const {
-	// part[0] is phase id, part[1] is index id in that phase
-	return format("%016llx||%016llx", part[0], part[1]);
+	return format("%016lx|%016llx|%016llx", batch, phase, cmdId);
 }
 
 
@@ -581,7 +581,7 @@ RestoreCommandEnum getPreviousCmd(RestoreCommandEnum curCmd) {
 	return ret;
 }
 
-
+// DEBUG_FAST_RESTORE is not used any more
 #define DEBUG_FAST_RESTORE 1
 
 #ifdef DEBUG_FAST_RESTORE

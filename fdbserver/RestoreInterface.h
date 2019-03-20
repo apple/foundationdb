@@ -59,10 +59,12 @@ BINARY_SERIALIZABLE(RestoreCommandEnum);
 // TODO: Add another field to indicate version-batch round
 class CMDUID {
 public:
-	uint64_t part[2];
-	CMDUID() { part[0] = part[1] = 0; }
-	CMDUID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
-	CMDUID(const CMDUID &cmduid) { part[0] = cmduid.part[0]; part[1] = cmduid.part[1]; }
+	uint32_t batch;
+	uint32_t phase;
+	uint64_t cmdId;
+	CMDUID() : batch(0), phase(0), cmdId(0) { }
+	CMDUID( uint32_t a, uint64_t b ) { batch = 0; phase=a; cmdId=b; }
+	CMDUID(const CMDUID &cmd) { batch = cmd.batch; phase = cmd.phase; cmdId = cmd.cmdId; }
 
 	void initPhase(RestoreCommandEnum phase);
 
@@ -76,19 +78,17 @@ public:
 
 	std::string toString() const;
 
-	bool operator == ( const CMDUID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
-	bool operator != ( const CMDUID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
-	bool operator < ( const CMDUID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase; cmdId == r.cmdId; }
+	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdId != r.cmdId; }
+	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdId < r.cmdId); }
 
-	uint64_t hash() const { return first(); }
-	uint64_t first() const { return part[0]; }
-	uint64_t second() const { return part[1]; }
-
-	//
+	//uint64_t hash() const { return first(); }
+	//uint64_t first() const { return part[0]; }
+	//uint64_t second() const { return part[1]; }
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		serializer(ar, part[0], part[1]);
+		serializer(ar, batch, phase, cmdId);
 	}
 };
 
