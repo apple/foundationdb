@@ -954,7 +954,7 @@ public:
 		// follows a poisson distribution.
 		// Net2 counts CPU cycles to abort emptying the ready queue if this takes too long.
 		// We can not do this in the simulator as this is non-deterministic. However, a task
-		// using many CPU cycles can have many reasons (like kernel interrupts happening duing
+		// using many CPU cycles can have many reasons (like kernel interrupts happening during
 		// the execution).
 		// The idea here is that we generate a random number y before the task queue is emptied
 		// and then we sum the poisson-numbers for each k. As long as the random number is smaller
@@ -966,6 +966,9 @@ public:
 	ACTOR static Future<Void> runLoop(Sim2 *self) {
 		state ISimulator::ProcessInfo *callingMachine = self->currentProcess;
 		state std::vector<Task> readyTasks;
+		state double y_poisson;
+		state unsigned k;
+		state double poisson_sum;
 		while ( !self->isStopped ) {
 			wait( self->net2->yield(TaskDefaultYield) );
 
@@ -983,10 +986,13 @@ public:
 				push_heap(readyTasks.begin(), readyTasks.end(), &Task::comparePriorities);
 				self->tasks.pop();
 			}
-			auto y_poisson = g_random->random01();
-			unsigned k = 1;
-			double poisson_sum = 0.0;
+			y_poisson = g_random->random01();
+			k = 0;
+			poisson_sum = 0.0;
 			while (!readyTasks.empty()) {
+				if(!checkCPU(poisson_sum, y_poisson, k++, 8)) {
+					break;
+				}
 				wait(self->net2->yield(TaskDefaultYield));
 				self->mutex.enter();
 				pop_heap(readyTasks.begin(), readyTasks.end(), &Task::comparePriorities);
@@ -997,11 +1003,6 @@ public:
 
 				self->execTask(t);
 				self->yielded = false;
-
-				if(checkCPU(poisson_sum, y_poisson, k, 8)) {
-					break;
-				}
-				++k;
 			}
 		}
 		self->currentProcess = callingMachine;
@@ -1652,7 +1653,7 @@ public:
 		}
 		else {
 			mutex.enter();
-			this->time = t.time;
+			this->time = std::max(t.time, this->time);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
