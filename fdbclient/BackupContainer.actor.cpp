@@ -1913,3 +1913,16 @@ TEST_CASE("/backup/containers_list") {
 	}
 	return Void();
 };
+
+TEST_CASE("/backup/time") {
+	ASSERT(BackupAgentBase::formatTime(BackupAgentBase::parseTime("2019/03/18.17:51:11-0600")) == "2019/03/18.16:51:11-0700");
+	ASSERT(BackupAgentBase::formatTime(BackupAgentBase::parseTime("2019/03/18.16:51:11-0700")) == "2019/03/18.16:51:11-0700");
+
+	ASSERT(BackupAgentBase::parseTime("2019/03/18.17:51:11-0600") == BackupAgentBase::parseTime("2019/03/18.16:51:11-0700"));
+	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07-0700") == BackupAgentBase::parseTime("2019/04/01.03:45:07-0200"));
+	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0000") == BackupAgentBase::parseTime("2019/04/01.03:45:07+0500"));
+	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0030") == BackupAgentBase::parseTime("2019/04/01.03:45:07+0530"));
+	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0030") == BackupAgentBase::parseTime("2019/04/01.04:00:07+0545"));
+
+	return Void();
+}

@@ -23,6 +23,48 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+std::string BackupAgentBase::formatTime(int64_t epochs) {
+	time_t curTime = (time_t)epochs;
+	char buffer[30];
+	struct tm timeinfo;
+	getLocalTime(&curTime, &timeinfo);
+	strftime(buffer, 30, "%Y/%m/%d.%H:%M:%S%z", &timeinfo);
+	return buffer;
+}
+
+int64_t BackupAgentBase::parseTime(std::string timestamp) {
+	// Windows does not support strptime, so we will use std::get_time
+	// Unfortunately, std::get_time() does not support %z (as strptime does) so we must read
+	// the date/time part separately from the timezone and then adjust tm.
+	struct tm out;
+	std::istringstream s(timestamp.substr(0, 19));
+	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
+	if (s.fail()) {
+		return -1;
+	}
+
+	// Read timezone offset in +/-HHMM format then convert to seconds
+	int tzHH;
+	int tzMM;
+	if(sscanf(timestamp.substr(19, 5).c_str(), "%3d%2d", &tzHH, &tzMM) != 2) {
+		return -1;
+	}
+	if(tzHH < 0) {
+		tzMM = -tzMM;
+	}
+	int tzOffset = tzHH * 60 * 60 + tzMM * 60;
+
+	// timestamp was meant to be read in timezone tzOffset, but instead (for reasons stated above) was read without at timezone.
+	// mktime() will return epoch seconds and update out.tm_gmtoff to the local timezone.
+	int64_t ts = mktime(&out);
+
+	// Add back the difference between the default timezone offset and the intended one.
+	ts += (out.tm_gmtoff - tzOffset);
+
+	return ts;
+}
+
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
 const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");
 const Key BackupAgentBase::keyEndVersion = LiteralStringRef("endVersion");
