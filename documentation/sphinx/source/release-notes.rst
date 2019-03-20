@@ -20,13 +20,14 @@ Features
 * Backup status and describe commands now have a --json output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 * Separate data distribution out from master as a new role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
 * Separate rate keeper out from data distribution as a new role. `(PR ##1176) <https://github.com/apple/foundationdb/pull/1176>`_
-* Added a new atomic op `CompareAndClear`. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
-* Added support for IPv6. `(PR #1176) https://github.com/apple/foundationdb/pull/1178`_
-* FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to TLS. `(PR #1157) https://github.com/apple/foundationdb/pull/1157`_
-* Added `DISABLE_POSIX_KERNEL_AIO` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) https://github.com/apple/foundationdb/pull/1283`_
-* Added support for a config where the primary and remote DC's can be used as satellites. `(PR #1320) https://github.com/apple/foundationdb/pull/1320`_
-* Added support for restoring multiple key ranges in a single restore job. `(PR #1190) https://github.com/apple/foundationdb/pull/1190`_
-* Depracated transaction option TRANSACTION_LOGGING_ENABLE. Added two new transaction options DEBUG_TRANSACTION_IDENTIFIER and LOG_TRANSACTION that sets an identifier for the transaction and logs the transaction to the trace file respectively. `(PR #1200) https://github.com/apple/foundationdb/pull/1200`_
+* Added a new atomic op ``CompareAndClear``. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
+* Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
+* FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
+* Added ``DISABLE_POSIX_KERNEL_AIO`` knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. `(PR #1283) <https://github.com/apple/foundationdb/pull/1283>`_
+* Added support for a config where the primary and remote DC's can be used as satellites. `(PR #1320) <https://github.com/apple/foundationdb/pull/1320>`_
+* Added support for restoring multiple key ranges in a single restore job. `(PR #1190) <https://github.com/apple/foundationdb/pull/1190>`_
+* Depracated transaction option ``TRANSACTION_LOGGING_ENABLE``. Added two new transaction options ``DEBUG_TRANSACTION_IDENTIFIER`` and ``LOG_TRANSACTION`` that sets an identifier for the transaction and logs the transaction to the trace file respectively. `(PR #1200) <https://github.com/apple/foundationdb/pull/1200>`_
+* Clients can now specify default transaction timeouts and retry limits to all transactions through a database option. `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
 
 Performance
 -----------
