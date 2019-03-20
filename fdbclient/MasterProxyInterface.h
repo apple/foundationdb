@@ -136,7 +136,8 @@ struct GetReadVersionRequest : TimedRequest {
 		PRIORITY_DEFAULT = 8 << 24,
 		PRIORITY_BATCH = 1 << 24
 	};
-	enum { 
+	enum {
+		FLAG_USE_PROVISIONAL_PROXIES = 2,
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};

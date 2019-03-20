@@ -89,7 +89,7 @@ struct TargetedKillWorkload : TestWorkload {
 			machine = self->dbInfo->get().master.address();
 		}
 		else if( self->machineToKill == "masterproxy" ) {
-			auto proxies = cx->getMasterProxies();
+			auto proxies = cx->getMasterProxies(false);
 			int o = g_random->randomInt(0, proxies->size());
 			for( int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
