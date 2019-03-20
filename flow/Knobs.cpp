@@ -48,6 +48,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
+	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
