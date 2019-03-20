@@ -54,31 +54,17 @@ enum class RestoreCommandEnum {Init = 0,
 		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done};
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
-const char *RestoreCommandEnumStr[] = {"Init",
-		"Set_Role", "Set_Role_Done",
-		"Sample_Range_File", "Sample_Log_File", "Sample_File_Done",
-		"Loader_Send_Sample_Mutation_To_Applier", "Loader_Send_Sample_Mutation_To_Applier_Done",
-		"Calculate_Applier_KeyRange", "Get_Applier_KeyRange", "Get_Applier_KeyRange_Done",
-		"Assign_Applier_KeyRange", "Assign_Applier_KeyRange_Done",
-		"Assign_Loader_Range_File", "Assign_Loader_Log_File", "Assign_Loader_File_Done",
-		"Loader_Send_Mutations_To_Applier", "Loader_Send_Mutations_To_Applier_Done",
-		"Apply_Mutation_To_DB", "Apply_Mutation_To_DB_Skip",
-		"Loader_Notify_Appler_To_Apply_Mutation",
-		"Notify_Loader_ApplierKeyRange", "Notify_Loader_ApplierKeyRange_Done"
-
-};
-
 // Restore command's UID. uint64_t part[2];
 // part[0] is the phase id, part[1] is the command index in the phase.
 // TODO: Add another field to indicate version-batch round
 class CMDUID {
 public:
-	uint32_t batch;
-	uint32_t phase;
-	uint64_t cmdId;
-	CMDUID() : batch(0), phase(0), cmdId(0) { }
-	CMDUID( uint32_t a, uint64_t b ) { batch = 0; phase=a; cmdId=b; }
-	CMDUID(const CMDUID &cmd) { batch = cmd.batch; phase = cmd.phase; cmdId = cmd.cmdId; }
+	uint16_t batch;
+	uint16_t phase;
+	uint64_t cmdID;
+	CMDUID() : batch(0), phase(0), cmdID(0) { }
+	CMDUID( uint16_t a, uint64_t b ) { batch = 0; phase=a; cmdID=b; }
+	CMDUID(const CMDUID &cmd) { batch = cmd.batch; phase = cmd.phase; cmdID = cmd.cmdID; }
 
 	void initPhase(RestoreCommandEnum phase);
 
@@ -87,14 +73,15 @@ public:
 	void nextCmd(); // Increase the command index at the same phase
 
 	RestoreCommandEnum getPhase();
+	void setPhase(RestoreCommandEnum newPhase);
 
 	uint64_t getIndex();
 
 	std::string toString() const;
 
-	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase; cmdId == r.cmdId; }
-	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdId != r.cmdId; }
-	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdId < r.cmdId); }
+	bool operator == ( const CMDUID& r ) const { return batch == r.batch && phase == r.phase; cmdID == r.cmdID; }
+	bool operator != ( const CMDUID& r ) const { return batch != r.batch || phase != r.phase || cmdID != r.cmdID; }
+	bool operator < ( const CMDUID& r ) const { return batch < r.batch || (batch == r.batch && phase < r.phase) || (batch == r.batch && phase == r.phase && cmdID < r.cmdID); }
 
 	//uint64_t hash() const { return first(); }
 	//uint64_t first() const { return part[0]; }
@@ -102,7 +89,7 @@ public:
 
 	template <class Ar>
 	void serialize_unversioned(Ar& ar) { // Changing this serialization format will affect key definitions, so can't simply be versioned!
-		serializer(ar, batch, phase, cmdId);
+		serializer(ar, batch, phase, cmdID);
 	}
 };
 
@@ -134,7 +121,7 @@ struct RestoreCommandInterface {
 
 struct RestoreCommand {
 	RestoreCommandEnum cmd; // 0: set role, -1: end of the command stream
-	CMDUID cmdId; // monotonically increase index for commands.
+	CMDUID cmdID; // monotonically increase index for commands.
 	UID id; // Node id that will receive the command
 	int nodeIndex; // The index of the node in the global node status
 	UID masterApplier;
@@ -181,21 +168,21 @@ struct RestoreCommand {
 	ReplyPromise< struct RestoreCommandReply > reply;
 
 	RestoreCommand() : id(UID()), role(RestoreRole::Invalid) {}
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id): cmd(cmd), cmdId(cmdId), id(id) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role) : cmd(cmd), cmdId(cmdId), id(id), role(role) {}
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id): cmd(cmd), cmdID(cmdID), id(id) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, RestoreRole role) : cmd(cmd), cmdID(cmdID), id(id), role(role) {}
 	// Set_Role
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, RestoreRole role, int nodeIndex, UID masterApplier) : cmd(cmd), cmdId(cmdId), id(id), role(role), nodeIndex(nodeIndex), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, KeyRange keyRange): cmd(cmd), cmdId(cmdId), id(id), keyRange(keyRange) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, LoadingParam loadingParam): cmd(cmd), cmdId(cmdId), id(id), loadingParam(loadingParam) {};
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, int keyRangeIndex): cmd(cmd), cmdId(cmdId), id(id), keyRangeIndex(keyRangeIndex) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, RestoreRole role, int nodeIndex, UID masterApplier) : cmd(cmd), cmdID(cmdID), id(id), role(role), nodeIndex(nodeIndex), masterApplier(masterApplier) {} // Temporary when we use masterApplier to apply mutations
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, KeyRange keyRange): cmd(cmd), cmdID(cmdID), id(id), keyRange(keyRange) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, LoadingParam loadingParam): cmd(cmd), cmdID(cmdID), id(id), loadingParam(loadingParam) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, int keyRangeIndex): cmd(cmd), cmdID(cmdID), id(id), keyRangeIndex(keyRangeIndex) {};
 	// For loader send mutation to applier
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), cmdId(cmdId), id(id), commitVersion(commitVersion), mutation(mutation) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, uint64_t commitVersion, struct MutationRef mutation): cmd(cmd), cmdID(cmdID), id(id), commitVersion(commitVersion), mutation(mutation) {};
 	// Notify loader about applier key ranges
-	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdId, UID id, KeyRef applierKeyRangeLB, UID applierID): cmd(cmd), cmdId(cmdId), id(id), applierKeyRangeLB(applierKeyRangeLB), applierID(applierID) {};
+	explicit RestoreCommand(RestoreCommandEnum cmd, CMDUID cmdID, UID id, KeyRef applierKeyRangeLB, UID applierID): cmd(cmd), cmdID(cmdID), id(id), applierKeyRangeLB(applierKeyRangeLB), applierID(applierID) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar , cmd  , cmdId , nodeIndex, id , masterApplier , role , keyRange ,  commitVersion , mutation , applierKeyRangeLB ,  applierID , keyRangeIndex , loadingParam , reply);
+		serializer(ar , cmd  , cmdID , nodeIndex, id , masterApplier , role , keyRange ,  commitVersion , mutation , applierKeyRangeLB ,  applierID , keyRangeIndex , loadingParam , reply);
 		//ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
 	}
 };
@@ -203,25 +190,25 @@ typedef RestoreCommand::LoadingParam LoadingParam;
 
 struct RestoreCommandReply {
 	UID id; // placeholder, which reply the worker's node id back to master
-	CMDUID cmdId;
+	CMDUID cmdID;
 	int num; // num is the number of key ranges calculated for appliers
 	Standalone<KeyRef> lowerBound;
 
-	RestoreCommandReply() : id(UID()), cmdId(CMDUID()) {}
+	RestoreCommandReply() : id(UID()), cmdID(CMDUID()) {}
 	//explicit RestoreCommandReply(UID id) : id(id) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdId) : id(id), cmdId(cmdId) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdId, int num) : id(id), cmdId(cmdId), num(num) {}
-	explicit RestoreCommandReply(UID id, CMDUID cmdId, KeyRef lowerBound) : id(id), cmdId(cmdId), lowerBound(lowerBound) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdID, int num) : id(id), cmdID(cmdID), num(num) {}
+	explicit RestoreCommandReply(UID id, CMDUID cmdID, KeyRef lowerBound) : id(id), cmdID(cmdID), lowerBound(lowerBound) {}
 
 	std::string toString() const {
 		std::stringstream ret;
-		ret << "ServerNodeID:" + id.toString() + " CMDID:" + cmdId.toString() + " num:" + std::to_string(num) + " lowerBound:" + lowerBound.toHexString();
+		ret << "ServerNodeID:" + id.toString() + " CMDID:" + cmdID.toString() + " num:" + std::to_string(num) + " lowerBound:" + lowerBound.toHexString();
 		return ret.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id , cmdId , num , lowerBound);
+		serializer(ar, id , cmdID , num , lowerBound);
 		//ar & id & cmdIndex & num & lowerBound;
 	}
 };
