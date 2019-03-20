@@ -42,7 +42,7 @@ extern int FastRestore_Failure_Timeout;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
-		Set_Role = 1, Set_Role_Done,
+		Set_Role, Set_Role_Done,
 		Sample_Range_File, Sample_Log_File, Sample_File_Done,
 		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done,
 		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done,
