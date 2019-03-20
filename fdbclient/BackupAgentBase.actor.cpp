@@ -18,12 +18,8 @@
  * limitations under the License.
  */
 
-#ifdef _WIN32
-	// Need struct tm member tm_gmtoff
-	#define _GNU_SOURCE
-#endif
-
 #include <iomanip>
+#include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbrpc/simulator.h"
@@ -63,12 +59,12 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	}
 	int tzOffset = tzHH * 60 * 60 + tzMM * 60;
 
-	// timestamp was meant to be read in timezone tzOffset, but instead (for reasons stated above) was read without at timezone.
-	// mktime() will return epoch seconds and update out.tm_gmtoff to the local timezone.
+	// timestamp was meant to be read in timezone tzOffset, but instead (for reasons stated above) was read without a timezone.
+	// mktime() will return epoch seconds and update out.tm_gmtoff to the local timezone (if it exists)
 	int64_t ts = mktime(&out);
 
 	// Add back the difference between the default timezone offset and the intended one.
-	ts += (out.tm_gmtoff - tzOffset);
+	ts += ((-_timezone) - tzOffset);  // Would like to use out.tm_gmtoff here but on Windows the negative of _timezone must be used instead.
 	return ts;
 #else
 	if(strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
