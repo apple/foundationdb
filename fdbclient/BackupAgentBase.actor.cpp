@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <iomanip>
+
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
