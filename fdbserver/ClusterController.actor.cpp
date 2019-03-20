@@ -1372,7 +1372,7 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 }
 
 void checkBetterDDOrRK(ClusterControllerData* self) {
-	if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+	if (!self->masterProcessId.present() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
 	}
 
@@ -1473,6 +1473,9 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo) );
+				}
+				if (worker.locality.processId() == cluster->masterProcessId) {
+					cluster->masterProcessId = Optional<Key>();
 				}
 				cluster->id_worker.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
@@ -2417,14 +2420,12 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 }
 
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
-	while (!self->masterProcessId.present() ) {
-		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
-	}
+	wait(delay(0.0));  // If master fails at the same time, give it a chance to clear master PID.
 
 	loop {
 		try {
-			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
-				wait( self->db.serverInfo->onChange() );
+			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2483,10 +2484,12 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
+	wait(delay(0.0));  // If master fails at the same time, give it a chance to clear master PID.
+
 	loop {
 		try {
-			while ( self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ) {
-				wait( self->db.serverInfo->onChange() );
+			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
