@@ -217,7 +217,6 @@ public: // workload functions
 						throw operation_failed();
 					}
 				}
-				wait(delay(30.0));
 			}
 			CSimpleIni ini;
 			ini.SetUnicode();
