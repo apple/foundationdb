@@ -205,11 +205,14 @@ bool DatabaseConfiguration::isValid() const {
 			return false;
 		}
 		dcIds.insert(r.dcId);
+		std::set<Key> satelliteDcIds;
+		satelliteDcIds.insert(Key());
+		satelliteDcIds.insert(r.dcId);
 		for(auto& s : r.satellites) {
-			if(dcIds.count(s.dcId)) {
+			if (satelliteDcIds.count(s.dcId)) {
 				return false;
 			}
-			dcIds.insert(s.dcId);
+			satelliteDcIds.insert(s.dcId);
 		}
 	}
 

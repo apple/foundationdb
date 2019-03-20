@@ -117,7 +117,7 @@ then
                 fi
                 docker_buid_logs="${log_dir}/docker_build_${curr_name}"
                 docker build . -t ${curr_name} 1> "${docker_buid_logs}.log" 2> "${docker_buid_logs}.err"
-                successOr "Building Docker image ${name} failed - see ${docker_buid_logs}.log and ${docker_buid_logs}.err"
+                successOr "Building Docker image ${curr_name} failed - see ${docker_buid_logs}.log and ${docker_buid_logs}.err"
             done
             if [ ! -z "${tests_to_run+x}"]
             then
@@ -135,12 +135,12 @@ then
                     then
                         docker_wait_any
                     fi
-                    echo "Starting Test ${curr_name}/${curr_test}"
                     log_file="${log_dir}/${curr_name}_${curr_test}.log"
                     err_file="${log_dir}/${curr_name}_${curr_test}.err"
                     docker_id=$( docker run -d -v "${fdb_source}:/foundationdb"\
                         -v "${fdb_build}:/build"\
                         ${curr_name} /sbin/init )
+                    echo "Starting Test ${curr_name}/${curr_test} Docker-ID: ${docker_id}"
                     {
                         docker exec "${docker_id}" bash \
                             /foundationdb/build/cmake/package_tester/${curr_format}_tests.sh -n ${curr_test} ${curr_packages[@]}\
@@ -177,6 +177,7 @@ then
                     echo "    - ${t}"
                 done
                 echo -e "${NC}"
+                __res=1
             fi
         done
         exitfun

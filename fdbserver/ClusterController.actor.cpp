@@ -275,7 +275,7 @@ public:
 		return results;
 	}
 
-	std::vector<WorkerDetails> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, Reference<IReplicationPolicy> const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>() ) {
+	std::vector<WorkerDetails> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, Reference<IReplicationPolicy> const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(), std::vector<UID> exclusionWorkerIds = {}) {
 		std::map<std::pair<ProcessClass::Fitness,bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
@@ -285,14 +285,15 @@ public:
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		logServerMap = (LocalityMap<WorkerDetails>*) logServerSet.getPtr();
-
 		for( auto& it : id_worker ) {
-			auto fitness = it.second.details.processClass.machineClassFitness( ProcessClass::TLog );
-			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId())) ) {
-				fitness_workers[ std::make_pair(fitness,it.second.details.degraded) ].push_back(it.second.details);
-			}
-			else {
-				unavailableLocals.push_back(it.second.details.interf.locality);
+			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) == exclusionWorkerIds.end()) {
+				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
+				if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
+					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
+				}
+				else {
+					unavailableLocals.push_back(it.second.details.interf.locality);
+				}
 			}
 		}
 
@@ -355,7 +356,7 @@ public:
 			TraceEvent(SevWarn, "GetTLogTeamFailed").detail("Policy", policy->info()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size()).detail("FitnessGroups", fitness_workers.size())
 				.detail("TLogZones", ::describeZones(tLocalities)).detail("TLogDataHalls", ::describeDataHalls(tLocalities)).detail("MissingZones", ::describeZones(unavailableLocals))
 				.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals)).detail("Required", required).detail("DesiredLogs", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-				.detail("CheckStable", checkStable).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+				.detail("CheckStable", checkStable).detail("NumExclusionWorkers", exclusionWorkerIds.size()).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
 
 			logServerSet->clear();
 			logServerSet.clear();
@@ -376,7 +377,7 @@ public:
 	}
 
 	//FIXME: This logic will fallback unnecessarily when usable dcs > 1 because it does not check all combinations of potential satellite locations
-	std::vector<WorkerDetails> getWorkersForSatelliteLogs( const DatabaseConfiguration& conf, const RegionInfo& region, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool& satelliteFallback, bool checkStable = false ) {
+	std::vector<WorkerDetails> getWorkersForSatelliteLogs( const DatabaseConfiguration& conf, const RegionInfo& region, const RegionInfo& remoteRegion, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool& satelliteFallback, bool checkStable = false ) {
 		int startDC = 0;
 		loop {
 			if(startDC > 0 && startDC >= region.satellites.size() + 1 - (satelliteFallback ? region.satelliteTLogUsableDcsFallback : region.satelliteTLogUsableDcs)) {
@@ -392,15 +393,26 @@ public:
 			}
 
 			try {
+				bool remoteDCUsedAsSatellite = false;
 				std::set<Optional<Key>> satelliteDCs;
 				for(int s = startDC; s < std::min<int>(startDC + (satelliteFallback ? region.satelliteTLogUsableDcsFallback : region.satelliteTLogUsableDcs), region.satellites.size()); s++) {
 					satelliteDCs.insert(region.satellites[s].dcId);
+					if (region.satellites[s].dcId == remoteRegion.dcId) {
+						remoteDCUsedAsSatellite = true;
+					}
 				}
-
+				std::vector<UID> exclusionWorkerIds;
+				// FIXME: If remote DC is used as satellite then this logic only ensures that required number of remote TLogs can be recruited. It does not balance the number of desired TLogs
+				// across the satellite and remote sides.
+				if (remoteDCUsedAsSatellite) {
+					std::map< Optional<Standalone<StringRef>>, int> tmpIdUsed;
+					auto remoteLogs = getWorkersForTlogs(conf, conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogReplicationFactor(), conf.getRemoteTLogPolicy(), tmpIdUsed, false, { remoteRegion.dcId }, {});
+					std::transform(remoteLogs.begin(), remoteLogs.end(), std::back_inserter(exclusionWorkerIds), [](const WorkerDetails &in) { return in.interf.id(); });
+				}
 				if(satelliteFallback) {
-					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactorFallback, conf.getDesiredSatelliteLogs(region.dcId)*region.satelliteTLogUsableDcsFallback/region.satelliteTLogUsableDcs, region.satelliteTLogPolicyFallback, id_used, checkStable, satelliteDCs );
+					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactorFallback, conf.getDesiredSatelliteLogs(region.dcId)*region.satelliteTLogUsableDcsFallback/region.satelliteTLogUsableDcs, region.satelliteTLogPolicyFallback, id_used, checkStable, satelliteDCs, exclusionWorkerIds);
 				} else {
-					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactor, conf.getDesiredSatelliteLogs(region.dcId), region.satelliteTLogPolicy, id_used, checkStable, satelliteDCs );
+					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactor, conf.getDesiredSatelliteLogs(region.dcId), region.satelliteTLogPolicy, id_used, checkStable, satelliteDCs, exclusionWorkerIds);
 				}
 			} catch (Error &e) {
 				if(e.code() != error_code_no_more_servers) {
@@ -560,7 +572,7 @@ public:
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
 
-		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.getRemoteTLogReplicationFactor(), req.configuration.getDesiredRemoteLogs(), req.configuration.getRemoteTLogPolicy(), id_used, false, remoteDC );
+		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.getRemoteTLogReplicationFactor(), req.configuration.getDesiredRemoteLogs(), req.configuration.getRemoteTLogPolicy(), id_used, false, remoteDC, req.exclusionWorkerIds );
 		for(int i = 0; i < remoteLogs.size(); i++) {
 			result.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
@@ -602,10 +614,13 @@ public:
 		result.dcId = dcId;
 
 		RegionInfo region;
+		RegionInfo remoteRegion;
 		for(auto& r : req.configuration.regions) {
 			if(r.dcId == dcId.get()) {
 				region = r;
-				break;
+			}
+			else {
+				remoteRegion = r;
 			}
 		}
 
@@ -623,7 +638,7 @@ public:
 
 		std::vector<WorkerDetails> satelliteLogs;
 		if(region.satelliteTLogReplicationFactor > 0) {
-			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, id_used, result.satelliteFallback );
+			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, remoteRegion, id_used, result.satelliteFallback );
 			for(int i = 0; i < satelliteLogs.size(); i++) {
 				result.satelliteTLogs.push_back(satelliteLogs[i].interf);
 			}
@@ -821,7 +836,7 @@ public:
 			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC);
 			if(regions[0].satelliteTLogReplicationFactor > 0) {
 				bool satelliteFallback = false;
-				getWorkersForSatelliteLogs(db.config, regions[0], id_used, satelliteFallback, true);
+				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
 
 			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
@@ -960,12 +975,14 @@ public:
 		std::set<Optional<Key>> remoteDC;
 
 		RegionInfo region;
+		RegionInfo remoteRegion;
 		if(db.config.regions.size() && clusterControllerDcId.present()) {
 			primaryDC.insert(clusterControllerDcId);
 			for(auto& r : db.config.regions) {
 				if(r.dcId != clusterControllerDcId.get()) {
 					ASSERT(remoteDC.empty());
 					remoteDC.insert(r.dcId);
+					remoteRegion = r;
 				} else {
 					ASSERT(region.dcId == StringRef());
 					region = r;
@@ -975,7 +992,8 @@ public:
 
 		// Check tLog fitness
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog);
-		RoleFitness newTLogFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC), ProcessClass::TLog);
+		auto newTLogs = getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC);
+		RoleFitness newTLogFit(newTLogs, ProcessClass::TLog);
 
 		if(oldTLogFit < newTLogFit) return false;
 
@@ -990,7 +1008,8 @@ public:
 
 		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
 		bool newSatelliteFallback = false;
-		RoleFitness newSatelliteTLogFit(region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, id_used, newSatelliteFallback, true) : satellite_tlogs, ProcessClass::TLog);
+		auto newSatelliteTLogs = region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
+		RoleFitness newSatelliteTLogFit(newSatelliteTLogs, ProcessClass::TLog);
 
 		if(oldSatelliteTLogFit < newSatelliteTLogFit)
 			return false;
@@ -998,9 +1017,13 @@ public:
 			return false;
 
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog);
+		std::vector<UID> exclusionWorkerIds;
+		auto fn = [](const WorkerDetails &in) { return in.interf.id(); };
+		std::transform(newTLogs.begin(), newTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
+		std::transform(newSatelliteTLogs.begin(), newSatelliteTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
 		RoleFitness newRemoteTLogFit(
 			(db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) ?
-			getWorkersForTlogs(db.config, db.config.getRemoteTLogReplicationFactor(), db.config.getDesiredRemoteLogs(), db.config.getRemoteTLogPolicy(), id_used, true, remoteDC)
+			getWorkersForTlogs(db.config, db.config.getRemoteTLogReplicationFactor(), db.config.getDesiredRemoteLogs(), db.config.getRemoteTLogPolicy(), id_used, true, remoteDC, exclusionWorkerIds)
 			: remote_tlogs, ProcessClass::TLog);
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 		int oldRouterCount = oldTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,oldTLogFit.count));
