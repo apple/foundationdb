@@ -110,7 +110,9 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(512)
 				.DETAILALLOCATORMEMUSAGE(1024)
 				.DETAILALLOCATORMEMUSAGE(2048)
-				.DETAILALLOCATORMEMUSAGE(4096);
+				.DETAILALLOCATORMEMUSAGE(4096)
+				.DETAILALLOCATORMEMUSAGE(8192)
+				.detail("HugeArenaMemory", g_hugeArenaMemory);
 
 			TraceEvent n("NetworkMetrics");
 			n
@@ -260,6 +262,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			TRACEALLOCATOR(1024);
 			TRACEALLOCATOR(2048);
 			TRACEALLOCATOR(4096);
+			TRACEALLOCATOR(8192);
 		}
 	}
 #endif

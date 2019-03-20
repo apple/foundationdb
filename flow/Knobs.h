@@ -62,6 +62,7 @@ public:
 
 	int RANDOMSEED_RETRY_LIMIT;
 	double FAST_ALLOC_LOGGING_BYTES;
+	double HUGE_ARENA_LOGGING_BYTES;
 
 	//slow task profiling
 	double SLOWTASK_PROFILING_INTERVAL;
