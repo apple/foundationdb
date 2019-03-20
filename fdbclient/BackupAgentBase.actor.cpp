@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+#ifdef _WIN32
+	// Need struct tm member tm_gmtoff
+	#define_GNU_SOURCE
+#endif
+
 #include <iomanip>
 
 #include "fdbclient/BackupAgent.actor.h"
