@@ -20,7 +20,7 @@
 
 #ifdef _WIN32
 	// Need struct tm member tm_gmtoff
-	#define_GNU_SOURCE
+	#define _GNU_SOURCE
 #endif
 
 #include <iomanip>
