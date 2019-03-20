@@ -166,8 +166,9 @@ struct TransactionOptions {
 struct TransactionInfo {
 	Optional<UID> debugID;
 	int taskID;
+	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID( taskID ) {}
+	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {

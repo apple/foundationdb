@@ -66,8 +66,8 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	Reference<ProxyInfo> getMasterProxies();
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
+	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
+	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
@@ -106,6 +106,7 @@ public:
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	bool provisional;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;

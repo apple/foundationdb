@@ -197,6 +197,8 @@ description is not currently required but encouraged.
     <Option name="first_in_batch" code="710"
             description="No other transactions will be applied before this transaction within the same commit version."
             hidden="true" />
+    <Option name="use_provisional_proxies" code="711"
+            description="This option should only be used by tools which change the database configuration." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

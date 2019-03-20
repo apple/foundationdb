@@ -1672,11 +1672,16 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 	#elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
+		bool exists = true;
 		if (stat(path.c_str(), &info) < 0) {
-			TraceEvent("StatFailed").detail("Path", path);
-			throw io_error();
+			if (errno == ENOENT) {
+				exists = false;
+			} else {
+				TraceEvent("StatFailed").detail("Path", path);
+				throw io_error();
+			}
 		}
-		if (chown(tempfilename.c_str(), info.st_uid, info.st_gid) < 0) {
+		if (exists && chown(tempfilename.c_str(), info.st_uid, info.st_gid) < 0) {
 			TraceEvent("ChownFailed")
 				.detail("TempFilename", tempfilename)
 				.detail("OriginalFile", path)
@@ -1685,7 +1690,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 			deleteFile(tempfilename);
 			throw io_error();
 		}
-		if (chmod(tempfilename.c_str(), info.st_mode) < 0) {
+		if (exists && chmod(tempfilename.c_str(), info.st_mode) < 0) {
 			TraceEvent("ChmodFailed")
 				.detail("TempFilename", tempfilename)
 				.detail("OriginalFile", path)
