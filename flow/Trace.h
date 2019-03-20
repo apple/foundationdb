@@ -271,13 +271,14 @@ struct Traceable<char*> : std::true_type {
 
 template<>
 struct Traceable<std::string> : std::true_type {
+	static bool isPrintable(char c) { return c >= 32 && c < 127; }
 	template<class Str>
 	static std::string toString(Str&& value) {
 		// if all characters are printable ascii, we simply return the string
 		int nonPrintables = 0;
 		int numBackslashes = 0;
 		for (auto c : value) {
-			if (!Traceable<const char*>::isPrintable(c)) {
+			if (!isPrintable(c)) {
 				++nonPrintables;
 			} else if (c == '\\') {
 				++numBackslashes;
@@ -289,7 +290,7 @@ struct Traceable<std::string> : std::true_type {
 		std::string result;
 		result.reserve(value.size() - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto c : value) {
-			if (Traceable<const char*>::isPrintable(c)) {
+			if (isPrintable(c)) {
 				result.push_back(c);
 			} else if (c == '\\') {
 				result.push_back('\\');
