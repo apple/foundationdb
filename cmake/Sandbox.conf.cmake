@@ -35,4 +35,4 @@ logdir = ${CMAKE_BINARY_DIR}/sandbox/logs
 
 ## An individual fdbserver process with id 4500
 ## Parameters set here override defaults from the [fdbserver] section
-[fdbserver.4500]
+[fdbserver.4000]
