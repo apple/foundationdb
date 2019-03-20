@@ -63,16 +63,25 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 
 	// The goal is to convert the timestamp string to epoch seconds assuming the date/time was expressed in the timezone at the end of the string.
 	// However, mktime() will ONLY return epoch seconds assuming the date/time is expressed in local time (based on locale / environment)
+	// mktime() will set out.tm_gmtoff when available
 	int64_t ts = mktime(&out);
 
-	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input string
+	// localTZOffset is the number of seconds EAST of GMT
+	long localTZOffset;
 #ifdef _WIN32
-	// _get_timezone() returns the number of seconds WEST of GMT, so we negate it to match the orientation of tzOffset
-	ts += ((-_get_timezone()) - tzOffset);
+	// _get_timezone() returns the number of seconds WEST of GMT
+	if(_get_timezone(&localTZOffset) != 0) {
+		return -1;
+	}
+	// Negate offset to match the orientation of tzOffset
+	localTZOffset = -localTZOffset;
 #else
 	// tm.tm_gmtoff is the number of seconds EAST of GMT
-	ts += (out.tm_gmtoff - tzOffset);
+	localTZOffset = out.tm_gmtoff;
 #endif
+
+	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input string
+	ts += (localTZOffset - tzOffset);
 	return ts;
 #else
 	// strptime is able to read a timezone offset from the input string (which is required) and process it correctly.
