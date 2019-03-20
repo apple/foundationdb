@@ -172,7 +172,7 @@ public:
 				break;
 			}
 			zones.insert(loc.zoneId());
-			zones.insert(loc.dcId());
+			dcs.insert(loc.dcId());
 		}
 		bool moreThanOneDC = dcs.size() > 1 ? true : false;
 
