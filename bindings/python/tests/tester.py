@@ -123,6 +123,20 @@ class Instruction:
         self.stack.push(self.index, val)
 
 
+def test_db_options(db):
+    db.options.set_max_watches(100001)
+    db.options.set_datacenter_id("dc_id")
+    db.options.set_machine_id("machine_id")
+    db.options.set_transaction_timeout(100000)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_max_retry_delay(100)
+    db.options.set_transaction_retry_limit(10)
+    db.options.set_transaction_retry_limit(-1)
+    db.options.set_snapshot_ryw_enable()
+    db.options.set_snapshot_ryw_disable()
+
+
 @fdb.transactional
 def test_options(tr):
     tr.options.set_priority_system_immediate()
@@ -528,6 +542,7 @@ class Tester:
                     try:
                         db.options.set_location_cache_size(100001)
 
+                        test_db_options(db)
                         test_options(db)
                         test_watches(db)
                         test_cancellation(db)
