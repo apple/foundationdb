@@ -564,44 +564,136 @@ uint64_t CMDUID::getIndex() {
 }
 
 std::string CMDUID::toString() const {
-	return format("%04lx|%04lx|%016llx", batch, phase, cmdID);
+	return format("%04lx|%04lx|%016lld", batch, phase, cmdID);
 }
 
 // getPreviousCmd help provide better debug information
 // getPreviousCmd will return the last command type used in the previous phase before input curCmd
 // Because the cmd sender waits on all acks from the previous phase, at any phase, the cmd receiver needs to reply to the sender if it receives a cmd from its previous phase.
 // However, if receiver receives a cmd that is not in the current or previous phase, it is highly possible there is an error.
-RestoreCommandEnum getPreviousCmd(RestoreCommandEnum curCmd) {
-	RestoreCommandEnum ret = RestoreCommandEnum::Init;
+// RestoreCommandEnum getPreviousCmd(RestoreCommandEnum curCmd) {
+// 	RestoreCommandEnum ret = RestoreCommandEnum::Init;
+// 	switch (curCmd) {
+// 		case RestoreCommandEnum::Set_Role_Done:
+// 			ret = RestoreCommandEnum::Set_Role_Done;
+// 			break;
+// 		case RestoreCommandEnum::Sample_File_Done: // On each loader
+// 			ret = RestoreCommandEnum::Set_Role_Done; // or RestoreCommandEnum::Assign_Loader_File_Done or RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation
+// 			break;
+// 		case RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done: // On each loader
+// 			ret = RestoreCommandEnum::Sample_File_Done;
+// 			break;
+// 		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader: The end command for each version batch
+// 			ret = RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done;
+// 			break;
+		
+// 		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
+// 			ret = RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done;
+// 			break;
+// 		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
+// 			ret = RestoreCommandEnum::Get_Applier_KeyRange_Done;
+// 			break;
+// 		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
+// 			ret = RestoreCommandEnum::Assign_Applier_KeyRange_Done;
+// 			break;
+// 		case RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation: // On each applier
+// 			ret = RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done;
+// 			break; 
+// 		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
+// 			ret = RestoreCommandEnum::Set_Role_Done;
+// 			break;
+		
+// 		default:
+// 			ret = RestoreCommandEnum::Init;
+// 			fprintf(stderr, "[ERROR] GetPreviousCmd Unknown curCmd:%d\n", curCmd);
+// 			break;
+// 	}
+
+// 	return ret;
+// }
+
+std::string getPreviousCmdStr(RestoreCommandEnum curCmd) {
+	std::string ret = RestoreCommandEnumStr[(int) RestoreCommandEnum::Init];
 	switch (curCmd) {
 		case RestoreCommandEnum::Set_Role_Done:
-			ret = RestoreCommandEnum::Set_Role_Done;
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done];
+			break;
+		case RestoreCommandEnum::Sample_File_Done: // On each loader
+			ret = std::string(RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done]) + "|" 
+				+ RestoreCommandEnumStr[(int)RestoreCommandEnum::Assign_Loader_File_Done] + "|"
+				+ RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation];
+			break;
+		case RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done: // On each loader
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Sample_File_Done];
+			break;
+		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader: The end command for each version batch
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done];
+			break;
+		
+		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done];
 			break;
 		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
-			ret = RestoreCommandEnum::Get_Applier_KeyRange_Done;
-			break;
-		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
-			ret = RestoreCommandEnum::Set_Role_Done;
-			break;
-		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
-			ret = RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done;
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Get_Applier_KeyRange_Done];
 			break;
 		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
-			ret = RestoreCommandEnum::Assign_Applier_KeyRange_Done;
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Assign_Applier_KeyRange_Done];
 			break;
 		case RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation: // On each applier
-			ret = RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done;
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done];
+			break; 
+		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Set_Role_Done];
 			break;
-		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader
-			ret = RestoreCommandEnum::Sample_File_Done;
-			break;
+		
 		default:
-			ret = RestoreCommandEnum::Init;
+			ret = RestoreCommandEnumStr[(int)RestoreCommandEnum::Init];
 			fprintf(stderr, "[ERROR] GetPreviousCmd Unknown curCmd:%d\n", curCmd);
 			break;
 	}
 
 	return ret;
+}
+
+bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd) {
+	bool ret = false;
+	switch (curCmd) {
+		case RestoreCommandEnum::Set_Role_Done:
+			ret = (curCmd == RestoreCommandEnum::Set_Role_Done);
+			break;
+		case RestoreCommandEnum::Sample_File_Done: // On each loader
+			ret = (curCmd == RestoreCommandEnum::Set_Role_Done || curCmd == RestoreCommandEnum::Assign_Loader_File_Done || curCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
+			break;
+		case RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done: // On each loader
+			ret = (curCmd == RestoreCommandEnum::Sample_File_Done);
+			break;
+		case RestoreCommandEnum::Assign_Loader_File_Done: // On each loader: The end command for each version batch
+			ret = (curCmd == RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done);
+			break;
+		
+		case RestoreCommandEnum::Get_Applier_KeyRange_Done: // On master applier
+			ret = (curCmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done);
+			break;
+		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
+			ret = (curCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done);
+			break;
+		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
+			ret = (curCmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done);
+			break;
+		case RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation: // On each applier
+			ret = (curCmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done);
+			break; 
+		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
+			ret = (curCmd == RestoreCommandEnum::Set_Role_Done);
+			break;
+		
+		default:
+			fprintf(stderr, "[ERROR] GetPreviousCmd Unknown curCmd:%d\n", curCmd);
+			break;
+	}
+
+	return ret;
+
 }
 
 // DEBUG_FAST_RESTORE is not used any more
@@ -713,14 +805,14 @@ typedef RestoreData::LoadingState LoadingState;
 
 // Log error message when the command is unexpected
 void logUnexpectedCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdID) {
-	fprintf(stderr, "[ERROR]Node:%s Log Unexpected Cmd: CurrentCmd:%d(%s), Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%d(%s)\n",
-			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmd(current), RestoreCommandEnumStr[(int)current]);
+	fprintf(stderr, "[ERROR]Node:%s Log Unexpected Cmd: CurrentCmd:%d(%s), Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%s\n",
+			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmdStr(current).c_str());
 }
 
 // Log  message when we receive a command from the old phase
 void logExpectedOldCmd(Reference<RestoreData> rd, RestoreCommandEnum current, RestoreCommandEnum received, CMDUID cmdID) {
-	fprintf(stdout, "[Warning]Node:%s Log Expected Old Cmd: CurrentCmd:%d(%s) Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%d(%s)\n",
-			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmd(current), RestoreCommandEnumStr[(int)current]);
+	fprintf(stdout, "[Warning]Node:%s Log Expected Old Cmd: CurrentCmd:%d(%s) Received cmd:%d(%s), Received CmdUID:%s, Expected cmd:%s\n",
+			rd->describeNode().c_str(), current, RestoreCommandEnumStr[(int)current], received, RestoreCommandEnumStr[(int)received], cmdID.toString().c_str(), getPreviousCmdStr(current).c_str());
 }
 
 void printAppliersKeyRange(Reference<RestoreData> rd) {
@@ -1618,7 +1710,7 @@ ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> rd, RestoreComma
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Set_Role_Done) == req.cmd ) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Set_Role_Done) ) {
 						logExpectedOldCmd(rd, RestoreCommandEnum::Set_Role_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					} else {
@@ -1775,7 +1867,7 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> rd, Re
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Assign_Applier_KeyRange_Done) != req.cmd && getPreviousCmd(RestoreCommandEnum::Set_Role_Done) != req.cmd) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Assign_Applier_KeyRange_Done) ) {
 						printf("Applier Node:%s receive commands from last phase. Check if this node is master applier\n", rd->describeNode().c_str());
 						logExpectedOldCmd(rd, RestoreCommandEnum::Assign_Applier_KeyRange_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
@@ -1997,7 +2089,7 @@ ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCo
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Get_Applier_KeyRange_Done) != req.cmd ) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Get_Applier_KeyRange_Done) ) {
 						logExpectedOldCmd(rd, RestoreCommandEnum::Get_Applier_KeyRange_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					} else {
@@ -2055,7 +2147,7 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done) != req.cmd ) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done) ) {
 						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					} else {
@@ -2107,7 +2199,7 @@ ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandIn
 					// Applier should wait in the loop in case the send message is lost. This actor will be cancelled when the test finishes
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation) != req.cmd ) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation) ) {
 						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master is waiting on the previous command
 					} else {
@@ -3071,7 +3163,7 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreCommandInter
 								getRoleStr(rd->localNodeStatus.role).c_str());
 							break;
 					} else {
-						if ( getPreviousCmd(RestoreCommandEnum::Assign_Loader_File_Done) != req.cmd ) {
+						if ( IsCmdInPreviousPhase(RestoreCommandEnum::Assign_Loader_File_Done) ) {
 							logExpectedOldCmd(rd, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd, req.cmdID);
 							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 						} else {
@@ -3230,7 +3322,7 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterf
 								getRoleStr(rd->localNodeStatus.role).c_str());
 							break; // Break the loop and return
 					} else {
-						if ( getPreviousCmd(RestoreCommandEnum::Sample_File_Done) != req.cmd ) {
+						if ( IsCmdInPreviousPhase(RestoreCommandEnum::Sample_File_Done) ) {
 							logExpectedOldCmd(rd, RestoreCommandEnum::Sample_File_Done, req.cmd, req.cmdID);
 							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 						} else {
@@ -4517,7 +4609,7 @@ ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreCom
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					break;
 				} else {
-					if ( getPreviousCmd(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done) != req.cmd ) {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done) ) {
 						logExpectedOldCmd(rd, RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done, req.cmd, req.cmdID);
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
 					} else {
