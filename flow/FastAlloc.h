@@ -156,7 +156,7 @@ int64_t getTotalUnusedAllocatedMemory();
 void setFastAllocatorThreadInitFunction( void (*)() );  // The given function will be called at least once in each thread that allocates from a FastAllocator.  Currently just one such function is tracked.
 
 template<int X>
-class NextPowerOfTwo {
+class NextFastAllocatedSize {
 	static const int A = X-1;
 	static const int B = A | (A>>1);
 	static const int C = B | (B>>2);
@@ -164,7 +164,7 @@ class NextPowerOfTwo {
 	static const int E = D | (D>>8);
 	static const int F = E | (E>>16);
 public:
-	static const int Result = F+1;
+	static const int Result = (X > 64 && X <= 96) ? 96 : F+1;
 };
 
 template <class Object>
@@ -173,13 +173,13 @@ public:
 	static void* operator new(size_t s) {
 		if (s != sizeof(Object)) abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
-		void* p = FastAllocator<sizeof(Object)<=64 ? 64 : NextPowerOfTwo<sizeof(Object)>::Result>::allocate();		
+		void* p = FastAllocator<sizeof(Object)<=64 ? 64 : NextFastAllocatedSize<sizeof(Object)>::Result>::allocate();
 		return p;
 	}
 
 	static void operator delete(void* s) {
 		INSTRUMENT_RELEASE(typeid(Object).name());
-		FastAllocator<sizeof(Object)<=64 ? 64 : NextPowerOfTwo<sizeof(Object)>::Result>::release(s);
+		FastAllocator<sizeof(Object)<=64 ? 64 : NextFastAllocatedSize<sizeof(Object)>::Result>::release(s);
 	}
 	// Redefine placement new so you can still use it
 	static void* operator new( size_t, void* p ) { return p; }
@@ -190,6 +190,7 @@ static void* allocateFast(int size) {
 	if (size <= 16) return FastAllocator<16>::allocate();
 	if (size <= 32) return FastAllocator<32>::allocate();
 	if (size <= 64) return FastAllocator<64>::allocate();
+	if (size <= 96) return FastAllocator<96>::allocate();
 	if (size <= 128) return FastAllocator<128>::allocate();
 	if (size <= 256) return FastAllocator<256>::allocate();
 	if (size <= 512) return FastAllocator<512>::allocate();
@@ -200,6 +201,7 @@ static void freeFast(int size, void* ptr) {
 	if (size <= 16) return FastAllocator<16>::release(ptr);
 	if (size <= 32) return FastAllocator<32>::release(ptr);
 	if (size <= 64) return FastAllocator<64>::release(ptr);
+	if (size <= 96) return FastAllocator<96>::release(ptr);
 	if (size <= 128) return FastAllocator<128>::release(ptr);
 	if (size <= 256) return FastAllocator<256>::release(ptr);
 	if (size <= 512) return FastAllocator<512>::release(ptr);

@@ -483,7 +483,7 @@ public:
 		return r->second;
 	}
 
-	static const int overheadPerItem = 128*4;
+	static const int overheadPerItem = 96*4;
 	struct iterator;
 
 	VersionedMap() : oldestVersion(0), latestVersion(0) {

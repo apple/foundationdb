@@ -222,7 +222,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 			}
 
 			if (reqSize < LARGE) {
-				if (reqSize <= 128) { b = (ArenaBlock*)FastAllocator<128>::allocate(); b->bigSize = 128; INSTRUMENT_ALLOCATE("Arena128"); }
+				if (reqSize <= 96) { b = (ArenaBlock*)FastAllocator<96>::allocate(); b->bigSize = 96; INSTRUMENT_ALLOCATE("Arena96"); }
+				else if (reqSize <= 128) { b = (ArenaBlock*)FastAllocator<128>::allocate(); b->bigSize = 128; INSTRUMENT_ALLOCATE("Arena128"); }
 				else if (reqSize <= 256) { b = (ArenaBlock*)FastAllocator<256>::allocate(); b->bigSize = 256; INSTRUMENT_ALLOCATE("Arena256"); }
 				else if (reqSize <= 512) { b = (ArenaBlock*)FastAllocator<512>::allocate(); b->bigSize = 512; INSTRUMENT_ALLOCATE("Arena512"); }
 				else if (reqSize <= 1024) { b = (ArenaBlock*)FastAllocator<1024>::allocate(); b->bigSize = 1024; INSTRUMENT_ALLOCATE("Arena1024"); }
@@ -264,7 +265,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 			else if (tinySize <= 32) { FastAllocator<32>::release(this); INSTRUMENT_RELEASE("Arena32"); }
 			else { FastAllocator<64>::release(this); INSTRUMENT_RELEASE("Arena64"); }
 		} else {
-			if (bigSize <= 128) { FastAllocator<128>::release(this); INSTRUMENT_RELEASE("Arena128"); }
+			if (bigSize <= 96) { FastAllocator<96>::release(this); INSTRUMENT_RELEASE("Arena96"); }
+			else if (bigSize <= 128) { FastAllocator<128>::release(this); INSTRUMENT_RELEASE("Arena128"); }
 			else if (bigSize <= 256) { FastAllocator<256>::release(this); INSTRUMENT_RELEASE("Arena256"); }
 			else if (bigSize <= 512) { FastAllocator<512>::release(this); INSTRUMENT_RELEASE("Arena512"); }
 			else if (bigSize <= 1024) { FastAllocator<1024>::release(this); INSTRUMENT_RELEASE("Arena1024"); }
