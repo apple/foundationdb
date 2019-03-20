@@ -49,3 +49,4 @@ testTitle=SnapSimpleShutdown
         testName=SaveAndKill
         restartInfoLocation=simfdb/restartInfo.ini
         testDuration=10.0
+        isRestoring=1

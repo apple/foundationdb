@@ -120,7 +120,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
 	{ OPT_RESTARTING,            "-R",                          SO_NONE },
 	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
-	{ OPT_RESTORING,            "--restoring",                 SO_NONE },
 	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
 	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
 	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
@@ -935,7 +934,7 @@ int main(int argc, char* argv[]) {
 		LocalityData localities;
 		int minTesterCount = 1;
 		bool testOnServers = false;
-		bool restoring = false;
+		bool isRestoring = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
@@ -1197,10 +1196,6 @@ int main(int argc, char* argv[]) {
 				case OPT_RESTARTING:
 					restarting = true;
 					break;
-			    case OPT_RESTORING: {
-				    restoring = true;
-				    break;
-			    }
 			    case OPT_RANDOMSEED: {
 					char* end;
 					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
@@ -1670,64 +1665,66 @@ int main(int argc, char* argv[]) {
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
-			} else if (restoring) {
-				std::vector<std::string> returnList;
-				std::string ext = "";
-				std::string tmpFolder = abspath(dataFolder);
-				returnList = platform::listDirectories(tmpFolder);
-				TraceEvent("RestoringDataFolder").detail("DataFolder", tmpFolder);
-
+			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
+				std::string tmpFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(tmpFolder, "restartInfo.ini").c_str());
-				std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
-				TraceEvent("RestoreSnapUID").detail("UID", snapStr);
+				int isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
+				if (isRestoring) {
+					std::vector<std::string> returnList;
+					std::string ext = "";
+					returnList = platform::listDirectories(tmpFolder);
+					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
-				// delete all files (except fdb.cluster) in non-snap directories
-				for (int i = 0; i < returnList.size(); i++) {
-					if (returnList[i] == "." || returnList[i] == "..") {
-						continue;
-					}
-					if (returnList[i].find(snapStr) != std::string::npos) {
-						continue;
-					}
+					TraceEvent("RestoringDataFolder").detail("DataFolder", tmpFolder);
+					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
-					std::string childf = tmpFolder + "/" + returnList[i];
-					std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-					for (int j = 0; j < returnFiles.size(); j++) {
-						fprintf(stderr, "file : %s\n", returnFiles[j].c_str());
-						if (returnFiles[j] != "fdb.cluster") {
-							TraceEvent("DeletingNonSnapfiles")
-							    .detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
-							deleteFile(childf + "/" + returnFiles[j]);
+					// delete all files (except fdb.cluster) in non-snap directories
+					for (int i = 0; i < returnList.size(); i++) {
+						if (returnList[i] == "." || returnList[i] == "..") {
+							continue;
+						}
+						if (returnList[i].find(snapStr) != std::string::npos) {
+							continue;
+						}
+
+						std::string childf = tmpFolder + "/" + returnList[i];
+						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+						for (int j = 0; j < returnFiles.size(); j++) {
+							fprintf(stderr, "file : %s\n", returnFiles[j].c_str());
+							if (returnFiles[j] != "fdb.cluster") {
+								TraceEvent("DeletingNonSnapfiles")
+									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
+								deleteFile(childf + "/" + returnFiles[j]);
+							}
 						}
 					}
-				}
-				// move the contents from snap folder to the original folder,
-				// delete snap folders
-				for (int i = 0; i < returnList.size(); i++) {
-					fprintf(stderr, "Dir : %s\n", returnList[i].c_str());
-					if (returnList[i] == "." || returnList[i] == "..") {
-						continue;
-					}
-					if (returnList[i].find(snapStr) == std::string::npos) {
-						if (returnList[i].find("snap") != std::string::npos) {
-							platform::eraseDirectoryRecursive(tmpFolder + returnList[i]);
+					// move the contents from snap folder to the original folder,
+					// delete snap folders
+					for (int i = 0; i < returnList.size(); i++) {
+						fprintf(stderr, "Dir : %s\n", returnList[i].c_str());
+						if (returnList[i] == "." || returnList[i] == "..") {
+							continue;
 						}
-						continue;
+						if (returnList[i].find(snapStr) == std::string::npos) {
+							if (returnList[i].find("snap") != std::string::npos) {
+								platform::eraseDirectoryRecursive(tmpFolder + returnList[i]);
+							}
+							continue;
+						}
+						std::string origDir = returnList[i].substr(0, 32);
+						std::string dirToRemove = tmpFolder + "/" + origDir;
+						std::string dirSrc = tmpFolder + "/" + returnList[i];
+						TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
+						platform::eraseDirectoryRecursive(dirToRemove);
+						renameFile(dirSrc, dirToRemove);
+						TraceEvent("RenamingSnapToOriginalDirectory")
+							.detail("Oldname", dirSrc)
+							.detail("Newname", dirToRemove);
 					}
-					std::string origDir = returnList[i].substr(0, 32);
-					std::string dirToRemove = tmpFolder + "/" + origDir;
-					std::string dirSrc = tmpFolder + "/" + returnList[i];
-					TraceEvent("DeletingOriginalNonSnapDirectory").detail("FileBeingDeleted", dirToRemove);
-					platform::eraseDirectoryRecursive(dirToRemove);
-					renameFile(dirSrc, dirToRemove);
-					TraceEvent("RenamingSnapToOriginalDirectory")
-					    .detail("Oldname", dirSrc)
-					    .detail("Newname", dirToRemove);
 				}
 			}
-
 			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
