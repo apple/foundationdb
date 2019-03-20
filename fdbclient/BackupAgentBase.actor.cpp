@@ -40,10 +40,11 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 }
 
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
+	struct tm out;
+#ifdef _WIN32
 	// Windows does not support strptime, so we will use std::get_time
 	// Unfortunately, std::get_time() does not support %z (as strptime does) so we must read
 	// the date/time part separately from the timezone and then adjust tm.
-	struct tm out;
 	std::istringstream s(timestamp.substr(0, 19));
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
 	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
@@ -68,8 +69,13 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 
 	// Add back the difference between the default timezone offset and the intended one.
 	ts += (out.tm_gmtoff - tzOffset);
-
 	return ts;
+#else
+	if(strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
+		return -1;
+	}
+	return (int64_t) mktime(&out);		
+#endif
 }
 
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
