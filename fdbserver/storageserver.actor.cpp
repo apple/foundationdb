@@ -3617,6 +3617,7 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
 		wait(self.storage.init());
+		wait(self.storage.commit()); //after a rollback there might be uncommitted changes.
 		bool ok = wait( self.storage.restoreDurableState() );
 		if (!ok) {
 			if(recovered.canBeSet()) recovered.send(Void());
