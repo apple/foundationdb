@@ -515,6 +515,10 @@ public:
 				bestFit = std::min(bestFit, thisFit);
 			}
 			count = workers.size();
+			//degraded is only used for recruitment of tlogs
+			if(role != ProcessClass::TLog) {
+				worstIsDegraded = false;
+			}
 		}
 
 		bool operator < (RoleFitness const& r) const {
