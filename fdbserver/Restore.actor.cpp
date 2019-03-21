@@ -3871,8 +3871,8 @@ ACTOR static Future<Version> processRestoreRequest(RestoreCommandInterface inter
 				bool isRange = rd->allFiles[curBackupFilesEndIndex].isRange;
 				bool validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
 				curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
-				printf("[DEBUG] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB\n",
-						endVersion, isRange, validVersion, curWorkloadSize);
+				printf("[DEBUG] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%d curBackupFilesEndIndex:%d, files.size:%d\n",
+						endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
 				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex > rd->allFiles.size()-1 )  {
 					if ( curBackupFilesEndIndex > rd->allFiles.size()-1 && curWorkloadSize <= 0 ) {
 						printf("Restore finishes: curBackupFilesEndIndex:%d, allFiles.size:%d, curWorkloadSize:%d",
@@ -3882,7 +3882,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreCommandInterface inter
 					//TODO: Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
 					rd->files.clear();
 					if ( curBackupFilesBeginIndex != curBackupFilesEndIndex ) {
-						for (int fileIndex = curBackupFilesBeginIndex; fileIndex <= curBackupFilesEndIndex; fileIndex++) {
+						for (int fileIndex = curBackupFilesBeginIndex; fileIndex <= curBackupFilesEndIndex && fileIndex < rd->allFiles.size(); fileIndex++) {
 							rd->files.push_back(rd->allFiles[fileIndex]);
 						}
 					} else {
