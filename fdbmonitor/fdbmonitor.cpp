@@ -223,40 +223,113 @@ std::string joinPath(std::string const& directory, std::string const& filename) 
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
 
-std::string abspath(std::string const& filename) {
-	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
-	char result[PATH_MAX];
-	auto r = realpath( filename.c_str(), result );
-	if (!r) {
-		if (errno == ENOENT) {
-			int sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
-			if (sep != std::string::npos) {
-				return joinPath( abspath( filename.substr(0, sep) ), filename.substr(sep) );
+std::string cleanPath(std::string const &path) {
+	std::vector<std::string> finalParts;
+	bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+
+	int i = 0;
+	while(i < path.size()) {
+		int sep = path.find((char)CANONICAL_PATH_SEPARATOR, i);
+		if(sep == path.npos) {
+			sep = path.size();
+		}
+		std::string part = path.substr(i + 1, sep - i);
+		if(part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+			continue;
+		if(part == "..") {
+			if(!finalParts.empty() && finalParts.back() != "..") {
+				finalParts.pop_back();
+				continue;
 			}
-			else if (filename.find("~") == std::string::npos) {
-				return joinPath( abspath( "." ), filename );
+			if(absolute) {
+				continue;
 			}
 		}
+		finalParts.push_back(part);
+	}
 
-		log_err("realpath", errno, "Unable to get real path for %s", filename.c_str());
+	std::string result;
+	result.reserve(PATH_MAX);
+	if(absolute) {
+		result.append(1, CANONICAL_PATH_SEPARATOR);
+	}
+
+	for(int i = 0; i < finalParts.size(); ++i) {
+		if(i != 0) {
+			result.append(1, CANONICAL_PATH_SEPARATOR);
+		}
+		result.append(finalParts[i]);
+	}
+
+	return result.empty() ? "." : result;
+}
+
+// Removes the last component from a path string (if possible) and returns the result with one trailing separator.
+std::string popPath(const std::string &path) {
+	int i = path.size() - 1;
+	// Skip over any trailing separators
+	while(i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
+		--i;
+	}
+	// Skip over non separators
+	while(i >= 0 && path[i] != CANONICAL_PATH_SEPARATOR) {
+		--i;
+	}
+	// Skip over trailing separators again
+	bool foundSeparator = false;
+	while(i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
+		--i;
+		foundSeparator = true;
+	}
+
+	if(foundSeparator) {
+		++i;
+	}
+	else {
+		// If absolute then we popped off the only path component so return "/"
+		if(!path.empty() && path.front() == CANONICAL_PATH_SEPARATOR) {
+			return "/";
+		}
+	}
+	return path.substr(0, i + 1);
+}
+
+std::string abspath( std::string const& path, bool resolveLinks = true) {
+	if(path.empty()) {
+		return "";
+	}
+
+	if(!resolveLinks) {
+		std::string clean = cleanPath(joinPath(abspath(".", true), path));
+		return clean;
+	}
+
+	char result[PATH_MAX];
+	// Must resolve links, so first try realpath on the whole thing
+	const char *r = realpath( path.c_str(), result );
+	if(r == nullptr) {
+		// If the error was ENOENT and the path doesn't have to exist,
+		// try to resolve symlinks in progressively shorter prefixes of the path
+		if(errno == ENOENT && path != ".") {
+			std::string prefix = popPath(path);
+			std::string suffix = path.substr(prefix.size());
+			if(prefix.empty()) {
+				prefix = ".";
+			}
+			return cleanPath(joinPath(abspath(prefix, true), suffix));
+		}
 		return "";
 	}
 	return std::string(r);
 }
 
-// Get the parent directory of a filename *without* resolving symbolic links so that fdbmonitor can support
-// symbolic links updates as a way of atomitically changing the configuration file
-std::string parentDirectory(std::string filename) {
-	size_t sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
+std::string parentDirectory( std::string const& path, bool resolveLinks = true) {
+	auto abs = abspath(path, resolveLinks);
+	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {
 		return "";
 	}
-
-	while(filename.size() && (filename.back() == '/' || filename.back() == CANONICAL_PATH_SEPARATOR)) {
-		filename.resize(filename.size() - 1);
-	}
-
-	return filename.substr(0, sep+1);
+	return abs.substr(0, sep + 1);
 }
 
 int mkdir(std::string const& directory) {
@@ -853,7 +926,7 @@ void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
 		/* Find the nearest existing ancestor */
 		while( (*confd_fd = open( confdir.c_str(), O_EVTONLY )) < 0 && errno == ENOENT ) {
 			child = confdir;
-			confdir = parentDirectory(confdir);
+			confdir = parentDirectory(confdir, false);
 		}
 
 		if ( *confd_fd >= 0 ) {
@@ -945,7 +1018,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				}
 			}
 
-			std::string parent = parentDirectory(subpath);
+			std::string parent = parentDirectory(subpath, false);
 
 			/* Watch the parent directory of the current path for changes */
 			int wd = inotify_add_watch(ifd, parent.c_str(), IN_CREATE | IN_MOVED_TO);
@@ -1054,7 +1127,7 @@ int main(int argc, char** argv) {
 	std::string confpath = p;
 
 	// Will always succeed given an absolute path
-	std::string confdir = parentDirectory(confpath);
+	std::string confdir = parentDirectory(confpath, false);
 	std::string conffile = confpath.substr(confdir.size());
 
 #ifdef __linux__
@@ -1119,7 +1192,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* open and lock our lockfile for mutual exclusion */
-	std::string lockfileDir = parentDirectory(abspath(lockfile));
+	std::string lockfileDir = parentDirectory(lockfile, true);
 	if(lockfileDir.size() == 0) {
 		log_msg(SevError, "Unable to determine parent directory of lockfile %s\n", lockfile.c_str());
 		exit(1);
@@ -1446,7 +1519,7 @@ int main(int argc, char** argv) {
 							confpath = redone_confpath;
 
 							// Will always succeed given an absolute path
-							confdir = parentDirectory(confpath);
+							confdir = parentDirectory(confpath, false);
 							conffile = confpath.substr(confdir.size());
 
 							// Remove all the old watches
