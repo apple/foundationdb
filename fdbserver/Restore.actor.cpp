@@ -1350,12 +1350,17 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 			printf("To decode value:%s\n", getHexString(val).c_str());
 		}
 		// In sampling, the last mutation vector may be not complete, we do not concatenate for performance benefit
-		if ( val_length_decode != (val.size() - 12) && !isSampling ) {
+		if ( val_length_decode != (val.size() - 12) ) {
 			//IF we see val.size() == 10000, It means val should be concatenated! The concatenation may fail to copy the data
-			printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
+			if (isSampling) {
+				printf("[PARSE WARNING]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
 					commitVersion, commitVersion);
-			printf("[PARSE ERROR] Skipped the mutation! OK for sampling workload but WRONG for restoring the workload\n");
-			continue;
+				printf("[PARSE WARNING] Skipped the mutation! OK for sampling workload but WRONG for restoring the workload\n");
+				continue;
+			} else {
+				printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d version:%ld(0x%lx)\n",  val_length_decode, val.size(),
+					commitVersion, commitVersion);
+			}
 		} else {
 			if ( debug_verbose ) {
 				printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
@@ -2432,6 +2437,8 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state CMDUID checkpointCMDUID = rd->cmdID;
 	state int checkpointCurFileIndex = curFileIndex;
 	state int64_t checkpointCurFileOffset = 0;
+	state std::vector<Future<RestoreCommandReply>> cmdReplies;
+	state RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_Range_File;
 	loop { // For retry on timeout
 		try {
 			if ( allLoadReqsSent ) {
@@ -2439,8 +2446,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 			wait(delay(1.0));
 
-			state std::vector<Future<RestoreCommandReply>> cmdReplies;
-			state RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_Range_File;
+			cmdReplies.clear();
 
 			printf("[Sampling] Node:%s We will sample the workload among %d backup files.\n", rd->describeNode().c_str(), rd->files.size());
 			printf("[Sampling] Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d, loadSize:%dB sampleIndex:%d\n", rd->describeNode().c_str(),
@@ -2533,7 +2539,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				}
 
 				rd->cmdID.nextCmd(); // The cmd index is the i^th file (range or log file) to be processed
-				printf("[Sampling] Master cmdType:%d cmdUID:%s isRange:%d\n", (int) cmdType, rd->cmdID.toString().c_str(), (int) rd->files[curFileIndex].isRange);
+				printf("[Sampling] Master cmdType:%d cmdUID:%s isRange:%d destinationNode:%s\n", 
+						(int) cmdType, rd->cmdID.toString().c_str(), (int) rd->files[curFileIndex].isRange,
+						nodeID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(cmdType, rd->cmdID, nodeID, param)) );
 				if (param.offset + param.length >= rd->files[curFileIndex].fileSize) { // Reach the end of the file
 					curFileIndex++;
@@ -3865,7 +3873,12 @@ ACTOR static Future<Version> processRestoreRequest(RestoreCommandInterface inter
 				curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
 				printf("[DEBUG] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB\n",
 						endVersion, isRange, validVersion, curWorkloadSize);
-				if ((validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= rd->allFiles.size()-1)  {
+				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex > rd->allFiles.size()-1 )  {
+					if ( curBackupFilesEndIndex > rd->allFiles.size()-1 && curWorkloadSize <= 0 ) {
+						printf("Restore finishes: curBackupFilesEndIndex:%d, allFiles.size:%d, curWorkloadSize:%d",
+								curBackupFilesEndIndex, rd->allFiles.size(), curWorkloadSize);
+						break;
+					}
 					//TODO: Construct the files [curBackupFilesBeginIndex, curBackupFilesEndIndex]
 					rd->files.clear();
 					if ( curBackupFilesBeginIndex != curBackupFilesEndIndex ) {
@@ -3885,7 +3898,7 @@ ACTOR static Future<Version> processRestoreRequest(RestoreCommandInterface inter
 
 					curEndTime = now();
 					curRunningTime = curEndTime - curStartTime;
-					ASSERT(curRunningTime > 0);
+					ASSERT(curRunningTime >= 0);
 					totalRunningTime += curRunningTime;
 					totalWorkloadSize += curWorkloadSize;
 
