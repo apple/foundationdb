@@ -233,7 +233,8 @@ std::string cleanPath(std::string const &path) {
 		if(sep == path.npos) {
 			sep = path.size();
 		}
-		std::string part = path.substr(i + 1, sep - i);
+		std::string part = path.substr(i, sep - i);
+		i = sep + 1;
 		if(part.size() == 0 || (part.size() == 1 && part[0] == '.'))
 			continue;
 		if(part == "..") {
@@ -300,8 +301,8 @@ std::string abspath( std::string const& path, bool resolveLinks = true) {
 	}
 
 	if(!resolveLinks) {
-		std::string clean = cleanPath(joinPath(abspath(".", true), path));
-		return clean;
+		bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+		return cleanPath(absolute ? path : joinPath(abspath(".", true), path));
 	}
 
 	char result[PATH_MAX];
@@ -318,18 +319,14 @@ std::string abspath( std::string const& path, bool resolveLinks = true) {
 			}
 			return cleanPath(joinPath(abspath(prefix, true), suffix));
 		}
+		log_err("realpath", errno, "Unable to get real path for %s", path.c_str());
 		return "";
 	}
 	return std::string(r);
 }
 
 std::string parentDirectory( std::string const& path, bool resolveLinks = true) {
-	auto abs = abspath(path, resolveLinks);
-	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
-	if (sep == std::string::npos) {
-		return "";
-	}
-	return abs.substr(0, sep + 1);
+	return popPath(abspath(path, resolveLinks));
 }
 
 int mkdir(std::string const& directory) {
@@ -1065,6 +1062,97 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 	return additional_watch_wds;
 }
 #endif
+
+int testPathFunction(const char *name, std::function<std::string(std::string)> fun, std::string a, std::string b) {
+	std::string o = fun(a);
+	bool r = b == o;
+	printf("%s: %s(%s) = %s expected %s\n", r ? "PASS" : "FAIL", name, a.c_str(), o.c_str(), b.c_str());
+	return r ? 0 : 1;
+}
+
+int testPathFunction2(const char *name, std::function<std::string(std::string, bool)> fun, std::string a, bool x, std::string b) {
+	std::string o = fun(a, x);
+	bool r = b == o;
+	printf("%s: %s(%s, %d) => %s expected %s\n", r ? "PASS" : "FAIL", name, a.c_str(), x, o.c_str(), b.c_str());
+	return r ? 0 : 1;
+}
+
+void testPathOps() {
+	int errors = 0;
+
+	errors += testPathFunction("popPath", popPath, "a", "");
+	errors += testPathFunction("popPath", popPath, "a/", "");
+	errors += testPathFunction("popPath", popPath, "a///", "");
+	errors += testPathFunction("popPath", popPath, "a///..", "a/");
+	errors += testPathFunction("popPath", popPath, "a///../", "a/");
+	errors += testPathFunction("popPath", popPath, "a///..//", "a/");
+	errors += testPathFunction("popPath", popPath, "/", "/");
+	errors += testPathFunction("popPath", popPath, "/a", "/");
+	errors += testPathFunction("popPath", popPath, "/a/b", "/a/");
+	errors += testPathFunction("popPath", popPath, "/a/b/", "/a/");
+	errors += testPathFunction("popPath", popPath, "/a/b/..", "/a/b/");
+
+	errors += testPathFunction("cleanPath", cleanPath, "/", "/");
+	errors += testPathFunction("cleanPath", cleanPath, "..", "..");
+	errors += testPathFunction("cleanPath", cleanPath, "../.././", "../..");
+	errors += testPathFunction("cleanPath", cleanPath, "///.///", "/");
+	errors += testPathFunction("cleanPath", cleanPath, "/a/b/.././../c/./././////./d/..//", "/c");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//", "c");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//..", ".");
+	errors += testPathFunction("cleanPath", cleanPath, "a/b/.././../c/./././////./d/..//../..", "..");
+	errors += testPathFunction("cleanPath", cleanPath, "../a/b/..//", "../a");
+	errors += testPathFunction("cleanPath", cleanPath, "/..", "/");
+	errors += testPathFunction("cleanPath", cleanPath, "/../foo/bar///", "/foo/bar");
+	errors += testPathFunction("cleanPath", cleanPath, "/a/b/../.././../", "/");
+	errors += testPathFunction("cleanPath", cleanPath, ".", ".");
+
+	mkdir("simfdb/backups/one/two/three");
+	std::string cwd = abspath(".", true);
+
+	// Create some symlinks and test resolution (or non-resolution) of them
+	symlink("one/two", "simfdb/backups/four");
+	symlink("../backups/four", "simfdb/backups/five");
+
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, joinPath(cwd, "simfdb/backups/one/three"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, joinPath(cwd, "simfdb/backups/one/four"));
+
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, joinPath(cwd, "simfdb/backups/one/"));
+
+	errors += testPathFunction2("abspath", abspath, "/", false, "/");
+	errors += testPathFunction2("abspath", abspath, "/foo//bar//baz/.././", false, "/foo/bar");
+	errors += testPathFunction2("abspath", abspath, "/", true, "/");
+	errors += testPathFunction2("abspath", abspath, "", true, "");
+	errors += testPathFunction2("abspath", abspath, ".", true, cwd);
+	errors += testPathFunction2("abspath", abspath, "/a", true, "/a");
+	errors += testPathFunction2("abspath", abspath, "one/two/three/four", false, joinPath(cwd, "one/two/three/four"));
+	errors += testPathFunction2("abspath", abspath, "one/two/three/./four", false, joinPath(cwd, "one/two/three/four"));
+	errors += testPathFunction2("abspath", abspath, "one/two/three/./four/..", false, joinPath(cwd, "one/two/three"));
+	errors += testPathFunction2("abspath", abspath, "one/./two/../three/./four", false, joinPath(cwd, "one/three/four"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", false, joinPath(cwd, "simfdb/backups/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", false, joinPath(cwd, "simfdb/backups/two"));
+	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, joinPath(cwd, "foo2/bar"));
+	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", true, joinPath(cwd, "foo2/bar"));
+
+	errors += testPathFunction2("parentDirectory", parentDirectory, "", true, "");
+	errors += testPathFunction2("parentDirectory", parentDirectory, "/", true, "/");
+	errors += testPathFunction2("parentDirectory", parentDirectory, "/a", true, "/");
+	errors += testPathFunction2("parentDirectory", parentDirectory, ".", false, cleanPath(joinPath(cwd, "..")) + "/");
+	errors += testPathFunction2("parentDirectory", parentDirectory, "./foo", false, cleanPath(cwd) + "/");
+	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/four", false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four", false, joinPath(cwd, "one/two/three/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "one/two/three/./four/..", false, joinPath(cwd, "one/two/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "one/./two/../three/./four", false, joinPath(cwd, "one/three/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, joinPath(cwd, "simfdb/backups/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", false, joinPath(cwd, "simfdb/backups/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, joinPath(cwd, "foo2/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, joinPath(cwd, "foo2/"));
+
+	printf("%d errors.\n", errors);
+	if(errors)
+		exit(-1);
+}
 
 int main(int argc, char** argv) {
 	std::string lockfile = "/var/run/fdbmonitor.pid";

@@ -321,8 +321,9 @@ void writeFile(std::string const& filename, std::string const& content);
 std::string joinPath( std::string const& directory, std::string const& filename );
 
 // cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
-// following symbolic links or verifying the existence of any path components, removing redundant
-// "." references and duplicate separators, and resolving any ".." references.
+// following symbolic links or verifying the existence of any path components.  It removes redundant
+// "." references and duplicate separators, and resolves any ".." references that can be resolved
+// using the preceding path components.
 // Relative paths remain relative and are NOT rebased on the current working directory.
 std::string cleanPath( std::string const& path );
 

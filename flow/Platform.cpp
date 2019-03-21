@@ -1840,7 +1840,7 @@ std::string cleanPath(std::string const &path) {
 
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 // If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
-// Note that this is NOT the same as getting the parant of path, as the final component could be ".."
+// Note that this is NOT the same as getting the parent of path, as the final component could be ".."
 // or "." and it would still be simply removed.
 // ALL of the following inputs will yield the result "/a/"
 //   /a/b
@@ -1893,8 +1893,9 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 	if(!resolveLinks) {
 		// TODO:  Not resolving symbolic links does not yet behave well on Windows because of drive letters
 		// and network names, so it's not currently allowed here (but it is allowed in fdbmonitor which is unix-only)
-		ASSERT(g_network->isSimulated());
-		std::string clean = cleanPath(joinPath(platform::getWorkingDirectory(), path));
+		ASSERT(false);
+		bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+		std::string clean = cleanPath(absolute ? path : joinPath(platform::getWorkingDirectory(), path));
 		if(mustExist && !fileExists(clean)) {
 			Error e = systemErrorCodeToError();
 			Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
@@ -1945,16 +1946,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 }
 
 std::string parentDirectory( std::string const& path, bool resolveLinks, bool mustExist ) {
-	auto abs = abspath(path, resolveLinks, mustExist);
-	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
-	if (sep == std::string::npos) {
-		Error e = platform_error();
-		TraceEvent(SevWarnAlways, "GetParentDirectory")
-			.detail("File", path)
-			.error(e);
-		throw e;
-	}
-	return abs.substr(0, sep + 1);
+	return popPath(abspath(path, resolveLinks, mustExist));
 }
 
 std::string basename( std::string const& filename ) {
@@ -2961,12 +2953,18 @@ int testPathFunction(const char *name, std::function<std::string(std::string)> f
 	return r ? 0 : 1;
 }
 
-int testPathFunction2(const char *name, std::function<std::string(std::string, bool, bool)> fun, std::string a, bool x, bool y, ErrorOr<std::string> b) {
+int testPathFunction2(const char *name, std::function<std::string(std::string, bool, bool)> fun, std::string a, bool resolveLinks, bool mustExist, ErrorOr<std::string> b) {
+	// Skip tests with resolveLinks set to false as the implementation is not complete
+	if(resolveLinks == false) {
+		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
+		return 0;
+	}
+	
 	ErrorOr<std::string> result;
-	try { result  = fun(a, x, y); } catch(Error &e) { result = e; }
+	try { result  = fun(a, resolveLinks, mustExist); } catch(Error &e) { result = e; }
 	bool r = result.isError() == b.isError() && (b.isError() || b.get() == result.get()) && (!b.isError() || b.getError().code() == result.getError().code());
 
-	printf("%s: %s('%s', %d, %d) -> %s", r ? "PASS" : "FAIL", name, a.c_str(), x, y, result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
+	printf("%s: %s('%s', %d, %d) -> %s", r ? "PASS" : "FAIL", name, a.c_str(), resolveLinks, mustExist, result.isError() ? result.getError().what() : format("'%s'", result.get().c_str()).c_str());
 	if(!r) {
 		printf("  *ERROR* expected %s", b.isError() ? b.getError().what() : format("'%s'", b.get().c_str()).c_str());
 	}
@@ -3027,6 +3025,8 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
 #endif
 
+	errors += testPathFunction2("abspath", abspath, "/", false, false, "/");
+	errors += testPathFunction2("abspath", abspath, "/foo//bar//baz/.././", false, false, "/foo/bar");
 	errors += testPathFunction2("abspath", abspath, "/", true, false, "/");
 	errors += testPathFunction2("abspath", abspath, "", true, false, platform_error());
 	errors += testPathFunction2("abspath", abspath, ".", true, false, cwd);
