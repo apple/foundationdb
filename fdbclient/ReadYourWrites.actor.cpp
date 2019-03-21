@@ -1081,6 +1081,10 @@ public:
 			if ( ryw->resetPromise.isSet() ) {
 				throw ryw->resetPromise.getFuture().getError();
 			}
+			if ( !ryw->timeoutActorStarted ) {
+				// If an error is encountered before the first read starts the timeout actor, start it here.
+				ryw->startTimeoutActor();
+			}
 
 			bool retry_limit_hit = ryw->options.maxRetries != -1 && ryw->retries >= ryw->options.maxRetries;
 			if (ryw->retries < std::numeric_limits<int>::max()) 
@@ -1123,9 +1127,7 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
-	resetTimeout();
-}
+ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {}
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
 	if (now() < endTime) {
@@ -1136,8 +1138,9 @@ ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
 	throw transaction_timed_out();	
 }
 
-void ReadYourWritesTransaction::resetTimeout() {
+void ReadYourWritesTransaction::startTimeoutActor() {
 	timeoutActor = options.timeoutInSeconds == 0.0 ? Void() : timebomb(options.timeoutInSeconds + creationTime, resetPromise);
+	timeoutActorStarted = true;
 }
 
 Future<Version> ReadYourWritesTransaction::getReadVersion() {
@@ -1145,6 +1148,9 @@ Future<Version> ReadYourWritesTransaction::getReadVersion() {
 		if (resetPromise.isSet())
 			return resetPromise.getFuture().getError();
 		return RYWImpl::getReadVersion(this);
+	}
+	if( !timeoutActorStarted ) {
+		startTimeoutActor();
 	}
 	return tr.getReadVersion();
 }
@@ -1792,7 +1798,7 @@ void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option,
 
 		case FDBTransactionOptions::TIMEOUT:
 			options.timeoutInSeconds = extractIntOption(value, 0, std::numeric_limits<int>::max())/1000.0;
-			resetTimeout();
+			startTimeoutActor();
 			break;
 
 		case FDBTransactionOptions::RETRY_LIMIT:
@@ -1894,7 +1900,7 @@ void ReadYourWritesTransaction::resetRyow() {
 
 	if(tr.apiVersionAtLeast(16)) {
 		options.reset(tr);
-		resetTimeout();
+		timeoutActorStarted = false;
 	}
 
 	if ( !oldReset.isSet() )
