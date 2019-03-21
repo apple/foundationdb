@@ -624,7 +624,9 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), na.ip.toString().c_str(), na.port);
+	std::string ip = na.ip.toString();
+	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
+	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
 	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskFlushTrace));

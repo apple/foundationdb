@@ -39,25 +39,11 @@
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
-	static std::string formatTime(int64_t epochs) {
-		time_t curTime = (time_t)epochs;
-		char buffer[128];
-		struct tm timeinfo;
-		getLocalTime(&curTime, &timeinfo);
-		strftime(buffer, 128, "%Y/%m/%d.%H:%M:%S%z", &timeinfo);
-		return buffer;
-	}
+	static std::string formatTime(int64_t epochs);
+	static int64_t parseTime(std::string timestamp);
 
 	static std::string timeFormat() {
 		return "YYYY/MM/DD.HH:MI:SS[+/-]HHMM";
-	}
-
-	static int64_t parseTime(std::string timestamp) {
-		struct tm out;
-		if (strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
-			return -1;
-		}
-		return (int64_t) mktime(&out);
 	}
 
 	// Type of program being executed
