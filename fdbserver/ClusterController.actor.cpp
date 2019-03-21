@@ -1381,7 +1381,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	auto masterFitnessForRK = masterWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 	auto masterFitnessForDD = masterWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 
-	if (!self->recruitingRatekeeperID.present() && db.ratekeeper.present()) {
+	if (!self->recruitingRatekeeperID.present() && db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId())) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) ||
@@ -1392,7 +1392,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		}
 	}
 
-	if (!self->recruitingDistributor && db.distributor.present()) {
+	if (!self->recruitingDistributor && db.distributor.present() && self->id_worker.count(db.distributor.get().locality.processId())) {
 		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 		if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) ||
@@ -1854,9 +1854,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		if (self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId() &&
 				(!self->recruitingRatekeeperID.present() || self->recruitingRatekeeperID.get() == req.ratekeeperInterf.get().id())) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
-			TraceEvent("ClusterController_RegisterRatekeeper", self->id).detail("RKID", rki.id());
+			TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", rki.id());
 			if (self->db.serverInfo->get().ratekeeper.present()) {
-				TraceEvent("ClusterController_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
+				TraceEvent("CC_HaltRatekeeper", self->id)
+				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 				self->db.serverInfo->get().ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
 			}
 			if (self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() == rki.id()) {
@@ -1864,7 +1865,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 			self->db.setRatekeeper(rki);
 		} else {
-			TraceEvent("ClusterController_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
+			TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
 			req.ratekeeperInterf.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
 		}
 	}
@@ -2554,7 +2555,7 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 			when ( wait(self->db.serverInfo->onChange()) ) {}
 			when ( wait(ratekeeperFailed) ) {
 				ratekeeperFailed = Never();
-				TraceEvent("ClusterController_RateKeeperDied", self->id)
+				TraceEvent("CC_RateKeeperDied", self->id)
 				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 				self->db.clearInterf(ProcessClass::RateKeeperClass);
 			}
@@ -2617,7 +2618,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
 			vector<WorkerDetails> workers;
 
-			auto masterAddr = self.db.serverInfo->get().master.address();
 			for(auto& it : self.id_worker) {
 				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.details.interf.address()) ) {
 					continue;
