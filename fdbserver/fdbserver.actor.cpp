@@ -321,7 +321,7 @@ UID getSharedMemoryMachineId() {
 	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
 	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
-	std::string sharedMemoryIdentifier = format("fdbserver_boost_%s", BOOST_LIB_VERSION);
+	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
 			// "0" is the default parameter "addr"
