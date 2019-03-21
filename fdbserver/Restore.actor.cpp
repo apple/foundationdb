@@ -778,7 +778,7 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 
 	// Describe the node information
 	std::string describeNode() {
-		return "[Role:" + getRoleStr(localNodeStatus.role) + "] [NodeID:" + localNodeStatus.nodeID.toString().c_str() + "] [nodeIndex:" + std::to_string(localNodeStatus.nodeIndex) + "]";
+		return "[Role:" + getRoleStr(localNodeStatus.role) + "] [NodeID:" + localNodeStatus.nodeID.toString().c_str() + "] [NodeIndex:" + std::to_string(localNodeStatus.nodeIndex) + "]";
 	}
 
 	void resetPerVersionBatch() {
@@ -1850,8 +1850,8 @@ ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> rd, Re
 	loop {
 		choose {
 			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-				printf("[INFO] Node:%s Got Restore Command: CMDID:%s cmd:%d nodeID:%s KeyRange:%s\n", rd->describeNode().c_str(),
-						req.cmdID.toString().c_str(), req.cmd, req.id.toString().c_str(), req.keyRange.toString().c_str());
+				printf("[INFO] Node:%s Got Restore Command: CMDID:%s KeyRange:%s\n", rd->describeNode().c_str(),
+						req.cmdID.toString().c_str(), req.keyRange.toString().c_str());
 				if ( rd->localNodeStatus.nodeID != req.id ) {
 						printf("[ERROR] CMDID:%s node:%s receive request with a different id:%s\n",
 								req.cmdID.toString().c_str(), rd->describeNode().c_str(), req.id.toString().c_str());
@@ -1954,8 +1954,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> 
 	loop {
 		choose {
 			when(RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-				printf("[INFO] Node:%s, CmdID:%s Got Restore Command: cmd:%d UID:%s\n", rd->describeNode().c_str(), req.cmdID.toString().c_str(),
-						req.cmd, req.id.toString().c_str());
+				printf("[INFO] Node:%s, Got Restore Command CmdID:%s \n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 				if ( rd->localNodeStatus.nodeID != req.id ) {
 						printf("[ERROR] CmdID:%s node:%s receive request with a different id:%s\n", req.cmdID.toString().c_str(),
 								rd->describeNode().c_str(), req.id.toString().c_str());
@@ -3035,9 +3034,8 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreCommandInter
 		try {
 			choose {
 				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-					printf("[INFO][Loader] Node:%s CMDUID:%s Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
-							rd->describeNode().c_str(), req.cmdID.toString().c_str(),
-							req.cmd, req.id.toString().c_str(), rd->localNodeStatus.role);
+					printf("Node:%s CMDUID:%s Got Restore Command: CMDID:%s\n",
+							rd->describeNode().c_str(), req.cmdID.toString().c_str());
 					if ( interf.id() != req.id ) {
 							printf("[WARNING] node:%s receive request with a different id:%s\n",
 								rd->describeNode().c_str(), req.id.toString().c_str());
@@ -3209,8 +3207,7 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterf
 		//wait(delay(1.0));
 		choose {
 			when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-				printf("[INFO] Node:%s Got Restore Command: cmd:%d.\n", rd->describeNode().c_str(),
-						req.cmd);
+				printf("[INFO] Node:%s Got Restore Command: cmdID:%s.\n", rd->describeNode().c_str(), req.cmdID.toString().c_str());
 				if ( interf.id() != req.id ) {
 						printf("[WARNING] node:%s receive request with a different id:%s\n",
 							rd->describeNode().c_str(), req.id.toString().c_str());
@@ -3351,15 +3348,15 @@ ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> rd, RestoreCommandInt
 			//wait(delay(1.0));
 			choose {
 				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-					printf("[INFO][Worker] Got Restore Command: cmd:%d UID:%s localNodeStatus.role:%d\n",
-							req.cmd, req.id.toString().c_str(), rd->localNodeStatus.role);
+					printf("Node:%s Got Restore Command: cmdID:%d \n", rd->describeNode().c_str(),
+							req.cmdID.toString().c_str());
 					if ( interf.id() != req.id ) {
 							printf("[WARNING] node:%s receive request with a different id:%s\n",
 								rd->describeNode().c_str(), req.id.toString().c_str());
 					}
 
 					if (req.cmd == RestoreCommandEnum::Apply_Mutation_To_DB) {
-							printf("[INFO][Worker] Node: %s, role: %s, receive cmd Apply_Mutation_To_DB \n",
+							printf("Node: %s, role: %s, receive cmd Apply_Mutation_To_DB \n",
 								rd->describeNode().c_str());
 
 							wait( notifyApplierToApplyMutations(rd) );
@@ -3367,7 +3364,7 @@ ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> rd, RestoreCommandInt
 							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 							break;
 					} else if (req.cmd == RestoreCommandEnum::Apply_Mutation_To_DB_Skip) {
-						printf("[INFO][Worker] Node: %s, role: %s, receive cmd Apply_Mutation_To_DB_Skip \n",
+						printf("Node: %s, role: %s, receive cmd Apply_Mutation_To_DB_Skip \n",
 								rd->describeNode().c_str());
 
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
