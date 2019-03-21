@@ -150,21 +150,10 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 
-	TransactionOptions(Database const& cx) {
-		reset(cx);
-		if (BUGGIFY) {
-			commitOnFirstProxy = true;
-		}
-	}
-
-	TransactionOptions() {
-		reset();
-	}
+	TransactionOptions(Database const& cx);
+	TransactionOptions();
 
 	void reset(Database const& cx);
-
-private: 
-	void reset();
 };
 
 struct TransactionInfo {

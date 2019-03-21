@@ -44,6 +44,7 @@ struct ReadYourWritesTransactionOptions {
 	ReadYourWritesTransactionOptions() {}
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
 	void reset(Transaction const& tr);
+	void fullReset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();
 };
 

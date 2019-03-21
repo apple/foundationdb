@@ -2356,15 +2356,24 @@ double Transaction::getBackoff(int errCode) {
 	return b;
 }
 
-void TransactionOptions::reset(Database const& cx) {
-	memset(this, 0, sizeof(*this));
-	maxBackoff = cx->transactionMaxBackoff;
-	lockAware = cx->lockAware;
+TransactionOptions::TransactionOptions(Database const& cx) {
+    maxBackoff = cx->transactionMaxBackoff;
+    reset(cx);
+    if (BUGGIFY) {
+        commitOnFirstProxy = true;
+    }
 }
 
-void TransactionOptions::reset() {
+TransactionOptions::TransactionOptions() {
+    memset(this, 0, sizeof(*this));
+    maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+}
+
+void TransactionOptions::reset(Database const& cx) {
+	double oldMaxBackoff = maxBackoff;
 	memset(this, 0, sizeof(*this));
-	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	lockAware = cx->lockAware;
 }
 
 void Transaction::reset() {
@@ -2390,6 +2399,7 @@ void Transaction::reset() {
 void Transaction::fullReset() {
 	reset();
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+	options.maxBackoff = getDatabase()->transactionMaxBackoff;
 }
 
 int Transaction::apiVersionAtLeast(int minVersion) const {

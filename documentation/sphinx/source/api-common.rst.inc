@@ -387,11 +387,11 @@
 
 ..  |option-set-retry-limit-blurb2| replace::
 
-    Like all transaction options, the retry limit must be reset after a call to |on-error-func|. This behavior allows the user to make the retry limit dynamic. One can also set the default retry limit for all transactions by calling |retry-limit-database-option|.
+    Prior to API version 610, Like all other transaction options, the retry limit must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the retry limit is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can also set the default retry limit for all transactions by calling |retry-limit-database-option|.
 
 ..  |option-set-max-retry-delay-blurb| replace::
 
-    Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
+    Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
 
 ..  |option-set-timeout-blurb1| replace::
 
@@ -403,7 +403,7 @@
 
 .. |option-set-timeout-blurb3| replace::
 
-    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the old behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally invoke this option in retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
+    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
 
 .. |option-next-write-no-write-conflict-range-blurb| replace::
 
