@@ -40,7 +40,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const int min_num_workers = 10; //10; // TODO: This can become a configuration param later
+const int min_num_workers = 3; //10; // TODO: This can become a configuration param later
 const int ratio_loader_to_applier = 1; // the ratio of loader over applier. The loader number = total worker * (ratio /  (ratio + 1) )
 
 int FastRestore_Failure_Timeout = 3600; // seconds
@@ -675,7 +675,7 @@ bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd, RestoreCommandEnum received
 			ret = (receivedCmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done);
 			break;
 		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
-			ret = (receivedCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done);
+			ret = (receivedCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done || receivedCmd == RestoreCommandEnum::Set_Role_Done);
 			break;
 		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
 			ret = (receivedCmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done);
@@ -1643,12 +1643,13 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 			index = 0;
 
 			std::vector<Future<RestoreCommandReply>> cmdReplies;
+			printf("Number of agents:%d\n", agents.size());
 			for(auto& cmdInterf : agents) {
 				role = rd->globalNodeStatus[index].role;
 				nodeID = rd->globalNodeStatus[index].nodeID;
 				rd->cmdID.nextCmd();
-				printf("Node:%s, Notify the finish of set role %s(%d) to node (index=%d uid=%s)\n", rd->describeNode().c_str(),
-						getRoleStr(role).c_str(), role, index, nodeID.toString().c_str());
+				printf("Node:%s, Notify the finish of set role %s(%d) to node (index=%d uid=%s), CMDID:%s\n", rd->describeNode().c_str(),
+						getRoleStr(role).c_str(), role, index, nodeID.toString().c_str(), rd->cmdID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role_Done, rd->cmdID, nodeID, role)));
 				index++;
 			}
@@ -3196,147 +3197,141 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterf
 			rd->describeNode().c_str());
 
 	loop {
-		try {
-			state LoadingParam param;
-			state int64_t beginBlock = 0;
-			state int64_t j = 0;
-			state int64_t readLen = 0;
-			state int64_t readOffset = 0;
-			state Reference<IBackupContainer> bc;
-			//wait(delay(1.0));
-			choose {
-				when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
-					printf("[INFO] Node:%s Got Restore Command: cmd:%d.\n", rd->describeNode().c_str(),
-							req.cmd);
-					if ( interf.id() != req.id ) {
-							printf("[WARNING] node:%s receive request with a different id:%s\n",
-								rd->describeNode().c_str(), req.id.toString().c_str());
+		state LoadingParam param;
+		state int64_t beginBlock = 0;
+		state int64_t j = 0;
+		state int64_t readLen = 0;
+		state int64_t readOffset = 0;
+		state Reference<IBackupContainer> bc;
+		//wait(delay(1.0));
+		choose {
+			when(state RestoreCommand req = waitNext(interf.cmd.getFuture())) {
+				printf("[INFO] Node:%s Got Restore Command: cmd:%d.\n", rd->describeNode().c_str(),
+						req.cmd);
+				if ( interf.id() != req.id ) {
+						printf("[WARNING] node:%s receive request with a different id:%s\n",
+							rd->describeNode().c_str(), req.id.toString().c_str());
+				}
+
+				param = req.loadingParam;
+				beginBlock = 0;
+				j = 0;
+				readLen = 0;
+				readOffset = 0;
+				readOffset = param.offset;
+				if ( req.cmd == RestoreCommandEnum::Sample_Range_File ) {
+					printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
+							rd->describeNode().c_str(), param.toString().c_str());
+
+					// Handle duplicate, assuming cmdUID is always unique for the same workload
+					if ( rd->isCmdProcessed(req.cmdID) ) {
+						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
+						continue;
 					}
 
-					param = req.loadingParam;
-					beginBlock = 0;
-					j = 0;
-					readLen = 0;
-					readOffset = 0;
-					readOffset = param.offset;
-					if ( req.cmd == RestoreCommandEnum::Sample_Range_File ) {
-						printf("[Sample_Range_File][Loader] Node: %s, loading param:%s\n",
-								rd->describeNode().c_str(), param.toString().c_str());
-
-						// Handle duplicate, assuming cmdUID is always unique for the same workload
-						if ( rd->isCmdProcessed(req.cmdID) ) {
-							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
-							continue;
-						}
-
-						// TODO: This can be expensive
-						bc = IBackupContainer::openContainer(param.url.toString());
-						printf("[INFO] node:%s open backup container for url:%s\n",
-								rd->describeNode().c_str(),
-								param.url.toString().c_str());
+					// TODO: This can be expensive
+					bc = IBackupContainer::openContainer(param.url.toString());
+					printf("[INFO] node:%s open backup container for url:%s\n",
+							rd->describeNode().c_str(),
+							param.url.toString().c_str());
 
 
-						rd->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
-						rd->mutationMap.clear();
-						rd->mutationPartMap.clear();
+					rd->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+					rd->mutationMap.clear();
+					rd->mutationPartMap.clear();
 
-						ASSERT( param.blockSize > 0 );
-						//state std::vector<Future<Void>> fileParserFutures;
-						if (param.offset % param.blockSize != 0) {
-							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
-						}
+					ASSERT( param.blockSize > 0 );
+					//state std::vector<Future<Void>> fileParserFutures;
+					if (param.offset % param.blockSize != 0) {
+						printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+					}
 
-						ASSERT( param.offset + param.blockSize >= param.length ); // We only sample one data block or less (at the end of the file) of a file.
-						for (j = param.offset; j < param.length; j += param.blockSize) {
-							readOffset = j;
-							readLen = std::min<int64_t>(param.blockSize, param.length - j);
-							wait( _parseRangeFileToMutationsOnLoader(rd, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
-							++beginBlock;
-						}
+					ASSERT( param.offset + param.blockSize >= param.length ); // We only sample one data block or less (at the end of the file) of a file.
+					for (j = param.offset; j < param.length; j += param.blockSize) {
+						readOffset = j;
+						readLen = std::min<int64_t>(param.blockSize, param.length - j);
+						wait( _parseRangeFileToMutationsOnLoader(rd, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix) );
+						++beginBlock;
+					}
 
-						printf("[Sampling][Loader] Node:%s finishes sample Range file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
-						// TODO: Send to applier to apply the mutations
-						printf("[Sampling][Loader] Node:%s will send sampled mutations to applier\n", rd->describeNode().c_str());
-						wait( registerMutationsToMasterApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
+					printf("[Sampling][Loader] Node:%s finishes sample Range file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
+					// TODO: Send to applier to apply the mutations
+					printf("[Sampling][Loader] Node:%s will send sampled mutations to applier\n", rd->describeNode().c_str());
+					wait( registerMutationsToMasterApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
-						//rd->processedFiles.insert(std::make_pair(param.filename, 1));
+					//rd->processedFiles.insert(std::make_pair(param.filename, 1));
 
-						//TODO: Send ack to master that loader has finished loading the data
+					//TODO: Send ack to master that loader has finished loading the data
+					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
+					rd->processedCmd[req.cmdID] = 1; // Record the processed comand to handle duplicate command
+				} else if (req.cmd == RestoreCommandEnum::Sample_Log_File) {
+					printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n",
+							rd->describeNode().c_str(), param.toString().c_str());
+
+					// Handle duplicate message
+					if ( rd->isCmdProcessed(req.cmdID) ) {
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
-						rd->processedCmd[req.cmdID] = 1; // Record the processed comand to handle duplicate command
-					} else if (req.cmd == RestoreCommandEnum::Sample_Log_File) {
-						printf("[Sample_Log_File][Loader]  Node: %s, loading param:%s\n",
-								rd->describeNode().c_str(), param.toString().c_str());
+						continue;
+					}
 
-						// Handle duplicate message
-						if ( rd->isCmdProcessed(req.cmdID) ) {
-							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID));
-							continue;
-						}
+					// TODO: Expensive operation
+					bc = IBackupContainer::openContainer(param.url.toString());
+					printf("[Sampling][Loader] Node:%s open backup container for url:%s\n",
+							rd->describeNode().c_str(),
+							param.url.toString().c_str());
+					printf("[Sampling][Loader] Node:%s filename:%s blockSize:%d\n",
+							rd->describeNode().c_str(),
+							param.filename.c_str(), param.blockSize);
 
-						// TODO: Expensive operation
-						bc = IBackupContainer::openContainer(param.url.toString());
-						printf("[Sampling][Loader] Node:%s open backup container for url:%s\n",
-								rd->describeNode().c_str(),
-								param.url.toString().c_str());
-						printf("[Sampling][Loader] Node:%s filename:%s blockSize:%d\n",
-								rd->describeNode().c_str(),
-								param.filename.c_str(), param.blockSize);
+					rd->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
+					rd->mutationMap.clear();
+					rd->mutationPartMap.clear();
 
-						rd->kvOps.clear(); //Clear kvOps so that kvOps only hold mutations for the current data block. We will send all mutations in kvOps to applier
-						rd->mutationMap.clear();
-						rd->mutationPartMap.clear();
+					ASSERT( param.blockSize > 0 );
+					//state std::vector<Future<Void>> fileParserFutures;
+					if (param.offset % param.blockSize != 0) {
+						printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
+					}
+					ASSERT( param.offset + param.blockSize >= param.length ); // Assumption: Only sample one data block or less
+					for (j = param.offset; j < param.length; j += param.blockSize) {
+						readOffset = j;
+						readLen = std::min<int64_t>(param.blockSize, param.length - j);
+						// NOTE: Log file holds set of blocks of data. We need to parse the data block by block and get the kv pair(version, serialized_mutations)
+						// The set of mutations at the same version may be splitted into multiple kv pairs ACROSS multiple data blocks when the size of serialized_mutations is larger than 20000.
+						wait( _parseLogFileToMutationsOnLoader(rd, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix, param.mutationLogPrefix) );
+						++beginBlock;
+					}
+					printf("[Sampling][Loader] Node:%s finishes parsing the data block into kv pairs (version, serialized_mutations) for file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
+					parseSerializedMutation(rd, true);
 
-						ASSERT( param.blockSize > 0 );
-						//state std::vector<Future<Void>> fileParserFutures;
-						if (param.offset % param.blockSize != 0) {
-							printf("[WARNING] Parse file not at block boundary! param.offset:%ld param.blocksize:%ld, remainder\n",param.offset, param.blockSize, param.offset % param.blockSize);
-						}
-						ASSERT( param.offset + param.blockSize >= param.length ); // Assumption: Only sample one data block or less
-						for (j = param.offset; j < param.length; j += param.blockSize) {
-							readOffset = j;
-							readLen = std::min<int64_t>(param.blockSize, param.length - j);
-							// NOTE: Log file holds set of blocks of data. We need to parse the data block by block and get the kv pair(version, serialized_mutations)
-							// The set of mutations at the same version may be splitted into multiple kv pairs ACROSS multiple data blocks when the size of serialized_mutations is larger than 20000.
-							wait( _parseLogFileToMutationsOnLoader(rd, bc, param.version, param.filename, readOffset, readLen, param.restoreRange, param.addPrefix, param.removePrefix, param.mutationLogPrefix) );
-							++beginBlock;
-						}
-						printf("[Sampling][Loader] Node:%s finishes parsing the data block into kv pairs (version, serialized_mutations) for file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
-						parseSerializedMutation(rd, true);
+					printf("[Sampling][Loader] Node:%s finishes process Log file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
+					printf("[Sampling][Loader] Node:%s will send log mutations to applier\n", rd->describeNode().c_str());
+					wait( registerMutationsToMasterApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
 
-						printf("[Sampling][Loader] Node:%s finishes process Log file:%s\n", rd->describeNode().c_str(), param.filename.c_str());
-						printf("[Sampling][Loader] Node:%s will send log mutations to applier\n", rd->describeNode().c_str());
-						wait( registerMutationsToMasterApplier(rd) ); // Send the parsed mutation to applier who will apply the mutation to DB
+					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
+					rd->processedFiles.insert(std::make_pair(param.filename, 1));
+					rd->processedCmd[req.cmdID] = 1;
+				} else if (req.cmd == RestoreCommandEnum::Sample_File_Done) {
+						printf("[Sampling][Loader] Node: %s, loading param:%s\n",
+							rd->describeNode().c_str(), param.toString().c_str());
 
 						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
-						rd->processedFiles.insert(std::make_pair(param.filename, 1));
-						rd->processedCmd[req.cmdID] = 1;
-					} else if (req.cmd == RestoreCommandEnum::Sample_File_Done) {
-							printf("[Sampling][Loader] Node: %s, loading param:%s\n",
-								rd->describeNode().c_str(), param.toString().c_str());
-
-							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
-							printf("[Sampling][Loader] Node: %s, role: %s, At the end of sampling. Proceed to the next step!\n",
-								rd->describeNode().c_str(),
-								getRoleStr(rd->localNodeStatus.role).c_str());
-							break; // Break the loop and return
+						printf("[Sampling][Loader] Node: %s, role: %s, At the end of sampling. Proceed to the next step!\n",
+							rd->describeNode().c_str(),
+							getRoleStr(rd->localNodeStatus.role).c_str());
+						break; // Break the loop and return
+				} else {
+					if ( IsCmdInPreviousPhase(RestoreCommandEnum::Sample_File_Done, req.cmd) ) {
+						logExpectedOldCmd(rd, RestoreCommandEnum::Sample_File_Done, req.cmd, req.cmdID);
+						req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 					} else {
-						if ( IsCmdInPreviousPhase(RestoreCommandEnum::Sample_File_Done, req.cmd) ) {
-							logExpectedOldCmd(rd, RestoreCommandEnum::Sample_File_Done, req.cmd, req.cmdID);
-							req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
-						} else {
-							logUnexpectedCmd(rd, RestoreCommandEnum::Sample_File_Done, req.cmd, req.cmdID);
-						}
-						//printf("[ERROR][Loader] Expecting command:%d, %d, %d. Receive unexpected restore command %d. Directly reply to master to avoid stucking master\n",
-						//		RestoreCommandEnum::Assign_Loader_Range_File, RestoreCommandEnum::Assign_Loader_Log_File, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd);
-						// NOTE: For debug benefit, we let master block in case error
-						//req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
+						logUnexpectedCmd(rd, RestoreCommandEnum::Sample_File_Done, req.cmd, req.cmdID);
 					}
+					//printf("[ERROR][Loader] Expecting command:%d, %d, %d. Receive unexpected restore command %d. Directly reply to master to avoid stucking master\n",
+					//		RestoreCommandEnum::Assign_Loader_Range_File, RestoreCommandEnum::Assign_Loader_Log_File, RestoreCommandEnum::Assign_Loader_File_Done, req.cmd);
+					// NOTE: For debug benefit, we let master block in case error
+					//req.reply.send(RestoreCommandReply(interf.id(), req.cmdID)); // master node is waiting
 				}
-			}
-		} catch(Error &e) {
-			if(e.code() != error_code_end_of_stream) {
-				printf("[ERROR][Loader] Node:%s sampleHandler has error:%s(code:%d)\n", rd->describeNode().c_str(), e.what(), e.code());
 			}
 		}
 	}
