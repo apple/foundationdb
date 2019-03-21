@@ -325,7 +325,7 @@ UID getSharedMemoryMachineId() {
 	loop {
 		try {
 			// "0" is the default parameter "addr"
-			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, "fdbserver", 1000, 0, p.permission);
+			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, "fdbserver_boost_1_67", 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
