@@ -140,14 +140,13 @@ private:
 	Promise<Void> resetPromise;
 	AndFuture reading;
 	int retries;
-	bool timeoutActorStarted;
 	Future<Void> timeoutActor;
 	double creationTime;
 	bool commitStarted;
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
-	void startTimeoutActor();
+	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)
 	void updateConflictMap( KeyRangeRef const& keys, WriteMap::iterator& it ); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
 	void writeRangeToNativeTransaction( KeyRangeRef const& keys );
