@@ -2432,6 +2432,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	curFileIndex = 0;
 	state CMDUID checkpointCMDUID = rd->cmdID;
 	state int checkpointCurFileIndex = curFileIndex;
+	state int64_t checkpointCurFileOffset = 0;
 	loop { // For retry on timeout
 		try {
 			if ( allLoadReqsSent ) {
@@ -2470,9 +2471,9 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 					if (curFileIndex >= rd->files.size()) {
 						break;
 					}
-					loadSizeB += std::min(rd->files[curFileIndex].blockSize, rd->files[curFileIndex].fileSize - curFileOffset * rd->files[curFileIndex].blockSize);
+					loadSizeB += std::min( rd->files[curFileIndex].blockSize, std::max(rd->files[curFileIndex].fileSize - curFileOffset * rd->files[curFileIndex].blockSize, (int64_t) 0) );
 					curFileOffset++;
-					if ( curFileOffset *  rd->files[curFileIndex].blockSize >= rd->files[curFileIndex].fileSize ) {
+					if ( rd->files[curFileIndex].blockSize == 0 || curFileOffset >= rd->files[curFileIndex].fileSize / rd->files[curFileIndex].blockSize ) {
 						curFileOffset = 0;
 						curFileIndex++;
 					}
@@ -2561,6 +2562,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				loaderIDs = finishedLoaderIDs;
 				checkpointCMDUID = rd->cmdID;
 				checkpointCurFileIndex = curFileIndex;
+				checkpointCurFileOffset = curFileOffset;
 			}
 
 			if (allLoadReqsSent) {
@@ -2577,6 +2579,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			}
 			rd->cmdID = checkpointCMDUID;
 			curFileIndex = checkpointCurFileIndex;
+			curFileOffset = checkpointCurFileOffset;
 			printf("[Sampling][Waring] Retry at CMDID:%s curFileIndex:%d\n", rd->cmdID.toString().c_str(), curFileIndex);
 		}
 	}
