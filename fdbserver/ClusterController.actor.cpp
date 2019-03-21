@@ -2540,19 +2540,25 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	loop {
 		if (self->db.serverInfo->get().ratekeeper.present()) {
 			ratekeeperFailed = waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME);
-		} else if (!recruitingRatekeeper) {
+		} else if (!recruitingRatekeeper && !self->recruitingRatekeeperID.present()) {
+			// Ratekeeper worker registration may happen after startRatekeeper().
+			// So checking recruitingRatekeeperID to make sure recruiting is actually done.
 			recruitingRatekeeper = true;
 			rkInterf = startRatekeeper(self);
 		}
 		choose {
 			when ( wait(self->recruitRatekeeper.onTrigger()) ) {
 				// Force recruiting even if we have a valid ratekeeper now.
-				if (!recruitingRatekeeper) {
+				if (!recruitingRatekeeper && !self->recruitingRatekeeperID.present()) {
 					recruitingRatekeeper = true;
 					rkInterf = startRatekeeper(self);
 				}
 			}
-			when ( wait(self->db.serverInfo->onChange()) ) {}
+			when ( wait(self->db.serverInfo->onChange()) ) {
+				// When a new ratekeeper registers, this wakes up and attempts to recruit
+				// another ratekeeper. So switch here to allow ratekeeper to be set first.
+				wait(delay(0.001));
+			}
 			when ( wait(ratekeeperFailed) ) {
 				ratekeeperFailed = Never();
 				TraceEvent("CC_RateKeeperDied", self->id)
