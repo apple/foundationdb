@@ -44,14 +44,14 @@ extern int FastRestore_Failure_Timeout;
 enum class RestoreCommandEnum {Init = 0,
 		Set_Role, Set_Role_Done,
 		Sample_Range_File, Sample_Log_File, Sample_File_Done,
-		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done,
-		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done,
-		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done,
-		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,
-		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,
-		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip,
+		Loader_Send_Sample_Mutation_To_Applier, Loader_Send_Sample_Mutation_To_Applier_Done, //7
+		Calculate_Applier_KeyRange, Get_Applier_KeyRange, Get_Applier_KeyRange_Done, //10
+		Assign_Applier_KeyRange, Assign_Applier_KeyRange_Done, //12
+		Assign_Loader_Range_File, Assign_Loader_Log_File, Assign_Loader_File_Done,//15
+		Loader_Send_Mutations_To_Applier, Loader_Send_Mutations_To_Applier_Done,//17
+		Apply_Mutation_To_DB, Apply_Mutation_To_DB_Skip, //19
 		Loader_Notify_Appler_To_Apply_Mutation,
-		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done};
+		Notify_Loader_ApplierKeyRange, Notify_Loader_ApplierKeyRange_Done}; //22
 BINARY_SERIALIZABLE(RestoreCommandEnum);
 
 // Restore command's UID. uint64_t part[2];
@@ -74,6 +74,7 @@ public:
 
 	RestoreCommandEnum getPhase();
 	void setPhase(RestoreCommandEnum newPhase);
+	void setBatch(int newBatchIndex);
 
 	uint64_t getIndex();
 
