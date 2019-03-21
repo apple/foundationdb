@@ -42,7 +42,7 @@ struct ReadYourWritesTransactionOptions {
 	int snapshotRywEnabled;
 
 	ReadYourWritesTransactionOptions() {}
-	explicit ReadYourWritesTransactionOptions(Transaction const& tr) { reset(tr); }
+	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
 	void reset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();
 };

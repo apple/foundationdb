@@ -735,6 +735,9 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			locationCache.insert( allKeys, Reference<LocationInfo>() );
 			break;
 		case FDBDatabaseOptions::TRANSACTION_TIMEOUT:
+			if( !apiVersionAtLeast(610) ) {
+				throw invalid_option();
+			}
 			transactionTimeout = extractIntOption(value, 0, std::numeric_limits<int>::max())/1000.0;
 			break;
 		case FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT:

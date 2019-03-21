@@ -1472,12 +1472,21 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 	}
 }
 
+ReadYourWritesTransactionOptions::ReadYourWritesTransactionOptions(Transaction const& tr) {
+	reset(tr);
+	timeoutInSeconds = tr.getDatabase()->transactionTimeout;
+}
+
 void ReadYourWritesTransactionOptions::reset(Transaction const& tr) {
-		memset(this, 0, sizeof(*this));
-		Database cx = tr.getDatabase();
-		timeoutInSeconds = cx->transactionTimeout;
-		maxRetries = cx->transactionMaxRetries;
-		snapshotRywEnabled = cx->snapshotRywEnabled;
+	double oldTimeout = timeoutInSeconds;
+	memset(this, 0, sizeof(*this));
+	Database cx = tr.getDatabase();
+	maxRetries = cx->transactionMaxRetries;
+	snapshotRywEnabled = cx->snapshotRywEnabled;
+	if( tr.apiVersionAtLeast(610) ) {
+		// Starting in API version 610, the timeout option is not cleared after reset.
+		timeoutInSeconds = oldTimeout;
+	}
 }
 
 bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {
@@ -1909,6 +1918,8 @@ void ReadYourWritesTransaction::cancel() {
 void ReadYourWritesTransaction::reset() {
 	retries = 0;
 	creationTime = now();
+	timeoutActor.cancel();
+	options.timeoutInSeconds = tr.getDatabase()->transactionTimeout;
 	transactionDebugInfo.clear();
 	tr.fullReset();
 	resetRyow();

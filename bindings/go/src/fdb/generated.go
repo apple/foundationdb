@@ -276,7 +276,7 @@ func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information.
+// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
 //
 // Parameter: value in milliseconds of timeout
 func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
@@ -413,7 +413,7 @@ func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to ``onError``. This behavior allows the user to make the timeout dynamic.
+// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally invoke this option.
 //
 // Parameter: value in milliseconds of timeout
 func (o TransactionOptions) SetTimeout(param int64) error {
@@ -469,6 +469,11 @@ func (o TransactionOptions) SetUsedDuringCommitProtectionDisable() error {
 // The transaction can read from locked databases.
 func (o TransactionOptions) SetReadLockAware() error {
 	return o.setOpt(702, nil)
+}
+
+// This option should only be used by tools which change the database configuration.
+func (o TransactionOptions) SetUseProvisionalProxies() error {
+	return o.setOpt(711, nil)
 }
 
 type StreamingMode int

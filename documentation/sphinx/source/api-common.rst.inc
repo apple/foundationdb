@@ -308,7 +308,7 @@
 
 .. |option-db-tr-timeout-blurb| replace::
 
-    Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database.
+    Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database. This option can only be called if the API version is at least 610.
 
 .. |option-db-tr-max-retry-delay-blurb| replace::
 
@@ -403,7 +403,7 @@
 
 .. |option-set-timeout-blurb3| replace::
 
-    Like all transaction options, a timeout must be reset after a call to |on-error-func|. This behavior allows the user to make the timeout dynamic. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. One can set the default timeout for all transactions by calling |timeout-database-option|.
+    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the old behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally invoke this option in retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
 
 .. |option-next-write-no-write-conflict-range-blurb| replace::
 
