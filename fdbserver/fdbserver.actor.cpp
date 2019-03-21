@@ -321,11 +321,11 @@ UID getSharedMemoryMachineId() {
 	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
 	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
-
+	std::string sharedMemoryIdentifier = format("fdbserver_boost_%s", BOOST_LIB_VERSION);
 	loop {
 		try {
 			// "0" is the default parameter "addr"
-			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, "fdbserver_boost_1_67", 1000, 0, p.permission);
+			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
@@ -334,7 +334,7 @@ UID getSharedMemoryMachineId() {
 		catch (boost::interprocess::interprocess_exception &e) {
 			try {
 				//If the shared memory already exists, open it read-only in case it was created by another user
-				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, "fdbserver");
+				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, sharedMemoryIdentifier.c_str());
 				machineId = segment.find<UID>("machineId").first;
 				if (!machineId)
 					criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate shared memory - 'machineId'");
