@@ -316,12 +316,15 @@ std::string abspath( std::string const& path, bool resolveLinks = true) {
 		if(errno == ENOENT && path != ".") {
 			std::string prefix = popPath(path);
 			std::string suffix = path.substr(prefix.size());
-			if(prefix.empty()) {
+			if(prefix.empty() && (suffix.empty() || suffix[0] != '~')) {
 				prefix = ".";
 			}
-			// Home directory references via ~ are not handled
-			if(prefix[0] != '~') {
-				return cleanPath(joinPath(abspath(prefix, true), suffix));
+			if(!prefix.empty()) {
+				std::string abs = abspath(prefix, true);
+				// An empty return from abspath() means there was an error.
+				if(abs.empty())
+					return abs;
+				return cleanPath(joinPath(abs, suffix));
 			}
 		}
 		log_err("realpath", errno, "Unable to get real path for %s", path.c_str());

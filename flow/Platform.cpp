@@ -1930,11 +1930,10 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 		if(errno == ENOENT && !mustExist) {
 			std::string prefix = popPath(path);
 			std::string suffix = path.substr(prefix.size());
-			if(prefix.empty()) {
+			if(prefix.empty() && (suffix.empty() || suffix[0] != '~')) {
 				prefix = ".";
 			}
-			// Home directory references via ~ are not handled
-			if(prefix[0] != '~') {
+			if(!prefix.empty()) {
 				return cleanPath(joinPath(abspath(prefix, true, false), suffix));
 			}
 		}

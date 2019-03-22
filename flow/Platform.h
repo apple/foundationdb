@@ -333,6 +333,9 @@ std::string cleanPath( std::string const& path );
 // An empty path or a non-existent path when mustExist is true will result in a platform_error() exception.
 // Upon success, all '..' references will be resolved with the assumption that non-existent components
 // are NOT symbolic links.
+// User directory references such as '~' or '~user' are effectively treated as symbolic links which
+// are impossible to resolve, so resolveLinks=true results in failure and resolveLinks=false results
+// in the reference being left in-tact prior to resolving '..' references.
 std::string abspath( std::string const& path, bool resolveLinks = true, bool mustExist = false );
 
 // parentDirectory() returns the parent directory of the given file or directory in a canonical form,
