@@ -1860,7 +1860,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", rki.id());
 			if (ratekeeper.present() && ratekeeper.get().id() != rki.id()) {
 				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id());
-				ratekeeper.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
+				self->addActor.send(brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 			}
 			if (self->recruitingRatekeeperID.present()) {
 				self->recruitingRatekeeperID = Optional<UID>();
@@ -1868,7 +1868,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			self->db.setRatekeeper(rki);
 		} else {
 			TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
-			req.ratekeeperInterf.get().haltRatekeeper.send(HaltRatekeeperRequest(self->id));
+			self->addActor.send(brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 		}
 	}
 	if( info == self->id_worker.end() ) {
@@ -2427,8 +2427,12 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 
 	loop {
 		try {
+			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
 			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (no_distributor && self->db.serverInfo->get().distributor.present()) {
+				return self->db.serverInfo->get().distributor.get();
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2491,8 +2495,13 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 
 	loop {
 		try {
+			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
 			while (!self->masterProcessId.present() || self->masterProcessId != self->db.serverInfo->get().master.locality.processId() || self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (no_ratekeeper && self->db.serverInfo->get().ratekeeper.present()) {
+				// Existing ratekeeper registers while waiting, so skip.
+				return Void();
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
@@ -2501,6 +2510,9 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			state WorkerDetails worker = rkWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::RateKeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
+			if (self->db.serverInfo->get().ratekeeper.present() && self->db.serverInfo->get().ratekeeper.get().locality.processId() == worker.interf.locality.processId()) {
+				throw no_more_servers();  // Avoid recruiting an existing one.
 			}
 			self->recruitingRatekeeperID = req.reqId;
 			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", worker.interf.address()).detail("RKID", req.reqId);
@@ -2563,7 +2575,7 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 			}
 			when ( wait(ratekeeperFailed) ) {
 				ratekeeperFailed = Never();
-				TraceEvent("CC_RateKeeperDied", self->id)
+				TraceEvent("CC_RatekeeperDied", self->id)
 				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 				self->db.clearInterf(ProcessClass::RateKeeperClass);
 			}
