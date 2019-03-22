@@ -414,28 +414,7 @@ def test_timeouts(db):
 
 
 def test_combinations(db):
-    # (1) Hitting retry limit cancels transaction
-    @retry_with_timeout(default_timeout)
-    def txn1(tr):
-        tr.options.set_retry_limit(0)
-        tr.options.set_timeout(100)
-        try:
-            tr.on_error(fdb.FDBError(1007)).wait()  # should throw
-            raise TestError("Retry limit was ignored.")
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
-        time.sleep(1)
-        try:
-            tr.commit().wait()  # should throw
-            raise TestError("Hitting retry limit did not cancel the transaction.")
-        except fdb.FDBError as e:
-            if e.code != 1025:
-                raise
-
-    txn1(db)
-
-    # (2) Cancellation does survive on_error() even when retry limit is hit
+    # (1) Cancellation does survive on_error() even when retry limit is hit
     @retry_with_timeout(default_timeout)
     def txn2(tr):
         tr.options.set_retry_limit(0)
@@ -453,4 +432,4 @@ def test_combinations(db):
             if e.code != 1025:
                 raise
 
-    txn2(db)
+    txn1(db)
