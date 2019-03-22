@@ -539,20 +539,12 @@ struct RolesInfo {
 };
 
 ACTOR static Future<JsonBuilderObject> processStatusFetcher(
-		Reference<AsyncVar<struct ServerDBInfo>> db,
-		std::vector<WorkerDetails> workers,
-		WorkerEvents pMetrics,
-		WorkerEvents mMetrics,
-		WorkerEvents errors,
-		WorkerEvents traceFileOpenErrors,
-		WorkerEvents programStarts,
-		std::map<std::string, JsonBuilderObject> processIssues,
-		vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-		vector<std::pair<TLogInterface, EventMap>> tLogs,
-		vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-		Database cx,
-		Optional<DatabaseConfiguration> configuration,
-		std::set<std::string> *incomplete_reasons) {
+    Reference<AsyncVar<struct ServerDBInfo>> db, std::vector<WorkerDetails> workers, WorkerEvents pMetrics,
+    WorkerEvents mMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors, WorkerEvents programStarts,
+    std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
+    vector<std::pair<StorageServerInterface, EventMap>> storageServers,
+    vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
+    Database cx, Optional<DatabaseConfiguration> configuration, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 	state double metric;
@@ -771,8 +763,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			std::string strAddress = address.toString();
 
 			// If this process has a process issue, identified by strAddress, then add it to messages array
-			if (processIssues.count(strAddress)){
-				messages.push_back(processIssues[strAddress]);
+			for (auto issue : processIssues[strAddress]) {
+				messages.push_back(issue);
 			}
 
 			// If this process had a trace file open error, identified by strAddress, then add it to messages array
@@ -1653,13 +1645,18 @@ static std::string getIssueDescription(std::string name) {
 	return name;
 }
 
-static std::map<std::string, JsonBuilderObject> getProcessIssuesAsMessages( ProcessIssuesMap const& _issues ) {
-	std::map<std::string, JsonBuilderObject> issuesMap;
+static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsMessages(
+    ProcessIssuesMap const& _issues) {
+	std::map<std::string, std::vector<JsonBuilderObject>> issuesMap;
 
 	try {
 		ProcessIssuesMap issues = _issues;
-		for (auto i : issues) {
-			issuesMap[i.first.toString()] = JsonString::makeMessage(i.second.first.c_str(), getIssueDescription(i.second.first).c_str());
+		for (auto processIssues : issues) {
+			for (auto issue : processIssues.second.first) {
+				std::string issueStr = issue.toString();
+				issuesMap[processIssues.first.toString()].push_back(
+				    JsonString::makeMessage(issueStr.c_str(), getIssueDescription(issueStr).c_str()));
+			}
 		}
 	}
 	catch (Error &e) {
@@ -1677,8 +1674,11 @@ static JsonBuilderArray getClientIssuesAsMessages( ProcessIssuesMap const& _issu
 		ProcessIssuesMap issues = _issues;
 		std::map<std::string, std::vector<std::string>> deduplicatedIssues;
 
-		for(auto i : issues) {
-			deduplicatedIssues[i.second.first].push_back(formatIpPort(i.first.ip, i.first.port));
+		for (auto processIssues : issues) {
+			for (auto issue : processIssues.second.first) {
+				deduplicatedIssues[issue.toString()].push_back(
+				    formatIpPort(processIssues.first.ip, processIssues.first.port));
+			}
 		}
 
 		for (auto i : deduplicatedIssues) {
@@ -1909,7 +1909,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["generation"] = db->get().recoveryCount;
 		}
 
-		state std::map<std::string, JsonBuilderObject> processIssues = getProcessIssuesAsMessages(workerIssues);
+		state std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
+		    getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;

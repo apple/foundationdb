@@ -1236,28 +1236,34 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 	}
 }
 
-void addIssue( ProcessIssuesMap& issueMap, NetworkAddress const& addr, std::string const& issue, UID& issueID ) {
-	auto& e = issueMap[addr];
-	e.first = issue;
-	e.second = issueID = g_random->randomUniqueID();
-	if (!issue.size()) issueMap.erase(addr);
+void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues,
+               Optional<UID>& issueID) {
+	if (issues.size()) {
+		auto& e = issueMap[addr];
+		e.first = issues;
+		e.second = g_random->randomUniqueID();
+		issueID = e.second;
+	} else {
+		issueMap.erase(addr);
+		issueID = Optional<UID>();
+	}
 }
 
-void removeIssue( ProcessIssuesMap& issueMap, NetworkAddress const& addr, std::string const& issue, UID& issueID ) {
-	if (!issue.size()) return;
-	if ( issueMap.count(addr) && issueMap[addr].second == issueID )
+void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID) {
+	if (!issueID.present()) {
+		return;
+	}
+	if (issueMap.count(addr) && issueMap[addr].second == issueID.get()) {
 		issueMap.erase( addr );
+	}
 }
 
-ACTOR Future<Void> clusterGetServerInfo(
-	ClusterControllerData::DBInfo* db,
-	UID knownServerInfoID,
-	std::string issues,
-	std::vector<NetworkAddress> incompatiblePeers,
-	ReplyPromise<ServerDBInfo> reply)
-{
-	state UID issueID;
-	addIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID knownServerInfoID,
+                                        Standalone<VectorRef<StringRef>> issues,
+                                        std::vector<NetworkAddress> incompatiblePeers,
+                                        ReplyPromise<ServerDBInfo> reply) {
+	state Optional<UID> issueID;
+	setIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
@@ -1269,24 +1275,20 @@ ACTOR Future<Void> clusterGetServerInfo(
 		}
 	}
 
-	removeIssue( db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+	removeIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issueID);
 
 	reply.send( db->serverInfo->get() );
 	return Void();
 }
 
-ACTOR Future<Void> clusterOpenDatabase(
-	ClusterControllerData::DBInfo* db,
-	UID knownClientInfoID,
-	std::string issues,
-	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
-	int connectedCoordinatorsNum,
-	Standalone<StringRef> traceLogGroup,
-	ReplyPromise<ClientDBInfo> reply)
-{
+ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, UID knownClientInfoID,
+                                       Standalone<VectorRef<StringRef>> issues,
+                                       Standalone<VectorRef<ClientVersionRef>> supportedVersions,
+                                       int connectedCoordinatorsNum, Standalone<StringRef> traceLogGroup,
+                                       ReplyPromise<ClientDBInfo> reply) {
 	// NOTE: The client no longer expects this function to return errors
-	state UID issueID;
-	addIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+	state Optional<UID> issueID;
+	setIssues(db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
 
 	if(supportedVersions.size() > 0) {
 		db->clientVersionMap[reply.getEndpoint().getPrimaryAddress()] = supportedVersions;
@@ -1302,7 +1304,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 		}
 	}
 
-	removeIssue( db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID );
+	removeIssues(db->clientsWithIssues, reply.getEndpoint().getPrimaryAddress(), issueID);
 	db->clientVersionMap.erase(reply.getEndpoint().getPrimaryAddress());
 	db->clientStatusInfoMap.erase(reply.getEndpoint().getPrimaryAddress());
 
@@ -2525,7 +2527,8 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			self.addActor.send( clusterOpenDatabase( &self.db, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.connectedCoordinatorsNum, req.traceLogGroup, req.reply ) );
+			self.addActor.send(clusterOpenDatabase(&self.db, req.knownClientInfoID, req.issues, req.supportedVersions,
+			                                       req.connectedCoordinatorsNum, req.traceLogGroup, req.reply));
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			self.addActor.send( clusterRecruitFromConfiguration( &self, req ) );
@@ -2577,7 +2580,8 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			clusterRegisterMaster( &self, req );
 		}
 		when( GetServerDBInfoRequest req = waitNext( interf.getServerDBInfo.getFuture() ) ) {
-			self.addActor.send( clusterGetServerInfo( &self.db, req.knownServerInfoID, req.issues.toString(), req.incompatiblePeers, req.reply ) );
+			self.addActor.send(
+			    clusterGetServerInfo(&self.db, req.knownServerInfoID, req.issues, req.incompatiblePeers, req.reply));
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.

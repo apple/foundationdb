@@ -27,7 +27,8 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
-typedef std::map< NetworkAddress, std::pair<std::string,UID> > ProcessIssuesMap;
+typedef Standalone<VectorRef<StringRef>> ProcessIssues;
+typedef std::map<NetworkAddress, std::pair<ProcessIssues, UID>> ProcessIssuesMap;
 typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > ClientVersionMap;
 
 struct ClientStatusInfo {
