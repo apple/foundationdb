@@ -2329,6 +2329,9 @@ void Transaction::execute(const KeyRef& cmdType, const ValueRef& cmdPayLoad) {
 
 	auto& req = tr;
 
+	// Helps with quickly finding the exec op in a tlog batch
+	setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+
 	auto& t = req.transaction;
 	auto r = singleKeyRange(cmdType, req.arena);
 	auto v = ValueRef(req.arena, cmdPayLoad);
