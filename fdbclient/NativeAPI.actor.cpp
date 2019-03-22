@@ -2357,16 +2357,16 @@ double Transaction::getBackoff(int errCode) {
 }
 
 TransactionOptions::TransactionOptions(Database const& cx) {
-    maxBackoff = cx->transactionMaxBackoff;
-    reset(cx);
-    if (BUGGIFY) {
-        commitOnFirstProxy = true;
-    }
+	maxBackoff = cx->transactionMaxBackoff;
+	reset(cx);
+	if (BUGGIFY) {
+		commitOnFirstProxy = true;
+	}
 }
 
 TransactionOptions::TransactionOptions() {
-    memset(this, 0, sizeof(*this));
-    maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	memset(this, 0, sizeof(*this));
+	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 }
 
 void TransactionOptions::reset(Database const& cx) {
