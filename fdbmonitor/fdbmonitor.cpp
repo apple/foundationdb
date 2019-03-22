@@ -1111,8 +1111,12 @@ void testPathOps() {
 	std::string cwd = abspath(".", true);
 
 	// Create some symlinks and test resolution (or non-resolution) of them
-	symlink("one/two", "simfdb/backups/four");
-	symlink("../backups/four", "simfdb/backups/five");
+	int rc;
+	// Ignoring return codes, if symlinks fail tests below will fail
+	rc = unlink("simfdb/backups/four");
+	rc = unlink("simfdb/backups/five");
+	rc = symlink("one/two", "simfdb/backups/four") == 0 ? 0 : 1;
+	rc = symlink("../backups/four", "simfdb/backups/five") ? 0 : 1;
 
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, joinPath(cwd, "simfdb/backups/one/two"));
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, joinPath(cwd, "simfdb/backups/one/three"));
@@ -1156,6 +1160,8 @@ void testPathOps() {
 }
 
 int main(int argc, char** argv) {
+	// testPathOps(); return -1;
+
 	std::string lockfile = "/var/run/fdbmonitor.pid";
 	std::string _confpath = "/etc/foundationdb/foundationdb.conf";
 
