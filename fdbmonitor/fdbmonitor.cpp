@@ -52,6 +52,7 @@
 #include <string>
 #include <sstream>
 #include <iterator>
+#include <functional>
 
 #include <string.h>
 #include <errno.h>
