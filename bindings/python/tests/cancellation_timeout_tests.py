@@ -126,124 +126,125 @@ def test_retry_limits(db):
             tr.on_error(err).wait()  # should throw
             raise TestError('(1) Retry limit was ignored.')
         except fdb.FDBError as e:
-            if e.code != 1007:
+            if e.code != err.code:
                 raise
         tr[b'foo'] = b'bar'
         tr.options.set_retry_limit(1)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(1) Retry limit was ignored.')
+            raise TestError('(1) Transaction not cancelled after error.')
         except fdb.FDBError as e:
-            if e.code != 1007:
+            if e.code != 1025:
                 raise
 
     txn1(db)
 
-    # (2) Number of retries accumulates even when limit is being hit
+    # (2) Retry limits don't survive resets
     @retry_with_timeout(default_timeout)
     def txn2(tr):
-        tr.options.set_retry_limit(0)
-        tr[b'foo'] = b'bar'
-        try:
-            tr.on_error(err).wait()  # should throw
-            raise TestError('(2) Retry limit was ignored.')
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
-        tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
-        try:
-            tr.on_error(err).wait()  # should throw
-            raise TestError('(2) Retry limit was ignored.')
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
-
-    txn2(db)
-
-    # (3) Retry limits don't survive resets
-    @retry_with_timeout(default_timeout)
-    def txn3(tr):
         tr.options.set_retry_limit(1)
         tr[b'foo'] = b'bar'
         tr.on_error(err).wait()  # should not throw
         tr.options.set_retry_limit(1)
+        tr[b'foo'] = b'bar'
+        try:
+            tr.on_error(err).wait()  # should throw
+            raise TestError('(2) Retry limit was ignored.')
+        except fdb.FDBError as e:
+            if e.code != err.code:
+                raise
+        tr.reset()
+        tr[b'foo'] = b'bar'
+        tr.on_error(err).wait()  # should not throw
+
+    txn2(db)
+
+    # (3) Number of retries does not survive resets
+    @retry_with_timeout(default_timeout)
+    def txn3(tr):
+        tr.options.set_retry_limit(0)
         tr[b'foo'] = b'bar'
         try:
             tr.on_error(err).wait()  # should throw
             raise TestError('(3) Retry limit was ignored.')
         except fdb.FDBError as e:
-            if e.code != 1007:
+            if e.code != err.code:
                 raise
         tr.reset()
+        tr.options.set_retry_limit(1)
         tr[b'foo'] = b'bar'
         tr.on_error(err).wait()  # should not throw
 
     txn3(db)
 
-    # (4) Number of retries does not survive resets
+    # (4) Retries accumulate when limits are turned off, and are respected retroactively
     @retry_with_timeout(default_timeout)
     def txn4(tr):
-        tr.options.set_retry_limit(0)
         tr[b'foo'] = b'bar'
+        tr.on_error(err).wait()  # should not throw
+        tr[b'foo'] = b'bar'
+        tr.on_error(err).wait()  # should not throw
+        tr.options.set_retry_limit(1)
         try:
             tr.on_error(err).wait()  # should throw
             raise TestError('(4) Retry limit was ignored.')
         except fdb.FDBError as e:
-            if e.code != 1007:
+            if e.code != err.code:
                 raise
         tr.reset()
+        tr[b'foo'] = b'bar'
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
-        tr.on_error(err).wait()  # should not throw
-
-    txn4(db)
-
-    # (5) Retries accumulate when limits are turned off, and are respected retroactively
-    @retry_with_timeout(default_timeout)
-    def txn5(tr):
-        tr[b'foo'] = b'bar'
         tr.on_error(err).wait()  # should not throw
         tr[b'foo'] = b'bar'
+        tr.options.set_retry_limit(2)
         tr.on_error(err).wait()  # should not throw
-        tr.options.set_retry_limit(1)
-        try:
-            tr.on_error(err).wait()  # should throw
-            raise TestError('(5) Retry limit was ignored.')
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
         tr[b'foo'] = b'bar'
-        tr.options.set_retry_limit(-1)
+        tr.options.set_retry_limit(3)
+        tr.on_error(err).wait()  # should not throw
+        tr[b'foo'] = b'bar'
+        tr.options.set_retry_limit(4)
         tr.on_error(err).wait()  # should not throw
         tr.options.set_retry_limit(4)
         try:
             tr.on_error(err).wait()  # should throw
+            raise TestError('(4) Retry limit was ignored.')
+        except fdb.FDBError as e:
+            if e.code != err.code:
+                raise
+        tr.options.set_retry_limit(4)
+        try:
+            tr.on_error(err).wait()  # should throw
+            raise TestError('(4) Transaction not cancelled after error.')
+        except fdb.FDBError as e:
+            if e.code != 1025:
+                raise
+
+    txn4(db)
+
+    # (5) Retry limits don't survive on_error()
+    @retry_with_timeout(default_timeout)
+    def txn5(tr):
+        tr.options.set_retry_limit(1)
+        tr[b'foo'] = b'bar'
+        tr.on_error(err).wait()  # should not throw
+        tr[b'foo'] = b'bar'
+        tr.on_error(err).wait()  # should not throw
+        tr.options.set_retry_limit(2)
+        try:
+            tr.on_error(err).wait()  # should throw
             raise TestError('(5) Retry limit was ignored.')
         except fdb.FDBError as e:
-            if e.code != 1007:
+            if e.code != err.code:
+                raise
+        try:
+            tr[b'foo'] = b'bar'
+            tr.on_error(err).wait()  # should throw
+            raise TestError('(5) Transaction not cancelled after error.')
+        except fdb.FDBError as e:
+            if e.code != 1025:
                 raise
 
     txn5(db)
-
-    # (6) Retry limits don't survive on_error()
-    @retry_with_timeout(default_timeout)
-    def txn6(tr):
-        tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
-        tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
-        tr.options.set_retry_limit(1)
-        try:
-            tr.on_error(err).wait()  # should throw
-            raise TestError('(6) Retry limit was ignored.')
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
-        tr[b'foo'] = b'bar'
-        tr.on_error(err).wait()  # should not throw
-
-    txn6(db)
 
 
 def test_timeouts(db):
@@ -413,25 +414,9 @@ def test_timeouts(db):
 
 
 def test_combinations(db):
-    # (1) Hitting retry limit still clears timeouts
+    # (1) Cancellation does survive on_error() even when retry limit is hit
     @retry_with_timeout(default_timeout)
     def txn1(tr):
-        tr.options.set_retry_limit(0)
-        tr.options.set_timeout(100)
-        try:
-            tr.on_error(fdb.FDBError(1007)).wait()  # should throw
-            raise TestError("Retry limit was ignored.")
-        except fdb.FDBError as e:
-            if e.code != 1007:
-                raise
-        time.sleep(1)
-        tr.commit().wait()  # should not throw
-
-    txn1(db)
-
-    # (2) Cancellation does survive on_error() even when retry limit is hit
-    @retry_with_timeout(default_timeout)
-    def txn2(tr):
         tr.options.set_retry_limit(0)
         tr.cancel()
         try:
@@ -447,4 +432,4 @@ def test_combinations(db):
             if e.code != 1025:
                 raise
 
-    txn2(db)
+    txn1(db)

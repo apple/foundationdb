@@ -18,10 +18,79 @@
  * limitations under the License.
  */
 
+#include <iomanip>
+#include <time.h>
+
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+std::string BackupAgentBase::formatTime(int64_t epochs) {
+	time_t curTime = (time_t)epochs;
+	char buffer[30];
+	struct tm timeinfo;
+	getLocalTime(&curTime, &timeinfo);
+	strftime(buffer, 30, "%Y/%m/%d.%H:%M:%S%z", &timeinfo);
+	return buffer;
+}
+
+int64_t BackupAgentBase::parseTime(std::string timestamp) {
+	struct tm out;
+	std::string timeOnly = timestamp.substr(0, 19);
+
+	// TODO:  Use std::get_time implementation for all platforms once supported
+	// It would be nice to read the timezone using %z, but it seems not all get_time()
+	// or strptime() implementations handle it correctly in all environments so we
+	// will read the date and time independent of timezone at first and then adjust it.
+#ifdef _WIN32
+	std::istringstream s(timeOnly);
+	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
+	if (s.fail()) {
+		return -1;
+	}
+#else
+	if(strptime(timeOnly.c_str(), "%Y/%m/%d.%H:%M:%S", &out) == nullptr) {
+		return -1;
+	}
+#endif
+
+	// Read timezone offset in +/-HHMM format then convert to seconds
+	int tzHH;
+	int tzMM;
+	if(sscanf(timestamp.substr(19, 5).c_str(), "%3d%2d", &tzHH, &tzMM) != 2) {
+		return -1;
+	}
+	if(tzHH < 0) {
+		tzMM = -tzMM;
+	}
+	// tzOffset is the number of seconds EAST of GMT
+	int tzOffset = tzHH * 60 * 60 + tzMM * 60;
+
+	// The goal is to convert the timestamp string to epoch seconds assuming the date/time was expressed in the timezone at the end of the string.
+	// However, mktime() will ONLY return epoch seconds assuming the date/time is expressed in local time (based on locale / environment)
+	// mktime() will set out.tm_gmtoff when available
+	int64_t ts = mktime(&out);
+
+	// localTZOffset is the number of seconds EAST of GMT
+	long localTZOffset;
+#ifdef _WIN32
+	// _get_timezone() returns the number of seconds WEST of GMT
+	if(_get_timezone(&localTZOffset) != 0) {
+		return -1;
+	}
+	// Negate offset to match the orientation of tzOffset
+	localTZOffset = -localTZOffset;
+#else
+	// tm.tm_gmtoff is the number of seconds EAST of GMT
+	localTZOffset = out.tm_gmtoff;
+#endif
+
+	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input string
+	ts += (localTZOffset - tzOffset);
+	return ts;
+}
 
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
 const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");

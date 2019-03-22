@@ -2376,6 +2376,7 @@ void outOfMemory() {
 	TRACEALLOCATOR(1024);
 	TRACEALLOCATOR(2048);
 	TRACEALLOCATOR(4096);
+	TRACEALLOCATOR(8192);
 	g_traceBatch.dump();
 #endif
 

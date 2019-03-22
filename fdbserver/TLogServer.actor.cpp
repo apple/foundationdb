@@ -811,7 +811,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 
 	auto locationIter = logData->versionLocation.lower_bound(newPersistentDataVersion);
 	if (locationIter != logData->versionLocation.end()) {
-		self->persistentData->set( KeyValueRef( persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.second,Unversioned()) ) );
+		self->persistentData->set( KeyValueRef( persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.first,Unversioned()) ) );
 	}
 
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
@@ -1898,15 +1898,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
 		loop {
-			if(logData->stopped) {
-				return Void();
-			}
-
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					if(endVersion.present() && ver > endVersion.get()) {
+					if(logData->stopped || (endVersion.present() && ver > endVersion.get())) {
 						return Void();
 					}
 
@@ -1945,7 +1941,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				if (!foundMessage) {
 					ver--;
 					if(ver > logData->version.get()) {
-						if(endVersion.present() && ver > endVersion.get()) {
+						if(logData->stopped || (endVersion.present() && ver > endVersion.get())) {
 							return Void();
 						}
 
@@ -2246,7 +2242,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 							// Updating persistRecoveryLocation and persistCurrentVersion at the same time,
 							// transactionally, should mean that we never read any TLogQueueEntry that has already
 							// been spilled.
-							ASSERT_WE_THINK(false);
+							ASSERT_WE_THINK(qe.version == logData->version.get());
 						}
 					}
 				}
