@@ -1859,7 +1859,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 			TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", rki.id());
 			if (ratekeeper.present() && ratekeeper.get().id() != rki.id()) {
-				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id());
+				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id())
+				.detail("DcID", printable(self->clusterControllerDcId))
+				.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
+				.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 				self->addActor.send(brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 			}
 			if (self->recruitingRatekeeperID.present()) {
@@ -1867,12 +1870,18 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 			self->db.setRatekeeper(rki);
 		} else {
-			TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id());
+			TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
+			.detail("DcID", printable(self->clusterControllerDcId))
+			.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
+			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 			self->addActor.send(brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 		}
 	}
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded );
+		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
+			self->masterProcessId = w.locality.processId();
+		}
 		checkOutstandingRequests( self );
 		return;
 	}
@@ -2425,6 +2434,7 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerData *self ) {
 	wait(delay(0.0));  // If master fails at the same time, give it a chance to clear master PID.
 
+	TraceEvent("CC_StartDataDistributor", self->id);
 	loop {
 		try {
 			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
@@ -2493,6 +2503,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 	wait(delay(0.0));  // If master fails at the same time, give it a chance to clear master PID.
 
+	TraceEvent("CC_StartRatekeeper", self->id);
 	loop {
 		try {
 			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
