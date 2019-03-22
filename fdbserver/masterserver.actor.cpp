@@ -832,9 +832,10 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 
 	state std::map<Optional<Value>,int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<vector<Standalone<CommitTransactionRef>>> recruitments = recruitEverything( self, seedServers, oldLogSystem );
+	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
-		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(1.0));
-
+		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
+		provisionalDelay = std::min(SERVER_KNOBS->PROVISIONAL_MAX_DELAY, provisionalDelay*SERVER_KNOBS->PROVISIONAL_DELAY_GROWTH);
 		choose {
 			when (vector<Standalone<CommitTransactionRef>> confChanges = wait( recruitments )) {
 				initialConfChanges->insert( initialConfChanges->end(), confChanges.begin(), confChanges.end() );
