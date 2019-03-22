@@ -1761,6 +1761,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
+	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 
 	if(info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
