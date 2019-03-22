@@ -42,7 +42,7 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	// TODO:  Use std::get_time implementation for all platforms once supported
 	// It would be nice to read the timezone using %z, but it seems not all get_time()
 	// or strptime() implementations handle it correctly in all environments so we
-	// will read the date and time independing of timezone at first and then adjust it.
+	// will read the date and time independent of timezone at first and then adjust it.
 #ifdef _WIN32
 	std::istringstream s(timeOnly);
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
