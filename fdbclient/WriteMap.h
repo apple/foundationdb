@@ -501,7 +501,7 @@ public:
 		
 	static void coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
 		RYWMutation existingEntry = stack.top();
-		if (existingEntry.type == newEntry.type) {
+		if (existingEntry.type == newEntry.type && newEntry.type != MutationRef::CompareAndClear) {
 			if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() && existingEntry.value.get().size() != newEntry.value.get().size()) {
 				stack.push(newEntry);
 			}
