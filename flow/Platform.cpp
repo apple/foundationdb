@@ -1894,7 +1894,8 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 		// TODO:  Not resolving symbolic links does not yet behave well on Windows because of drive letters
 		// and network names, so it's not currently allowed here (but it is allowed in fdbmonitor which is unix-only)
 		ASSERT(false);
-		bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+		// Treat paths starting with ~ or separator as absolute, meaning they shouldn't be appended to the current working dir
+		bool absolute = !path.empty() && (path[0] == CANONICAL_PATH_SEPARATOR || path[0] == '~');
 		std::string clean = cleanPath(absolute ? path : joinPath(platform::getWorkingDirectory(), path));
 		if(mustExist && !fileExists(clean)) {
 			Error e = systemErrorCodeToError();
@@ -1932,7 +1933,10 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 			if(prefix.empty()) {
 				prefix = ".";
 			}
-			return cleanPath(joinPath(abspath(prefix, true, false), suffix));
+			// Home directory references via ~ are not handled
+			if(prefix[0] != '~') {
+				return cleanPath(joinPath(abspath(prefix, true, false), suffix));
+			}
 		}
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;

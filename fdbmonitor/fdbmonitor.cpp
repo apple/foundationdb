@@ -302,7 +302,8 @@ std::string abspath( std::string const& path, bool resolveLinks = true) {
 	}
 
 	if(!resolveLinks) {
-		bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
+		// Treat paths starting with ~ or separator as absolute, meaning they shouldn't be appended to the current working dir
+		bool absolute = !path.empty() && (path[0] == CANONICAL_PATH_SEPARATOR || path[0] == '~');
 		return cleanPath(absolute ? path : joinPath(abspath(".", true), path));
 	}
 
@@ -318,7 +319,10 @@ std::string abspath( std::string const& path, bool resolveLinks = true) {
 			if(prefix.empty()) {
 				prefix = ".";
 			}
-			return cleanPath(joinPath(abspath(prefix, true), suffix));
+			// Home directory references via ~ are not handled
+			if(prefix[0] != '~') {
+				return cleanPath(joinPath(abspath(prefix, true), suffix));
+			}
 		}
 		log_err("realpath", errno, "Unable to get real path for %s", path.c_str());
 		return "";
