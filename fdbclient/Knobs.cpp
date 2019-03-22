@@ -62,6 +62,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
+	init( BROADCAST_BATCH_SIZE,                     20 ); if( randomize && BUGGIFY ) BROADCAST_BATCH_SIZE = 1;
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         300000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
