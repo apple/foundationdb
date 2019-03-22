@@ -287,6 +287,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MAX_TXS_SEND_MEMORY,                                   1e7 ); if( randomize && BUGGIFY ) MAX_TXS_SEND_MEMORY = 1e5;
 	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND );
 	init( MAX_RECOVERY_TIME,                                    20.0 ); if( randomize && BUGGIFY ) MAX_RECOVERY_TIME = 1.0;
+	init( PROVISIONAL_START_DELAY,                               1.0 );
+	init( PROVISIONAL_MAX_DELAY,                                60.0 );
+	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );
