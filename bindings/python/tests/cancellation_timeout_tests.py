@@ -238,7 +238,7 @@ def test_retry_limits(db):
                 raise
         try:
             tr[b'foo'] = b'bar'
-            tr.on_error(err).wait()  # should not throw
+            tr.on_error(err).wait()  # should throw
             raise TestError('(5) Transaction not cancelled after error.')
         except fdb.FDBError as e:
             if e.code != 1025:
@@ -427,7 +427,7 @@ def test_combinations(db):
                 raise
         time.sleep(1)
         try:
-            tr.commit().wait()  # should not throw
+            tr.commit().wait()  # should throw
             raise TestError("Hitting retry limit did not cancel the transaction.")
         except fdb.FDBError as e:
             if e.code != 1025:
