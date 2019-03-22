@@ -416,7 +416,7 @@ def test_timeouts(db):
 def test_combinations(db):
     # (1) Cancellation does survive on_error() even when retry limit is hit
     @retry_with_timeout(default_timeout)
-    def txn2(tr):
+    def txn1(tr):
         tr.options.set_retry_limit(0)
         tr.cancel()
         try:
