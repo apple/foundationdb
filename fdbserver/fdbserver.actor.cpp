@@ -1693,7 +1693,7 @@ int main(int argc, char* argv[]) {
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
 						for (int j = 0; j < returnFiles.size(); j++) {
 							fprintf(stderr, "file : %s\n", returnFiles[j].c_str());
-							if (returnFiles[j] != "fdb.cluster") {
+							if (returnFiles[j] != "fdb.cluster" && returnFiles[j] != "fitness") {
 								TraceEvent("DeletingNonSnapfiles")
 									.detail("FileBeingDeleted", childf + "/" + returnFiles[j]);
 								deleteFile(childf + "/" + returnFiles[j]);
