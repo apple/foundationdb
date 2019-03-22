@@ -42,8 +42,10 @@ import fdb.tuple
 from directory_extension import DirectoryExtension
 
 from cancellation_timeout_tests import test_timeouts
+from cancellation_timeout_tests import test_db_timeouts
 from cancellation_timeout_tests import test_cancellation
 from cancellation_timeout_tests import test_retry_limits
+from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
 random.seed(0)
@@ -547,7 +549,9 @@ class Tester:
                         test_watches(db)
                         test_cancellation(db)
                         test_retry_limits(db)
+                        test_db_retry_limits(db)
                         test_timeouts(db)
+                        test_db_timeouts(db)
                         test_combinations(db)
                         test_locality(db)
                         test_predicates()
