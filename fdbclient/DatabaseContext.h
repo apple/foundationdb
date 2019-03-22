@@ -152,6 +152,11 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
+	double transactionTimeout;
+	int transactionMaxRetries;
+	double transactionMaxBackoff;
+	int snapshotRywEnabled;
+
 	Future<Void> logger;
 
 	int taskID;

@@ -19,8 +19,19 @@
 .. |error-raise-type| replace:: raise
 .. |future-cancel| replace:: :meth:`Future.cancel`
 .. |max-watches-database-option| replace:: :meth:`Database.options.set_max_watches`
+.. |retry-limit-database-option| replace:: :meth:`Database.options.set_transaction_retry_limit`
+.. |timeout-database-option| replace:: :meth:`Database.options.set_transaction_timeout`
+.. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
+.. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :class:`Future`
 .. |read-your-writes-disable-option| replace:: :meth:`Transaction.options.set_read_your_writes_disable`
+.. |read-your-writes-disable-option| replace:: :meth:`Transaction.options.set_read_your_writes_disable`
+.. |retry-limit-transaction-option| replace:: :meth:`Transaction.options.set_retry_limit`
+.. |timeout-transaction-option| replace:: :meth:`Transaction.options.set_timeout`
+.. |max-retry-delay-transaction-option| replace:: :meth:`Transaction.options.set_max_retry_delay`
+.. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :class:`DirectorySubspace`
@@ -351,6 +362,26 @@ Database options
 .. method:: Database.options.set_datacenter_id(id) -> nil
 
     |option-datacenter-id-blurb|
+
+.. method:: Database.options.set_transaction_timeout(timeout) -> nil
+
+    |option-db-tr-timeout-blurb|
+
+.. method:: Database.options.set_transaction_retry_limit(retry_limit) -> nil
+
+    |option-db-tr-retry-limit-blurb|
+
+.. method:: Database.options.set_transaction_max_retry_delay(delay_limit) -> nil
+
+    |option-db-tr-max-retry-delay-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_enable() -> nil
+
+    |option-db-snapshot-ryw-enable-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_disable() -> nil
+
+    |option-db-snapshot-ryw-disable-blurb|
 
 Transaction objects
 ===================

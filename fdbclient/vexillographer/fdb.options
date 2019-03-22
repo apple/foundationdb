@@ -133,6 +133,19 @@ description is not currently required but encouraged.
     <Option name="datacenter_id" code="22"
             paramType="String" paramDescription="Hexadecimal ID"
             description="Specify the datacenter ID that was passed to fdbserver processes running in the same datacenter as this client, for better location-aware load balancing." />
+    <Option name="transaction_timeout" code="500"
+            paramType="Int" paramDescription="value in milliseconds of timeout"
+            description="Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher." />
+    <Option name="transaction_retry_limit" code="501"
+            paramType="Int" paramDescription="number of times to retry"
+            description="Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information." />
+    <Option name="transaction_max_retry_delay" code="502"
+            paramType="Int" paramDescription="value in milliseconds of maximum delay"
+            description="Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. This sets the ``max_retry_delay`` option of each transaction created by this database. See the transaction option description for more information." />
+    <Option name="snapshot_ryw_enable" code="26"
+            description="Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior." />
+    <Option name="snapshot_ryw_disable" code="27"
+            description="Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300." />
   </Scope>
   
   <Scope name="TransactionOption">
@@ -177,17 +190,17 @@ description is not currently required but encouraged.
             description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output." />
     <Option name="timeout" code="500"
             paramType="Int" paramDescription="value in milliseconds of timeout"
-            description="Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to onError. This behavior allows the user to make the timeout dynamic." />
+            description="Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option." />
     <Option name="retry_limit" code="501"
             paramType="Int" paramDescription="number of times to retry"
-            description="Set a maximum number of retries after which additional calls to onError will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Like all transaction options, the retry limit must be reset after a call to onError. This behavior allows the user to make the retry limit dynamic." />
+            description="Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Prior to API version 610, like all other transaction options, the retry limit must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the retry limit each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option." />
     <Option name="max_retry_delay" code="502"
             paramType="Int" paramDescription="value in milliseconds of maximum delay"
-            description="Set the maximum amount of backoff delay incurred in the call to onError if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. Like all transaction options, the maximum retry delay must be reset after a call to onError. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay."/>
+            description="Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the maximum retry delay each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option."/>
     <Option name="snapshot_ryw_enable" code="600"
-            description="Snapshot read operations will see the results of writes done in the same transaction." />
+            description="Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior." />
     <Option name="snapshot_ryw_disable" code="601"
-            description="Snapshot read operations will not see the results of writes done in the same transaction." />
+            description="Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300." />
     <Option name="lock_aware" code="700"
             description="The transaction can read and write to locked databases, and is resposible for checking that it took the lock."/>
     <Option name="used_during_commit_protection_disable" code="701"

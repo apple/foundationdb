@@ -1123,18 +1123,21 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {}
+ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cache(&arena), writes(&arena), tr(cx), retries(0), creationTime(now()), commitStarted(false), options(tr), deferredError(cx->deferredError) {
+	resetTimeout();
+}
 
-ACTOR Future<Void> timebomb(double totalSeconds, Promise<Void> resetPromise) {
-	if(totalSeconds == 0.0) {
-		wait ( Never() );
-	}
-	else if (now() < totalSeconds) {
-		wait ( delayUntil( totalSeconds ) );
+ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
+	if (now() < endTime) {
+		wait ( delayUntil( endTime ) );
 	}
 	if( !resetPromise.isSet() )
 		resetPromise.sendError(transaction_timed_out());
 	throw transaction_timed_out();	
+}
+
+void ReadYourWritesTransaction::resetTimeout() {
+	timeoutActor = options.timeoutInSeconds == 0.0 ? Void() : timebomb(options.timeoutInSeconds + creationTime, resetPromise);
 }
 
 Future<Version> ReadYourWritesTransaction::getReadVersion() {
@@ -1469,6 +1472,37 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 	}
 }
 
+ReadYourWritesTransactionOptions::ReadYourWritesTransactionOptions(Transaction const& tr) {
+	Database cx = tr.getDatabase();
+	timeoutInSeconds = cx->transactionTimeout;
+	maxRetries = cx->transactionMaxRetries;
+	reset(tr);
+}
+
+void ReadYourWritesTransactionOptions::reset(Transaction const& tr) {
+	double oldTimeout = timeoutInSeconds;
+	int oldMaxRetries = maxRetries;
+	memset(this, 0, sizeof(*this));
+	if( tr.apiVersionAtLeast(610) ) {
+		// Starting in API version 610, these options are not cleared after reset.
+		timeoutInSeconds = oldTimeout;
+		maxRetries = oldMaxRetries;
+	}
+	else {
+		Database cx = tr.getDatabase();
+		maxRetries = cx->transactionMaxRetries;
+		timeoutInSeconds = cx->transactionTimeout;
+	}
+	snapshotRywEnabled = tr.getDatabase()->snapshotRywEnabled;
+}
+
+void ReadYourWritesTransactionOptions::fullReset(Transaction const& tr) {
+	reset(tr);
+	Database cx = tr.getDatabase();
+	maxRetries = cx->transactionMaxRetries;
+	timeoutInSeconds = cx->transactionTimeout;
+}
+
 bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {
 	bool disabled = nextWriteDisableConflictRange;
 	nextWriteDisableConflictRange = false;
@@ -1781,7 +1815,7 @@ void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option,
 
 		case FDBTransactionOptions::TIMEOUT:
 			options.timeoutInSeconds = extractIntOption(value, 0, std::numeric_limits<int>::max())/1000.0;
-			timeoutActor = timebomb(options.timeoutInSeconds == 0.0 ? options.timeoutInSeconds : options.timeoutInSeconds + creationTime, resetPromise);
+			resetTimeout();
 			break;
 
 		case FDBTransactionOptions::RETRY_LIMIT:
@@ -1883,6 +1917,7 @@ void ReadYourWritesTransaction::resetRyow() {
 
 	if(tr.apiVersionAtLeast(16)) {
 		options.reset(tr);
+		resetTimeout();
 	}
 
 	if ( !oldReset.isSet() )
@@ -1897,6 +1932,8 @@ void ReadYourWritesTransaction::cancel() {
 void ReadYourWritesTransaction::reset() {
 	retries = 0;
 	creationTime = now();
+	timeoutActor.cancel();
+	options.fullReset(tr);
 	transactionDebugInfo.clear();
 	tr.fullReset();
 	resetRyow();

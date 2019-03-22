@@ -791,6 +791,15 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "UNIT_TESTS":
 		db.Options().SetLocationCacheSize(100001)
 		db.Options().SetMaxWatches(10001)
+		db.Options().SetDatacenterId("dc_id")
+		db.Options().SetMachineId("machine_id")
+		db.Options().SetTransactionTimeout(100000)
+		db.Options().SetTransactionTimeout(0)
+		db.Options().SetTransactionMaxRetryDelay(100)
+		db.Options().SetTransactionRetryLimit(10)
+		db.Options().SetTransactionRetryLimit(-1)
+		db.Options().SetSnapshotRywEnable()
+		db.Options().SetSnapshotRywDisable()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")

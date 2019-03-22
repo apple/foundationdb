@@ -429,6 +429,19 @@ public class StackTester {
 							}
 						}
 
+						Database db = tr.getDatabase();
+						db.options().setLocationCacheSize(100001);
+						db.options().setMaxWatches(10001);
+						db.options().setDatacenterId("dc_id");
+						db.options().setMachineId("machine_id");
+						db.options().setTransactionTimeout(100000);
+						db.options().setTransactionTimeout(0);
+						db.options().setTransactionMaxRetryDelay(100);
+						db.options().setTransactionRetryLimit(10);
+						db.options().setTransactionRetryLimit(-1);
+						db.options().setSnapshotRywEnable();
+						db.options().setSnapshotRywDisable();
+
 						tr.options().setPrioritySystemImmediate();
 						tr.options().setPriorityBatch();
 						tr.options().setCausalReadRisky();

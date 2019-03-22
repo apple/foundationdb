@@ -513,12 +513,15 @@ DatabaseContext::DatabaseContext(
 	lockAware(lockAware), apiVersion(apiVersion), provisional(false),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), 
 	transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), 
-	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0),
+	transactionsMaybeCommitted(0), transactionsResourceConstrained(0), outstandingWatches(0), transactionTimeout(0.0), transactionMaxRetries(-1),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
 	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0)
 {
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
+
+	transactionMaxBackoff = CLIENT_KNOBS->FAILURE_MAX_DELAY;
+	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
 
 	logger = databaseLogger( this );
 	locationCacheSize = g_network->isSimulated() ?
@@ -730,6 +733,27 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
 			server_interf.clear();
 			locationCache.insert( allKeys, Reference<LocationInfo>() );
+			break;
+		case FDBDatabaseOptions::TRANSACTION_TIMEOUT:
+			if( !apiVersionAtLeast(610) ) {
+				throw invalid_option();
+			}
+			transactionTimeout = extractIntOption(value, 0, std::numeric_limits<int>::max())/1000.0;
+			break;
+		case FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT:
+			transactionMaxRetries = (int)extractIntOption(value, -1, std::numeric_limits<int>::max());
+			break;
+		case FDBDatabaseOptions::TRANSACTION_MAX_RETRY_DELAY:
+			validateOptionValue(value, true);
+			transactionMaxBackoff = extractIntOption(value, 0, std::numeric_limits<int32_t>::max()) / 1000.0;
+			break;
+		case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
+			validateOptionValue(value, false);
+			snapshotRywEnabled++;
+			break;
+		case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
+			validateOptionValue(value, false);
+			snapshotRywEnabled--;
 			break;
 	}
 }
@@ -1425,8 +1449,8 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 }
 
 ACTOR Future<Void> readVersionBatcher(
-    DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
-    uint32_t flags);
+	DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
+	uint32_t flags);
 
 ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Value> value, Database cx, int readVersionFlags, TransactionInfo info )
 {
@@ -1938,12 +1962,9 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
+	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
 {
 	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-	if(cx->lockAware) {
-		options.lockAware = true;
-	}
 }
 
 Transaction::~Transaction() {
@@ -2335,6 +2356,26 @@ double Transaction::getBackoff(int errCode) {
 	return b;
 }
 
+TransactionOptions::TransactionOptions(Database const& cx) {
+	maxBackoff = cx->transactionMaxBackoff;
+	reset(cx);
+	if (BUGGIFY) {
+		commitOnFirstProxy = true;
+	}
+}
+
+TransactionOptions::TransactionOptions() {
+	memset(this, 0, sizeof(*this));
+	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+}
+
+void TransactionOptions::reset(Database const& cx) {
+	double oldMaxBackoff = maxBackoff;
+	memset(this, 0, sizeof(*this));
+	maxBackoff = cx->apiVersionAtLeast(610) ? oldMaxBackoff : cx->transactionMaxBackoff;
+	lockAware = cx->lockAware;
+}
+
 void Transaction::reset() {
 	tr = CommitTransactionRequest();
 	readVersion = Future<Version>();
@@ -2350,16 +2391,15 @@ void Transaction::reset() {
 	cancelWatches();
 
 	if(apiVersionAtLeast(16)) {
-		options.reset();
+		options.reset(cx);
 		setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-		if(cx->lockAware)
-			options.lockAware = true;
 	}
 }
 
 void Transaction::fullReset() {
 	reset();
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+	options.maxBackoff = getDatabase()->transactionMaxBackoff;
 }
 
 int Transaction::apiVersionAtLeast(int minVersion) const {

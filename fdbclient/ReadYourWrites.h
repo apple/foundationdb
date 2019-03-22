@@ -42,13 +42,9 @@ struct ReadYourWritesTransactionOptions {
 	int snapshotRywEnabled;
 
 	ReadYourWritesTransactionOptions() {}
-	explicit ReadYourWritesTransactionOptions(Transaction const& tr) { reset(tr); }
-	void reset(Transaction const& tr) {
-		memset(this, 0, sizeof(*this));
-		timeoutInSeconds = 0.0;
-		maxRetries = -1;
-		snapshotRywEnabled = tr.apiVersionAtLeast(300) ? 1 : 0;
-	}
+	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
+	void reset(Transaction const& tr);
+	void fullReset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();
 };
 
@@ -130,7 +126,7 @@ public:
 
 	void getWriteConflicts( KeyRangeMap<bool> *result );
 
-	Database getDatabase(){
+	Database getDatabase() {
 		return tr.getDatabase();
 	}
 private:
@@ -151,6 +147,7 @@ private:
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
+	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)
 	void updateConflictMap( KeyRangeRef const& keys, WriteMap::iterator& it ); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
 	void writeRangeToNativeTransaction( KeyRangeRef const& keys );
