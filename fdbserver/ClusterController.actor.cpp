@@ -1429,7 +1429,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 			TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 			.detail("Excluded", rkWorker.priorityInfo.isExcluded)
 			.detail("Fitness", rkFitness).detail("BestFitness", bestFitnessForRK);
-			self->recruitRatekeeper.trigger();
+			self->recruitRatekeeper.set(true);
 		}
 	}
 
