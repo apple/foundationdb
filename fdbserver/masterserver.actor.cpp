@@ -320,7 +320,10 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", printable(remoteDcId)).detail("Loc", loc);
 		}
 
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() * std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())) ) ) );
+		std::vector<UID> exclusionWorkerIds;
+		std::transform(recr.tLogs.begin(), recr.tLogs.end(), std::back_inserter(exclusionWorkerIds), [](const WorkerInterface &in) { return in.id(); });
+		std::transform(recr.satelliteTLogs.begin(), recr.satelliteTLogs.end(), std::back_inserter(exclusionWorkerIds), [](const WorkerInterface &in) { return in.id(); });
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() * std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())), exclusionWorkerIds) ) );
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->primaryLocality, self->dcId_locality[remoteDcId], self->allTags, self->recruitmentStalled ) );
@@ -485,7 +488,9 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 
 	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
 	parent->provisionalProxies = vector<MasterProxyInterface>(1);
+	parent->provisionalProxies[0].provisional = true;
 	parent->provisionalProxies[0].locality = parent->myInterface.locality;
+	parent->provisionalProxies[0].initEndpoints();
 	state Future<Void> waitFailure = waitFailureServer(parent->provisionalProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();
 
@@ -827,9 +832,10 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 
 	state std::map<Optional<Value>,int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<vector<Standalone<CommitTransactionRef>>> recruitments = recruitEverything( self, seedServers, oldLogSystem );
+	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
-		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(1.0));
-
+		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
+		provisionalDelay = std::min(SERVER_KNOBS->PROVISIONAL_MAX_DELAY, provisionalDelay*SERVER_KNOBS->PROVISIONAL_DELAY_GROWTH);
 		choose {
 			when (vector<Standalone<CommitTransactionRef>> confChanges = wait( recruitments )) {
 				initialConfChanges->insert( initialConfChanges->end(), confChanges.begin(), confChanges.end() );

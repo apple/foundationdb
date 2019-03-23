@@ -20,10 +20,14 @@
 
 package com.apple.foundationdb.test;
 
+import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.security.AccessController;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -43,7 +47,7 @@ import com.apple.foundationdb.tuple.Versionstamp;
 public class TupleTest {
 	private static final byte FF = (byte)0xff;
 
-	public static void main(String[] args) throws InterruptedException {
+	public static void main(String[] args) throws NoSuchFieldException {
 		final int reps = 1000;
 		try {
 			FDB fdb = FDB.selectAPIVersion(610);
@@ -54,6 +58,7 @@ public class TupleTest {
 			intoBuffer();
 			offsetsAndLengths();
 			malformedBytes();
+			malformedStrings();
 			replaceTests();
 			serializedForms();
 			try(Database db = fdb.open()) {
@@ -136,14 +141,15 @@ public class TupleTest {
 				Tuple.from((Object)new byte[]{0x00, 0x00, 0x00, 0x04}), new byte[]{0x01, 0x00, FF, 0x00, FF, 0x00, FF, 0x04, 0x00},
 				Tuple.from(""), new byte[]{0x02, 0x00},
 				Tuple.from("hello"), new byte[]{0x02, 'h', 'e', 'l', 'l', 'o', 0x00},
-				Tuple.from("\u4e2d\u6587"), new byte[]{0x02, (byte)0xe4, (byte)0xb8, (byte)0xad, (byte)0xe6, (byte)0x96, (byte)0x87, 0x00},
-				Tuple.from("\u03bc\u03ac\u03b8\u03b7\u03bc\u03b1"), new byte[]{0x02, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xac, (byte)0xce, (byte)0xb8, (byte)0xce, (byte)0xb7, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xb1, 0x00},
-				Tuple.from(new String(new int[]{0x1f525}, 0, 1)), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
-				Tuple.from("\ud83d\udd25"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00},
-				Tuple.from("\ud83e\udd6f"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00},
-				Tuple.from("\ud83d"), new byte[]{0x02, 0x3f, 0x00},
-				Tuple.from("\udd25\ud83e\udd6f"), new byte[]{0x02, 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // malformed string - low surrogate without high surrogate
-				Tuple.from("a\udd25\ud83e\udd6f"), new byte[]{0x02, 'a', 0x3f, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // malformed string - low surrogate without high surrogate
+				Tuple.from("\u4e2d\u6587"), new byte[]{0x02, (byte)0xe4, (byte)0xb8, (byte)0xad, (byte)0xe6, (byte)0x96, (byte)0x87, 0x00}, // chinese (three bytes per code point)
+				Tuple.from("\u03bc\u03ac\u03b8\u03b7\u03bc\u03b1"), new byte[]{0x02, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xac, (byte)0xce, (byte)0xb8, (byte)0xce, (byte)0xb7, (byte)0xce, (byte)0xbc, (byte)0xce, (byte)0xb1, 0x00}, // Greek (two bytes per codepoint)
+				Tuple.from(new String(new int[]{0x1f525}, 0, 1)), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00}, // fire emoji as unicode codepoint
+				Tuple.from("\ud83d\udd25"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0x94, (byte)0xa5, 0x00}, // fire emoji in UTF-16
+				Tuple.from("\ud83e\udd6f"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa5, (byte)0xaf, 0x00}, // bagel emoji in UTF-16
+				Tuple.from(new String(new int[]{0x1f9a5}, 0, 1)), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa6, (byte)0xa5, 0x00}, // currently unused UTF-8 code point (will be sloth)
+				Tuple.from("\ud83e\udda5"), new byte[]{0x02, (byte)0xf0, (byte)0x9f, (byte)0xa6, (byte)0xa5, 0x00}, // currently unused UTF-8 code point (will be sloth)
+				Tuple.from(new String(new int[]{0x10FFFF}, 0, 1)), new byte[]{0x02, (byte)0xf4, (byte)0x8f, (byte)0xbf, (byte)0xbf, 0x00}, // maximum unicode codepoint
+				Tuple.from("\udbff\udfff"), new byte[]{0x02, (byte)0xf4, (byte)0x8f, (byte)0xbf, (byte)0xbf, 0x00}, // maximum unicode codepoint
 				Tuple.from(Tuple.from((Object)null)), new byte[]{0x05, 0x00, FF, 0x00},
 				Tuple.from(Tuple.from(null, "hello")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x00},
 				Tuple.from(Arrays.asList(null, "hello")), new byte[]{0x05, 0x00, FF, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x00},
@@ -182,6 +188,62 @@ public class TupleTest {
 			}
 		}
 		System.out.println("All tuples had matching serializations");
+	}
+
+	private static void malformedStrings() {
+		// Malformed when packing
+		List<String> strings = Arrays.asList(
+				"\ud83d", // high surrogate without low (end of string)
+				"\ud83da", // high surrogate without low (not end of string)
+				"\ud83d\ud8ed", // two high surrogates
+				"\udd25", // low surrogate without low (start of string)
+				"\udd26\udd6f", // two low surrogates
+				"a\udd25", // low surrogate without high (not start of string)
+				"a\udd25\udd6e", // two low surrogates (not start of string)
+				"a\udd25\udd6f", // two low surrogates (not start of string)
+				"\ud33d\udd25\udd25" // high surrogate followed by two low surrogates
+		);
+
+		// Verify that it won't be packed
+		for(String s : strings) {
+			Tuple t = Tuple.from(s);
+			try {
+				t.getPackedSize();
+				throw new RuntimeException("able to get packed size of malformed string " + ByteArrayUtil.printable(s.getBytes()));
+			}
+			catch (IllegalArgumentException e) {
+				// eat
+			}
+			try {
+				t.pack();
+				throw new RuntimeException("able to pack malformed string " + ByteArrayUtil.printable(s.getBytes()));
+			}
+			catch(IllegalArgumentException e) {
+				// eat
+			}
+			try {
+				// Modify the memoized packed size to match what it would be if naively packed.
+				// This checks to make sure the validation logic invoked right before packing works,
+				// but getting that code path to execute means modifying the tuple's internal state, hence
+				// the reflection.
+				Field f = Tuple.class.getDeclaredField("memoizedPackedSize");
+				AccessController.doPrivileged((PrivilegedExceptionAction<Void>) () -> {
+					if(!f.isAccessible()) {
+						f.setAccessible(true);
+					}
+					f.setInt(t, 2 + s.getBytes("UTF-8").length);
+					return null;
+				});
+				t.pack();
+				throw new RuntimeException("able to pack malformed string");
+			}
+			catch(NoSuchFieldException | PrivilegedActionException e) {
+				throw new RuntimeException("reflection chicanery failed", e);
+			}
+			catch(IllegalArgumentException e) {
+				// eat
+			}
+		}
 	}
 
 	private static void comparisons() {
@@ -239,12 +301,6 @@ public class TupleTest {
 				Tuple.from("a\ud83d\udd25"),
 				Tuple.from("\ufb49"),
 				Tuple.from("\ud83d\udd25\ufb49"),
-				Tuple.from("\ud8ed\ud8ed"), // malformed string -- two high surrogates
-				Tuple.from("\ud8ed\ud8eda"), // malformed string -- two high surrogates
-				Tuple.from("\udd25\udd25"), // malformed string -- two low surrogates
-				Tuple.from("a\udd25\ud8ed"), // malformed string -- two low surrogates
-				Tuple.from("\udd25\ud83e\udd6f"), // malformed string -- low surrogate followed by high then low surrogate
-				Tuple.from("\udd6f\ud83e\udd6f"), // malformed string -- low surrogate followed by high then low surrogate
 				Tuple.from(new UUID(-1, 0)),
 				Tuple.from(new UUID(-1, -1)),
 				Tuple.from(new UUID(1, -1)),
@@ -697,9 +753,11 @@ public class TupleTest {
 				new byte[]{0x01, (byte)0xde, (byte)0xad, 0x00, FF, (byte)0xc0, (byte)0xde}, // no termination character but null in middle
 				new byte[]{0x02, 'h', 'e', 'l', 'l', 'o'}, // no termination character for string
 				new byte[]{0x02, 'h', 'e', 'l', 0x00, FF, 'l', 'o'}, // no termination character but null in the middle
-				// Invalid UTF-8 decodes malformed as U+FFFD rather than throwing an error
-				// new byte[]{0x02, 'u', 't', 'f', 0x08, (byte)0x80, 0x00}, // invalid utf-8 code point start character
-				// new byte[]{0x02, 'u', 't', 'f', 0x08, (byte)0xc0, 0x01, 0x00}, // invalid utf-8 code point second character
+				new byte[]{0x02, 'u', 't', 'f', 0x08, (byte)0x80, 0x00}, // invalid utf-8 code point start character
+				new byte[]{0x02, 'u', 't', 'f', 0x08, (byte)0xc0, 0x01, 0x00}, // invalid utf-8 code point second character
+				new byte[]{0x02, 'u', 't', 'f', 0x10, (byte)0xed, (byte)0xa0, (byte)0xbd, (byte)0x00}, // invalid utf-8 (corresponds to high surrogate \ud83d)
+				new byte[]{0x02, 'u', 't', 'f', 0x10, (byte)0xed, (byte)0xb4, (byte)0xa5, (byte)0x00}, // invalid utf-8 (corresponds to low surrogate \udd25)
+				new byte[]{0x02, 'u', 't', 'f', 0x10, (byte)0xed, (byte)0xa0, (byte)0xbd, (byte)0xed, (byte)0xb4, (byte)0xa5, (byte)0x00}, // invalid utf-8 (corresponds to \ud83d\udd25 which *is* valid utf-16, but not encoded like that)
 				new byte[]{0x05, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00}, // no termination character for nested tuple
 				new byte[]{0x05, 0x02, 'h', 'e', 'l', 'l', 'o', 0x00, 0x00, FF, 0x02, 't', 'h', 'e', 'r', 'e', 0x00}, // no termination character for nested tuple but null in the middle
 				new byte[]{0x16, 0x01}, // integer truncation

@@ -150,24 +150,18 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 
-	TransactionOptions() {
-		reset();
-		if (BUGGIFY) {
-			commitOnFirstProxy = true;
-		}
-	}
+	TransactionOptions(Database const& cx);
+	TransactionOptions();
 
-	void reset() {
-		memset(this, 0, sizeof(*this));
-		maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
-	}
+	void reset(Database const& cx);
 };
 
 struct TransactionInfo {
 	Optional<UID> debugID;
 	int taskID;
+	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID( taskID ) {}
+	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -300,7 +294,7 @@ public:
 
 	void checkDeferredError();
 
-	Database getDatabase(){
+	Database getDatabase() const {
 		return cx;
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);

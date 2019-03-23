@@ -65,7 +65,7 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			RegionInfo info;
 			json_spirit::mArray datacenters;
 			dc.get("datacenters", datacenters);
-			int nonSatelliteDatacenters = 0;
+			bool foundNonSatelliteDatacenter = false;
 			for (StatusObjectReader s : datacenters) {
 				std::string idStr;
 				if (s.has("satellite") && s.last().get_int() == 1) {
@@ -75,15 +75,15 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 					s.get("priority", satInfo.priority);
 					info.satellites.push_back(satInfo);
 				} else {
-					if (nonSatelliteDatacenters > 0) throw invalid_option();
-					nonSatelliteDatacenters++;
+					if (foundNonSatelliteDatacenter) throw invalid_option();
+					foundNonSatelliteDatacenter = true;
 					s.get("id", idStr);
 					info.dcId = idStr;
 					s.get("priority", info.priority);
 				}
 			}
 			std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority() );
-			if (nonSatelliteDatacenters != 1) throw invalid_option();
+			if (!foundNonSatelliteDatacenter) throw invalid_option();
 			dc.tryGet("satellite_logs", info.satelliteDesiredTLogCount);
 			std::string satelliteReplication;
 			if(dc.tryGet("satellite_redundancy_mode", satelliteReplication)) {
@@ -133,7 +133,7 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			regions->push_back(info);
 		}
 		std::sort(regions->begin(), regions->end(), RegionInfo::sort_by_priority() );
-	} catch( Error &e ) {
+	} catch (Error&) {
 		regions->clear();
 		return;
 	}
@@ -205,11 +205,14 @@ bool DatabaseConfiguration::isValid() const {
 			return false;
 		}
 		dcIds.insert(r.dcId);
+		std::set<Key> satelliteDcIds;
+		satelliteDcIds.insert(Key());
+		satelliteDcIds.insert(r.dcId);
 		for(auto& s : r.satellites) {
-			if(dcIds.count(s.dcId)) {
+			if (satelliteDcIds.count(s.dcId)) {
 				return false;
 			}
-			dcIds.insert(s.dcId);
+			satelliteDcIds.insert(s.dcId);
 		}
 	}
 
@@ -262,7 +265,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1 ) {
 			result["storage_engine"] = "ssd-redwood-experimental";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
-			result["storage_engine"] = "memory";
+			result["storage_engine"] = "memory-1";
+		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
+			result["storage_engine"] = "memory-2";
 		} else {
 			result["storage_engine"] = "custom";
 		}

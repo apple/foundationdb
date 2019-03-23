@@ -42,8 +42,10 @@ import fdb.tuple
 from directory_extension import DirectoryExtension
 
 from cancellation_timeout_tests import test_timeouts
+from cancellation_timeout_tests import test_db_timeouts
 from cancellation_timeout_tests import test_cancellation
 from cancellation_timeout_tests import test_retry_limits
+from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
 random.seed(0)
@@ -121,6 +123,20 @@ class Instruction:
 
     def push(self, val):
         self.stack.push(self.index, val)
+
+
+def test_db_options(db):
+    db.options.set_max_watches(100001)
+    db.options.set_datacenter_id("dc_id")
+    db.options.set_machine_id("machine_id")
+    db.options.set_transaction_timeout(100000)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_max_retry_delay(100)
+    db.options.set_transaction_retry_limit(10)
+    db.options.set_transaction_retry_limit(-1)
+    db.options.set_snapshot_ryw_enable()
+    db.options.set_snapshot_ryw_disable()
 
 
 @fdb.transactional
@@ -528,11 +544,14 @@ class Tester:
                     try:
                         db.options.set_location_cache_size(100001)
 
+                        test_db_options(db)
                         test_options(db)
                         test_watches(db)
                         test_cancellation(db)
                         test_retry_limits(db)
+                        test_db_retry_limits(db)
                         test_timeouts(db)
+                        test_db_timeouts(db)
                         test_combinations(db)
                         test_locality(db)
                         test_predicates()

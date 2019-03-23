@@ -1530,15 +1530,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
 		loop {
-			if(logData->stopped) {
-				return Void();
-			}
-
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					if(endVersion.present() && ver > endVersion.get()) {
+					if(logData->stopped || (endVersion.present() && ver > endVersion.get())) {
 						return Void();
 					}
 
@@ -1577,7 +1573,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				if (!foundMessage) {
 					ver--;
 					if(ver > logData->version.get()) {
-						if(endVersion.present() && ver > endVersion.get()) {
+						if(logData->stopped || (endVersion.present() && ver > endVersion.get())) {
 							return Void();
 						}
 

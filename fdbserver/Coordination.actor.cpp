@@ -256,7 +256,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			LeaderInfo newInfo;
 			newInfo.forward = true;
 			newInfo.serializedInfo = req.conn.toString();
-			for(int i=0; i<notify.size(); i++)
+			for(unsigned int i=0; i<notify.size(); i++)
 				notify[i].send( newInfo );
 			notify.clear();
 			req.reply.send( Void() );
@@ -294,7 +294,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				if ( !nextNominee.present() || !foundCurrentNominee || currentNominee.get().leaderChangeRequired(nextNominee.get()) ) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 						.detail("Changed", nextNominee != currentNominee).detail("Key", printable(key));
-					for(int i=0; i<notify.size(); i++)
+					for(unsigned int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
 					currentNominee = nextNominee;

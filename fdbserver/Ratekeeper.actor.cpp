@@ -122,11 +122,11 @@ struct RatekeeperLimits {
 	int64_t storageSpringBytes;
 	int64_t logTargetBytes;
 	int64_t logSpringBytes;
-	int64_t maxVersionDifference;
+	double maxVersionDifference;
 
 	std::string context;
 
-	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, int64_t maxVersionDifference) :
+	RatekeeperLimits(std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference) :
 		tpsLimit(std::numeric_limits<double>::infinity()),
 		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 		reasonMetric(StringRef("Ratekeeper.Reason" + context)),

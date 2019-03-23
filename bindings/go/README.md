@@ -30,7 +30,7 @@ Documentation
 -------------
 
 * [API documentation](https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb)
-* [Tutorial](https://apple.github.io/foundationdb/class-scheduling.html)
+* [Tutorial](https://apple.github.io/foundationdb/class-scheduling-go.html)
 
 Modules
 -------

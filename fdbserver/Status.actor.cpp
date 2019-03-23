@@ -1315,7 +1315,7 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 }
 
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	Reference<ProxyInfo> proxyInfo = cx->getMasterProxies();
+	Reference<ProxyInfo> proxyInfo = cx->getMasterProxies(false);
 	std::vector<MasterProxyInterface> servers;
 	if(proxyInfo) {
 		for(int i = 0; i < proxyInfo->size(); ++i) {

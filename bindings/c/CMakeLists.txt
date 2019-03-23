@@ -63,7 +63,6 @@ endif()
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
 fdb_install(TARGETS fdb_c
-  EXPORT fdbc
   DESTINATION lib
   COMPONENT clients)
 fdb_install(

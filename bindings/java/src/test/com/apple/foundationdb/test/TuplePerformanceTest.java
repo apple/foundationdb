@@ -142,7 +142,11 @@ public class TuplePerformanceTest {
 				// Random Unicode codepoints
 				int[] codepoints = new int[r.nextInt(20)];
 				for(int x = 0; x < codepoints.length; x++) {
-					codepoints[x] = r.nextInt(0x10FFFF);
+					int codepoint = r.nextInt(0x10FFFF);
+					while(Character.isSurrogate((char)codepoint)) {
+						codepoint = r.nextInt(0x10FFFF);
+					}
+					codepoints[x] = codepoint;
 				}
 				values.add(new String(codepoints, 0, codepoints.length));
 			}
