@@ -1876,8 +1876,14 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		self->db.setDistributor(di);
 	}
 	if (req.ratekeeperInterf.present()) {
-		if (self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId() &&
-				(!self->recruitingRatekeeperID.present() || self->recruitingRatekeeperID.get() == req.ratekeeperInterf.get().id())) {
+		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
+			self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId()) {
+				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
+			.detail("DcID", printable(self->clusterControllerDcId))
+			.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
+			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
+			self->addActor.send(brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
+		} else if(!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 			TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", rki.id());
@@ -1888,16 +1894,9 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 				self->addActor.send(brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 			}
-			if (self->recruitingRatekeeperID.present()) {
-				self->recruitingRatekeeperID = Optional<UID>();
+			if(!ratekeeper.present() || ratekeeper.get().id() != rki.id()) {
+				self->db.setRatekeeper(rki);
 			}
-			self->db.setRatekeeper(rki);
-		} else {
-			TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
-			.detail("DcID", printable(self->clusterControllerDcId))
-			.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
-			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->addActor.send(brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
 		}
 	}
 }
@@ -2525,6 +2524,17 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			ErrorOr<RatekeeperInterface> interf = wait( worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0) );
 			if (interf.present()) {
 				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", worker.interf.address());
+				self->recruitingRatekeeperID = Optional<UID>();
+				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", interf.get().id());
+				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id()) {
+					TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id())
+					.detail("DcID", printable(self->clusterControllerDcId));
+					self->addActor.send(brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id))));
+				}
+				if(!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
+					self->db.setRatekeeper(interf.get());
+				}
 				return Void();
 			}
 		}
