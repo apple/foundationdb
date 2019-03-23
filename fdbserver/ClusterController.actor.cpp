@@ -1044,7 +1044,7 @@ public:
 
 	bool isProxyOrResolver(Optional<Key> processId) {
 		ASSERT(masterProcessId.present());
-		if (processId == masterProcessId.get()) return false;
+		if (processId == masterProcessId) return false;
 
 		auto& dbInfo = db.serverInfo->get();
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
