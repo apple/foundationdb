@@ -1505,10 +1505,12 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		for(auto &ss : storageServers.get()) {
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
 
-			readRequests.updateValues( StatusCounter(storageMetrics.getValue("QueryQueue")));
-			reads.updateValues( StatusCounter(storageMetrics.getValue("FinishedQueries")));
-			readKeys.updateValues( StatusCounter(storageMetrics.getValue("RowsQueried")));
-			readBytes.updateValues( StatusCounter(storageMetrics.getValue("BytesQueried")));
+			if (storageMetrics.size() > 0) {
+				readRequests.updateValues(StatusCounter(storageMetrics.getValue("QueryQueue")));
+				reads.updateValues(StatusCounter(storageMetrics.getValue("FinishedQueries")));
+				readKeys.updateValues(StatusCounter(storageMetrics.getValue("RowsQueried")));
+				readBytes.updateValues(StatusCounter(storageMetrics.getValue("BytesQueried")));
+			}
 		}
 
 		operationsObj["read_requests"] = readRequests.getStatus();
