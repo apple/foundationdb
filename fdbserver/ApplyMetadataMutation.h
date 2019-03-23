@@ -271,7 +271,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				Version requested = BinaryReader::fromStringRef<Version>(m.param2, Unversioned());
 				TraceEvent("MinRequiredCommitVersion", dbgid).detail("Min", requested).detail("Current", popVersion).detail("HasConf", !!confChange);
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
-				if (confChange) *confChange = true;
+				if (commitVersion && commitVersion->get() < requested && confChange) *confChange = true;
 				TEST(true);  // Recovering at a higher version.
 			}
 		}
