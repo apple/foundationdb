@@ -1062,7 +1062,7 @@ public:
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::RateKeeper) || pid == masterProcessId.get()) {
 			return false;
 		}
-		return isProxyOrResolver(pid) || worker.processClass.machineClassFitness(role) > id_worker[masterProcessId.get()].details.processClass.machineClassFitness(role);
+		return isProxyOrResolver(pid);
 	}
 
 	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
