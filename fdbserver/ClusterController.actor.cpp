@@ -1918,7 +1918,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	}
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
-			self->clusterControllerDcId == w.locality.dcId()) {
+			self->clusterControllerDcId != w.locality.dcId()) {
 				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
 			.detail("DcID", printable(self->clusterControllerDcId))
 			.detail("ReqDcID", printable(w.locality.dcId()))
