@@ -1156,6 +1156,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
+	UID lastRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
@@ -1935,7 +1936,8 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 				self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 			}
-			if(!ratekeeper.present() || ratekeeper.get().id() != rki.id()) {
+			if(self->lastRatekeeperID != rki.id() && (!ratekeeper.present() || ratekeeper.get().id() != rki.id())) {
+				self->lastRatekeeperID = ratekeeper.present() ? ratekeeper.get().id() : self->lastRatekeeperID;
 				self->db.setRatekeeper(rki);
 			}
 		}
@@ -2575,7 +2577,8 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 					.detail("DcID", printable(self->clusterControllerDcId));
 					self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 				}
-				if(!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
+				if(self->lastRatekeeperID != interf.get().id() && (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id())) {
+					self->lastRatekeeperID = ratekeeper.present() ? ratekeeper.get().id() : self->lastRatekeeperID;
 					self->db.setRatekeeper(interf.get());
 				}
 				checkOutstandingRequests(self);
