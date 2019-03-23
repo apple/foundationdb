@@ -992,6 +992,7 @@ public:
 		std::set<Optional<Key>> remoteDC;
 
 		RegionInfo region;
+		RegionInfo remoteRegion;
 		if (db.config.regions.size()) {
 			primaryDC.insert(clusterControllerDcId);
 			for(auto& r : db.config.regions) {
@@ -1440,7 +1441,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 			TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
 			.detail("Excluded", ddWorker.priorityInfo.isExcluded)
 			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD);
-			self->id_worker[db.distributor.get().locality.processId()].haltDistributor = brokenPromiseToNever(db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
+			ddWorker.haltDistributor = brokenPromiseToNever(db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
 		}
 	}
 }
@@ -1917,20 +1918,20 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	}
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
-			self->clusterControllerDcId == req.ratekeeperInterf.get().locality.dcId()) {
+			self->clusterControllerDcId == w.locality.dcId()) {
 				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
 			.detail("DcID", printable(self->clusterControllerDcId))
-			.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
+			.detail("ReqDcID", printable(w.locality.dcId()))
 			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->id_worker[req.ratekeeperInterf.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
+			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 		} else if(!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 			TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", rki.id());
-			if (ratekeeper.present() && ratekeeper.get().id() != rki.id()) {
+			if (ratekeeper.present() && ratekeeper.get().id() != rki.id() && self->id_worker.count(ratekeeper.get().locality.processId())) {
 				TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id())
 				.detail("DcID", printable(self->clusterControllerDcId))
-				.detail("ReqDcID", printable(req.ratekeeperInterf.get().locality.dcId()))
+				.detail("ReqDcID", printable(w.locality.dcId()))
 				.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 				self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 			}
@@ -2569,7 +2570,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 				self->recruitingRatekeeperID = Optional<UID>();
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 				TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", interf.get().id());
-				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id()) {
+				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() && self->id_worker.count(ratekeeper.get().locality.processId())) {
 					TraceEvent("CC_HaltRatekeeper", self->id).detail("RKID", ratekeeper.get().id())
 					.detail("DcID", printable(self->clusterControllerDcId));
 					self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
