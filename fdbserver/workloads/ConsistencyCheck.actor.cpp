@@ -114,12 +114,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 				wait( timeKeeperSetDisable(cx) );
 			}
 
-			try
-			{
+			try {
 				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
 			}
-			catch(Error& e)
-			{
+			catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
 				self->testFailure("Unable to achieve a quiet database");
 				self->performQuiescentChecks = false;
@@ -391,12 +389,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state int i = 0;
 
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
-		for ( ; i < shards.size(); i++)
-		{
-			while(beginKey < std::min<KeyRef>(shards[i].first.end, endKey))
-			{
-				try
-				{
+		for ( ; i < shards.size(); i++) {
+			while (beginKey < std::min<KeyRef>(shards[i].first.end, endKey)) {
+				try {
 					Version version = wait(self->getVersion(cx, self));
 
 					GetKeyValuesRequest req;
@@ -408,10 +403,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 					//Try getting the shard locations from the key servers
 					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					for(int j = 0; j < shards[i].second.size(); j++)
-					{
+					for (const auto& kv : shards[i].second) {
 						resetReply(req);
-						keyValueFutures.push_back(shards[i].second[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+						keyValueFutures.push_back(kv.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 
 					wait(waitForAll(keyValueFutures));
@@ -419,15 +413,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 					int firstValidStorageServer = -1;
 
 					//Read the shard location results
-					for(int j = 0; j < keyValueFutures.size(); j++)
-					{
+					for (int j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> reply = keyValueFutures[j].get();
 
-						if(!reply.present())
-						{
+						if (!reply.present()) {
 							//If the storage server didn't reply in a quiescent database, then the check fails
-							if(self->performQuiescentChecks)
-							{
+							if(self->performQuiescentChecks) {
 								TraceEvent("ConsistencyCheck_KeyServerUnavailable").detail("StorageServer", shards[i].second[j].id().toString().c_str());
 								self->testFailure("Key server unavailable");
 								return false;
@@ -439,12 +430,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 						}
 
 						//If this is the first storage server, store the locations to send back to the caller
-						else if(firstValidStorageServer < 0)
+						else if(firstValidStorageServer < 0) {
 							firstValidStorageServer = j;
 
 						//Otherwise, compare the data to the results from the first storage server.  If they are different, then the check fails
-						else if(reply.get().data != keyValueFutures[firstValidStorageServer].get().get().data || reply.get().more != keyValueFutures[firstValidStorageServer].get().get().more)
-						{
+						} else if(reply.get().data != keyValueFutures[firstValidStorageServer].get().get().data || reply.get().more != keyValueFutures[firstValidStorageServer].get().get().more) {
 							TraceEvent("ConsistencyCheck_InconsistentKeyServers").detail("StorageServer1", shards[i].second[firstValidStorageServer].id())
 								.detail("StorageServer2", shards[i].second[j].id());
 							self->testFailure("Key servers inconsistent", true);
@@ -475,8 +465,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					if(beginKey >= endKey)
 						keyLocations.push_back_deep(keyLocations.arena(), currentLocations.end()[-1]);
 				}
-				catch(Error &e)
-				{
+				catch (Error& e) {
 					//If we failed because of a version problem, then retry
 					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
 						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
@@ -1134,10 +1123,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state bool foundExtraDataStore = false;
 
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
-		for(auto ss : storageServers) {
+		for (const auto& ss : storageServers) {
 			statefulProcesses[ss.address()].insert(ss.id());
 		}
-		for(auto log : logs) {
+		for (const auto& log : logs) {
 			statefulProcesses[log.address()].insert(log.id());
 		}
 
@@ -1149,7 +1138,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				return false;
 			}
 
-			for(auto id : stores.get()) {
+			for (const auto& id : stores.get()) {
 				if(!statefulProcesses[itr->interf.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
@@ -1170,32 +1159,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return true;
 	}
 
-	//Returns true if the worker at the given address has the specified machineClass or has an unset class
-	//The interfaceType paramater is used in a TraceEvent, should be something like (Master, MasterProxy, StorageServer, ...)
-	bool workerHasClass(vector<WorkerDetails> workers, NetworkAddress address, ProcessClass::ClassType machineClass, std::string interfaceType)
-	{
-		//Search all workers until the correct one is found
-		for(int i = 0; i < workers.size(); i++)
-		{
-			if(workers[i].interf.address() == address)
-			{
-				if(workers[i].processClass == machineClass || workers[i].processClass == ProcessClass::UnsetClass)
-					return true;
-
-				TraceEvent("ConsistencyCheck_InvalidClassType").detail("RequestedClass", workers[i].processClass.toString())
-					.detail("ActualClass", ProcessClass(machineClass, ProcessClass::CommandLineSource).toString()).detail("InterfaceType", interfaceType);
-
-				return false;
-			}
-		}
-
-		//No worker had specified address
-		TraceEvent("ConsistencyCheck_WorkerNotFound").detail("Address", address).detail("ActualClass", ProcessClass(machineClass, ProcessClass::CommandLineSource).toString())
-			.detail("InterfaceType", interfaceType);
-
-		return false;
-	}
-
 	ACTOR Future<bool> checkWorkerList( Database cx, ConsistencyCheckWorkload *self ) {
 		if(g_simulator.extraDB)
 			return true;
@@ -1203,7 +1166,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		std::set<NetworkAddress> workerAddresses;
 
-		for( auto it : workers ) {
+		for (const auto& it : workers) {
 			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
@@ -1263,7 +1226,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (auto addr : old.coordinators()) {
+				for (const auto& addr : old.coordinators()) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if(checkDuplicates.count(findResult->second.zoneId())) {
@@ -1292,7 +1255,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		std::map<NetworkAddress, WorkerDetails> allWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
-		for (auto worker : allWorkers) {
+		for (const auto& worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToAllClassTypes.count(dc))
@@ -1302,7 +1265,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		std::map<NetworkAddress, WorkerDetails> nonExcludedWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
-		for (auto worker : nonExcludedWorkers) {
+		for (const auto& worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToNonExcludedClassTypes.count(dc))
@@ -1380,7 +1343,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		// Check resolver
 		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Resolver);
-		for (auto resolver : db.resolvers) {
+		for (const auto& resolver : db.resolvers) {
 			if (!nonExcludedWorkerProcessMap.count(resolver.address()) || nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
 				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("BestResolverFitness", bestResolverFitness).detail("ExistingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(ProcessClass::Resolver) : -1);
 				return false;
