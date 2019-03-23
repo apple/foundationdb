@@ -320,14 +320,32 @@ void writeFile(std::string const& filename, std::string const& content);
 
 std::string joinPath( std::string const& directory, std::string const& filename );
 
-// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
-std::string abspath( std::string const& filename );
+// cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
+// following symbolic links or verifying the existence of any path components.  It removes redundant
+// "." references and duplicate separators, and resolves any ".." references that can be resolved
+// using the preceding path components.
+// Relative paths remain relative and are NOT rebased on the current working directory.
+std::string cleanPath( std::string const& path );
+
+// abspath() resolves the given path to a canonical form.
+// If path is relative, the result will be based on the current working directory.
+// If resolveLinks is true then symbolic links will be expanded BEFORE resolving '..' references.
+// An empty path or a non-existent path when mustExist is true will result in a platform_error() exception.
+// Upon success, all '..' references will be resolved with the assumption that non-existent components
+// are NOT symbolic links.
+// User directory references such as '~' or '~user' are effectively treated as symbolic links which
+// are impossible to resolve, so resolveLinks=true results in failure and resolveLinks=false results
+// in the reference being left in-tact prior to resolving '..' references.
+std::string abspath( std::string const& path, bool resolveLinks = true, bool mustExist = false );
+
+// parentDirectory() returns the parent directory of the given file or directory in a canonical form,
+// with a single trailing path separator.
+// It uses absPath() with the same bool options to initially obtain a canonical form, and upon success
+// removes the final path component, if present.
+std::string parentDirectory( std::string const& path, bool resolveLinks = true, bool mustExist = false);
 
 // Returns the portion of the path following the last path separator (e.g. the filename or directory name)
 std::string basename( std::string const& filename );
-
-// Returns the parent directory of the given file or directory
-std::string parentDirectory( std::string const& filename );
 
 // Returns the home directory of the current user
 std::string getUserHomeDirectory();
