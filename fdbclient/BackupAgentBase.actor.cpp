@@ -37,17 +37,24 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	struct tm out;
+	std::string timeOnly = timestamp.substr(0, 19);
+
+	// TODO:  Use std::get_time implementation for all platforms once supported
+	// It would be nice to read the timezone using %z, but it seems not all get_time()
+	// or strptime() implementations handle it correctly in all environments so we
+	// will read the date and time independent of timezone at first and then adjust it.
 #ifdef _WIN32
-	// TODO:  Use this implementation for all platforms
-	// Windows does not support strptime, so we will use std::get_time
-	// Unfortunately, std::get_time() does not support %z (as strptime does) so we must read
-	// the date/time part separately from the timezone and then adjust the epoch seconds result.
-	std::istringstream s(timestamp.substr(0, 19));
+	std::istringstream s(timeOnly);
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
 	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
 	if (s.fail()) {
 		return -1;
 	}
+#else
+	if(strptime(timeOnly.c_str(), "%Y/%m/%d.%H:%M:%S", &out) == nullptr) {
+		return -1;
+	}
+#endif
 
 	// Read timezone offset in +/-HHMM format then convert to seconds
 	int tzHH;
@@ -83,13 +90,6 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input string
 	ts += (localTZOffset - tzOffset);
 	return ts;
-#else
-	// strptime is able to read a timezone offset from the input string (which is required) and process it correctly.
-	if(strptime(timestamp.c_str(), "%Y/%m/%d.%H:%M:%S%z", &out) == nullptr) {
-		return -1;
-	}
-	return (int64_t) mktime(&out);		
-#endif
 }
 
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");

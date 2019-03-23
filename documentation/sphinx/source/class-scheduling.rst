@@ -133,6 +133,11 @@ is equivalent to something like::
 
 If instead you pass a :class:`Transaction` for the ``tr`` parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits transactionally decorated functions to be composed into larger transactions.
 
+Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the ``set_retry_limit`` or ``set_timeout`` transaction options or at the database level with the ``set_transaction_retry_limit`` or ``set_transaction_timeout`` database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling::
+
+    db.options.set_transaction_timeout(60000)  # 60,000 ms = 1 minute
+    db.options.set_retry_limit(100)
+
 Making some sample classes
 --------------------------
 
@@ -344,6 +349,8 @@ Here's the code for the scheduling tutorial::
     # ('class', class_name) = seats_left
 
     db = fdb.open()
+    db.options.set_transaction_timeout(60000)  # 60,000 ms = 1 minute
+    db.options.set_retry_limit(100)
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
     course = scheduling['class']
     attends = scheduling['attends']
