@@ -662,11 +662,11 @@ public:
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
 		if(req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
-			if(regions[0].priority == regions[1].priority && clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
+			if(regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
 				std::swap(regions[0], regions[1]);
 			}
 
-			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+			if(regions[1].dcId == clusterControllerDcId.get() && regions[1].priority >= 0 && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
 				std::swap(regions[0], regions[1]);
 			}
 
@@ -680,12 +680,12 @@ public:
 				desiredDcIds.set(dcPriority);
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(clusterControllerDcId.present() && regions[0].dcId == clusterControllerDcId.get()) {
+				} else if(regions[0].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY && (!clusterControllerDcId.present() || regions[1].dcId != clusterControllerDcId.get())) {
+				if (now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY && regions[1].dcId != clusterControllerDcId.get()) {
 					throw operation_failed();
 				}
 
@@ -702,7 +702,7 @@ public:
 				}
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
+				} else if (regions[1].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw;
@@ -714,7 +714,7 @@ public:
 			auto reply = findWorkersForConfiguration(req, req.configuration.regions[0].dcId);
 			if(reply.isError()) {
 				throw reply.getError();
-			} else if(clusterControllerDcId.present() && req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
+			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
 				return reply.get();
 			}
 			throw no_more_servers();
@@ -840,7 +840,7 @@ public:
 
 	void checkRecoveryStalled() {
 		if( (db.serverInfo->get().recoveryState == RecoveryState::RECRUITING || db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS || db.serverInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED) && db.recoveryStalled ) {
-			if(db.config.regions.size() > 1 && clusterControllerDcId.present()) {
+			if (db.config.regions.size() > 1) {
 				auto regions = db.config.regions;
 				if(clusterControllerDcId.get() == regions[0].dcId) {
 					std::swap(regions[0], regions[1]);
@@ -864,7 +864,7 @@ public:
 			return false;
 		}
 
-		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].priority > db.config.regions[1].priority &&
+		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
 			db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 			checkRegions(db.config.regions);
 		}
@@ -960,7 +960,7 @@ public:
 		std::set<Optional<Key>> remoteDC;
 
 		RegionInfo region;
-		if(db.config.regions.size() && clusterControllerDcId.present()) {
+		if (db.config.regions.size()) {
 			primaryDC.insert(clusterControllerDcId);
 			for(auto& r : db.config.regions) {
 				if(r.dcId != clusterControllerDcId.get()) {
@@ -2407,7 +2407,7 @@ ACTOR Future<Void> handleForcedRecoveries( ClusterControllerData *self, ClusterC
 		state Future<Void> fCommit = doEmptyCommit(self->cx);
 		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
 		if(!fCommit.isReady() || fCommit.isError()) {
-			if(!self->clusterControllerDcId.present() || self->clusterControllerDcId != req.dcId) {
+			if (self->clusterControllerDcId != req.dcId) {
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(req.dcId);
 				dcPriority.push_back(self->clusterControllerDcId);
