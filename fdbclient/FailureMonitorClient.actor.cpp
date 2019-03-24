@@ -104,6 +104,9 @@ ACTOR Future<Void> failureMonitorClientLoop(
 						//printf("Client '%s': status of '%s' is now '%s'\n", g_network->getLocalAddress().toString().c_str(), reply.changes[c].address.toString().c_str(), reply.changes[c].status.failed ? "Failed" : "OK");
 						auto& addrList = reply.changes[c].addresses;
 						monitor->setStatus( addrList.address, reply.changes[c].status );
+						if(addrList.secondaryAddress.present()) {
+							monitor->setStatus( addrList.secondaryAddress.get(), reply.changes[c].status );
+						}
 						if (reply.changes[c].status != FailureStatus()) {
 							fmState->knownAddrs.insert( addrList.address );
 							if(addrList.secondaryAddress.present()) {
