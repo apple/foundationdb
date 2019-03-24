@@ -66,7 +66,6 @@ public:
 	//  - The description contains only allowed characters (a-z, A-Z, 0-9, _)
 	//  - The ID contains only allowed characters (a-z, A-Z, 0-9)
 	//  - At least one address is specified
-	//  - All addresses either have TLS enabled or disabled (no mixing)
 	//  - There is no address present more than once
 	explicit ClusterConnectionFile( std::string const& path );
 	explicit ClusterConnectionFile(ClusterConnectionString const& cs) : cs(cs), setConn(false) {}

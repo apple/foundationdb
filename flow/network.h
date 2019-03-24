@@ -171,7 +171,30 @@ struct NetworkAddress {
 	}
 };
 
-typedef std::vector<NetworkAddress> NetworkAddressList;
+struct NetworkAddressList {
+	NetworkAddress address;
+	Optional<NetworkAddress> secondaryAddress;
+
+	bool operator==(NetworkAddressList const& r) const { return address == r.address && secondaryAddress == r.secondaryAddress; }
+	bool operator!=(NetworkAddressList const& r) const { return address != r.address || secondaryAddress != r.secondaryAddress; }
+	bool operator<(NetworkAddressList const& r) const {
+		if (address != r.address)
+			return address < r.address;
+		return secondaryAddress < r.secondaryAddress;
+	}
+
+	std::string toString() const {
+		if(!secondaryAddress.present()) {
+			return address.toString();
+		}
+		return address.toString() + ", " + secondaryAddress.get().toString();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, address, secondaryAddress);
+	}
+};
 
 std::string toIPVectorString(std::vector<uint32_t> ips);
 std::string toIPVectorString(const std::vector<IPAddress>& ips);
