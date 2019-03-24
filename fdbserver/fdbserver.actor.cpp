@@ -1496,7 +1496,7 @@ int main(int argc, char* argv[]) {
 			tlsOptions->register_network();
 #endif
 			if (expectsPublicAddress) {
-				for (int ii = 0; ii < publicAddresses.secondaryAddress.present() ? 2 : 1; ++ii) {
+				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress = ii==0 ? publicAddresses.address : publicAddresses.secondaryAddress.get();
 					const NetworkAddress& listenAddress = ii==0 ? listenAddresses.address : listenAddresses.secondaryAddress.get();
 					try {
