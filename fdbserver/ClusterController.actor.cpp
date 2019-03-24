@@ -1428,7 +1428,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
-			rkFitness == ProcessClass::ExcludeFit;
+			rkFitness = ProcessClass::ExcludeFit;
 		}
 		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) || rkFitness > bestFitnessForRK) {
 			TraceEvent("CC_HaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
@@ -1442,7 +1442,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
 		if(ddWorker.priorityInfo.isExcluded) {
-			ddFitness == ProcessClass::ExcludeFit;
+			ddFitness = ProcessClass::ExcludeFit;
 		}
 		if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) || ddFitness > bestFitnessForDD) {
 			TraceEvent("CC_HaltDD", self->id).detail("DDID", db.distributor.get().id())
