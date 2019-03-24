@@ -1158,7 +1158,6 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
-	UID lastRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
@@ -1424,7 +1423,8 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::RateKeeper);
 	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
 
-	if (!self->recruitingRatekeeperID.present() && db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId())) {
+	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
+	   (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
@@ -1945,8 +1945,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
 				self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 			}
-			if(self->lastRatekeeperID != rki.id() && (!ratekeeper.present() || ratekeeper.get().id() != rki.id())) {
-				self->lastRatekeeperID = ratekeeper.present() ? ratekeeper.get().id() : self->lastRatekeeperID;
+			if(!ratekeeper.present() || ratekeeper.get().id() != rki.id()) {
 				self->db.setRatekeeper(rki);
 			}
 		}
@@ -2496,9 +2495,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
-			if (self->db.serverInfo->get().distributor.present() && self->db.serverInfo->get().distributor.get().locality.processId() == worker.interf.locality.processId()) {
-				throw no_more_servers();  // Avoid recruiting an existing one.
-			}
+			
 			InitializeDataDistributorRequest req(g_random->randomUniqueID());
 			TraceEvent("CC_DataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
@@ -2570,9 +2567,6 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			if (self->onMasterIsBetter(worker, ProcessClass::RateKeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
-			if (self->db.serverInfo->get().ratekeeper.present() && self->db.serverInfo->get().ratekeeper.get().locality.processId() == worker.interf.locality.processId()) {
-				throw no_more_servers();  // Avoid recruiting an existing one.
-			}
 
 			self->recruitingRatekeeperID = req.reqId;
 			TraceEvent("ClusterController_RecruitRatekeeper", self->id).detail("Addr", worker.interf.address()).detail("RKID", req.reqId);
@@ -2581,7 +2575,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			if (interf.present()) {
 				TraceEvent("ClusterController_RatekeeperRecruited", self->id).detail("Addr", worker.interf.address());
 				self->recruitRatekeeper.set(false);
-				self->recruitingRatekeeperID = Optional<UID>();
+				self->recruitingRatekeeperID = interf.get().id();
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 				TraceEvent("CC_RegisterRatekeeper", self->id).detail("RKID", interf.get().id());
 				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() && self->id_worker.count(ratekeeper.get().locality.processId())) {
@@ -2589,8 +2583,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 					.detail("DcID", printable(self->clusterControllerDcId));
 					self->id_worker[ratekeeper.get().locality.processId()].haltRatekeeper = brokenPromiseToNever(ratekeeper.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
 				}
-				if(self->lastRatekeeperID != interf.get().id() && (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id())) {
-					self->lastRatekeeperID = ratekeeper.present() ? ratekeeper.get().id() : self->lastRatekeeperID;
+				if(!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
 				}
 				checkOutstandingRequests(self);
