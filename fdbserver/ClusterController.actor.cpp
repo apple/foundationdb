@@ -1198,12 +1198,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			//This should always be possible, because we can recruit the master on the same process as the cluster controller.
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[cluster->clusterControllerProcessId]++;
-			if (cluster->db.serverInfo->get().distributor.present()) {
-				id_used[cluster->db.serverInfo->get().distributor.get().locality.processId()]++;
-			}
-			if (cluster->db.serverInfo->get().ratekeeper.present()) {
-				id_used[cluster->db.serverInfo->get().ratekeeper.get().locality.processId()]++;
-			}
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.processClass.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId )
 				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
