@@ -1841,7 +1841,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 }
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
-	WorkerInterface w = req.wi;
+	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
@@ -1895,6 +1895,9 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded );
+		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
+			self->masterProcessId = w.locality.processId();
+		}
 		checkOutstandingRequests( self );
 	} else if( info->second.details.interf.id() != w.id() || req.generation >= info->second.gen ) {
 		if (!info->second.reply.isSet()) {
