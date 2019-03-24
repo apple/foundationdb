@@ -64,6 +64,7 @@
 #pragma comment(lib, "Shell32.lib")
 
 #define CANONICAL_PATH_SEPARATOR '\\'
+#define PATH_MAX MAX_PATH
 #endif
 
 #ifdef __unixish__
@@ -1947,7 +1948,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 
 #ifdef _WIN32
 	char nameBuffer[MAX_PATH];
-	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, NULL) || (mustExist && !fileExists(nameBuffer)) {
+	if(!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, NULL) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
 		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
