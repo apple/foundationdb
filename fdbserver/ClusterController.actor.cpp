@@ -2510,18 +2510,8 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 }
 
 ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
-	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY);
-
-	// wait for a while to see if existing data distributor will join.
-	loop choose {
-		when ( wait(initialDelay) ) { break; }
-		when ( wait(self->db.serverInfo->onChange()) ) {  // Rejoins via worker registration
-			if ( self->db.serverInfo->get().distributor.present() ) {
-				TraceEvent("CC_InfoChange", self->id)
-				.detail("DDID", self->db.serverInfo->get().distributor.get().id());
-				break;
-			}
-		}
+	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->db.serverInfo->onChange());
 	}
 
 	loop {
@@ -2595,18 +2585,8 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
-	state Future<Void> initialDelay = delay(SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY);
-
-	// wait for a while to see if an existing ratekeeper will join.
-	loop choose {
-		when ( wait(initialDelay) ) { break; }
-		when ( wait(self->db.serverInfo->onChange()) ) {  // Rejoins via worker registration
-			if ( self->db.serverInfo->get().ratekeeper.present() ) {
-				TraceEvent("ClusterController_GotRateKeeper", self->id)
-				.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
-				break;
-			}
-		}
+	while(self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->db.serverInfo->onChange());
 	}
 
 	loop {
