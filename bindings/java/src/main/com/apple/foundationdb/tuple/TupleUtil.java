@@ -24,7 +24,11 @@ import java.math.BigInteger;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -37,7 +41,7 @@ import com.apple.foundationdb.FDB;
 
 class TupleUtil {
 	private static final byte nil = 0x00;
-	private static final Charset UTF8 = Charset.forName("UTF-8");
+	private static final Charset UTF8 = StandardCharsets.UTF_8;
 	private static final BigInteger LONG_MIN_VALUE = BigInteger.valueOf(Long.MIN_VALUE);
 	private static final BigInteger LONG_MAX_VALUE = BigInteger.valueOf(Long.MAX_VALUE);
 	private static final int UUID_BYTES = 2 * Long.BYTES;
@@ -306,6 +310,7 @@ class TupleUtil {
 	}
 
 	static void encode(EncodeState state, String s) {
+		StringUtil.validate(s);
 		byte[] bytes = s.getBytes(UTF8);
 		state.add(STRING_CODE).addNullEscaped(bytes).add(nil);
 	}
@@ -448,13 +453,21 @@ class TupleUtil {
 			int end = state.findNullTerminator(rep, start, last);
 			//System.out.println("End of UTF8 string: " + end);
 			String str;
+			ByteBuffer byteBuffer;
 			if(state.nullCount == 0) {
-				str = new String(rep, start, end - start, UTF8);
+				byteBuffer = ByteBuffer.wrap(rep, start, end - start);
 			}
 			else {
-				ByteBuffer dest = ByteBuffer.allocate(end - start - state.nullCount);
-				ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, NULL_ARR, dest);
-				str = new String(dest.array(), UTF8);
+				byteBuffer = ByteBuffer.allocate(end - start - state.nullCount);
+				ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, NULL_ARR, byteBuffer);
+				byteBuffer.position(0);
+			}
+			try {
+				CharsetDecoder decoder = UTF8.newDecoder().onMalformedInput(CodingErrorAction.REPORT);
+				str = decoder.decode(byteBuffer).toString();
+			}
+			catch(CharacterCodingException e) {
+				throw new IllegalArgumentException("malformed UTF-8 string", e);
 			}
 			//System.out.println(" -> UTF8 string contents: '" + str + "'");
 			state.add(str, end + 1);
@@ -596,13 +609,7 @@ class TupleUtil {
 			return ByteArrayUtil.compareUnsigned((byte[])item1, (byte[])item2);
 		}
 		if(code1 == STRING_CODE) {
-			try {
-				return StringUtil.compareUtf8((String)item1, (String)item2);
-			}
-			catch(IllegalArgumentException e) {
-				// Encountered malformed unicode when comparing. Use byte comparison.
-				return ByteArrayUtil.compareUnsigned(((String)item1).getBytes(UTF8), ((String)item2).getBytes(UTF8));
-			}
+			return StringUtil.compareUtf8((String)item1, (String)item2);
 		}
 		if(code1 == INT_ZERO_CODE) {
 			if(item1 instanceof Long && item2 instanceof Long) {
@@ -729,15 +736,8 @@ class TupleUtil {
 				packedSize += 2 + bytes.length + ByteArrayUtil.nullCount((byte[])item);
 			}
 			else if(item instanceof String) {
-				try {
-					int strPackedSize = StringUtil.packedSize((String)item);
-					packedSize += 2 + strPackedSize;
-				}
-				catch (IllegalArgumentException e) {
-					// The unicode was malformed. Grab the array and count the bytes
-					byte[] strBytes = ((String)item).getBytes(UTF8);
-					packedSize += 2 + strBytes.length + ByteArrayUtil.nullCount(strBytes);
-				}
+				int strPackedSize = StringUtil.packedSize((String)item);
+				packedSize += 2 + strPackedSize;
 			}
 			else if(item instanceof Float)
 				packedSize += 1 + Float.BYTES;

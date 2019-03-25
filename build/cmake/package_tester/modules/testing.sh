@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-if [ -z "${testing_sh_included}" ]
+if [ -z "${testing_sh_included+x}" ]
 then
     testing_sh_included=1
 

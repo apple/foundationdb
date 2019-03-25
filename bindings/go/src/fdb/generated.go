@@ -276,6 +276,49 @@ func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
 
+// Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
+//
+// Parameter: value in milliseconds of timeout
+func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
+	b, e := int64ToBytes(param)
+	if e != nil {
+		return e
+	}
+	return o.setOpt(500, b)
+}
+
+// Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: number of times to retry
+func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
+	b, e := int64ToBytes(param)
+	if e != nil {
+		return e
+	}
+	return o.setOpt(501, b)
+}
+
+// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. This sets the ``max_retry_delay`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: value in milliseconds of maximum delay
+func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
+	b, e := int64ToBytes(param)
+	if e != nil {
+		return e
+	}
+	return o.setOpt(502, b)
+}
+
+// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
+func (o DatabaseOptions) SetSnapshotRywEnable() error {
+	return o.setOpt(26, nil)
+}
+
+// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
+func (o DatabaseOptions) SetSnapshotRywDisable() error {
+	return o.setOpt(27, nil)
+}
+
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
 func (o TransactionOptions) SetCausalWriteRisky() error {
 	return o.setOpt(10, nil)
@@ -370,7 +413,7 @@ func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to onError. This behavior allows the user to make the timeout dynamic.
+// Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of timeout
 func (o TransactionOptions) SetTimeout(param int64) error {
@@ -381,7 +424,7 @@ func (o TransactionOptions) SetTimeout(param int64) error {
 	return o.setOpt(500, b)
 }
 
-// Set a maximum number of retries after which additional calls to onError will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Like all transaction options, the retry limit must be reset after a call to onError. This behavior allows the user to make the retry limit dynamic.
+// Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Prior to API version 610, like all other transaction options, the retry limit must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the retry limit each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: number of times to retry
 func (o TransactionOptions) SetRetryLimit(param int64) error {
@@ -392,7 +435,7 @@ func (o TransactionOptions) SetRetryLimit(param int64) error {
 	return o.setOpt(501, b)
 }
 
-// Set the maximum amount of backoff delay incurred in the call to onError if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. Like all transaction options, the maximum retry delay must be reset after a call to onError. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay.
+// Set the maximum amount of backoff delay incurred in the call to ``onError`` if the error is retryable. Defaults to 1000 ms. Valid parameter values are ``[0, INT_MAX]``. If the maximum retry delay is less than the current retry delay of the transaction, then the current retry delay will be clamped to the maximum retry delay. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to ``onError``. If the API version is 610 or greater, the retry limit is not reset after an ``onError`` call. Note that at all API versions, it is safe and legal to set the maximum retry delay each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of maximum delay
 func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
@@ -403,12 +446,12 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 	return o.setOpt(502, b)
 }
 
-// Snapshot read operations will see the results of writes done in the same transaction.
+// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
 func (o TransactionOptions) SetSnapshotRywEnable() error {
 	return o.setOpt(600, nil)
 }
 
-// Snapshot read operations will not see the results of writes done in the same transaction.
+// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
 func (o TransactionOptions) SetSnapshotRywDisable() error {
 	return o.setOpt(601, nil)
 }
@@ -426,6 +469,11 @@ func (o TransactionOptions) SetUsedDuringCommitProtectionDisable() error {
 // The transaction can read from locked databases.
 func (o TransactionOptions) SetReadLockAware() error {
 	return o.setOpt(702, nil)
+}
+
+// This option should only be used by tools which change the database configuration.
+func (o TransactionOptions) SetUseProvisionalProxies() error {
+	return o.setOpt(711, nil)
 }
 
 type StreamingMode int

@@ -301,6 +301,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			if(!creating && !force) {
 				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
@@ -455,7 +456,8 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				loop {
 					try {
 						tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+						tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 						Optional<Value> v = wait( tr.get( initIdKey ) );
 						if (v != m[initIdKey.toString()])
@@ -721,6 +723,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			vector<ProcessData> workers = wait( getWorkers(&tr) );
 			std::map<NetworkAddress, Optional<Standalone<StringRef>>> address_processId;
@@ -862,6 +865,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 			Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
 
 			if (!currentKey.present())
@@ -1145,11 +1149,13 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
@@ -1173,11 +1179,13 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
@@ -1227,6 +1235,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			vector<ProcessData> workers = wait( getWorkers(&tr) );
 

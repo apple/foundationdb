@@ -321,11 +321,11 @@ UID getSharedMemoryMachineId() {
 	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
 	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
-
+	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
 			// "0" is the default parameter "addr"
-			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, "fdbserver", 1000, 0, p.permission);
+			boost::interprocess::managed_shared_memory segment(boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(g_random->randomUniqueID());
 			if (!machineId)
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
@@ -334,7 +334,7 @@ UID getSharedMemoryMachineId() {
 		catch (boost::interprocess::interprocess_exception &e) {
 			try {
 				//If the shared memory already exists, open it read-only in case it was created by another user
-				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, "fdbserver");
+				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, sharedMemoryIdentifier.c_str());
 				machineId = segment.find<UID>("machineId").first;
 				if (!machineId)
 					criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate shared memory - 'machineId'");
@@ -757,60 +757,66 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	const NetworkAddressList& coordinators = connectionFile.getConnectionString().coordinators();
+	auto& coordinators = connectionFile.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
-
-	int numTLSAddress = 0;
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
 		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
-
+		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
 				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
-				publicNetworkAddresses.emplace_back(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
+				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true,  parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr, "ERROR: could not determine public address automatically from `%s': %s\n", publicAddressStr.c_str(), e.what());
 				throw;
 			}
 		} else {
 			try {
-				publicNetworkAddresses.push_back(NetworkAddress::parse(publicAddressStr));
+				currentPublicAddress = NetworkAddress::parse(publicAddressStr);
 			} catch (Error&) {
 				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", publicAddressStr.c_str());
 				throw;
 			}
 		}
 
-		const NetworkAddress& currentPublicAddress = publicNetworkAddresses.back();
+		if(ii == 0) {
+			publicNetworkAddresses.address = currentPublicAddress;
+		} else {
+			publicNetworkAddresses.secondaryAddress = currentPublicAddress;
+		}
+
 		if (!currentPublicAddress.isValid()) {
 			fprintf(stderr, "ERROR: %s is not a valid IP address\n", currentPublicAddress.toString().c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (currentPublicAddress.isTLS()) {
-			numTLSAddress += 1;
-		}
-
 		const std::string& listenAddressStr = listenAddressStrs[ii];
+		NetworkAddress currentListenAddress;
 		if (listenAddressStr == "public") {
-			listenNetworkAddresses.push_back(currentPublicAddress);
+			currentListenAddress = currentPublicAddress;
 		} else {
 			try {
-				listenNetworkAddresses.push_back(NetworkAddress::parse(listenAddressStr));
+				currentListenAddress = NetworkAddress::parse(listenAddressStr);
 			} catch (Error&) {
 				fprintf(stderr, "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n", listenAddressStr.c_str());
 				throw;
 			}
 
-			if (listenNetworkAddresses.back().isTLS() != currentPublicAddress.isTLS()) {
+			if (currentListenAddress.isTLS() != currentPublicAddress.isTLS()) {
 				fprintf(stderr,
 				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
 				        listenAddressStr.c_str(), publicAddressStr.c_str());
 				flushAndExit(FDB_EXIT_ERROR);
 			}
+		}
+
+		if(ii == 0) {
+			listenNetworkAddresses.address = currentListenAddress;
+		} else {
+			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
 		bool hasSameCoord =
@@ -827,7 +833,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		}
 	}
 
-	if (numTLSAddress > 1 || publicNetworkAddresses.size() - numTLSAddress > 1) {
+	if (publicNetworkAddresses.secondaryAddress.present() && publicNetworkAddresses.address.isTLS() == publicNetworkAddresses.secondaryAddress.get().isTLS()) {
 		fprintf(stderr, "ERROR: only one public address of each TLS state is allowed.\n");
 		flushAndExit(FDB_EXIT_ERROR);
 	}
@@ -1332,13 +1338,13 @@ int main(int argc, char* argv[]) {
 		}
 
 		if(role == ConsistencyCheck) {
-			if(!publicAddresses.empty()) {
+			if(!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddresses.push_back(NetworkAddress(publicIP, ::getpid()));
+			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
 		if (role==Simulation)
@@ -1463,17 +1469,15 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
-			if (publicAddresses.empty()) {
+			if (publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
-				} else {
-					publicAddresses.push_back(NetworkAddress());
 				}
 			}
 
-			openTraceFile(publicAddresses[0], rollsize, maxLogsSize, logFolder, "trace", logGroup);
+			openTraceFile(publicAddresses.address, rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
 #ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
@@ -1492,9 +1496,9 @@ int main(int argc, char* argv[]) {
 			tlsOptions->register_network();
 #endif
 			if (expectsPublicAddress) {
-				for (int ii = 0; ii < publicAddresses.size(); ++ii) {
-					const NetworkAddress& publicAddress = publicAddresses[ii];
-					const NetworkAddress& listenAddress = listenAddresses[ii];
+				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
+					const NetworkAddress& publicAddress = ii==0 ? publicAddresses.address : publicAddresses.secondaryAddress.get();
+					const NetworkAddress& listenAddress = ii==0 ? listenAddresses.address : listenAddresses.secondaryAddress.get();
 					try {
 						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
 						listenErrors.push_back(errorF);
@@ -1617,7 +1621,7 @@ int main(int argc, char* argv[]) {
 			setupSlowTaskProfiler();
 
 			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddresses[0].port);  // SOMEDAY: Better default
+				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );

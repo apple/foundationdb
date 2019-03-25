@@ -34,7 +34,7 @@
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-static NetworkAddressList g_currentDeliveryPeerAddress = {NetworkAddress()};
+static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 const UID WLTOKEN_PING_PACKET(-1, 1);
@@ -296,16 +296,13 @@ struct Peer : NonCopyable {
 	void prependConnectPacket() {
 		// Send the ConnectPacket expected at the beginning of a new connection
 		ConnectPacket pkt;
-		bool found = false;
-		for(auto& addr : transport->localAddresses) {
-			if(addr.isTLS() == destination.isTLS()) {
-				pkt.canonicalRemotePort = addr.port;
-				pkt.setCanonicalRemoteIp(addr.ip);
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
+		if(transport->localAddresses.address.isTLS() == destination.isTLS()) {
+			pkt.canonicalRemotePort = transport->localAddresses.address.port;
+			pkt.setCanonicalRemoteIp(transport->localAddresses.address.ip);
+		} else if(transport->localAddresses.secondaryAddress.present()) {
+			pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
+			pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
+		} else {
 			pkt.canonicalRemotePort = 0;   // a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
 			pkt.setCanonicalRemoteIp(IPAddress(0));
 		}
@@ -336,12 +333,9 @@ struct Peer : NonCopyable {
 		// In case two processes are trying to connect to each other simultaneously, the process with the larger canonical NetworkAddress
 		// gets to keep its outgoing connection.
 		if ( !destination.isPublic() && !outgoingConnectionIdle ) throw address_in_use();
-		NetworkAddress compatibleAddr = transport->localAddresses[0];
-		for(int i = 1; i < transport->localAddresses.size(); i++) {
-			if(transport->localAddresses[i].isTLS() == destination.isTLS()) {
-				compatibleAddr = transport->localAddresses[i];
-				break;
-			}
+		NetworkAddress compatibleAddr = transport->localAddresses.address;
+		if(transport->localAddresses.secondaryAddress.present() && transport->localAddresses.secondaryAddress.get().isTLS() == destination.isTLS()) {
+			compatibleAddr = transport->localAddresses.secondaryAddress.get();
 		}
 
 		if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
@@ -538,10 +532,7 @@ ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReade
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (destination.token.first() != -1) {
 			sendPacket(self,
-			           SerializeSource<Endpoint>(Endpoint(self->localAddresses.empty()
-			                                                  ? NetworkAddressList(1, NetworkAddress())
-			                                                  : self->localAddresses,
-			                                              destination.token)),
+			           SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)),
 			           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false, true);
 		}
 	}
@@ -857,7 +848,7 @@ Peer* TransportData::getPeer( NetworkAddress const& address, bool openConnection
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
-	return std::find(localAddresses.begin(), localAddresses.end(), address) != localAddresses.end();
+	return address == localAddresses.address || (localAddresses.secondaryAddress.present() && address == localAddresses.secondaryAddress.get());
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker( TransportData* self ) {
@@ -894,10 +885,7 @@ NetworkAddressList FlowTransport::getLocalAddresses() const {
 }
 
 NetworkAddress FlowTransport::getLocalAddress() const {
-	if ( self->localAddresses.empty()) {
-		return NetworkAddress();
-	}
-	return self->localAddresses[0];
+	return self->localAddresses.address;
 }
 
 std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
@@ -913,7 +901,11 @@ std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompa
 
 Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress listenAddress ) {
 	ASSERT( publicAddress.isPublic() );
-	self->localAddresses.push_back(publicAddress);
+	if(self->localAddresses.address == NetworkAddress()) {
+		self->localAddresses.address = publicAddress;
+	} else {
+		self->localAddresses.secondaryAddress = publicAddress;
+	}
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
 
 	Future<Void> listenF = listen( self, listenAddress );
@@ -924,7 +916,7 @@ Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress l
 void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
 	if (endpoint.getPrimaryAddress().isValid()) return;
 	ASSERT( !(endpoint.token.first() & TOKEN_STREAM_FLAG) );  // Only reply promises are supposed to be unaddressed
-	ASSERT( g_currentDeliveryPeerAddress[0].isValid() );
+	ASSERT( g_currentDeliveryPeerAddress.address.isValid() );
 	endpoint.addresses = g_currentDeliveryPeerAddress;
 }
 
@@ -958,10 +950,10 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
 	endpoint.token = g_random->randomUniqueID();
 	if (receiver->isStream()) {
-		endpoint.addresses = self->localAddresses.empty() ? NetworkAddressList(1, NetworkAddress()) : self->localAddresses;
+		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
 	} else {
-		endpoint.addresses = {NetworkAddress()};
+		endpoint.addresses = NetworkAddressList();
 		endpoint.token = UID( endpoint.token.first() & ~TOKEN_STREAM_FLAG, endpoint.token.second() );
 	}
 	self->endpoints.insert( receiver, endpoint.token, taskID );
@@ -972,7 +964,7 @@ void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageRece
 }
 
 void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
-	endpoint.addresses = self->localAddresses.empty() ? NetworkAddressList(1, NetworkAddress()) : self->localAddresses;
+	endpoint.addresses = self->localAddresses;
 	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
 	Endpoint::Token otoken = endpoint.token;
 	self->endpoints.insert( receiver, endpoint.token, taskID );

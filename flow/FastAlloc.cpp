@@ -81,6 +81,8 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	threadInitFunction = f; 
 }
 
+int64_t g_hugeArenaMemory = 0;
+
 #ifdef ALLOC_INSTRUMENTATION
 INIT_SEG std::map<const char*, AllocInstrInfo> allocInstr;
 INIT_SEG std::unordered_map<int64_t, std::pair<uint32_t, size_t>> memSample;

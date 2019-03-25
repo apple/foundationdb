@@ -151,6 +151,7 @@ private:
 	static void releaseMagazine(void*);
 };
 
+extern int64_t g_hugeArenaMemory;
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 void setFastAllocatorThreadInitFunction( void (*)() );  // The given function will be called at least once in each thread that allocates from a FastAllocator.  Currently just one such function is tracked.

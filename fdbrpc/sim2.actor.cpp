@@ -1004,8 +1004,9 @@ public:
 		}
 
 		NetworkAddressList addresses;
-		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
-			addresses.emplace_back(ip, processPort, true, false);
+		addresses.address = NetworkAddress(ip, port, true, false);
+		if(listenPerProcess == 2) {
+			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 
 		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
@@ -1016,9 +1017,9 @@ public:
 		}
 		m->machine = &machine;
 		machine.processes.push_back(m);
-		currentlyRebootingProcesses.erase(addresses[0]);
-		m->excluded = g_simulator.isExcluded(addresses[0]);
-		m->cleared = g_simulator.isCleared(addresses[0]);
+		currentlyRebootingProcesses.erase(addresses.address);
+		m->excluded = g_simulator.isExcluded(addresses.address);
+		m->cleared = g_simulator.isCleared(addresses.address);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
