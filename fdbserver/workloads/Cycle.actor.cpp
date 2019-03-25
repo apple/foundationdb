@@ -115,6 +115,9 @@ struct CycleWorkload : TestWorkload {
 						tr.set( self->key(r), self->value(r3) );
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
+						TraceEvent("CyclicTestMX").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						TraceEvent("CyclicTestMX").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						TraceEvent("CyclicTestMX").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait( tr.commit() );
 						//TraceEvent("CycleCommit");
@@ -134,8 +137,19 @@ struct CycleWorkload : TestWorkload {
 			throw;
 		}
 	}
+
+	void logTestData(const VectorRef<KeyValueRef>& data) {
+		TraceEvent("MXTestFailureDetail");
+		int index = 0;
+		for(auto &entry : data) {
+			TraceEvent("CurrentDataEntry").detail("Index", index).detail("Key", entry.key.toString()).detail("Value", entry.value.toString());
+			index++;
+		}
+	}
+
 	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
 		if (data.size() != nodeCount) {
+			logTestData(data);
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
 			TraceEvent(SevError, "TestFailureInfo").detail("DataSize", data.size()).detail("NodeCount", nodeCount).detail("Workload", description());
 			return false;
@@ -144,6 +158,7 @@ struct CycleWorkload : TestWorkload {
 		for(int c=0; c<nodeCount; c++) {
 			if (c && !i) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 			if (data[i].key != key(i)) {
