@@ -567,7 +567,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
+			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 			std::string connectionString = connFile->getConnectionString().toString();
 			if(!incorrectTime.present()) {
 				incorrectTime = now();

@@ -549,7 +549,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 
 			ClusterConnectionString fileConnectionString;
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
-				req.issues = LiteralStringRef("incorrect_cluster_file_contents");
+				req.issues.push_back_deep(req.arena, LiteralStringRef("incorrect_cluster_file_contents"));
 				std::string connectionString = ccf->getConnectionString().toString();
 				if(!incorrectTime.present()) {
 					incorrectTime = now();
