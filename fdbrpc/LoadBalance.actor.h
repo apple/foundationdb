@@ -75,6 +75,20 @@ struct LoadBalancedReply {
 	}
 };
 
+template <class Request>
+struct TrackedReply {
+	REPLY_TYPE(Request) reply;
+	NetworkAddress address;
+
+	TrackedReply() {}
+	TrackedReply(REPLY_TYPE(Request) reply, NetworkAddress address = NetworkAddress()) : reply(reply), address(address) {}
+
+	template <class Ar>
+	void serialize(Ar &ar) {
+		serializer(ar, reply, address);
+	}
+};
+
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 
@@ -152,11 +166,24 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 	}
 }
 
+ACTOR template <class Interface, class Request, class Multi>
+Future< REPLY_TYPE(Request) > loadBalance(
+	Reference<MultiInterface<Multi>> alternatives,
+	RequestStream<Request> Interface::* channel,
+	Request request = Request(),
+	int taskID = TaskDefaultPromiseEndpoint,
+	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+	QueueModel* model = nullptr)
+{
+	TrackedReply<Request> trackedReply = wait(trackedLoadBalance(alternatives, channel, request, taskID, atMostOnce, model));
+	return trackedReply.reply;
+}
+
 // Keep trying to get a reply from any of servers until success or cancellation; tries to take into account
 //   failMon's information for load balancing and avoiding failed servers
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the list of servers
 ACTOR template <class Interface, class Request, class Multi>
-Future< REPLY_TYPE(Request) > loadBalance(
+Future< TrackedReply<Request> > trackedLoadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
@@ -165,8 +192,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	QueueModel* model = NULL) 
 {
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
+	state NetworkAddress firstRequestAddress;
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Optional<REPLY_TYPE(Request)>> secondRequest;
+	state NetworkAddress secondRequestAddress;
 	state Future<Void> secondDelay = Never();
 
 	state Promise<Void> requestFinished;
@@ -311,7 +340,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			//Only the first location is available. 
 			Optional<REPLY_TYPE(Request)> result = wait( firstRequest );
 			if(result.present()) {
-				return result.get();
+				return TrackedReply<Request>(result.get(), firstRequestAddress);
 			}
 
 			firstRequest = Future<Optional<REPLY_TYPE(Request)>>();
@@ -319,6 +348,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		} else if( firstRequest.isValid() ) {
 			//Issue a second request, the first one is taking a long time.
 			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce, triedAllOptions);
+			secondRequestAddress = stream->getEndpoint().getPrimaryAddress();
 			state bool firstFinished = false;
 
 			loop {
@@ -330,7 +360,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 								throw result.getError();
 							}
 							else {
-								return result.get().get();
+								return TrackedReply<Request>(result.get().get(), firstRequestAddress);
 							}
 						}
 
@@ -347,7 +377,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 								throw result.getError();
 							}
 							else {
-								return result.get().get();
+								return TrackedReply<Request>(result.get().get(), secondRequestAddress);
 							}
 						}
 
@@ -362,6 +392,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		} else {
 			//Issue a request, if it takes too long to get a reply, go around the loop
 			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce, triedAllOptions);
+			firstRequestAddress = stream->getEndpoint().getPrimaryAddress();
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
@@ -377,7 +408,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						}
 
 						if(result.get().present()) {
-							return result.get().get();
+							return TrackedReply<Request>(result.get().get(), firstRequestAddress);
 						}
 
 						firstRequest = Future<Optional<REPLY_TYPE(Request)>>();

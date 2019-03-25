@@ -466,6 +466,26 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+Reference<RequestStats> RequestStatsList::getNewRequestStats() {
+	list.push_back(Reference<RequestStats>(new RequestStats(nextRequestId++)));
+	return *list.rbegin();
+}
+
+Reference<RequestStats> RequestStatsList::getNewRequestStats(uint64_t requestId) {
+	list.push_back(Reference<RequestStats>(new RequestStats(requestId)));
+	return *list.rbegin();
+}
+
+uint64_t RequestStatsList::getNextRequestId() { return nextRequestId++; }
+
+Reference<RequestStats> Transaction::getNewRequestStats() {
+	return requestStatsList ? requestStatsList->getNewRequestStats() : Reference<RequestStats>();
+}
+
+Reference<RequestStats> Transaction::getNewRequestStats(uint64_t requestId) {
+	return requestStatsList ? requestStatsList->getNewRequestStats(requestId) : Reference<RequestStats>();
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -1118,10 +1138,10 @@ Future<Standalone<RangeResultRef>> getRange(
 	TransactionInfo const& info);
 
 ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
-                                       Reference<TransactionLogInfo> trLogInfo);
+                                       Reference<TransactionLogInfo> trLogInfo, Reference<RequestStats> requestStats);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface( Database cx, TransactionInfo info, UID id, Future<Version> ver = latestVersion ) {
-	Optional<Value> val = wait( getValue(ver, serverListKeyFor(id), cx, info, Reference<TransactionLogInfo>()) );
+	Optional<Value> val = wait( getValue(ver, serverListKeyFor(id), cx, info, Reference<TransactionLogInfo>(), Reference<RequestStats>()) );
 	if( !val.present() ) {
 		// A storage server has been removed from serverList since we read keyServers
 		return Optional<StorageServerInterface>();
@@ -1286,7 +1306,7 @@ Future<Void> Transaction::warmRange(Database cx, KeyRange keys) {
 	return warmRange_impl(this, cx, keys);
 }
 
-ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Database cx, TransactionInfo info, Reference<TransactionLogInfo> trLogInfo )
+ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Database cx, TransactionInfo info, Reference<TransactionLogInfo> trLogInfo, Reference<RequestStats> requestStats)
 {
 	state Version ver = wait( version );
 	validateVersion(ver);
@@ -1314,12 +1334,20 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			startTime = timer_int();
 			startTimeD = now();
 			++cx->transactionPhysicalReads;
-			state GetValueReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			state TrackedReply<GetValueRequest> trackedReply = wait( trackedLoadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			state GetValueReply reply = trackedReply.reply;
 			double latency = now() - startTimeD;
 			cx->readLatencies.addSample(latency);
+			int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 			if (trLogInfo) {
-				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
+			}
+			if (requestStats) {
+				requestStats->beginKey = key;
+				requestStats->endKey = key;
+				requestStats->storageContacted = trackedReply.address;
+				requestStats->bytesFetched = valueSize;
+				requestStats->keysFetched = reply.value.present() ? 1 : 0;
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1355,7 +1383,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	}
 }
 
-ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
+ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info, Reference<RequestStats> requestStats ) {
 	Version ver = wait(version);
 
 	if( info.debugID.present() )
@@ -1377,7 +1405,16 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++cx->transactionPhysicalReads;
-			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			TrackedReply<GetKeyRequest> trackedReply = wait( trackedLoadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			GetKeyReply reply = trackedReply.reply;
+			if (requestStats) {
+				requestStats->storageContacted = trackedReply.address;
+				requestStats->beginKey = k.getKey();
+				requestStats->endKey = k.getKey();
+				requestStats->bytesFetched = k.getKey().size();
+				requestStats->keysFetched = 1;
+			}
+			TraceEvent("GetValueRequestRouted").detail("Address", trackedReply.address);
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
@@ -1531,7 +1568,8 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 					.detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
-				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				TrackedReply<GetKeyValuesRequest> trackedReply = wait( trackedLoadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				GetKeyValuesReply rep = trackedReply.reply;
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
 				output.arena().dependsOn( rep.arena );
@@ -1628,7 +1666,7 @@ Future<Key> resolveKey( Database const& cx, KeySelector const& key, Version cons
 	if( key.isFirstGreaterThan() )
 		return Future<Key>( keyAfter( key.getKey() ) );
 
-	return getKey( cx, key, version, info );
+	return getKey( cx, key, version, info, Reference<RequestStats>() );
 }
 
 ACTOR Future<Standalone<RangeResultRef>> getRangeFallback( Database cx, Version version,
@@ -1727,12 +1765,13 @@ void getRangeFinished(Reference<TransactionLogInfo> trLogInfo, double startTime,
 
 ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-	TransactionInfo info )
+	TransactionInfo info, Reference<RequestStatsList> requestStatsList, uint64_t requestId )
 {
 	state GetRangeLimits originalLimits( limits );
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state Standalone<RangeResultRef> output;
+	state Reference<RequestStats> requestStats;
 
 	try {
 		state Version version = wait( fVersion );
@@ -1803,7 +1842,22 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				if (requestStatsList) {
+					requestStats = requestStatsList->getNewRequestStats(requestId);
+				}
+				TrackedReply<GetKeyValuesRequest> trackedReply = wait( trackedLoadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				GetKeyValuesReply rep = trackedReply.reply;
+				if (requestStats) {
+					requestStats->storageContacted = trackedReply.address;
+					requestStats->keysFetched = rep.data.size();
+					for (const auto &kv : rep.data) {
+						requestStats->bytesFetched += kv.key.size() + kv.value.size();
+					}
+					if (!rep.data.empty()) {
+						requestStats->beginKey = rep.data.begin()->key;
+						requestStats->endKey = rep.data.rbegin()->key;
+					}
+				}
 
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
@@ -1927,9 +1981,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
-	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info )
+	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, Reference<RequestStatsList> requestStatsList, uint64_t requestId )
 {
-	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info);
+	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, requestStatsList, requestId);
 }
 
 Transaction::Transaction( Database const& cx )
@@ -2028,7 +2082,7 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 		}
 	}
 
-	return getValue( ver, key, cx, info, trLogInfo );
+	return getValue( ver, key, cx, info, trLogInfo, getNewRequestStats() );
 }
 
 void Watch::setWatch(Future<Void> watchFuture) {
@@ -2076,7 +2130,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 
 	state Key ksKey = keyServersKey(key);
-	Future<Standalone<RangeResultRef>> futureServerUids = getRange(cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info);
+	Future<Standalone<RangeResultRef>> futureServerUids = getRange(cx, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), false, info, Reference<RequestStatsList>(), 0);
 	Standalone<RangeResultRef> serverUids = wait( futureServerUids );
 
 	ASSERT( serverUids.size() ); // every shard needs to have a team
@@ -2107,10 +2161,10 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 }
 
 ACTOR Future< Key > getKeyAndConflictRange(
-	Database cx, KeySelector k, Future<Version> version, Promise<std::pair<Key, Key>> conflictRange, TransactionInfo info)
+	Database cx, KeySelector k, Future<Version> version, Promise<std::pair<Key, Key>> conflictRange, TransactionInfo info, Reference<RequestStats> requestStats)
 {
 	try {
-		Key rep = wait( getKey(cx, k, version, info) );
+		Key rep = wait( getKey(cx, k, version, info, requestStats) );
 		if( k.offset <= 0 )
 			conflictRange.send( std::make_pair( rep, k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()) ) );
 		else
@@ -2124,12 +2178,14 @@ ACTOR Future< Key > getKeyAndConflictRange(
 
 Future< Key > Transaction::getKey( const KeySelector& key, bool snapshot ) {
 	++cx->transactionLogicalReads;
+
+	auto requestStats = getNewRequestStats();
 	if( snapshot )
-		return ::getKey(cx, key, getReadVersion(), info);
+		return ::getKey(cx, key, getReadVersion(), info, requestStats);
 
 	Promise<std::pair<Key, Key>> conflictRange;
 	extraConflictRanges.push_back( conflictRange.getFuture() );
-	return getKeyAndConflictRange( cx, key, getReadVersion(), conflictRange, info );
+	return getKeyAndConflictRange( cx, key, getReadVersion(), conflictRange, info, requestStats );
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getRange(
@@ -2171,7 +2227,9 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 		extraConflictRanges.push_back( conflictRange.getFuture() );
 	}
 
-	return ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info);
+	uint64_t requestId = requestStatsList ? requestStatsList->getNextRequestId() : 0;
+	auto result = ::getRange(cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, requestStatsList, requestId);
+	return result;
 }
 
 Future< Standalone<RangeResultRef> > Transaction::getRange(
@@ -2814,6 +2872,10 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				throw client_invalid_operation();
 			}
 			break;
+
+		case FDBTransactionOptions::TRACK_REQUEST_STATS:
+			validateOptionValue(value, false);
+			options.trackRequestStats = true;
 
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);

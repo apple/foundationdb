@@ -149,6 +149,7 @@ struct TransactionOptions {
 	bool lockAware : 1;
 	bool readOnly : 1;
 	bool firstInBatch : 1;
+	bool trackRequestStats : 1;
 
 	TransactionOptions() {
 		reset();
@@ -219,6 +220,30 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Watch(Key key, Optional<Value> val) : key(key), value(val), watchFuture(Never()), valuePresent(true), setPresent(false) { }
 
 	void setWatch(Future<Void> watchFuture);
+};
+
+struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
+	RequestStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
+
+	uint64_t requestId;
+	uint64_t bytesFetched;
+	uint64_t keysFetched;
+	Key beginKey;
+	Key endKey;
+	NetworkAddress storageContacted;
+};
+
+struct RequestStatsList : public ReferenceCounted<RequestStatsList>, NonCopyable {
+	RequestStatsList() : nextRequestId(0) {}
+	std::vector<Reference<RequestStats>> list;
+
+	Reference<RequestStats> getNewRequestStats();
+	Reference<RequestStats> getNewRequestStats(uint64_t requestId);
+
+	uint64_t getNextRequestId();
+
+private:
+	uint64_t nextRequestId;
 };
 
 class Transaction : NonCopyable {
@@ -295,6 +320,8 @@ public:
 	int numErrors;
 
 	std::vector<Reference<Watch>> watches;
+	Reference<RequestStatsList> requestStatsList;
+	std::vector<NetworkAddress> proxiesContacted;
 
 	int apiVersionAtLeast(int minVersion) const;
 
@@ -310,6 +337,8 @@ public:
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	void setPriority(uint32_t priorityFlag);
+	Reference<RequestStats> getNewRequestStats();
+	Reference<RequestStats> getNewRequestStats(uint64_t requestId);
 
 	Database cx;
 

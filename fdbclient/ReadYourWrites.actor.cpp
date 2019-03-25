@@ -1220,6 +1220,31 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 		return Optional<Value>();
 	}
 
+	if (key == LiteralStringRef("\xff\xff/request_stats")){
+		if (!tr.requestStatsList) {
+			return Optional<Value>();
+		}
+		json_spirit::Array proxiesContacted;
+		for (const auto &p : tr.proxiesContacted) {
+			proxiesContacted.push_back(json_spirit::Value(p.toString()));
+		}
+		json_spirit::Array storageStatsList;
+		for (const auto &r : tr.requestStatsList->list) {
+			json_spirit::Object storageStats;
+			storageStats.push_back(json_spirit::Pair("requestId", json_spirit::Value(r->requestId)));
+			storageStats.push_back(json_spirit::Pair("beginKey", json_spirit::Value(r->beginKey.toString())));
+			storageStats.push_back(json_spirit::Pair("endKey", json_spirit::Value(r->endKey.toString())));
+			storageStats.push_back(json_spirit::Pair("storageContacted", json_spirit::Value(r->storageContacted.toString())));
+			storageStats.push_back(json_spirit::Pair("keysFetched", json_spirit::Value(r->keysFetched)));
+			storageStats.push_back(json_spirit::Pair("bytesFetched", json_spirit::Value(r->bytesFetched)));
+			storageStatsList.push_back(storageStats);
+		}
+		json_spirit::Object result;
+		result.push_back(json_spirit::Pair("storagesContacted", json_spirit::Value(storageStatsList)));
+		result.push_back(json_spirit::Pair("proxiesContacted", json_spirit::Value(proxiesContacted)));
+		return Optional<Value>(json_spirit::write_string(json_spirit::Value(result)));
+	}
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
