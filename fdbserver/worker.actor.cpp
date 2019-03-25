@@ -597,6 +597,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		choose {
 			when( ServerDBInfo ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", ni.id).detail("MasterID", ni.master.id())
+				.detail("RatekeeperID", ni.ratekeeper.present() ? ni.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", ni.distributor.present() ? ni.distributor.get().id() : UID());
 				ServerDBInfo localInfo = ni;
 				localInfo.myLocality = locality;
@@ -850,7 +851,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when ( InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture()) ) {
-				RatekeeperInterface recruited(locality);
+				RatekeeperInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (rkInterf->get().present()) {
@@ -860,6 +861,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
+					DUMPTOKEN( recruited.haltRatekeeper );
 
 					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
 					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );

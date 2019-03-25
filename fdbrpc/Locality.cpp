@@ -90,8 +90,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::TransactionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::CoordinatorClass:

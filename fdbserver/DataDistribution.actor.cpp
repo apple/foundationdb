@@ -3685,7 +3685,17 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
-		wait( distributor || collection );
+		loop choose {
+			when ( wait(distributor || collection) ) {
+				ASSERT(false);
+				throw internal_error();
+			}
+			when ( HaltDataDistributorRequest req = waitNext(di.haltDataDistributor.getFuture()) ) {
+				req.reply.send(Void());
+				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
+				break;
+			}
+		}
 	}
 	catch ( Error &err ) {
 		if ( normalDataDistributorErrors().count(err.code()) == 0 ) {
