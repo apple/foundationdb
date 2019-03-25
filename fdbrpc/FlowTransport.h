@@ -34,42 +34,15 @@ public:
 	NetworkAddressList addresses;
 	Token token;
 
-	Endpoint() : addresses({NetworkAddress()}) {}
+	Endpoint() {}
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
-		ASSERT(addresses.size() > 0);
 		choosePrimaryAddress();
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.size() < 2) {
-			return;
-		}
-
-		if (g_network->getLocalAddresses().size() == 0) {
-			// At client, we always prefer non-TLS ports during TLS transition.
-			for (int i = 1; addresses[0].isTLS() && i < addresses.size(); i++) {
-				if (!addresses[i].isTLS()) {
-					std::swap(addresses[0], addresses[i]);
-				}
-			}
-			return;
-		}
-
-		for(int i = 0; i < addresses.size(); i++) {
-			bool compatible = false;
-			for(auto& addr : g_network->getLocalAddresses()) {
-				if(addr.isTLS() == addresses[i].isTLS()) {
-					compatible = true;
-					break;
-				}
-			}
-			if(compatible) {
-				if(i > 0) {
-					std::swap(addresses[0], addresses[i]);
-				}
-				break;
-			}
-		}
+		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
+			std::swap(addresses.address, addresses.secondaryAddress.get());
+		}	
 	}
 
 	bool isValid() const { return token.isValid(); }
@@ -78,7 +51,7 @@ public:
 	// Return the primary network address, which is the first network address among
 	// all addresses this endpoint listens to.
 	const NetworkAddress& getPrimaryAddress() const {
-		return addresses[0];
+		return addresses.address;
 	}
 
 	bool operator == (Endpoint const& r) const {
@@ -100,8 +73,8 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061020001LL) {
-			addresses.resize(1);
-			serializer(ar, addresses[0], token);
+			addresses.secondaryAddress = Optional<NetworkAddress>();
+			serializer(ar, addresses.address, token);
 		} else {
 			serializer(ar, addresses, token);
 			if (ar.isDeserializing) {
@@ -112,15 +85,11 @@ public:
 };
 #pragma pack(pop)
 
-
-
 class NetworkMessageReceiver {
 public:
 	virtual void receive( ArenaReader& ) = 0;
 	virtual bool isStream() const { return false; }
 };
-
-
 
 typedef struct NetworkPacket* PacketID;
 
@@ -198,11 +167,8 @@ private:
 };
 
 inline bool Endpoint::isLocal() const {
-	auto localAddrs = FlowTransport::transport().getLocalAddresses();
-	if (localAddrs.empty()) {
-		return addresses[0] == NetworkAddress();
-	}
-	return std::find(localAddrs.begin(), localAddrs.end(), addresses[0]) != localAddrs.end();
+	const auto& localAddrs = FlowTransport::transport().getLocalAddresses();
+	return addresses.address == localAddrs.address || (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
 
 #endif

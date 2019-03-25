@@ -224,7 +224,7 @@ struct RegisterMasterRequest {
 
 struct GetServerDBInfoRequest {
 	UID knownServerInfoID;
-	Standalone<StringRef> issues;
+	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise< struct ServerDBInfo > reply;
 

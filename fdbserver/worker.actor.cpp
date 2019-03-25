@@ -567,7 +567,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
+			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 			std::string connectionString = connFile->getConnectionString().toString();
 			if(!incorrectTime.present()) {
 				incorrectTime = now();
@@ -635,6 +635,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	               std::pair<Future<Void>, PromiseStream<InitializeTLogRequest>>> sharedLogs;
 
 	state WorkerInterface interf( locality );
+
+	folder = abspath(folder);
 
 	if(metricsPrefix.size() > 0) {
 		if( metricsConnFile.size() > 0) {
@@ -726,7 +728,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
-				ASSERT_WE_THINK( StringRef( parentDirectory(s.filename) ).endsWith( StringRef(folder) ) );
+				ASSERT_WE_THINK( abspath(parentDirectory(s.filename)) == folder );
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				const DiskQueueVersion dqv = s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 				const int64_t diskQueueWarnSize = s.tLogOptions.spillType == TLogSpillType::VALUE ? 10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;

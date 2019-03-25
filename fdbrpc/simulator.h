@@ -69,13 +69,10 @@ public:
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses[0]), dataFolder(dataFolder),
+			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses.address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), cleared(false) {
-
-			ASSERT(addresses.size() >= 1);
-		}
+				fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -114,10 +111,9 @@ public:
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			const NetworkAddress& address = addresses[0];
 			return format(
 			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d", name,
-			    formatIpPort(address.ip, address.port).c_str(),
+			    formatIpPort(addresses.address.ip, addresses.address.port).c_str(),
 			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
 			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
 			    startingClass.toString().c_str(), excluded, cleared);
