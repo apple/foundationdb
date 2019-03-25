@@ -586,17 +586,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 }
 
 IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
-	if (isIPv6) {
-		IPAddress::IPAddressStore addrStore{ 0xAB, 0xCD };
-		uint16_t* ptr = (uint16_t*)addrStore.data();
-		ptr[4] = (uint16_t)(parts[0] << 8);
-		ptr[5] = (uint16_t)(parts[1] << 8);
-		ptr[6] = (uint16_t)(parts[2] << 8);
-		ptr[7] = (uint16_t)(parts[3] << 8);
-		return IPAddress(addrStore);
-	} else {
-		return IPAddress(parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]);
-	}
+	return IPAddress(parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]);
 }
 
 #include "fdbclient/MonitorLeader.h"

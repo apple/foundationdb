@@ -91,14 +91,14 @@ struct IPAddress {
 	explicit IPAddress(const IPAddressStore& v6addr);
 	explicit IPAddress(uint32_t v4addr);
 
-	bool isV6() const { return isV6addr; }
-	bool isV4() const { return !isV6addr; }
+	bool isV6() const { return false; }
+	bool isV4() const { return true; }
 	bool isValid() const;
 
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
 	uint32_t toV4() const;
-	const IPAddressStore& toV6() const { return store; }
+	const IPAddressStore toV6() const { ASSERT(false); return IPAddressStore({}); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -109,18 +109,11 @@ struct IPAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isV6addr);
-		if (isV6addr) {
-			serializer(ar, store);
-		} else {
-			uint32_t* parts = (uint32_t*)store.data();
-			serializer(ar, parts[0]);
-		}
+		serializer(ar, ip);
 	}
 
 private:
-	bool isV6addr;
-	IPAddressStore store;
+	uint32_t ip;
 };
 
 struct NetworkAddress {
