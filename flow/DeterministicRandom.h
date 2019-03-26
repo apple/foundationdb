@@ -64,7 +64,7 @@ public:
 		uint64_t v = (gen64() % range);
 		int i;
 		if (min < 0 && ((unsigned int) -min) > v)
-			i = -(((unsigned int) -min) - v);
+			i = -(int)(((unsigned int) -min) - v);
 		else
 			i = v + min;
 		if (randLog && g_random==this) fprintf(randLog, "Rint %d\n", i);
@@ -83,7 +83,7 @@ public:
 		uint64_t v = (gen64() % range);
 		int64_t i;
 		if (min < 0 && ((uint64_t) -min) > v)
-			i = -(((uint64_t) -min) - v);
+			i = -(int64_t)(((uint64_t) -min) - v);
 		else
 			i = v + min;
 		if (randLog && g_random==this) fprintf(randLog, "Rint64 %" PRId64 "\n", i);

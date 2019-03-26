@@ -60,6 +60,7 @@ public:
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
+	int BROADCAST_BATCH_SIZE;
 
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
@@ -182,6 +183,9 @@ public:
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 	int CONSISTENCY_CHECK_RATE_WINDOW;
+
+	// TLS related
+	int CHECK_CONNECTED_COORDINATOR_NUM_DELAY;
 
 	ClientKnobs(bool randomize = false);
 };

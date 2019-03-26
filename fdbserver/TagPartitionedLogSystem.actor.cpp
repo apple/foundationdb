@@ -531,12 +531,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		if(begin >= lastBegin) {
 			TraceEvent("TLogPeekRemoteBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("BestSet", bestSet).detail("BestSetStart", lastBegin).detail("LogRouterIds", tLogs[bestSet]->logRouterString());
-			return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, begin, getPeekEnd(), false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) );
+			return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, begin, getPeekEnd(), false, std::vector<LocalityData>(), Reference<IReplicationPolicy>(), 0 ) );
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
 			TraceEvent("TLogPeekRemoteAddingBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("BestSet", bestSet).detail("BestSetStart", lastBegin).detail("LogRouterIds", tLogs[bestSet]->logRouterString());
-			cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, lastBegin, getPeekEnd(), false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) ) );
+			cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, lastBegin, getPeekEnd(), false, std::vector<LocalityData>(), Reference<IReplicationPolicy>(), 0 ) ) );
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
@@ -565,7 +565,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					TraceEvent("TLogPeekRemoteAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("BestOldSet", bestOldSet).detail("LogRouterIds", oldLogData[i].tLogs[bestOldSet]->logRouterString())
 					.detail("LastBegin", lastBegin).detail("ThisBegin", thisBegin).detail("BestStartVer", oldLogData[i].tLogs[bestOldSet]->startVersion);
 					cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(  oldLogData[i].tLogs[bestOldSet]->logRouters, -1, (int)oldLogData[i].tLogs[bestOldSet]->logRouters.size(), tag,
-						thisBegin, lastBegin, false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) ) );
+						thisBegin, lastBegin, false, std::vector<LocalityData>(), Reference<IReplicationPolicy>(), 0 ) ) );
 					epochEnds.push_back(LogMessageVersion(lastBegin));
 					lastBegin = thisBegin;
 				}
@@ -959,24 +959,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		wait( quorum( alive, std::min(logSet->tLogReplicationFactor, numPresent - logSet->tLogWriteAntiQuorum) ) );
 
-		state Reference<LocalityGroup> locked(new LocalityGroup());
-		state std::vector<bool> responded(alive.size());
-		for (int i = 0; i < alive.size(); i++) {
-			responded[i] = false;
-		}
+		state std::vector<LocalityEntry> aliveEntries;
+		state std::vector<bool> responded(alive.size(), false);
 		loop {
 			for (int i = 0; i < alive.size(); i++) {
 				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-					locked->add(logSet->tLogLocalities[i]);
+					aliveEntries.push_back(logSet->logEntryArray[i]);
 					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked->validate(logSet->tLogPolicy);
-			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
-			if (logSet->tLogReplicationFactor == 1 && locked->size() > 0) {
-				ASSERT(quorum_obtained);
-			}
-			if (quorum_obtained) {
+
+			if (logSet->satisfiesPolicy(aliveEntries)) {
 				return Void();
 			}
 
@@ -1566,7 +1559,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion,
-		std::vector<LocalityData> tLogLocalities, IRepPolicyRef tLogPolicy, bool forRemote ) {
+		std::vector<LocalityData> tLogLocalities, Reference<IReplicationPolicy> tLogPolicy, bool forRemote ) {
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;

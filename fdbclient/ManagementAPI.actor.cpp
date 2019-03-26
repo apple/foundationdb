@@ -81,60 +81,69 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
+	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
 	if (mode == "ssd-1") {
-		storeType= KeyValueStoreType::SSD_BTREE_V1;
+		logType = KeyValueStoreType::SSD_BTREE_V1;
+		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
 	} else if (mode == "ssd-redwood-experimental") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-	} else if (mode == "memory") {
+	} else if (mode == "memory" || mode == "memory-2") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType= KeyValueStoreType::MEMORY;
+	} else if (mode == "memory-1") {
+		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
-		out[p+"log_engine"] = out[p+"storage_engine"] = format("%d", storeType.get());
+		out[p+"log_engine"] = format("%d", logType.get());
+		out[p+"storage_engine"] = format("%d", storeType.get());
 		return out;
 	}
 
 	std::string redundancy, log_replicas;
-	IRepPolicyRef storagePolicy;
-	IRepPolicyRef tLogPolicy;
+	Reference<IReplicationPolicy> storagePolicy;
+	Reference<IReplicationPolicy> tLogPolicy;
 
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
 		log_replicas="1";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyOne());
+		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
 
 	} else if(mode == "double" || mode == "fast_recovery_double") {
 		redundancy="2";
 		log_replicas="2";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	} else if(mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy="3";
 		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	} else if(mode == "three_datacenter" || mode == "multi_dc") {
 		redundancy="6";
 		log_replicas="4";
-		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(3, "dcid",
+			Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))
 		));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "dcid",
+			Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))
 		));
 	} else if(mode == "three_datacenter_fallback") {
 		redundancy="4";
 		log_replicas="4";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
+		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "dcid", Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
 	} else if(mode == "three_data_hall") {
 		redundancy="3";
 		log_replicas="4";
-		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(3, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
+		tLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "data_hall",
+			Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))
 		));
 	} else
 		redundancySpecified = false;
@@ -154,29 +163,29 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	}
 
 	std::string remote_redundancy, remote_log_replicas;
-	IRepPolicyRef remoteTLogPolicy;
+	Reference<IReplicationPolicy> remoteTLogPolicy;
 	bool remoteRedundancySpecified = true;
 	if (mode == "remote_default") {
 		remote_redundancy="0";
 		remote_log_replicas="0";
-		remoteTLogPolicy = IRepPolicyRef();
+		remoteTLogPolicy = Reference<IReplicationPolicy>();
 	} else if (mode == "remote_single") {
 		remote_redundancy="1";
 		remote_log_replicas="1";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
 	} else if(mode == "remote_double") {
 		remote_redundancy="2";
 		remote_log_replicas="2";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	} else if(mode == "remote_triple") {
 		remote_redundancy="3";
 		remote_log_replicas="3";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	} else if(mode == "remote_three_data_hall") { //FIXME: not tested in simulation
 		remote_redundancy="3";
 		remote_log_replicas="4";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyAcross(2, "data_hall",
+			Reference<IReplicationPolicy>(new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))
 		));
 	} else
 		remoteRedundancySpecified = false;
@@ -212,7 +221,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	auto p = configKeysPrefix.toString();
 	if(!outConf.count(p + "storage_replication_policy") && outConf.count(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
-		IRepPolicyRef storagePolicy = IRepPolicyRef(new PolicyAcross(storageCount, "zoneid", IRepPolicyRef(new PolicyOne())));
+		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		outConf[p+"storage_replication_policy"] = policyWriter.toStringRef().toString();
@@ -220,7 +229,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 
 	if(!outConf.count(p + "log_replication_policy") && outConf.count(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
-		IRepPolicyRef logPolicy = IRepPolicyRef(new PolicyAcross(logCount, "zoneid", IRepPolicyRef(new PolicyOne())));
+		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
@@ -292,6 +301,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			if(!creating && !force) {
 				state Future<Standalone<RangeResultRef>> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
@@ -446,7 +456,8 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				loop {
 					try {
 						tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+						tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 						Optional<Value> v = wait( tr.get( initIdKey ) );
 						if (v != m[initIdKey.toString()])
@@ -712,6 +723,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			vector<ProcessData> workers = wait( getWorkers(&tr) );
 			std::map<NetworkAddress, Optional<Standalone<StringRef>>> address_processId;
@@ -853,6 +865,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 			Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
 
 			if (!currentKey.present())
@@ -1136,11 +1149,13 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
@@ -1164,11 +1179,13 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(g_random->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = g_random->randomUniqueID().toString();
+
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
@@ -1218,6 +1235,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
 			vector<ProcessData> workers = wait( getWorkers(&tr) );
 

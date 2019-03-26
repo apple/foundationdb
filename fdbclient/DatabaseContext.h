@@ -46,8 +46,12 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
-class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
+class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
+	static DatabaseContext* allocateOnForeignThread() {
+		return (DatabaseContext*)DatabaseContext::operator new(sizeof(DatabaseContext));
+	}
+
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
@@ -62,8 +66,8 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	Reference<ProxyInfo> getMasterProxies();
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
+	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
+	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
@@ -102,6 +106,7 @@ public:
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	bool provisional;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
@@ -146,6 +151,11 @@ public:
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	double transactionTimeout;
+	int transactionMaxRetries;
+	double transactionMaxBackoff;
+	int snapshotRywEnabled;
 
 	Future<Void> logger;
 

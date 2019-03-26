@@ -301,7 +301,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default"
+                         "log_group":"default",
+                         "connected_coordinators":2
                      }
                  ],
                  "count" : 1,
@@ -500,7 +501,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
-             "memory"
+             "memory",
+             "memory-1",
+             "memory-2"
          ]},
          "coordinators_count":1,
          "excluded_servers":[

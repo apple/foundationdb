@@ -112,8 +112,6 @@ void forwardPromise( PromiseStream<T> output, Future<T> input ) {
 	}
 }
 
-
-
 ACTOR template <class T> Future<Void> broadcast(Future<T> input, std::vector<Promise<T>> output) {
 	T value = wait(input);
 	for (int i = 0; i<output.size(); i++)
@@ -128,8 +126,29 @@ ACTOR template <class T> Future<Void> broadcast( Future<T> input, std::vector<Re
 	return Void();
 }
 
+ACTOR template <class T> Future<Void> incrementalBroadcast(Future<T> input, std::vector<Promise<T>> output, int batchSize) {
+	state T value = wait(input);
+	state int i = 0;
+	for (; i<output.size(); i++) {
+		output[i].send(value);
+		if((i+1)%batchSize==0) {
+			wait(delay(0));
+		}
+	}
+	return Void();
+}
 
-
+ACTOR template <class T> Future<Void> incrementalBroadcast( Future<T> input, std::vector<ReplyPromise<T>> output, int batchSize) {
+	state T value = wait( input );
+	state int i = 0;
+	for(; i<output.size(); i++) {
+		output[i].send(value);
+		if((i+1)%batchSize==0) {
+			wait(delay(0));
+		}
+	}
+	return Void();
+}
 
 // Needed for the call to endpointNotFound()
 #include "fdbrpc/FailureMonitor.h"

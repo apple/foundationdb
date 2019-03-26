@@ -68,7 +68,7 @@ class Database {
 public:
 	enum { API_VERSION_LATEST = -1 };
 
-	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData() );
+	static Database createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, LocalityData const& clientLocality=LocalityData(), DatabaseContext *preallocatedDb=nullptr );
 	static Database createDatabase( std::string connFileName, int apiVersion, LocalityData const& clientLocality=LocalityData() ); 
 
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
@@ -115,8 +115,8 @@ void stopNetwork();
  */
 class Cluster : public ReferenceCounted<Cluster>, NonCopyable {
 public:
-	Cluster(Reference<ClusterConnectionFile> connFile, int apiVersion=Database::API_VERSION_LATEST);
-	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface);
+	Cluster(Reference<ClusterConnectionFile> connFile,  Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
+	Cluster(Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface, Reference<AsyncVar<int>> connectedCoordinatorsNum);
 
 	~Cluster();
 
@@ -126,7 +126,7 @@ public:
 	Future<Void> onConnected();
 
 private: 
-	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, int apiVersion=Database::API_VERSION_LATEST);
+	void init(Reference<ClusterConnectionFile> connFile, bool startClientInfoMonitor, Reference<AsyncVar<int>> connectedCoordinatorsNum, int apiVersion=Database::API_VERSION_LATEST);
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
 	Reference<ClusterConnectionFile> connectionFile;
@@ -150,24 +150,18 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 
-	TransactionOptions() {
-		reset();
-		if (BUGGIFY) {
-			commitOnFirstProxy = true;
-		}
-	}
+	TransactionOptions(Database const& cx);
+	TransactionOptions();
 
-	void reset() {
-		memset(this, 0, sizeof(*this));
-		maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
-	}
+	void reset(Database const& cx);
 };
 
 struct TransactionInfo {
 	Optional<UID> debugID;
 	int taskID;
+	bool useProvisionalProxies;
 
-	explicit TransactionInfo( int taskID ) : taskID( taskID ) {}
+	explicit TransactionInfo( int taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -300,7 +294,7 @@ public:
 
 	void checkDeferredError();
 
-	Database getDatabase(){
+	Database getDatabase() const {
 		return cx;
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);

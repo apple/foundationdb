@@ -55,7 +55,7 @@ using namespace boost::asio::ip;
 //
 //                                                       xyzdev
 //                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061040001LL;
+const uint64_t currentProtocolVersion        = 0x0FDB00B061050001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -735,7 +735,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
 		int i = std::min<double>(NetworkMetrics::SLOW_EVENT_BINS-1, log( elapsed/1e6 ) / log(2.));
 		int s = ++networkMetrics.countSlowEvents[i];
-		uint64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
+		int64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
 
 		//printf("SlowTask: %d, %d yields\n", (int)(elapsed/1e6), numYields);
 

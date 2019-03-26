@@ -23,6 +23,7 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
+#include "flow/Knobs.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -79,6 +80,8 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	ASSERT( !threadInitFunction );
 	threadInitFunction = f; 
 }
+
+int64_t g_hugeArenaMemory = 0;
 
 #ifdef ALLOC_INSTRUMENTATION
 INIT_SEG std::map<const char*, AllocInstrInfo> allocInstr;
@@ -420,6 +423,9 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
+	if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
+	}
 	block = (void **)::allocate(magazine_size * Size, false);
 #endif
 

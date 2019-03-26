@@ -45,9 +45,12 @@ ACTOR Future<Void> failureMonitorClientLoop(
 	state double before = now();
 	state double waitfor = 0;
 
-	for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
-		monitor->setStatus(addr, FailureStatus(false));
-		fmState->knownAddrs.insert(addr);
+	state NetworkAddressList controlAddr = controller.failureMonitoring.getEndpoint().addresses;
+	monitor->setStatus(controlAddr.address, FailureStatus(false));
+	fmState->knownAddrs.insert(controlAddr.address);
+	if(controlAddr.secondaryAddress.present()) {
+		monitor->setStatus(controlAddr.secondaryAddress.get(), FailureStatus(false));
+		fmState->knownAddrs.insert(controlAddr.secondaryAddress.get());
 	}
 
 	//The cluster controller's addresses (controller.failureMonitoring.getEndpoint().addresses) are treated specially because we can declare that it is down independently
@@ -62,14 +65,16 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					requestTimeout = Never();
 					if (reply.allOthersFailed) {
 						// Reset all systems *not* mentioned in the reply to the default (failed) state
-						for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
-							fmState->knownAddrs.erase( addr );
+						fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().addresses.address );
+						if(controller.failureMonitoring.getEndpoint().addresses.secondaryAddress.present()) {
+							fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().addresses.secondaryAddress.get() );
 						}
 
 						std::set<NetworkAddress> changedAddresses;
 						for(int c=0; c<reply.changes.size(); c++) {
-							for(auto& addr : reply.changes[c].addresses) {
-								changedAddresses.insert( addr );
+							changedAddresses.insert( reply.changes[c].addresses.address );
+							if(reply.changes[c].addresses.secondaryAddress.present()) {
+								changedAddresses.insert( reply.changes[c].addresses.secondaryAddress.get() );
 							}
 						}
 						for(auto it : fmState->knownAddrs)
@@ -83,9 +88,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					if( monitor->getState( controller.failureMonitoring.getEndpoint() ).isFailed() )
 						TraceEvent("FailureMonitoringServerUp").detail("OldServer",controller.id());
 
-					for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
-						monitor->setStatus( addr, FailureStatus(false) );
-						fmState->knownAddrs.insert( addr );
+					monitor->setStatus(controlAddr.address, FailureStatus(false));
+					fmState->knownAddrs.insert(controlAddr.address);
+					if(controlAddr.secondaryAddress.present()) {
+						monitor->setStatus(controlAddr.secondaryAddress.get(), FailureStatus(false));
+						fmState->knownAddrs.insert(controlAddr.secondaryAddress.get());
 					}
 
 					//if (version != reply.failureInformationVersion)
@@ -95,13 +102,21 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					fmState->serverFailedTimeout = reply.considerServerFailedTimeoutMS * .001;
 					for(int c=0; c<reply.changes.size(); c++) {
 						//printf("Client '%s': status of '%s' is now '%s'\n", g_network->getLocalAddress().toString().c_str(), reply.changes[c].address.toString().c_str(), reply.changes[c].status.failed ? "Failed" : "OK");
-						for(auto& addr : reply.changes[c].addresses) {
-							monitor->setStatus( addr, reply.changes[c].status );
-							if (reply.changes[c].status != FailureStatus())
-								fmState->knownAddrs.insert( addr );
-							else
-								fmState->knownAddrs.erase( addr );
-							ASSERT( addr != controller.failureMonitoring.getEndpoint().getPrimaryAddress() || !reply.changes[c].status.failed );
+						auto& addrList = reply.changes[c].addresses;
+						monitor->setStatus( addrList.address, reply.changes[c].status );
+						if(addrList.secondaryAddress.present()) {
+							monitor->setStatus( addrList.secondaryAddress.get(), reply.changes[c].status );
+						}
+						if (reply.changes[c].status != FailureStatus()) {
+							fmState->knownAddrs.insert( addrList.address );
+							if(addrList.secondaryAddress.present()) {
+								fmState->knownAddrs.insert( addrList.secondaryAddress.get() );
+							}
+						} else {
+							fmState->knownAddrs.erase( addrList.address );
+							if(addrList.secondaryAddress.present()) {
+								fmState->knownAddrs.erase( addrList.secondaryAddress.get() );
+							}
 						}
 					}
 					before = now();
@@ -112,9 +127,11 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					g_network->setCurrentTask(TaskDefaultDelay);
 					requestTimeout = Never();
 					TraceEvent(SevWarn, "FailureMonitoringServerDown").detail("OldServerID",controller.id());
-					for(auto& addr : controller.failureMonitoring.getEndpoint().addresses) {
-						monitor->setStatus( addr, FailureStatus(true) );
-						fmState->knownAddrs.erase( addr );
+					monitor->setStatus(controlAddr.address, FailureStatus(true));
+					fmState->knownAddrs.erase(controlAddr.address);
+					if(controlAddr.secondaryAddress.present()) {
+						monitor->setStatus(controlAddr.secondaryAddress.get(), FailureStatus(true));
+						fmState->knownAddrs.erase(controlAddr.secondaryAddress.get());
 					}
 				}
 				when( wait( nextRequest ) ) {

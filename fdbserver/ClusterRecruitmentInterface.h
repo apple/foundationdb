@@ -104,14 +104,15 @@ struct RecruitRemoteFromConfigurationRequest {
 	DatabaseConfiguration configuration;
 	Optional<Key> dcId;
 	int logRouterCount;
+	std::vector<UID> exclusionWorkerIds;
 	ReplyPromise< struct RecruitRemoteFromConfigurationReply > reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
-	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount) {}
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount, const std::vector<UID> &exclusionWorkerIds) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount), exclusionWorkerIds(exclusionWorkerIds){}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, configuration, dcId, logRouterCount, reply);
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
 	}
 };
 
@@ -223,7 +224,7 @@ struct RegisterMasterRequest {
 
 struct GetServerDBInfoRequest {
 	UID knownServerInfoID;
-	Standalone<StringRef> issues;
+	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise< struct ServerDBInfo > reply;
 

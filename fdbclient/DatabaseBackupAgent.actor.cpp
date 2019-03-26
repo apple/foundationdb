@@ -1376,7 +1376,7 @@ namespace dbBackup {
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.addReadConflictRange(singleKeyRange(sourceStates.pack(DatabaseBackupAgent::keyStateStatus)));
-					tr.set(sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_DIFFERENTIAL)));
+					tr.set(sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)));
 
 					Key versionKey = task->params[DatabaseBackupAgent::keyConfigLogUid].withPrefix(task->params[BackupAgentBase::destUid]).withPrefix(backupLatestVersionsPrefix);
 					Optional<Key> prevBeginVersion = wait(tr.get(versionKey));
@@ -1418,7 +1418,7 @@ namespace dbBackup {
 				wait(success(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
 			}
 			else { // Start the writing of logs, if differential
-				tr->set(states.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_DIFFERENTIAL)));
+				tr->set(states.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)));
 
 				allPartsDone = futureBucket->future(tr);
 
@@ -1544,7 +1544,7 @@ namespace dbBackup {
 
 					srcTr2->set( Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceTagName).pack(task->params[BackupAgentBase::keyTagName]), logUidValue );
 					srcTr2->set( sourceStates.pack(DatabaseBackupAgent::keyFolderId), task->params[DatabaseBackupAgent::keyFolderId] );
-					srcTr2->set( sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_BACKUP)));
+					srcTr2->set( sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_RUNNING)));
 
 					state Key destPath = destUidValue.withPrefix(backupLogKeys.begin);
 					// Start logging the mutations for the specified ranges of the tag
@@ -1587,7 +1587,7 @@ namespace dbBackup {
 
 			tr->set(logUidValue.withPrefix(applyMutationsBeginRange.begin), BinaryWriter::toValue(beginVersion, Unversioned()));
 			tr->set(logUidValue.withPrefix(applyMutationsEndRange.begin), BinaryWriter::toValue(beginVersion, Unversioned()));
-			tr->set(states.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_BACKUP)));
+			tr->set(states.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_RUNNING)));
 
 			state Reference<TaskFuture>	kvBackupRangeComplete = futureBucket->future(tr);
 			state Reference<TaskFuture>	kvBackupComplete = futureBucket->future(tr);
@@ -1791,7 +1791,7 @@ public:
 				}
 
 				// Break, if in differential mode (restorable) and stopWhenDone is not enabled
-				if ((!stopWhenDone) && (BackupAgentBase::STATE_DIFFERENTIAL == status)) {
+				if ((!stopWhenDone) && (BackupAgentBase::STATE_RUNNING_DIFFERENTIAL == status)) {
 					return status;
 				}
 
@@ -1954,7 +1954,7 @@ public:
 		state int status = wait(backupAgent->getStateValue(dest, destlogUid));
 
 		TraceEvent("DBA_SwitchoverStart").detail("Status", status);
-		if (status != BackupAgentBase::STATE_DIFFERENTIAL && status != BackupAgentBase::STATE_COMPLETED) {
+		if (status != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL && status != BackupAgentBase::STATE_COMPLETED) {
 			throw backup_duplicate();
 		}
 
@@ -2311,10 +2311,10 @@ public:
 					case BackupAgentBase::STATE_SUBMITTED:
 						statusText += "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database (just started).\n";
 						break;
-					case BackupAgentBase::STATE_BACKUP:
+					case BackupAgentBase::STATE_RUNNING:
 						statusText += "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database.\n";
 						break;
-					case BackupAgentBase::STATE_DIFFERENTIAL:
+					case BackupAgentBase::STATE_RUNNING_DIFFERENTIAL:
 						statusText += "The DR on tag `" + tagNameDisplay + "' is a complete copy of the primary database.\n";
 						break;
 					case BackupAgentBase::STATE_COMPLETED:

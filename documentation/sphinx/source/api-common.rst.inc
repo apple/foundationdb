@@ -302,17 +302,37 @@
 
     Specify the datacenter ID to be preferentially used for database operations. ID must be a string of up to 16 hexadecimal digits that was used to configure :ref:`fdbserver processes <foundationdb-conf-fdbserver>`. Load balancing uses this option for location-awareness, attempting to send database operations first to servers on a specified machine, then a specified datacenter, then returning to its default algorithm.
 
+.. |option-db-tr-retry-limit-blurb| replace::
+
+    Set the default maximum number of retries for each transaction after which additional calls to |on-error-func| will throw the most recently seen error code. This is equivalent to calling |retry-limit-transaction-option| on each transaction created by this database.
+
+.. |option-db-tr-timeout-blurb| replace::
+
+    Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database. This option can only be called if the API version is at least 610.
+
+.. |option-db-tr-max-retry-delay-blurb| replace::
+
+    Set the default maximum backoff delay incurred by each transaction in the call to |on-error-func| if the error is retryable. This is equivalent to calling |max-retry-delay-transaction-option| on each transaction created by this database.
+
+.. |option-db-snapshot-ryw-enable-blurb| replace::
+
+    If this option has been set an equal or more times with this database than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling |snapshot-ryw-enable-transaction-option| on each transaction created by this database.
+
+.. |option-db-snapshot-ryw-disable-blurb| replace::
+
+    If this option has been set more times with this database than the disable option, snapshot reads will *not* see the effects of prior writes in the same transaction. Disabling this option is equivalent to calling |snapshot-ryw-disable-transaction-option| on each transaction created by this database.
+
 .. |transaction-options-blurb| replace::
 
     Transaction options alter the behavior of FoundationDB transactions. FoundationDB defaults to extremely safe transaction behavior, and we have worked hard to make the performance excellent with the default setting, so you should not often need to use transaction options.
 
 .. |option-snapshot-ryw-enable-blurb| replace::
 
-    If this option is set an equal or more times in this transaction than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction.
+    If this option is set an equal or more times in this transaction than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. This option can be enabled one or more times at the database-level by calling |snapshot-ryw-enable-database-option|.
 
 .. |option-snapshot-ryw-disable-blurb| replace::
 
-    If this option is set more times in this transaction than the enable option, snapshot reads will *not* see the effects of prior writes in the same transaction.
+    If this option is set more times in this transaction than the enable option, snapshot reads will *not* see the effects of prior writes in the same transaction. Note that prior to API version 300, this was the default behavior. This option can be disabled one or more times at the database level by calling |snapshot-ryw-disable-database-option|.
 
 .. |option-priority-batch-blurb| replace::
     This transaction should be treated as low priority (other transactions should be processed first).  Useful for doing potentially saturating batch work without interfering with the latency of other operations.
@@ -367,11 +387,11 @@
 
 ..  |option-set-retry-limit-blurb2| replace::
 
-    Like all transaction options, the retry limit must be reset after a call to |on-error-func|. This behavior allows the user to make the retry limit dynamic.
+    Prior to API version 610, Like all other transaction options, the retry limit must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the retry limit is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can also set the default retry limit for all transactions by calling |retry-limit-database-option|.
 
 ..  |option-set-max-retry-delay-blurb| replace::
 
-    Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable.
+    Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
 
 ..  |option-set-timeout-blurb1| replace::
 
@@ -383,7 +403,7 @@
 
 .. |option-set-timeout-blurb3| replace::
 
-    Like all transaction options, a timeout must be reset after a call to |on-error-func|. This behavior allows the user to make the timeout dynamic. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured.
+    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
 
 .. |option-next-write-no-write-conflict-range-blurb| replace::
 

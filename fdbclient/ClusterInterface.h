@@ -117,15 +117,17 @@ struct OpenDatabaseRequest {
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 	Arena arena;
-	StringRef issues, traceLogGroup;
+	StringRef traceLogGroup;
+	VectorRef<StringRef> issues;
 	VectorRef<ClientVersionRef> supportedVersions;
+	int connectedCoordinatorsNum; // Number of coordinators connected by the client
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, reply, arena);
+		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply, arena);
 	}
 };
 
