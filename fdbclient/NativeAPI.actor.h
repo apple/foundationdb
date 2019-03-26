@@ -230,6 +230,7 @@ struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
 struct RequestStatsList : public ReferenceCounted<RequestStatsList>, NonCopyable {
 	RequestStatsList() : nextRequestId(0) {}
 	std::vector<Reference<RequestStats>> list;
+	std::vector<NetworkAddress> proxies;
 
 	Reference<RequestStats> getNewRequestStats();
 	Reference<RequestStats> getNewRequestStats(uint64_t requestId);
@@ -315,7 +316,6 @@ public:
 
 	std::vector<Reference<Watch>> watches;
 	Reference<RequestStatsList> requestStatsList;
-	std::vector<NetworkAddress> proxiesContacted;
 
 	int apiVersionAtLeast(int minVersion) const;
 

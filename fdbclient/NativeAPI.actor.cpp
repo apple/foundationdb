@@ -1486,7 +1486,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 }
 
 ACTOR Future<Void> readVersionBatcher(
-	DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
+	DatabaseContext* cx, FutureStream<std::pair<Promise<TrackedReply<GetReadVersionRequest>>, Optional<UID>>> versionStream,
 	uint32_t flags);
 
 ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Value> value, Database cx, int readVersionFlags, TransactionInfo info )
@@ -2957,7 +2957,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, Optional<UID> debugID ) {
+ACTOR Future<TrackedReply<GetReadVersionRequest>> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, Optional<UID> debugID ) {
 	try {
 		if( debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
@@ -2965,11 +2965,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			state GetReadVersionRequest req( transactionCount, flags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+				when ( TrackedReply<GetReadVersionRequest> rep = wait( trackedLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
-					ASSERT( v.version > 0 );
-					return v;
+					ASSERT( rep.reply.version > 0 );
+					return rep;
 				}
 			}
 		}
@@ -2980,8 +2980,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 	}
 }
 
-ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > versionStream, uint32_t flags ) {
-	state std::vector< Promise<GetReadVersionReply> > requests;
+ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::pair< Promise<TrackedReply<GetReadVersionRequest>>, Optional<UID> > > versionStream, uint32_t flags ) {
+	state std::vector< Promise<TrackedReply<GetReadVersionRequest> > > requests;
 	state PromiseStream< Future<Void> > addActor;
 	state Future<Void> collection = actorCollection( addActor.getFuture() );
 	state Future<Void> timeout;
@@ -2997,7 +2997,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	loop {
 		send_batch = false;
 		choose {
-			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
+			when(std::pair< Promise<TrackedReply<GetReadVersionRequest>>, Optional<UID> > req = waitNext(versionStream)) {
 				if (req.second.present()) {
 					if (!debugID.present())
 						debugID = g_nondeterministic_random->randomUniqueID();
@@ -3024,24 +3024,28 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 			ASSERT(count);
 
 			// dynamic batching
-			Promise<GetReadVersionReply> GRVReply;
+			Promise<TrackedReply<GetReadVersionRequest>> GRVReply;
 			requests.push_back(GRVReply);
 			addActor.send(timeReply(GRVReply.getFuture(), replyTimes));
 
 			Future<Void> batch =
 				incrementalBroadcast(
 					getConsistentReadVersion(cx, count, flags, std::move(debugID)),
-					std::vector< Promise<GetReadVersionReply> >(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+					std::vector< Promise<TrackedReply<GetReadVersionRequest>> >(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 			debugID = Optional<UID>();
-			requests = std::vector< Promise<GetReadVersionReply> >();
+			requests = std::vector< Promise<TrackedReply<GetReadVersionRequest>> >();
 			addActor.send(batch);
 			timeout = Future<Void>();
 		}
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion) {
-	GetReadVersionReply rep = wait(f);
+ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<TransactionLogInfo> trLogInfo, Future<TrackedReply<GetReadVersionRequest>> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, Reference<RequestStatsList> requestStatsList) {
+	TrackedReply<GetReadVersionRequest> trackedReply = wait(f);
+	if (requestStatsList) {
+		requestStatsList->proxies.push_back(trackedReply.address);
+	}
+	auto rep = trackedReply.reply;
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
@@ -3067,10 +3071,10 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
 	}
 	if (!readVersion.isValid()) {
-		Promise<GetReadVersionReply> p;
+		Promise<TrackedReply<GetReadVersionRequest>> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion);
+		readVersion = extractReadVersion( cx.getPtr(), trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion, requestStatsList);
 	}
 	return readVersion;
 }

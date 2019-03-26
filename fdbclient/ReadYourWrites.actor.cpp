@@ -1228,7 +1228,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 			return Optional<Value>();
 		}
 		json_spirit::Array proxiesContacted;
-		for (const auto &p : tr.proxiesContacted) {
+		for (const auto &p : tr.requestStatsList->proxies) {
 			proxiesContacted.push_back(json_spirit::Value(p.toString()));
 		}
 		json_spirit::Array storageStatsList;

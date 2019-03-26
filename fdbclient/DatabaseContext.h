@@ -114,7 +114,7 @@ public:
 
 	// Transaction start request batching
 	struct VersionBatcher {
-		PromiseStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > stream;
+		PromiseStream< std::pair< Promise<TrackedReply<GetReadVersionRequest>>, Optional<UID> > > stream;
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
