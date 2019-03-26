@@ -1662,6 +1662,7 @@ int main(int argc, char* argv[]) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
+			int isRestoring = 0;
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
@@ -1670,7 +1671,7 @@ int main(int argc, char* argv[]) {
 				ini.SetUnicode();
 				std::string tmpFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(tmpFolder, "restartInfo.ini").c_str());
-				int isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
+				isRestoring = atoi(ini.GetValue("RESTORE", "isRestoring"));
 				if (isRestoring) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
@@ -1725,7 +1726,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1) , tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
