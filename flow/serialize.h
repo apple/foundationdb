@@ -307,7 +307,7 @@ public:
 		rhs.data = 0;
 	}
 	void operator=( BinaryWriter&& r) {
-		delete[] data;
+		deleteData();
 		data = r.data;
 		size = r.size;
 		allocated = r.allocated;
@@ -316,7 +316,7 @@ public:
 		r.allocated = 0;
 		r.data = 0;
 	}
-	~BinaryWriter() { delete[] data; }
+	~BinaryWriter() { deleteData(); }
 
 	template <class T, class VersionOptions>
 	static Standalone<StringRef> toValue( T const& t, VersionOptions vo ) {
@@ -407,15 +407,30 @@ private:
 	int size, allocated;
 	uint64_t m_protocolVersion;
 
+	void deleteData() {
+		if(allocated == 4096) {
+			FastAllocator<4096>::release(data);
+		} else {
+			delete[] data;
+		}
+	}
+
 	void* writeBytes(int s) {
 		int p = size;
 		size += s;
 		if (size > allocated) {
-			allocated = std::max(allocated*2, size);
-			uint8_t* newData = new uint8_t[allocated];
+			int nextAllocated = std::max(allocated*2, size);
+			uint8_t* newData;
+			if(nextAllocated < 4096) {
+				nextAllocated = 4096;
+				newData = (uint8_t*)FastAllocator<4096>::allocate();
+			} else {
+				newData = new uint8_t[nextAllocated];
+			}
 			memcpy(newData, data, p);
-			delete[] data;
+			deleteData();
 			data = newData;
+			allocated = nextAllocated;
 		}
 		return data+p;
 	}
