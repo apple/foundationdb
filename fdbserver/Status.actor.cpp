@@ -600,6 +600,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	roles.addRole("master", db->get().master);
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
 
+	if (db->get().distributor.present()) {
+		roles.addRole("data_distributor", db->get().distributor.get());
+	}
+
+	if (db->get().ratekeeper.present()) {
+		roles.addRole("rate_keeper", db->get().ratekeeper.get());
+	}
+
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
 		roles.addRole( "proxy", proxy->first, proxy->second );
