@@ -43,6 +43,9 @@
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 
 struct ProxyStats {
 	CounterCollection cc;
@@ -715,8 +718,24 @@ ACTOR Future<Void> commitBatch(
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 
+<<<<<<< HEAD
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
+=======
+						auto& tags = ranges.begin().value().tags;
+						if(!tags.size()) {
+							for( auto info : ranges.begin().value().src_info ) {
+								tags.push_back( info->tag );
+							}
+							for( auto info : ranges.begin().value().dest_info ) {
+								tags.push_back( info->tag );
+							}
+							uniquify(tags);
+						}
+						
+						for (auto& tag : tags)
+							toCommit.addTag(tag);
+>>>>>>> c6dc6bf3... Exec op to tag only local storage nodes
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
@@ -741,9 +760,24 @@ ACTOR Future<Void> commitBatch(
 							.detail("TransactionNum", transactionNum);
 						committed[transactionNum] = ConflictBatch::TransactionConflict;
 					} else {
+						// Send the ExecOp to
+						// - all the storage nodes in a single region and
+						// - only to storage nodes in local region in multi-region setup
+						// step 1: get the DatabaseConfiguration
+						state DatabaseConfiguration conf;
+						Standalone<VectorRef<KeyValueRef>> results = wait( self->txnStateStore->readRange( configKeys ) );
+						conf.fromKeyValues(results);
+						// step 2: find the tag.id from locality info of the master
+						auto localityKey =
+							self->txnStateStore->readValue(tagLocalityListKeyFor(self->master.locality.dcId())).get();
+						int8_t locality = tagLocalityInvalid;
+						if (localityKey.present()) {
+							locality = decodeTagLocalityListValue(localityKey.get());
+						}
+
 						auto ranges = self->keyInfo.intersectingRanges(allKeys);
 						std::set<Tag> allSources;
-
+						auto& m = (*pMutations)[mutationNum];
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid)
 								.detail("To", "all sources")
@@ -754,14 +788,32 @@ ACTOR Future<Void> commitBatch(
 							auto& tags = r.value().tags;
 							if (!tags.size()) {
 								for (auto info : r.value().src_info) {
-									tags.push_back(info->tag);
+									if (info->tag.locality == locality) {
+										tags.push_back(info->tag);
+									}
 								}
 								for (auto info : r.value().dest_info) {
-									tags.push_back(info->tag);
+									if (info->tag.locality == locality) {
+										tags.push_back(info->tag);
+									}
 								}
 								uniquify(tags);
 							}
-							allSources.insert(tags.begin(), tags.end());
+							std::vector<Tag> localTags;
+							for (auto t : tags) {
+								if ( (!conf.isValid())
+									|| (conf.usableRegions > 1 && t.locality == locality)
+									|| (conf.usableRegions == 1) ) {
+									// step 3: based on DatabaseConfiguration and locality
+									// information gathered in step 1 and step 2,
+									// - find all the relevant tags
+									localTags.push_back(t);
+								}
+							}
+							TraceEvent(SevDebug, "DebugTagInfo")
+								.detail("TagsSize", tags.size())
+								.detail("LocalTagsSize", localTags.size());
+							allSources.insert(localTags.begin(), localTags.end());
 						}
 
 						auto param2 = m.param2.toString();
@@ -792,6 +844,7 @@ ACTOR Future<Void> commitBatch(
 					UNREACHABLE();
 
 
+				auto& m = (*pMutations)[mutationNum];
 
 				// Check on backing up key, if backup ranges are defined and a normal key
 				if (self->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey)) {
