@@ -913,11 +913,8 @@ Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress l
 	return listenF;
 }
 
-void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
-	if (endpoint.getPrimaryAddress().isValid()) return;
-	ASSERT( !(endpoint.token.first() & TOKEN_STREAM_FLAG) );  // Only reply promises are supposed to be unaddressed
-	ASSERT( g_currentDeliveryPeerAddress.address.isValid() );
-	endpoint.addresses = g_currentDeliveryPeerAddress;
+Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
+	return Endpoint(g_currentDeliveryPeerAddress, token);
 }
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
