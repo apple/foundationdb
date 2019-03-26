@@ -1443,7 +1443,6 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				requestStats->bytesFetched = k.getKey().size();
 				requestStats->keysFetched = 1;
 			}
-			TraceEvent("GetValueRequestRouted").detail("Address", trackedReply.address);
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
