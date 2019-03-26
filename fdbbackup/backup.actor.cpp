@@ -2673,6 +2673,7 @@ int main(int argc, char* argv[]) {
 		bool quietDisplay = false;
 		bool dryRun = false;
 		std::string traceDir = "";
+		std::string traceFormat = "";
 		std::string traceLogGroup;
 		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -2778,9 +2779,10 @@ int main(int argc, char* argv[]) {
 					traceDir = args->OptionArg();
 					break;
 				case OPT_TRACE_FORMAT:
-					if (!selectTraceFormatter(args->OptionArg())) {
+					if (!validateTraceFormat(args->OptionArg())) {
 						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args->OptionArg());
 					}
+					traceFormat = args->OptionArg();
 					break;
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
@@ -3121,6 +3123,9 @@ int main(int argc, char* argv[]) {
 				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
 			else
 				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(traceDir));
+			if (!traceFormat.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(traceFormat));
+			}
 
 			setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 		}
