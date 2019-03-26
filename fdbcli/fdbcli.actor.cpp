@@ -2302,6 +2302,7 @@ struct CLIOptions {
 	std::string clusterFile;
 	bool trace;
 	std::string traceDir;
+	std::string traceFormat;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2398,9 +2399,10 @@ struct CLIOptions {
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
 			case OPT_TRACE_FORMAT:
-				if (!selectTraceFormatter(args.OptionArg())) {
+				if (!validateTraceFormat(args.OptionArg())) {
 					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 				}
+				traceFormat = args.OptionArg();
 				break;
 			case OPT_VERSION:
 				printVersion();
@@ -3395,6 +3397,9 @@ int main(int argc, char **argv) {
 		else
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(opt.traceDir));
 
+		if (!opt.traceFormat.empty()) {
+			setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(opt.traceFormat));
+		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
 
