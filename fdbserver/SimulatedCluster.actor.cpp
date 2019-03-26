@@ -1380,7 +1380,7 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication, i
 	ifs.close();
 }
 
-ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, Reference<TLSOptions> tlsOptions) {
+ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, bool restoring, Reference<TLSOptions> tlsOptions ) {
 	state vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
@@ -1410,10 +1410,15 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			wait(timeoutError(restartSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile,
-			                                         &startingConfiguration, tlsOptions, extraDB),
-			                  100.0));
-		} else {
+			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, tlsOptions, extraDB), 100.0 ) );
+			if (restoring) {
+				std::string config =  "usable_regions=1";
+				startingConfiguration = makeString(config.size());
+				uint8_t* ptr = mutateString(startingConfiguration);
+				memcpy(ptr, ((uint8_t*)config.c_str()), config.size());
+			}
+		}
+		else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB,
 			                     minimumReplication, minimumRegions, tlsOptions);
