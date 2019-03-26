@@ -205,7 +205,7 @@ public:
 		}
 		void triggerAll() {
 			MutexHolder h(mutex);
-			for(int i=ntriggered; i<barriers.size(); i++)
+			for(uint32_t i=ntriggered; i<barriers.size(); i++)
 				unsafeTrigger(i);
 			ntriggered = barriers.size();
 		}
