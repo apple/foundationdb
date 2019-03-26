@@ -1131,7 +1131,7 @@ AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 			return AddressExclusion();
 		}
 		return AddressExclusion(addr.ip, addr.port);
-	} catch (Error& e) {
+	} catch (Error& ) {
 		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
 		return AddressExclusion();
 	}

@@ -65,7 +65,7 @@ struct SlowTaskWorkload : TestWorkload {
 		for(int j=0; j<1000; j++)
 			try {
 				throw success();
-			} catch (Error& e) {
+			} catch (Error& ) {
 				++*exc_count;
 			}
 	}

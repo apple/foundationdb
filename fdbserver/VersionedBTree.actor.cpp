@@ -88,7 +88,7 @@ struct BTreePage {
 							if(t.getType(i) == Tuple::ElementType::INT)
 								r += format("%lld", t.getInt(i, true));
 						}
-					} catch(Error &e) {
+					} catch(Error& ) {
 					}
 					r += format("['%s']", c.getKeyRef().toHexString(20).c_str());
 
@@ -100,7 +100,7 @@ struct BTreePage {
 
 				} while(c.moveNext());
 			}
-		} catch(Error &e) {
+		} catch(Error& ) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
 			debug_printf("BTreePage::toString partial result: %s\n", r.c_str());
 			throw;

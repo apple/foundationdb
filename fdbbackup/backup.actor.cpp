@@ -3033,7 +3033,7 @@ int main(int argc, char* argv[]) {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
 					}
-					catch (Error& e) {
+					catch (Error& ) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
@@ -3064,7 +3064,7 @@ int main(int argc, char* argv[]) {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
 					}
-					catch (Error& e) {
+					catch (Error& ) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
