@@ -335,7 +335,7 @@
     If this option is set more times in this transaction than the enable option, snapshot reads will *not* see the effects of prior writes in the same transaction. Note that prior to API version 300, this was the default behavior. This option can be disabled one or more times at the database level by calling |snapshot-ryw-disable-database-option|.
 
 .. |option-priority-batch-blurb| replace::
-    This transaction should be treated as low priority (other transactions should be processed first).  Useful for doing potentially saturating batch work without interfering with the latency of other operations.
+    This transaction should be treated as low priority (other transactions will be processed first). Batch priority transactions will also be throttled at load levels smaller than for other types of transactions and may be fully cut off in the event of machine failures. Useful for doing potentially saturating batch work without interfering with the latency of other operations.
 
 .. |option-priority-system-immediate-blurb| replace::
 
