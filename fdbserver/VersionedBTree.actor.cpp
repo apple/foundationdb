@@ -1059,14 +1059,14 @@ private:
 	// Returns list of (version, list of (lower_bound, list of children) )
 	// TODO:  Probably should pass prev/next records by pointer in many places
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound) {
-		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBound->toString().c_str(), upperBound->toString().c_str());
+		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", THIS, root, lowerBound->toString().c_str(), upperBound->toString().c_str());
 		self->counts.commitToPageStart++;
 
 		// If the lower bound key and the upper bound key are the same then there can't be any changes to
 		// this subtree since changes would happen after the upper bound key as the mutated versions would
 		// necessarily be higher than all previous versions
 		if(lowerBound->key == upperBound->key) {
-			debug_printf("%p no changes, lower and upper bound keys are the same.\n", this);
+			debug_printf("%p no changes, lower and upper bound keys are the same.\n", THIS);
 			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 		}
 
@@ -1083,7 +1083,7 @@ private:
 		else {
 			// If the there are no mutations, we're done
 			if(iMutationBoundary == iMutationBoundaryEnd) {
-				debug_printf("%p no changes, mutation buffer start/end are the same\n", this);
+				debug_printf("%p no changes, mutation buffer start/end are the same\n", THIS);
 				return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 			}
 		}
@@ -1101,14 +1101,14 @@ private:
 			    iMutationBoundary->first < lowerBound->key)
 			)
 		) {
-			debug_printf("%p no changes because sole mutation range was not cleared\n", this);
+			debug_printf("%p no changes because sole mutation range was not cleared\n", THIS);
 			return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 		}
 
 		self->counts.commitToPage++;
 		state Reference<const IPage> rawPage = wait(readPage(snapshot, root, self->m_usablePageSizeOverride, lowerBound, upperBound));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
-		debug_printf("%p commitSubtree(): %s\n", this, page->toString(false, root, snapshot->getVersion(), lowerBound, upperBound).c_str());
+		debug_printf("%p commitSubtree(): %s\n", THIS, page->toString(false, root, snapshot->getVersion(), lowerBound, upperBound).c_str());
 
 		BTreePage::BinaryTree::Cursor cursor = getReader(rawPage)->getCursor();
 		cursor.moveFirst();
@@ -1118,7 +1118,7 @@ private:
 			VersionedChildrenT results;
 			std::vector<RedwoodRecordRef> merged;
 
-			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", this);
+			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", THIS);
 			if(REDWOOD_DEBUG) {
 				self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
 			}
@@ -1132,7 +1132,7 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			while(iMutationBoundary != iMutationBoundaryEnd) {
-				debug_printf("%p New mutation boundary: '%s': %s\n", this, printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
+				debug_printf("%p New mutation boundary: '%s': %s\n", THIS, printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
 
 				SingleKeyMutationsByVersion::const_iterator iMutations;
 
@@ -1152,7 +1152,7 @@ private:
 				// Output old versions of the mutation boundary key
 				while(cursor.valid() && cursor.get().key == iMutationBoundary->first) {
 					merged.push_back(cursor.get());
-					debug_printf("%p: Added %s [existing, boundary start]\n", this, merged.back().toString().c_str());
+					debug_printf("%p: Added %s [existing, boundary start]\n", THIS, merged.back().toString().c_str());
 					cursor.moveNext();
 				}
 
@@ -1166,7 +1166,7 @@ private:
 							minVersion = iMutations->first;
 						++changes;
 						merged.push_back(iMutations->second.toRecord(iMutationBoundary->first, iMutations->first));
-						debug_printf("%p: Added non-split %s [mutation, boundary start]\n", this, merged.back().toString().c_str());
+						debug_printf("%p: Added non-split %s [mutation, boundary start]\n", THIS, merged.back().toString().c_str());
 					}
 					else {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
@@ -1181,7 +1181,7 @@ private:
 							merged.push_back(whole.split(start, partSize));
 							bytesLeft -= partSize;
 							start += partSize;
-							debug_printf("%p: Added split %s [mutation, boundary start]\n", this, merged.back().toString().c_str());
+							debug_printf("%p: Added split %s [mutation, boundary start]\n", THIS, merged.back().toString().c_str());
 						}
 					}
 					++iMutations;
@@ -1192,12 +1192,12 @@ private:
 				// Advance to the next boundary because we need to know the end key for the current range.
 				++iMutationBoundary;
 
-				debug_printf("%p Mutation range end: '%s'\n", this, printable(iMutationBoundary->first).c_str());
+				debug_printf("%p Mutation range end: '%s'\n", THIS, printable(iMutationBoundary->first).c_str());
 
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(cursor.valid() && cursor.get().key < iMutationBoundary->first) {
 					merged.push_back(cursor.get());
-					debug_printf("%p: Added %s [existing, middle]\n", this, merged.back().toString().c_str());
+					debug_printf("%p: Added %s [existing, middle]\n", THIS, merged.back().toString().c_str());
 
 					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next cursor
 					// key is different than the current one.  If the last cursor key in the page is different from the
@@ -1211,7 +1211,7 @@ private:
 							minVersion = clearVersion;
 						++changes;
 						merged.push_back(RedwoodRecordRef(cursor.get().key, clearVersion));
-						debug_printf("%p: Added %s [existing, middle clear]\n", this, merged.back().toString().c_str());
+						debug_printf("%p: Added %s [existing, middle clear]\n", THIS, merged.back().toString().c_str());
 					}
 					cursor = nextCursor;
 				}
@@ -1220,15 +1220,15 @@ private:
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
 			while(cursor.valid()) {
 				merged.push_back(cursor.get());
-				debug_printf("%p: Added %s [existing, tail]\n", this, merged.back().toString().c_str());
+				debug_printf("%p: Added %s [existing, tail]\n", THIS, merged.back().toString().c_str());
 				cursor.moveNext();
 			}
 
-			debug_printf("%p Done merging mutations into existing leaf contents, made %d changes\n", this, changes);
+			debug_printf("%p Done merging mutations into existing leaf contents, made %d changes\n", THIS, changes);
 
 			// No changes were actually made.  This could happen if the only mutations are clear ranges which do not match any records.
 			if(minVersion == invalidVersion) {
-				debug_printf("%p No changes were made during mutation merge\n", this);
+				debug_printf("%p No changes were made during mutation merge\n", THIS);
 				ASSERT(changes == 0);
 				return VersionedChildrenT({ {0,{{*lowerBound,root}}} });
 			}
@@ -1249,11 +1249,11 @@ private:
 				minVersion = 0;
 
 			// Write page(s), get new page IDs
-			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBound, this);
+			std::vector<LogicalPageID> newPageIDs = self->writePages(pages, minVersion, root, page, upperBound, THIS);
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 			if(root == self->m_root && pages.size() > 1) {
-				debug_printf("%p Building new root\n", this);
+				debug_printf("%p Building new root\n", THIS);
 				self->buildNewRoot(minVersion, pages, newPageIDs, page);
 			}
 
@@ -1264,11 +1264,11 @@ private:
 			for(int i=0; i<pages.size(); i++) {
 				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
 				const RedwoodRecordRef &lower = (i == 0) ? *lowerBound : pages[i].lowerBound;
-				debug_printf("%p Adding page to results: %s => %d\n", this, lower.toString().c_str(), newPageIDs[i]);
+				debug_printf("%p Adding page to results: %s => %d\n", THIS, lower.toString().c_str(), newPageIDs[i]);
 				results.back().second.push_back( {lower, newPageIDs[i]} );
 			}
 
-			debug_printf("%p DONE.\n", this);
+			debug_printf("%p DONE.\n", THIS);
 			return results;
 		}
 		else {
@@ -1316,7 +1316,7 @@ private:
 			}
 
 			if(!modified) {
-				debug_printf("%p not modified.\n", this);
+				debug_printf("%p not modified.\n", THIS);
 				return VersionedChildrenT({{0, {{*lowerBound, root}}}});
 			}
 
@@ -1329,7 +1329,7 @@ private:
 				std::vector<RedwoodRecordRef> childEntries;
 
 				// For each Future<VersionedChildrenT>
-				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", this, root, version);
+				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", THIS, root, version);
 
 				// If we're writing version 0, there is a chance that we don't have to write ourselves, if there are no changes
 				bool modified = version != 0;
@@ -1338,11 +1338,11 @@ private:
 					LogicalPageID pageID = childPageIDs[i];
 					const VersionedChildrenT &children = futureChildren[i].get();
 
-					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", this, pageID, children.size());
+					debug_printf("%p  Versioned page set that replaced Page id=%d: %lu versions\n", THIS, pageID, children.size());
 					for(auto &versionedPageSet : children) {
-						debug_printf("%p    version: Page id=%lld\n", this, versionedPageSet.first);
+						debug_printf("%p    version: Page id=%lld\n", THIS, versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
-							debug_printf("%p      '%s' -> Page id=%u\n", this, boundaryPage.first.toString().c_str(), boundaryPage.second);
+							debug_printf("%p      '%s' -> Page id=%u\n", THIS, boundaryPage.first.toString().c_str(), boundaryPage.second);
 						}
 					}
 
@@ -1351,36 +1351,36 @@ private:
 
 					// If there are no versions before the one we found, just update nextVersion and continue.
 					if(cv == children.begin()) {
-						debug_printf("%p First version (%lld) in set is greater than current, setting nextVersion and continuing\n", this, cv->first);
+						debug_printf("%p First version (%lld) in set is greater than current, setting nextVersion and continuing\n", THIS, cv->first);
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("%p   curr %lld next %lld\n", this, version, nextVersion);
+						debug_printf("%p   curr %lld next %lld\n", THIS, version, nextVersion);
 						continue;
 					}
 
 					// If a version greater than the current version being written was found, update nextVersion
 					if(cv != children.end()) {
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("%p   curr %lld next %lld\n", this, version, nextVersion);
+						debug_printf("%p   curr %lld next %lld\n", THIS, version, nextVersion);
 					}
 
 					// Go back one to the last version that was valid prior to or at the current version we are writing
 					--cv;
 
-					debug_printf("%p   Using children for version %lld from this set, building version %lld\n", this, cv->first, version);
+					debug_printf("%p   Using children for version %lld from this set, building version %lld\n", THIS, cv->first, version);
 
 					// If page count isn't 1 then the root is definitely modified
 					modified = modified || cv->second.size() != 1;
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("%p  Adding child page %s\n", this, childPage.first.toString().c_str());
+						debug_printf("%p  Adding child page %s\n", THIS, childPage.first.toString().c_str());
 						RedwoodRecordRef entry = childPage.first;
 						entry.value = StringRef((unsigned char *)&childPage.second, sizeof(uint32_t));
 						childEntries.push_back(entry);
 					}
 				}
 
-				debug_printf("%p Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", this, childEntries.size(), version, nextVersion);
+				debug_printf("%p Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", THIS, childEntries.size(), version, nextVersion);
 
 				if(modified) {
 					// TODO: Track split points across iterations of this loop, so that they don't shift unnecessarily and
@@ -1390,7 +1390,7 @@ private:
 					std::vector<BoundaryAndPage> pages = buildPages(false, *lowerBound, *upperBound, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_usablePageSizeOverride);
 
 					// Write page(s), use version 0 to replace latest version if only writing one page
-					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBound, this);
+					std::vector<LogicalPageID> newPageIDs = self->writePages(pages, version, root, page, upperBound, THIS);
 
 					// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 					if(root == self->m_root)
@@ -1404,12 +1404,12 @@ private:
 
 					// TODO: figure this out earlier instead of writing replacement page more than once
 					if (result.size() > 1 && result.back().second == result.end()[-2].second) {
-						debug_printf("%p Output same as last version, popping it.\n", this);
+						debug_printf("%p Output same as last version, popping it.\n", THIS);
 						result.pop_back();
 					}
 				}
 				else {
-					debug_printf("%p Version 0 has no changes\n", this);
+					debug_printf("%p Version 0 has no changes\n", THIS);
 					result.push_back({0, {{*lowerBound, root}}});
 				}
 
@@ -1418,7 +1418,7 @@ private:
 				version = nextVersion;
 			}
 
-			debug_printf("%p DONE.\n", this);
+			debug_printf("%p DONE.\n", THIS);
 			return result;
 		}
 	}
