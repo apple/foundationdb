@@ -678,7 +678,7 @@ bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd, RestoreCommandEnum received
 			ret = (receivedCmd == RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done);
 			break;
 		case RestoreCommandEnum::Assign_Applier_KeyRange_Done: // On master applier and other appliers
-			ret = (receivedCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done || receivedCmd == RestoreCommandEnum::Set_Role_Done);
+			ret = (receivedCmd == RestoreCommandEnum::Get_Applier_KeyRange_Done || receivedCmd == RestoreCommandEnum::Set_Role_Done || receivedCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
 			break;
 		case RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done: // On each applier
 			ret = (receivedCmd == RestoreCommandEnum::Assign_Applier_KeyRange_Done);
@@ -687,7 +687,7 @@ bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd, RestoreCommandEnum received
 			ret = (receivedCmd == RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done);
 			break; 
 		case RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done: // On master applier
-			ret = (receivedCmd == RestoreCommandEnum::Set_Role_Done);
+			ret = (receivedCmd == RestoreCommandEnum::Set_Role_Done || receivedCmd == RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
 			break;
 		
 		default:
@@ -2137,9 +2137,9 @@ ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCo
 					printf("[INFO][Applier] CMD:%s, NodeID:%s: num of key ranges:%d\n",
 							rd->cmdID.toString().c_str(), rd->describeNode().c_str(), keyRangeLowerBounds.size());
 					req.reply.send(RestoreCommandReply(interf.id(), req.cmdID, keyRangeLowerBounds.size()));
-					rd->processedCmd[req.cmdID] = 1;
+					//rd->processedCmd[req.cmdID] = 1; // We should not skip this command in the following phase. Otherwise, the handler in other phases may return a wrong number of appliers
 				} else if ( req.cmd == RestoreCommandEnum::Get_Applier_KeyRange ) {
-					if ( req.keyRangeIndex < 0 || req.keyRangeIndex > keyRangeLowerBounds.size() ) {
+					if ( req.keyRangeIndex < 0 || req.keyRangeIndex >= keyRangeLowerBounds.size() ) {
 						printf("[INFO][Applier] NodeID:%s Get_Applier_KeyRange keyRangeIndex is out of range. keyIndex:%d keyRagneSize:%d\n",
 								rd->describeNode().c_str(), req.keyRangeIndex,  keyRangeLowerBounds.size());
 					}
@@ -2746,6 +2746,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	}
 
 	// Ask master applier to calculate the key ranges for appliers
+	state int numKeyRanges = 0;
 	loop {
 		try {
 			RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
@@ -2754,8 +2755,13 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			rd->cmdID.initPhase(RestoreCommandEnum::Calculate_Applier_KeyRange);
 			rd->cmdID.nextCmd();
 			RestoreCommandReply rep = wait( timeoutError(  cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Calculate_Applier_KeyRange, rd->cmdID, rd->masterApplier, applierIDs.size())),  FastRestore_Failure_Timeout) );
-			printf("[Sampling][CMDRep] number of key ranges calculated by master applier\n", rep.num);
-			state int numKeyRanges = rep.num;
+			printf("[Sampling][CMDRep] number of key ranges calculated by master applier:%d\n", rep.num);
+			numKeyRanges = rep.num;
+
+			if (numKeyRanges <= 0 || numKeyRanges >= applierIDs.size() ) {
+				printf("[WARNING] Calculate_Applier_KeyRange receives wrong reply (numKeyRanges:%d) from other phases. applierIDs.size:%d Retry Calculate_Applier_KeyRange\n", numKeyRanges, applierIDs.size());
+				continue;
+			}
 
 			if ( numKeyRanges < applierIDs.size() ) {
 				printf("[WARNING][Sampling] numKeyRanges:%d < appliers number:%d. %d appliers will not be used!\n",
@@ -4814,7 +4820,9 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 				cmdReplies.push_back(applierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation, rd->cmdID, applierID)));
 			}
 
-			std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+			// Q: Maybe we should not timeout at apply-to-DB because apply-to-DB can take a long time
+			//std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
+			std::vector<RestoreCommandReply> reps = wait( getAll(cmdReplies) );
 			//wait( waitForAny(cmdReplies) ); //TODO: I wait for any insteal of wait for all! This is NOT TESTED IN SIMULATION!
 
 			printf("[INFO] Node:%s Finish Loader_Notify_Appler_To_Apply_Mutation cmd\n", rd->describeNode().c_str());

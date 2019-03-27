@@ -195,7 +195,7 @@ struct RestoreCommandReply {
 	int num; // num is the number of key ranges calculated for appliers
 	Standalone<KeyRef> lowerBound;
 
-	RestoreCommandReply() : id(UID()), cmdID(CMDUID()) {}
+	RestoreCommandReply() : id(UID()), cmdID(CMDUID()), num(0) {}
 	//explicit RestoreCommandReply(UID id) : id(id) {}
 	explicit RestoreCommandReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
 	explicit RestoreCommandReply(UID id, CMDUID cmdID, int num) : id(id), cmdID(cmdID), num(num) {}
