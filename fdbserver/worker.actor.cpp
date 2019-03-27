@@ -863,10 +863,10 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
 
-					Future<Void> ratekeeper = ratekeeper( recruited, dbInfo );
+					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(
 					    forwardError(errors, Role::RATEKEEPER, recruited.id(),
-					                 setWhenDoneOrError(ratekeeper, rkInterf, Optional<RatekeeperInterface>())));
+					                 setWhenDoneOrError(ratekeeperProcess, rkInterf, Optional<RatekeeperInterface>())));
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
