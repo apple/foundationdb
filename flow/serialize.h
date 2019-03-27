@@ -298,16 +298,16 @@ public:
 	}
 	void* getData() { return data; }
 	int getLength() { return size; }
-	StringRef toStringRef() { return StringRef(data,size); }
+	Standalone<StringRef> toStringRef() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
 	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
-	BinaryWriter( BinaryWriter&& rhs ) : data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
+	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
 		rhs.data = 0;
 	}
 	void operator=( BinaryWriter&& r) {
-		deleteData();
+		arena = std::move(r.arena);
 		data = r.data;
 		size = r.size;
 		allocated = r.allocated;
@@ -316,7 +316,6 @@ public:
 		r.allocated = 0;
 		r.data = 0;
 	}
-	~BinaryWriter() { deleteData(); }
 
 	template <class T, class VersionOptions>
 	static Standalone<StringRef> toValue( T const& t, VersionOptions vo ) {
@@ -403,34 +402,27 @@ public:
 	uint64_t protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 private:
+	Arena arena;
 	uint8_t* data;
 	int size, allocated;
 	uint64_t m_protocolVersion;
-
-	void deleteData() {
-		if(allocated == 4096) {
-			FastAllocator<4096>::release(data);
-		} else {
-			delete[] data;
-		}
-	}
 
 	void* writeBytes(int s) {
 		int p = size;
 		size += s;
 		if (size > allocated) {
-			int nextAllocated = std::max(allocated*2, size);
-			uint8_t* newData;
-			if(nextAllocated < 4096) {
-				nextAllocated = 4096;
-				newData = (uint8_t*)FastAllocator<4096>::allocate();
+			if(size <= 512) {
+				allocated = 512;
+			} else if(size <= 4096) {
+				allocated = 4096;
 			} else {
-				newData = new uint8_t[nextAllocated];
+				allocated = std::max(allocated*2, size);
 			}
+			Arena newArena;
+			uint8_t* newData = new ( newArena ) uint8_t[ allocated ];
 			memcpy(newData, data, p);
-			deleteData();
+			arena = newArena;
 			data = newData;
-			allocated = nextAllocated;
 		}
 		return data+p;
 	}
