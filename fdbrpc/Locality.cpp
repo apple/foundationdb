@@ -39,6 +39,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::WorstFit;
 		case ProcessClass::LogClass:
 			return ProcessClass::WorstFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -54,6 +56,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::UnsetFit;
 		case ProcessClass::StorageClass:
 			return ProcessClass::WorstFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -71,6 +75,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -84,10 +90,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::TransactionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -103,6 +109,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -120,6 +128,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:
@@ -143,6 +153,40 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+			return ProcessClass::NeverAssign;
+		case ProcessClass::TesterClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::DataDistributor:
+		switch( _class ) {
+		case ProcessClass::DataDistributorClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::RateKeeper:
+		switch( _class ) {
+		case ProcessClass::RateKeeperClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 			return ProcessClass::NeverAssign;
 		default:

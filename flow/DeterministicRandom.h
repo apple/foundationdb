@@ -24,6 +24,8 @@
 
 #include <cinttypes>
 #include "flow/IRandom.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 
 #include <random>
 
@@ -62,7 +64,7 @@ public:
 		uint64_t v = (gen64() % range);
 		int i;
 		if (min < 0 && ((unsigned int) -min) > v)
-			i = -(((unsigned int) -min) - v);
+			i = -(int)(((unsigned int) -min) - v);
 		else
 			i = v + min;
 		if (randLog && g_random==this) fprintf(randLog, "Rint %d\n", i);
@@ -81,7 +83,7 @@ public:
 		uint64_t v = (gen64() % range);
 		int64_t i;
 		if (min < 0 && ((uint64_t) -min) > v)
-			i = -(((uint64_t) -min) - v);
+			i = -(int64_t)(((uint64_t) -min) - v);
 		else
 			i = v + min;
 		if (randLog && g_random==this) fprintf(randLog, "Rint64 %" PRId64 "\n", i);
@@ -89,6 +91,14 @@ public:
 	}
 
 	uint32_t randomUInt32() { return gen64(); }
+
+	uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
+		std::uniform_real_distribution<double> distribution( std::log(min), std::log(maxPlusOne-1) );
+		double logpower = distribution(random);
+		uint32_t loguniform = static_cast<uint32_t>( std::pow( 10, logpower ) );
+		// doubles can be imprecise, so let's make sure we don't violate an edge case.
+		return std::max(std::min(loguniform, maxPlusOne-1), min);
+	}
 
 	UID randomUniqueID() {
 		uint64_t x,y;

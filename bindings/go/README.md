@@ -30,4 +30,22 @@ Documentation
 -------------
 
 * [API documentation](https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb)
-* [Tutorial](https://apple.github.io/foundationdb/class-scheduling.html)
+* [Tutorial](https://apple.github.io/foundationdb/class-scheduling-go.html)
+
+Modules
+-------
+
+If you used the bindings with modules before the addition of the `go.mod` file in the foundation repo,
+it may be necessary to update the import path in your `go.mod`.
+
+By default, a module enabled `go get` will add something like this to your `go.mod`:
+    
+    github.com/apple/foundationdb vx.x.x-xxxxxxxxxxxxxx-xxxxxxxxxxxx
+
+You will need to delete that line, then run `go get github.com/apple/foundationdb/bindings/go@version`.
+You should now have a line like this in your `go.mod`:
+
+    github.com/apple/foundationdb/bindings/go vx.x.x-xxxxxxxxxxxxxx-xxxxxxxxxxxx
+
+Note:  `@version` is only necessary if you previously locked to a 
+specific version or commit, in which case you'd replace `version` with a commit hash or tag.

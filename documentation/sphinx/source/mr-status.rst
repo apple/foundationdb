@@ -80,7 +80,8 @@ The following format informally describes the JSON containing the status data. T
             "connected_clients": [
               {
                 "address": "127.0.0.1:1234",
-                "log_group": "default"
+                "log_group": "default",
+                "connected_coordinators": 2
               }
             ],
             "count": 1,
@@ -127,6 +128,7 @@ The following format informally describes the JSON containing the status data. T
           "name": <  "initializing"
                    | "missing_data"
                    | "healing"
+                   | "optimizing_team_collections"
                    | "healthy_repartitioning"
                    | "healthy_removing_server"
                    | "healthy_rebalancing"
@@ -316,34 +318,37 @@ Several fields in the JSON object may contain messages in the format:
 
 Each message is an Object having at least a ``"name"`` field.  The ``"description"`` is present only in some messages.  Other fields may be present based on specific message instance details.  The possible name and description values of a message found at a given location in the JSON object are described in the tables below.
 
-====================================  =============================== =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
-JSON Path                             Name                            Description
-====================================  =============================== =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
-client.messages                       inconsistent_cluster_file       Cluster file is not up to date. It contains the connection string ‘<value>’. The current connection string is ‘<value>’. This must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.
-client.messages                       no_cluster_controller           Unable to locate a cluster controller within 2 seconds. Check that there are server processes running.
-client.messages                       quorum_not_reachable            Unable to reach a quorum of coordinators.
-client.messages                       status_incomplete_client        Could not retrieve client status information.
-client.messages                       status_incomplete_cluster       Could not retrieve cluster status information.
-client.messages                       status_incomplete_coordinators  Could not fetch coordinator info.
-client.messages                       status_incomplete_error         Cluster encountered an error fetching status.
-client.messages                       status_incomplete_timeout       Timed out fetching cluster status.
-client.messages                       unreachable_cluster_controller  No response received from the cluster controller.
-cluster.messages                      client_issues                   Some clients of this cluster have issues.
-cluster.messages                      commit_timeout                  Unable to commit after __ seconds.
-cluster.messages                      read_timeout                    Unable to read after __ seconds.
-cluster.messages                      status_incomplete               Unable to retrieve all status information.
-cluster.messages                      storage_servers_error           Timed out trying to retrieve storage servers.
-cluster.messages                      log_servers_error               Timed out trying to retrieve log servers.
-cluster.messages                      transaction_start_timeout       Unable to start transaction after __ seconds.
-cluster.messages                      unreachable_master_worker       Unable to locate the master worker.
-cluster.messages                      unreachable_processes           The cluster has some unreachable processes.
-cluster.messages                      unreadable_configuration        Unable to read database configuration.
-cluster.messages                      layer_status_incomplete         Some or all of the layers subdocument could not be read.
-cluster.processes.<process>.messages  file_open_error                 Unable to open ‘<file>’ (<os_error>).
-cluster.processes.<process>.messages  incorrect_cluster_file_contents Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.
-cluster.processes.<process>.messages  io_error                        <error> occured in <subsystem>
-cluster.processes.<process>.messages  platform_error                  <error> occured in <subsystem>
-cluster.processes.<process>.messages  process_error                   <error> occured in <subsystem>
+====================================  ====================================  =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
+JSON Path                             Name                                  Description
+====================================  ====================================  =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
+client.messages                       inconsistent_cluster_file             Cluster file is not up to date. It contains the connection string ‘<value>’. The current connection string is ‘<value>’. This must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.
+client.messages                       no_cluster_controller                 Unable to locate a cluster controller within 2 seconds. Check that there are server processes running.
+client.messages                       quorum_not_reachable                  Unable to reach a quorum of coordinators.
+client.messages                       server_overloaded                     Server is under too much load and cannot respond.
+client.messages                       status_incomplete_client              Could not retrieve client status information.
+client.messages                       status_incomplete_cluster             Could not retrieve cluster status information.
+client.messages                       status_incomplete_coordinators        Could not fetch coordinator info.
+client.messages                       status_incomplete_error               Cluster encountered an error fetching status.
+client.messages                       status_incomplete_timeout             Timed out fetching cluster status.
+client.messages                       unreachable_cluster_controller        No response received from the cluster controller.
+cluster.messages                      client_issues                         Some clients of this cluster have issues.
+cluster.messages                      commit_timeout                        Unable to commit after __ seconds.
+cluster.messages                      read_timeout                          Unable to read after __ seconds.
+cluster.messages                      status_incomplete                     Unable to retrieve all status information.
+cluster.messages                      storage_servers_error                 Timed out trying to retrieve storage servers.
+cluster.messages                      log_servers_error                     Timed out trying to retrieve log servers.
+cluster.messages                      transaction_start_timeout             Unable to start transaction after __ seconds.
+cluster.messages                      unreachable_master_worker             Unable to locate the master worker.
+cluster.messages                      unreachable_dataDistributor_worker    Unable to locate the data distributor worker.
+cluster.messages                      unreachable_ratekeeper_worker         Unable to locate the ratekeeper worker.
+cluster.messages                      unreachable_processes                 The cluster has some unreachable processes.
+cluster.messages                      unreadable_configuration              Unable to read database configuration.
+cluster.messages                      layer_status_incomplete               Some or all of the layers subdocument could not be read.
+cluster.processes.<process>.messages  file_open_error                       Unable to open ‘<file>’ (<os_error>).
+cluster.processes.<process>.messages  incorrect_cluster_file_contents       Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.
+cluster.processes.<process>.messages  io_error                              <error> occured in <subsystem>
+cluster.processes.<process>.messages  platform_error                        <error> occured in <subsystem>
+cluster.processes.<process>.messages  process_error                         <error> occured in <subsystem>
 ====================================  =============================== =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
 
 The JSON path ``cluster.recovery_state``, when it exists, is an Object containing at least ``"name"`` and ``"description"``.  The possible values for those fields are in the following table:

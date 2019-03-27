@@ -77,7 +77,7 @@ struct OpenFileInfo : NonCopyable {
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
 	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) noexcept(true) : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);
@@ -257,9 +257,9 @@ private:
 		try {
 			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
 			if(flags & IAsyncFile::OPEN_CACHED_READ_ONLY)
-				flags = flags & ~IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_READONLY;
+				flags = (flags & ~IAsyncFile::OPEN_READWRITE) | IAsyncFile::OPEN_READONLY;
 			else
-				flags = flags & ~IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_READWRITE;
+				flags = (flags & ~IAsyncFile::OPEN_READONLY) | IAsyncFile::OPEN_READWRITE;
 			state Reference<IAsyncFile> f = wait( IAsyncFileSystem::filesystem()->open(filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode) );
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait( f->size() );

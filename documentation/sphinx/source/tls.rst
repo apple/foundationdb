@@ -29,10 +29,52 @@ This will configure the new cluster to communicate with TLS.
 
 .. note:: Depending on your operating system, version and configuration, there may be a firewall in place that prevents external access to certain ports. If necessary, please consult the appropriate documentation for your OS and ensure that all machines in your cluster can reach the ports configured in your :ref:`configuration file <foundationdb-conf>`.
 
-.. _converting-existing-cluster:
+.. _converting-existing-cluster-after-6.1:
 
-Converting an existing cluster to use TLS
-=========================================
+Converting an existing cluster to use TLS (since v6.1)
+======================================================
+
+Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:
+
+1) Restart each FoundationDB server individually, but with an additional listen address for TLS traffic::
+
+     /path/to/fdbserver -C fdb.cluster -p 127.0.0.1:4500 -p 127.0.0.1:4600:tls
+
+   Since, the server still listens to unencrypted traffic and the cluster file still contains the old address, rest of the processes will be able to talk to this new process.
+
+2) Once all processes are listening to both TLS and unencrypted traffic, switch one or more coordinator to use TLS. Therefore, if the old coordinator list was ``127.0.0.1:4500,127.0.0.1:4501,127.0.0.1:4502``, the new one would be something like ``127.0.0.1:4600:tls,127.0.0.1:4501,127.0.0.1:4502``. Switching few coordinators to TLS at a time allows a smoother migration and a window to find out clients who do not yet have TLS configured. The number of coordinators each client can connect to can be seen via  ``fdbstatus`` (look for ``connected_coordinators`` field in ``clients``)::
+
+    "clients" : {
+        "count" : 2,
+        "supported_versions" : [
+            {
+                "client_version" : "6.1.0",
+                "connected_clients" : [
+                    {
+                        "address" : "127.0.0.1:42916",
+                        "connected_coordinators": 3,
+                        "log_group" : "default"
+                    },
+                    {
+                        "address" : "127.0.0.1:42918",
+                        "connected_coordinators": 2,
+                        "log_group" : "default"
+                    }
+                ]
+            }, ...
+        ]
+    }
+
+3) If there exist a client (e.g., the client 127.0.0.1:42918 in the above example) that cannot connect to all coordinators after a coordinator is switched to TLS, it mean the client does not set up its TLS correctly. System operator should notify the client to correct the client's TLS configuration. Otherwise, when all coordinators are switched to TLS ports, the client will loose connection.
+
+4) Repeat (2) and (3) until all the addresses in coordinator list are TLS.
+
+5) Restart each FoundationDB server, but only with one public address that listens to TLS traffic only.
+
+.. _converting-existing-cluster-before-6.1:
+
+Converting an existing cluster to use TLS (< v6.1)
+==================================================
 
 Enabling TLS on an existing (non-TLS) cluster cannot be accomplished without downtime because all processes must have TLS enabled to communicate. At startup, each server process enables TLS if the addresses in its cluster file are TLS-enabled. As a result, server processes must be stopped and restarted to convert them to use TLS. To convert the cluster to TLS in the most conservative way:
 
@@ -70,6 +112,8 @@ The value for each setting can be specified in more than one way.  The actual va
 2. The value of the environment variable, if one has been set;
 3. The default value
 
+For the password, rather than using the command-line option, it is recommended to use the environment variable ``FDB_TLS_PASSWORD``, as command-line options are more visible to other processes running on the same host.
+
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
 The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.
@@ -98,6 +142,17 @@ There is no default password. If no password is specified, it is assumed that th
 
 Parameters and client bindings
 ------------------------------
+
+Automatic TLS certificate refresh
+------------------------------
+
+The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
+
+  * They are changed, judging by the last modified time.
+  * They are valid certificates.
+  * The key file matches the certificate file.
+
+The refresh rate is controlled by ``--knob_tls_cert_refresh_delay_seconds``. Setting it to 0 will disable the refresh.
 
 The default LibreSSL-based implementation
 =========================================
@@ -197,7 +252,7 @@ Requirements can be placed on the fields of the Issuer and Subject DNs in the pe
 Field    Well known name
 =======  ===================
 ``CN``   Common Name
-``C``    County
+``C``    Country
 ``L``    Locality
 ``ST``   State
 ``O``    Organization

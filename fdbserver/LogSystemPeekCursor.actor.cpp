@@ -22,6 +22,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
 			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(g_random->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), parallelGetMore(parallelGetMore) {
@@ -272,7 +273,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IP
 }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end,
-	bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor )
+	bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor )
 	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(g_random->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
 	if(tLogPolicy) {
 		logSet = Reference<LogSet>( new LogSet() );

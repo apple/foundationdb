@@ -39,7 +39,7 @@ namespace FdbClientLogEvents {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
 		Event() { }
 
-		template <typename Ar>	Ar& serialize(Ar &ar) { return ar & type & startTs; }
+		template <typename Ar>	Ar& serialize(Ar &ar) { return serializer(ar, type, startTs); }
 
 		EventType type{ EVENTTYPEEND };
 		double startTs{ 0 };
@@ -53,9 +53,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency;
+				return serializer(Event::serialize(ar), latency);
 			else
-				return ar & latency;
+				return serializer(ar, latency);
 		}
 
 		double latency;
@@ -71,9 +71,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & valueSize & key;
+				return serializer(Event::serialize(ar), latency, valueSize, key);
 			else
-				return ar & latency & valueSize & key;
+				return serializer(ar, latency, valueSize, key);
 		}
 
 		double latency;
@@ -91,9 +91,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & rangeSize & startKey & endKey;
+				return serializer(Event::serialize(ar), latency, rangeSize, startKey, endKey);
 			else
-				return ar & latency & rangeSize & startKey & endKey;
+				return serializer(ar, latency, rangeSize, startKey, endKey);
 		}
 
 		double latency;
@@ -112,9 +112,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & numMutations & commitBytes & req.transaction & req.arena;
+				return serializer(Event::serialize(ar), latency, numMutations, commitBytes, req.transaction, req.arena);
 			else
-				return ar & latency & numMutations & commitBytes & req.transaction & req.arena;
+				return serializer(ar, latency, numMutations, commitBytes, req.transaction, req.arena);
 		}
 
 		double latency;
@@ -145,9 +145,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & errCode & key;
+				return serializer(Event::serialize(ar), errCode, key);
 			else
-				return ar & errCode & key;
+				return serializer(ar, errCode, key);
 		}
 
 		int errCode;
@@ -164,9 +164,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & errCode & startKey & endKey;
+				return serializer(Event::serialize(ar), errCode, startKey, endKey);
 			else
-				return ar & errCode & startKey & endKey;
+				return serializer(ar, errCode, startKey, endKey);
 		}
 
 		int errCode;
@@ -184,9 +184,9 @@ namespace FdbClientLogEvents {
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & errCode & req.transaction & req.arena;
+				return serializer(Event::serialize(ar), errCode, req.transaction, req.arena);
 			else
-				return ar & errCode & req.transaction & req.arena;
+				return serializer(ar, errCode, req.transaction, req.arena);
 		}
 
 		int errCode;

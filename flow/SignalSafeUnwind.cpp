@@ -25,13 +25,14 @@ int64_t dl_iterate_phdr_calls = 0;
 #ifdef __linux__
 
 #include <link.h>
+#include <mutex>
 
 static bool phdr_cache_initialized = false;
 static std::vector< std::vector<uint8_t> > phdr_cache;
 
 static int (*chain_dl_iterate_phdr)(
           int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-          void *data) = 0;
+          void *data) = nullptr;
 
 static int phdr_cache_add( struct dl_phdr_info *info, size_t size, void *data ) {
 	phdr_cache.push_back( std::vector<uint8_t>((uint8_t*)info, (uint8_t*)info + size) );
@@ -39,10 +40,14 @@ static int phdr_cache_add( struct dl_phdr_info *info, size_t size, void *data ) 
 }
 
 static void initChain() {
+	static std::once_flag flag;
+
 	// Ensure that chain_dl_iterate_phdr points to the "real" function that we are overriding
-	*(void**)&chain_dl_iterate_phdr = dlsym(RTLD_NEXT, "dl_iterate_phdr");
-	if (!chain_dl_iterate_phdr)
+	std::call_once(flag, [](){ *(void**)&chain_dl_iterate_phdr = dlsym(RTLD_NEXT, "dl_iterate_phdr"); });
+
+	if (!chain_dl_iterate_phdr) {
 		criticalError(FDB_EXIT_ERROR, "SignalSafeUnwindError", "Unable to find dl_iterate_phdr symbol");
+	}
 }
 
 void initSignalSafeUnwind() {

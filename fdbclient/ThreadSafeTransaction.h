@@ -30,7 +30,6 @@
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
 	~ThreadSafeDatabase();
-	static ThreadFuture<Reference<IDatabase>> create( std::string connFilename, int apiVersion=-1 );
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
 	Reference<ITransaction> createTransaction();
@@ -46,14 +45,14 @@ private:
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;
 public:  // Internal use only
+	ThreadSafeDatabase( std::string connFilename, int apiVersion );
 	ThreadSafeDatabase( DatabaseContext* db ) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
-	Database unsafeGetDatabase() const;  // This is thread unsafe (ONLY call from the network thread), but respects reference counting
 };
 
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction( ThreadSafeDatabase *cx );
+	explicit ThreadSafeTransaction( Reference<ThreadSafeDatabase> db );
 	~ThreadSafeTransaction();
 
 	void cancel();
@@ -97,8 +96,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(NULL) {}
-	void operator=(ThreadSafeTransaction&& r) noexcept(true);
-	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept(true);
+	void operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
 
@@ -119,7 +118,7 @@ public:
 	void runNetwork();
 	void stopNetwork();
 
-	ThreadFuture<Reference<IDatabase>> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char *clusterFilePath);
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 

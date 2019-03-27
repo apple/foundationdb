@@ -74,7 +74,7 @@ struct FailureStatus {
 	bool operator != (FailureStatus const& r) const { return failed != r.failed; }
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & failed;
+		serializer(ar, failed);
 	}
 };
 
@@ -89,7 +89,7 @@ public:
 	// The next time the known status for the endpoint changes, returns the new status.
 	virtual Future<Void> onStateChanged( Endpoint const& endpoint ) = 0;
 
-	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.address ), but more efficiently
+	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.getPrimaryAddress() ), but more efficiently
 	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint ) = 0;
 
 	// Returns true if the endpoint is failed but the address of the endpoint is not failed.

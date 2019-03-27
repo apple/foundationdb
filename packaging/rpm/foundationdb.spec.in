@@ -2,7 +2,7 @@ Name: foundationdb
 Version: FDBVERSION
 Release: FDBRELEASE
 Group: Applications/Databases
-License: FoundationDB Community License Agreement (https://www.foundationdb.org/license)
+License: Apache Software License 2.0
 URL: https://www.foundationdb.org
 Packager: FoundationDB <fdb-dist@apple.com>
 BuildArch: x86_64

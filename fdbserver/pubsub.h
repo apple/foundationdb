@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 /*
  * ///////////////
@@ -69,7 +69,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & originatorFeed & messageId & data & data.arena();
+		serializer(ar, originatorFeed, messageId, data, data.arena());
 	}
 };
 

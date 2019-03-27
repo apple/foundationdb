@@ -34,7 +34,7 @@ class FutureVoid extends NativeFuture<Void> {
 		//  with a get on the error and throw if the error is not success.
 		FDBException err = Future_getError(cPtr);
 
-		if(!err.isSuccess()) {
+		if(err != null && !err.isSuccess()) {
 			throw err;
 		}
 		return null;

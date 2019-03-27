@@ -45,6 +45,8 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
 
+#include <boost/version.hpp>
+
 using namespace std::rel_ops;
 
 #define TEST( condition ) if (!(condition)); else { static TraceEvent* __test = &(TraceEvent("CodeCoverage").detail("File", __FILE__).detail("Line",__LINE__).detail("Condition", #condition)); }
@@ -111,94 +113,6 @@ public:
 class Never {};
 
 template <class T>
-class Optional {
-public:
-	Optional() : valid(false) {}
-	Optional(const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(o.get());
-	}
-
-	template <class U>
-	Optional(const U& t) : valid(true) { new (&value) T(t); }
-
-	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
-	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
-	Use .cast_to<>() instead.
-	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
-
-	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(a, o.get());
-	}
-	int expectedSize() const { return valid ? get().expectedSize() : 0; }
-
-	template <class R> Optional<R> cast_to() const {
-		if (present())
-			return Optional<R>(get());
-		else
-			return Optional<R>();
-	}
-
-	~Optional() {
-		if (valid) ((T*)&value)->~T();
-	}
-
-	void reset() {
-		if (valid) {
-			valid = false;
-			((T*)&value)->~T();
-		}
-	}
-
-	Optional & operator=(Optional const& o) {
-		reset();
-		if (o.valid) {
-			new (&value) T(o.get());
-			valid = true;
-		}
-		return *this;
-	}
-
-	bool present() const { return valid; }
-	T& get() {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T*)&value;
-	}
-	T const& get() const {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T const*)&value;
-	}
-	T orDefault(T const& default_value) const { if (valid) return get(); else return default_value; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// SOMEDAY: specialize for space efficiency?
-		if (valid && Ar::isDeserializing)
-			(*(T *)&value).~T();
-		ar & valid;
-		if (valid) {
-			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
-		}
-	}
-
-	bool operator == (Optional const& o) const {
-		return present() == o.present() && (!present() || get() == o.get());
-	}
-	bool operator != (Optional const& o) const {
-		return !(*this == o);
-	}
-	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator < (Optional const& o) const {
-		if (present() != o.present()) return o.present();
-		if (!present()) return false;
-		return get() < o.get();
-	}
-private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
-	bool valid;
-};
-
-template <class T>
 class ErrorOr {
 public:
 	ErrorOr() : error(default_error_or()) {}
@@ -215,11 +129,17 @@ public:
 	}
 	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
-	template <class R> ErrorOr<R> cast_to() const {
-		if (present())
-			return ErrorOr<R>(get());
-		else
-			return ErrorOr<R>();
+	template <class R> ErrorOr<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> ErrorOr<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return ErrorOr<R>(f(get()));
+		}
+		else {
+			return ErrorOr<R>(error);
+		}
 	}
 
 	~ErrorOr() {
@@ -251,24 +171,11 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// SOMEDAY: specialize for space efficiency?
-		ar & error;
+		serializer(ar, error);
 		if (present()) {
 			if (Ar::isDeserializing) new (&value) T();
-			ar & *(T*)&value;
+			serializer(ar, *(T*)&value);
 		}
-	}
-
-	bool operator == (ErrorOr const& o) const {
-		return error == o.error && (!present() || get() == o.get());
-	}
-	bool operator != (ErrorOr const& o) const {
-		return !(*this == o);
-	}
-
-	bool operator < (ErrorOr const& o) const {
-		if (error != o.error) return error < o.error;
-		if (!present()) return false;
-		return get() < o.get();
 	}
 
 	bool isError() const { return error.code() != invalid_error_code; }
@@ -621,7 +528,7 @@ public:
 		if (sav) sav->addFutureRef();
 		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
-	Future(Future<T>&& rhs) noexcept(true) : sav(rhs.sav) {
+	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
 		rhs.sav = 0;
 		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
@@ -641,6 +548,11 @@ public:
 		sav->sendError(error);
 	}
 
+#ifndef NO_INTELLISENSE
+	template<class U>
+	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
+#endif
+
 	~Future() {
 		//if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
 		if (sav) sav->delFutureRef();
@@ -650,7 +562,7 @@ public:
 		if (sav) sav->delFutureRef();
 		sav = rhs.sav;
 	}
-	void operator=(Future<T>&& rhs) noexcept(true) {
+	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
 			if (sav) sav->delFutureRef();
 			sav = rhs.sav;
@@ -726,7 +638,7 @@ public:
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	Promise(Promise&& rhs) noexcept(true) : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -734,7 +646,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(Promise && rhs) noexcept(true) {
+	void operator=(Promise && rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -779,14 +691,14 @@ public:
 	}
 	FutureStream() : queue(NULL) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) noexcept(true) : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue) queue->delFutureRef();
 		queue = rhs.queue;
 	}
-	void operator=(FutureStream&& rhs) noexcept(true) {
+	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
 		if (rhs.queue != queue) {
 			if (queue) queue->delFutureRef();
 			queue = rhs.queue;
@@ -880,13 +792,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	PromiseStream(PromiseStream&& rhs) noexcept(true) : queue(rhs.queue) { rhs.queue = 0; }
+	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(PromiseStream&& rhs) noexcept(true) {
+	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;

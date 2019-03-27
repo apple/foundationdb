@@ -53,7 +53,7 @@ struct Tag {
 
 	template <class Ar>
 	force_inline void serialize_unversioned(Ar& ar) { 
-		ar & locality & id;
+		serializer(ar, locality, id);
 	}
 };
 #pragma pack(pop)
@@ -145,12 +145,17 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
-std::string printable( const Optional<StringRef>& val );
-std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
+
+template <class T>
+std::string printable( const Optional<T>& val ) {
+	if( val.present() )
+		return printable( val.get() );
+	return "[not set]";
+}
 
 inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
 	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )
@@ -193,7 +198,7 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		ar & const_cast<KeyRef&>(begin) & const_cast<KeyRef&>(end);
+		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		if( begin > end ) {
 			throw inverted_range();
 		};
@@ -227,7 +232,7 @@ struct KeyValueRef {
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
 	template <class Ar>
-	force_inline void serialize(Ar& ar) { ar & key & value; }
+	force_inline void serialize(Ar& ar) { serializer(ar, key, value); }
 
 	struct OrderByKey {
 		bool operator()(KeyValueRef const& a, KeyValueRef const& b) const {
@@ -385,7 +390,7 @@ public:
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & key & orEqual & offset;
+		serializer(ar, key, orEqual, offset);
 	}
 };
 
@@ -418,7 +423,7 @@ struct KeyRangeWith : KeyRange {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((KeyRange&)*this) & value;
+		serializer(ar, ((KeyRange&)*this), value);
 	}
 };
 template <class Val>
@@ -470,7 +475,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & ((VectorRef<KeyValueRef>&)*this) & more & readThrough & readToBegin & readThroughEnd;
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 };
 
@@ -492,7 +497,7 @@ struct KeyValueStoreType {
 	operator StoreType() const { return StoreType(type); }
 
 	template <class Ar>
-	void serialize(Ar& ar) { ar & type; }
+	void serialize(Ar& ar) { serializer(ar, type); }
 
 	std::string toString() const {
 		switch( type ) {
@@ -502,6 +507,82 @@ struct KeyValueStoreType {
 			case MEMORY: return "memory";
 			default: return "unknown";
 		}
+	}
+
+private:
+	uint32_t type;
+};
+
+struct TLogVersion {
+	enum Version {
+		UNSET = 0,
+		// Everything between BEGIN and END should be densely packed, so that we
+		// can iterate over them easily.
+		// V1 = 1,  // 4.6 is dispatched to via 6.0
+		V2 = 2, // 6.0
+		V3 = 3, // 6.1
+		MIN_SUPPORTED = V2,
+		MAX_SUPPORTED = V3,
+		MIN_RECRUITABLE = V2,
+		DEFAULT = V2,
+	} version;
+
+	TLogVersion() : version(UNSET) {}
+	TLogVersion( Version v ) : version(v) {}
+
+	operator Version() const {
+		return version;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		uint32_t v = (uint32_t)version;
+		serializer(ar, v);
+		version = (Version)v;
+	}
+
+	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
+		if (s == LiteralStringRef("2")) return V2;
+		if (s == LiteralStringRef("3")) return V3;
+		return default_error_or();
+	}
+};
+
+struct TLogSpillType {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	enum SpillType {
+		UNSET = 0,
+		DEFAULT = 1,
+		VALUE = 1,
+		REFERENCE = 2,
+		END = 3,
+	};
+
+	TLogSpillType() : type(DEFAULT) {}
+	TLogSpillType( SpillType type ) : type(type) {
+		if ((uint32_t)type >= END) {
+			this->type = UNSET;
+		}
+	}
+	operator SpillType() const { return SpillType(type); }
+
+	template <class Ar>
+	void serialize(Ar& ar) { serializer(ar, type); }
+
+	std::string toString() const {
+		switch( type ) {
+			case VALUE: return "value";
+			case REFERENCE: return "reference";
+			case UNSET: return "unset";
+			default: ASSERT(false);
+		}
+		return "";
+	}
+
+	static ErrorOr<TLogSpillType> FromStringRef( StringRef s ) {
+		if ( s == LiteralStringRef("1") ) return VALUE;
+		if ( s == LiteralStringRef("2") ) return REFERENCE;
+		return default_error_or();
 	}
 
 private:
@@ -520,7 +601,7 @@ struct StorageBytes {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & free & total & used & available;
+		serializer(ar, free, total, used, available);
 	}
 };
 
@@ -552,33 +633,21 @@ struct LogMessageVersion {
 };
 
 struct AddressExclusion {
-	uint32_t ip;
+	IPAddress ip;
 	int port;
 
 	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion( uint32_t ip ) : ip(ip), port(0) {}
-	explicit AddressExclusion( uint32_t ip, int port ) : ip(ip), port(port) {}
+	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
+	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
 
-	explicit AddressExclusion (std::string s) {
-		int a,b,c,d,p,count=-1;
-		if (sscanf(s.c_str(), "%d.%d.%d.%d:%d%n", &a,&b,&c,&d, &p, &count) == 5 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = p;
-		}
-		else if (sscanf(s.c_str(), "%d.%d.%d.%d%n", &a,&b,&c,&d, &count) == 4 && count == s.size()) {
-			ip = (a<<24)+(b<<16)+(c<<8)+d;
-			port = 0;
-		}
-		else {
-			throw connection_string_invalid();
-		}
+	bool operator<(AddressExclusion const& r) const {
+		if (ip != r.ip) return ip < r.ip;
+		return port < r.port;
 	}
-
-	bool operator< (AddressExclusion const& r) const { if (ip != r.ip) return ip < r.ip; return port<r.port; }
-	bool operator== (AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
+	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
 
 	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip != 0 || port != 0; }
+	bool isValid() const { return ip.isValid() || port != 0; }
 
 	bool excludes( NetworkAddress const& addr ) const {
 		if(isWholeMachine())
@@ -588,17 +657,16 @@ struct AddressExclusion {
 
 	// This is for debugging and IS NOT to be used for serialization to persistant state
 	std::string toString() const {
-		std::string as = format( "%d.%d.%d.%d", (ip>>24)&0xff, (ip>>16)&0xff, (ip>>8)&0xff, ip&0xff );
 		if (!isWholeMachine())
-			as += format(":%d", port);
-		return as;
+			return formatIpPort(ip, port);
+		return ip.toString();
 	}
 
 	static AddressExclusion parse( StringRef const& );
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		serializer(ar, ip, port);
 	}
 };
 
@@ -639,7 +707,79 @@ struct ClusterControllerPriorityInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & processClassFitness & isExcluded & dcFitness;
+		serializer(ar, processClassFitness, isExcluded, dcFitness);
+	}
+};
+
+struct HealthMetrics {
+	struct StorageStats {
+		int64_t storageQueue;
+		int64_t storageDurabilityLag;
+		double diskUsage;
+		double cpuUsage;
+
+		bool operator==(StorageStats const &r) const {
+			return (
+				(storageQueue == r.storageQueue) &&
+				(storageDurabilityLag == r.storageDurabilityLag) &&
+				(diskUsage == r.diskUsage) &&
+				(cpuUsage == r.cpuUsage)
+			);
+		}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, storageQueue, storageDurabilityLag, diskUsage, cpuUsage);
+		}
+	};
+
+	int64_t worstStorageQueue;
+	int64_t worstStorageDurabilityLag;
+	int64_t worstTLogQueue;
+	double tpsLimit;
+	bool batchLimited;
+	std::map<UID, StorageStats> storageStats;
+	std::map<UID, int64_t> tLogQueue;
+
+	HealthMetrics()
+		: worstStorageQueue(0)
+		, worstStorageDurabilityLag(0)
+		, worstTLogQueue(0)
+		, tpsLimit(0.0)
+		, batchLimited(false)
+	{}
+
+	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
+	{
+		worstStorageQueue = hm.worstStorageQueue;
+		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
+		worstTLogQueue = hm.worstTLogQueue;
+		tpsLimit = hm.tpsLimit;
+		batchLimited = hm.batchLimited;
+
+		if (!detailedOutput) {
+			storageStats.clear();
+			tLogQueue.clear();
+		} else if (detailedInput) {
+			storageStats = hm.storageStats;
+			tLogQueue = hm.tLogQueue;
+		}
+	}
+
+	bool operator==(HealthMetrics const& r) const {
+		return (
+			worstStorageQueue == r.worstStorageQueue &&
+			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
+			worstTLogQueue == r.worstTLogQueue &&
+			storageStats == r.storageStats &&
+			tLogQueue == r.tLogQueue &&
+			batchLimited == r.batchLimited
+		);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
 	}
 };
 

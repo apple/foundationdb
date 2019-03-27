@@ -868,7 +868,7 @@ template<> Future<int> chain<0>( Future<int> const& x ) {
 	return x;
 }
 
-Future<int> chain2( Future<int> const& x, int const& i );
+ACTOR Future<int> chain2(Future<int> x, int i);
 
 ACTOR Future<int> chain2( Future<int> x, int i ) {
 	if (i>1) {
@@ -925,7 +925,7 @@ struct AddReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & sum;
+		serializer(ar, sum);
 	}
 };
 
@@ -938,7 +938,7 @@ struct AddRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & a & b & reply;
+		serializer(ar, a, b, reply);
 	}
 };
 
@@ -1017,7 +1017,7 @@ ACTOR void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal){
 	loop{
 		waitNext(in);
 		(*ptotal)++;
-		out.send(_);
+		out.send(Void());
 	}
 }
 

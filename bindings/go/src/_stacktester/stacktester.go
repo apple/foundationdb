@@ -25,8 +25,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
 	"math/big"
 	"os"
@@ -37,6 +35,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 const verbose bool = false
@@ -104,7 +105,7 @@ func (sm *StackMachine) waitAndPop() (ret stackEntry) {
 	switch el := ret.item.(type) {
 	case []byte:
 		ret.item = el
-	case int64, uint64, *big.Int, string, bool, tuple.UUID, float32, float64, tuple.Tuple:
+	case int64, uint64, *big.Int, string, bool, tuple.UUID, float32, float64, tuple.Tuple, tuple.Versionstamp:
 		ret.item = el
 	case fdb.Key:
 		ret.item = []byte(el)
@@ -661,6 +662,24 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			t = append(t, sm.waitAndPop().item)
 		}
 		sm.store(idx, []byte(t.Pack()))
+	case op == "TUPLE_PACK_WITH_VERSIONSTAMP":
+		var t tuple.Tuple
+
+		prefix := sm.waitAndPop().item.([]byte)
+		c := sm.waitAndPop().item.(int64)
+		for i := 0; i < int(c); i++ {
+			t = append(t, sm.waitAndPop().item)
+		}
+
+		packed, err := t.PackWithVersionstamp(prefix)
+		if err != nil && strings.Contains(err.Error(), "No incomplete") {
+			sm.store(idx, []byte("ERROR: NONE"))
+		} else if err != nil {
+			sm.store(idx, []byte("ERROR: MULTIPLE"))
+		} else {
+			sm.store(idx, []byte("OK"))
+			sm.store(idx, packed)
+		}
 	case op == "TUPLE_UNPACK":
 		t, e := tuple.Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
 		if e != nil {
@@ -772,6 +791,15 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "UNIT_TESTS":
 		db.Options().SetLocationCacheSize(100001)
 		db.Options().SetMaxWatches(10001)
+		db.Options().SetDatacenterId("dc_id")
+		db.Options().SetMachineId("machine_id")
+		db.Options().SetTransactionTimeout(100000)
+		db.Options().SetTransactionTimeout(0)
+		db.Options().SetTransactionMaxRetryDelay(100)
+		db.Options().SetTransactionRetryLimit(10)
+		db.Options().SetTransactionRetryLimit(-1)
+		db.Options().SetSnapshotRywEnable()
+		db.Options().SetSnapshotRywDisable()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")
@@ -812,7 +840,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetRetryLimit(50)
 			tr.Options().SetMaxRetryDelay(100)
 			tr.Options().SetUsedDuringCommitProtectionDisable()
-			tr.Options().SetTransactionLoggingEnable("my_transaction")
+			tr.Options().SetDebugTransactionIdentifier("my_transaction")
+			tr.Options().SetLogTransaction()
 			tr.Options().SetReadLockAware()
 			tr.Options().SetLockAware()
 
@@ -893,7 +922,7 @@ func main() {
 		log.Fatal("API version not equal to value selected")
 	}
 
-	db, e = fdb.Open(clusterFile, []byte("DB"))
+	db, e = fdb.OpenDatabase(clusterFile)
 	if e != nil {
 		log.Fatal(e)
 	}

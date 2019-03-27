@@ -104,7 +104,7 @@ public:
 	static Reference<P> addRef( P* ptr ) { ptr->addref(); return Reference(ptr); }
 
 	Reference(const Reference& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
-	Reference(Reference && r) noexcept(true) : ptr(r.getPtr()) { r.ptr = NULL; }
+	Reference(Reference && r) BOOST_NOEXCEPT : ptr(r.getPtr()) { r.ptr = NULL; }
 
 	template <class Q>
 	Reference(const Reference<Q>& r) : ptr(r.getPtr()) { if (ptr) addref(ptr); }
@@ -122,7 +122,7 @@ public:
 		}
 		return *this;
 	}
-	Reference& operator=(Reference&& r) noexcept(true) {
+	Reference& operator=(Reference&& r) BOOST_NOEXCEPT {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
 		if (oldPtr != newPtr) {

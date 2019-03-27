@@ -23,6 +23,7 @@
 #include "fdbrpc/libcoroutine/Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 
 Coro *current_coro = 0, *main_coro = 0;

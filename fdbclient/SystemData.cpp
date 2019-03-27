@@ -374,11 +374,7 @@ const AddressExclusion decodeExcludedServersKey( KeyRef const& key ) {
 }
 std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
-	std::string as = format( "%d.%d.%d.%d", (addr.ip>>24)&0xff, (addr.ip>>16)&0xff, (addr.ip>>8)&0xff, addr.ip&0xff );
-	//ASSERT( StringRef(as).endsWith(LiteralStringRef(":0")) == (addr.port == 0) );
-	if (!addr.isWholeMachine())
-		as += format(":%d", addr.port);
-	return excludedServersPrefix.toString() + as;
+	return excludedServersPrefix.toString() + addr.toString();
 }
 
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
@@ -418,8 +414,12 @@ const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCom
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
 const KeyRef lastEpochEndPrivateKey = LiteralStringRef("\xff\xff/globals/lastEpochEnd");
+const KeyRef killStorageKey = LiteralStringRef("\xff/globals/killStorage");
+const KeyRef killStoragePrivateKey = LiteralStringRef("\xff\xff/globals/killStorage");
 const KeyRef rebootWhenDurableKey = LiteralStringRef("\xff/globals/rebootWhenDurable");
 const KeyRef rebootWhenDurablePrivateKey = LiteralStringRef("\xff\xff/globals/rebootWhenDurable");
+const KeyRef primaryLocalityKey = LiteralStringRef("\xff/globals/primaryLocality");
+const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/primaryLocality");
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
@@ -433,6 +433,9 @@ const UID dataDistributionModeLock = UID(6345,3425);
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
 const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+
+// Request latency measurement key
+const KeyRef latencyBandConfigKey = LiteralStringRef("\xff\x02/latencyBandConfig");
 
 // Keyspace to maintain wall clock to version map
 const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/map/"), LiteralStringRef("\xff\x02/timeKeeper/map0"));
@@ -583,6 +586,8 @@ std::pair<MetricNameRef, KeyRef> decodeMetricConfKey( KeyRef const& prefix, KeyR
 const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
+const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
+const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
 
 const KeyRangeRef monitorConfKeys(

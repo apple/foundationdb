@@ -35,6 +35,7 @@
 #include "flow/CompressedInt.h"
 #include <algorithm>
 #include <functional>
+#include <cmath>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricNameRef {
@@ -182,8 +183,7 @@ public:
 		// Get and store the local address in the metric collection, but only if it is not 0.0.0.0:0
 		if( address.size() == 0 ) {
 			NetworkAddress addr = g_network->getLocalAddress();
-			if(addr.ip != 0 && addr.port != 0)
-				address = StringRef(addr.toString());
+			if (addr.ip.isValid() && addr.port != 0) address = StringRef(addr.toString());
 		}
 		return address.size() != 0;
 	}
@@ -216,14 +216,14 @@ struct MetricData {
 		appendStart(appendStart) {
 	}
 
-	MetricData( MetricData&& r ) noexcept(true) :
+	MetricData( MetricData&& r ) BOOST_NOEXCEPT :
 		start(r.start),
 		rollTime(r.rollTime),
 		appendStart(r.appendStart),
 		writer(std::move(r.writer)) {
 	}
 
-	void operator=( MetricData&& r ) noexcept(true) {
+	void operator=( MetricData&& r ) BOOST_NOEXCEPT {
 		start = r.start; rollTime = r.rollTime; appendStart = r.appendStart; writer = std::move(r.writer);
 	}
 
@@ -316,7 +316,14 @@ auto tuple_map(F f, const Tuple &t, const Tuples &... ts) -> decltype( tuple_map
 }
 
 template <class T>
-struct Descriptor {};
+struct Descriptor {
+#ifndef NO_INTELLISENSE
+	using fields = std::tuple<>;
+	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
+
+	static StringRef typeName() {{ return LiteralStringRef(""); }}
+#endif
+};
 
 // FieldHeader is a serializable (FIXED SIZE!) and updatable Header type for Metric field levels.
 // Update is via += with either a T or another FieldHeader
@@ -338,9 +345,9 @@ struct FieldHeader {
 		sum += v;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & sum;
+		serializer(ar, count, sum);
 	}
 };
 
@@ -619,9 +626,9 @@ template <class T, class Descriptor = NullDescriptor, class FieldLevelType = Fie
 struct EventField : public Descriptor {
 	std::vector<FieldLevelType> levels;
 
-	EventField( EventField&& r ) noexcept(true) : Descriptor(r), levels(std::move(r.levels)) {}
+	EventField( EventField&& r ) BOOST_NOEXCEPT : Descriptor(r), levels(std::move(r.levels)) {}
 
-	void operator=( EventField&& r ) noexcept(true) {
+	void operator=( EventField&& r ) BOOST_NOEXCEPT {
 		levels = std::move(r.levels);
 	}
 
@@ -818,23 +825,29 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void logFields(index_sequence<Is...>, uint64_t t, int64_t l, bool& overflow, int64_t& bytes) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).log( std::tuple_element<Is, typename Descriptor<E>::fields>::type::get( static_cast<E&>(*this) ), t, l, overflow, bytes ), Void())...
 		};
+#endif
 	}
 
 	template <size_t... Is>
 	void initFields(index_sequence<Is...>) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).init(), Void())...
 		};
+#endif
 	}
 
 	template <size_t... Is>
 	void nextKeys(index_sequence<Is...>, uint64_t t, int64_t l ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).nextKey(t, l),Void())...
 		};
+#endif
 	}
 
 	virtual void flushData(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
@@ -848,9 +861,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void flushFields(index_sequence<Is...>, MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).flushField( mk, rollTime, batch ),Void())...
 		};
+#endif
 	}
 
 	virtual void rollMetric( uint64_t t ) {
@@ -860,9 +875,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void rollFields(index_sequence<Is...>, uint64_t t ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).rollMetric( t ),Void())...
 		};
+#endif
 	}
 
 	virtual void registerFields( MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys ) {
@@ -872,9 +889,11 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 
 	template <size_t... Is>
 	void registerFields(index_sequence<Is...>, const MetricKeyRef &mk, std::vector<Standalone<StringRef>>& fieldKeys ) {
+#ifdef NO_INTELLISENSE
 		auto _ = {
 			(std::get<Is>(values).registerField( mk, fieldKeys ),Void())...
 		};
+#endif
 	}
 protected:
     bool it;
@@ -1126,9 +1145,9 @@ struct FieldHeader<TimeAndValue<T>> {
 		previous_time = v.time;
 	}
 	template<class Ar> void serialize(Ar &ar) {
-		ar & version;
+		serializer(ar, version);
 		ASSERT(version == 1);
-		ar & count & area;
+		serializer(ar, count, area);
 	}
 };
 

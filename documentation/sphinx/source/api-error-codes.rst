@@ -100,7 +100,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_invalid_version                   | 2020| Transaction does not have a valid commit version                               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| transaction_read_only                         | 2021| Transaction is read-only and therefore does not have a commit version          |
+| no_commit_version                             | 2021| Transaction is read-only and therefore does not have a commit version          |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | environment_variable_network_option_failed    | 2022| Environment variable network option could not be set                           |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

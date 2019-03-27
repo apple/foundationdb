@@ -1,6 +1,11 @@
 export
 PLATFORM := $(shell uname)
 ARCH := $(shell uname -m)
+ifeq ("$(wildcard /etc/centos-release)", "")
+	LIBSTDCPP_HACK = 1
+else
+	LIBSTDCPP_HACK = 0
+endif
 
 TOPDIR := $(shell pwd)
 
@@ -15,13 +20,12 @@ ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-DMCS := $(shell which dmcs)
 MCS := $(shell which mcs)
-ifneq ($(DMCS),)
-  MCS := $(DMCS)
+ifeq ($(MCS),)
+  MCS := $(shell which dmcs) 
 endif
 ifeq ($(MCS),)
-  MCS := /usr/bin/dmcs
+  MCS := /usr/bin/mcs
 endif
 
 CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
@@ -32,6 +36,7 @@ ifeq ($(NIGHTLY),true)
 	CFLAGS += -DFDB_CLEAN_BUILD
 endif
 
+BOOST_BASENAME ?= boost_1_67_0
 ifeq ($(PLATFORM),Linux)
   PLATFORM := linux
 
@@ -40,7 +45,7 @@ ifeq ($(PLATFORM),Linux)
 
   CXXFLAGS += -std=c++0x
 
-  BOOSTDIR ?= /opt/boost_1_52_0
+  BOOST_BASEDIR ?= /opt
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
@@ -56,13 +61,14 @@ else ifeq ($(PLATFORM),Darwin)
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
-  BOOSTDIR ?= $(HOME)/boost_1_52_0
+  BOOST_BASEDIR ?= ${HOME}
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
   $(error Not prepared to compile on platform $(PLATFORM))
 endif
+BOOSTDIR ?= ${BOOST_BASEDIR}/${BOOST_BASENAME}
 
 CCACHE := $(shell which ccache)
 ifneq ($(CCACHE),)
@@ -71,6 +77,12 @@ ifneq ($(CCACHE),)
 else
   CCACHE_CC := $(CC)
   CCACHE_CXX := $(CXX)
+endif
+
+# Default variables don't get pushed into the environment, but scripts in build/
+# rely on the existence of CC in the environment.
+ifeq ($(origin CC), default)
+  CC := $(CC)
 endif
 
 ACTORCOMPILER := bin/actorcompiler.exe
@@ -99,7 +111,7 @@ FDB_TLS_LIB := lib/libFDBLibTLS.a
 TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
 endif
 
-CXXFLAGS += -Wno-deprecated
+CXXFLAGS += -Wno-deprecated -DBOOST_ERROR_CODE_HEADER_ONLY -DBOOST_SYSTEM_NO_DEPRECATED
 LDFLAGS :=
 LIBS :=
 STATIC_LIBS :=
@@ -199,6 +211,7 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	done
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
+
 
 docpreview: javadoc
 	@echo "Generating     docpreview"

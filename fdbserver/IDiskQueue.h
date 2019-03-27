@@ -25,6 +25,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IKeyValueStore.h"
 
+enum class CheckHashes {
+	NO,
+	YES,
+};
+
 class IDiskQueue : public IClosable {
 public:
 	struct location {
@@ -34,18 +39,39 @@ public:
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
 		operator std::string() { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
 
+		template<class Ar>
+		void serialize_unversioned(Ar& ar) {
+			serializer(ar, hi, lo);
+		}
+
 		bool operator < (location const& r) const {
 			if (hi<r.hi) return true;
 			if (hi>r.hi) return false;
 			return lo < r.lo;
 		}
+
+		bool operator == (const location& r) const {
+			return hi == r.hi && lo == r.lo;
+		}
 	};
 
+	//! Find the first and last pages in the disk queue, and initialize invariants.
+	//!
+	//! Most importantly, most invariants only hold after this function returns, and
+	//! some functions assert that the IDiskQueue has been initialized.
+	//!
+	//! \param recoverAt The minimum location from which to start recovery.
+	//! \returns True, if DiskQueue is now considered in a recovered state.
+	//!          False, if the caller should call readNext until recovered is true.
+	virtual Future<bool> initializeRecovery(location recoverAt) = 0;
 	// Before calling push or commit, the caller *must* perform recovery by calling readNext() until it returns less than the requested number of bytes.
 	// Thereafter it may not be called again.
 	virtual Future<Standalone<StringRef>> readNext( int bytes ) = 0;  // Return the next bytes in the queue (beginning, the first time called, with the first unpopped byte)
 	virtual location getNextReadLocation() = 0;    // Returns a location >= the location of all bytes previously returned by readNext(), and <= the location of all bytes subsequently returned
+	virtual location getNextCommitLocation() = 0;  // If commit() were to be called, all buffered writes would be written starting at `location`.
+	virtual location getNextPushLocation() = 0;  // If push() were to be called, the pushed data would be written starting at `location`.
 
+	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes vc ) = 0;
 	virtual location push( StringRef contents ) = 0;  // Appends the given bytes to the byte stream.  Returns a location token representing the *end* of the contents.
 	virtual void pop( location upTo ) = 0;            // Removes all bytes before the given location token from the byte stream.
 	virtual Future<Void> commit() = 0;  // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.
@@ -55,6 +81,28 @@ public:
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
-IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
+// FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
+template <class Ar> void load( Ar& ar, IDiskQueue::location& loc ) { loc.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, const IDiskQueue::location& loc ) { const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar); }
+
+namespace std {
+template<>
+struct numeric_limits<IDiskQueue::location> {
+	static IDiskQueue::location max() {
+		int64_t max64 = numeric_limits<int64_t>::max();
+		return IDiskQueue::location(max64, max64);
+	};
+	static IDiskQueue::location min() {
+		return IDiskQueue::location(0, 0);
+	}
+};
+}
+
+enum class DiskQueueVersion : uint16_t {
+	V0 = 0,
+	V1 = 1,
+};
+
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

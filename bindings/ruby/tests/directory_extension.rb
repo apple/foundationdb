@@ -157,10 +157,10 @@ module DirectoryExtension
           exists = directory.exists?(inst.tr)
           children = exists ? directory.list(inst.tr) : []
           log_subspace = FDB::Subspace.new([@dir_index], inst.wait_and_pop)
-          inst.tr[log_subspace['path']] = FDB::Tuple.pack(directory.path)
-          inst.tr[log_subspace['layer']] = FDB::Tuple.pack([directory.layer])
-          inst.tr[log_subspace['exists']] = FDB::Tuple.pack([exists ? 1 : 0])
-          inst.tr[log_subspace['children']] = FDB::Tuple.pack(children)
+          inst.tr[log_subspace['path'.encode('utf-8')]] = FDB::Tuple.pack(directory.path)
+          inst.tr[log_subspace['layer'.encode('utf-8')]] = FDB::Tuple.pack([directory.layer])
+          inst.tr[log_subspace['exists'.encode('utf-8')]] = FDB::Tuple.pack([exists ? 1 : 0])
+          inst.tr[log_subspace['children'.encode('utf-8')]] = FDB::Tuple.pack(children)
         elsif inst.op == 'DIRECTORY_STRIP_PREFIX'
           str = inst.wait_and_pop
           throw "String #{str} does not start with raw prefix #{directory.key}" if !str.start_with?(directory.key)

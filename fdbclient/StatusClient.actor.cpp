@@ -28,6 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {
 	json_spirit::mValue val;
@@ -219,7 +220,7 @@ void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue
 			try {
 				dst = mergeOperator<json_spirit::mValue>(op, aObj, bObj, a, b);
 				return;
-			} catch(std::exception &e) {
+			} catch(std::exception&) {
 			}
 
 			// Now try type and type pair specific operators
@@ -300,7 +301,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().address.toString();
+			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
 			
 			if (leaderServers[i].isReady()){
 				coordStatus["reachable"] = true;
@@ -373,6 +374,9 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, S
 					if (result.getError().code() == error_code_request_maybe_delivered)
 						messages->push_back(makeMessage("unreachable_cluster_controller", 
 							("Unable to communicate with the cluster controller at " + cI.address().toString() + " to get status.").c_str()));
+					else if (result.getError().code() == error_code_server_overloaded)
+						messages->push_back(makeMessage("server_overloaded",
+							"The cluster controller is currently processing too many status requests and is unable to respond"));
 					else
 						messages->push_back(makeMessage("status_incomplete_error", "Cluster encountered an error fetching status."));
 				}
@@ -437,7 +441,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 							|| !client.at("cluster_file.up_to_date").get_bool());
 		}
 	}
-	catch(std::exception &e)
+	catch(std::exception&)
 	{
 		// As documented above, exceptions leave isAvailable and isHealthy in the right state
 	}
@@ -458,11 +462,11 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	// This could be read from the JSON but doing so safely is ugly so using a real var.
 	state bool quorum_reachable = false;
 	state int coordinatorsFaultTolerance = 0;
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 
 	try {
 		state int64_t clientTime = time(0);
 
-		state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));

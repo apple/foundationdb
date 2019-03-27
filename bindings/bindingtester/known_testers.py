@@ -62,6 +62,6 @@ testers = {
     'ruby': Tester('ruby', _absolute_path('ruby/tests/tester.rb'), 2040, 23, MAX_API_VERSION),
     'java': Tester('java', _java_cmd + 'StackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
     'java_async': Tester('java', _java_cmd + 'AsyncStackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
-    'go': Tester('go', _absolute_path('go/build/bin/_stacktester'), 2040, 200, MAX_API_VERSION),
+    'go': Tester('go', _absolute_path('go/build/bin/_stacktester'), 2040, 200, MAX_API_VERSION, types=ALL_TYPES),
     'flow': Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION, directory_snapshot_ops_enabled=False),
 }

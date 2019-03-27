@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
@@ -413,7 +412,11 @@ public class AsyncStackTester {
 				return inst.popParams(listSize).thenAcceptAsync(rawElements -> {
 					List<Tuple> tuples = new ArrayList<>(listSize);
 					for(Object o : rawElements) {
-						tuples.add(Tuple.fromBytes((byte[])o));
+						// Unpacking a tuple keeps around the serialized representation and uses
+						// it for comparison if it's available. To test semantic comparison, recreate
+						// the tuple from the item list.
+						Tuple t = Tuple.fromBytes((byte[])o);
+						tuples.add(Tuple.fromList(t.getItems()));
 					}
 					Collections.sort(tuples);
 					for(Tuple t : tuples) {
@@ -472,6 +475,20 @@ public class AsyncStackTester {
 						throw e;
 					}
 				}
+
+				Database db = tr.getDatabase();
+				db.options().setLocationCacheSize(100001);
+				db.options().setMaxWatches(10001);
+				db.options().setDatacenterId("dc_id");
+				db.options().setMachineId("machine_id");
+				db.options().setTransactionTimeout(100000);
+				db.options().setTransactionTimeout(0);
+				db.options().setTransactionMaxRetryDelay(100);
+				db.options().setTransactionRetryLimit(10);
+				db.options().setTransactionRetryLimit(-1);
+				db.options().setSnapshotRywEnable();
+				db.options().setSnapshotRywDisable();
+
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
 				tr.options().setCausalReadRisky();
@@ -483,7 +500,8 @@ public class AsyncStackTester {
 				tr.options().setRetryLimit(50);
 				tr.options().setMaxRetryDelay(100);
 				tr.options().setUsedDuringCommitProtectionDisable();
-				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setDebugTransactionIdentifier("my_transaction");
+				tr.options().setLogTransaction();
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
 
@@ -723,9 +741,7 @@ public class AsyncStackTester {
 			throw new IllegalStateException("API version not correctly set to " + apiVersion);
 		}
 		//ExecutorService executor = Executors.newFixedThreadPool(2);
-		Cluster cl = fdb.createCluster(args.length > 2 ? args[2] : null);
-
-		Database db = cl.openDatabase();
+		Database db = fdb.open(args.length > 2 ? args[2] : null);
 
 		Context c = new AsynchronousContext(db, prefix);
 		//System.out.println("Starting test...");

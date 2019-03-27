@@ -46,10 +46,10 @@ static int send_func(void* ctx, const uint8_t* buf, int len) {
 		int w = conn->conn->write( &sb );
 		return w;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionSendError", conn->getDebugID()).suppressFor(1.0).detail("Peer", conn->getPeerAddress().toString()).error(e);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionSendError", conn->getDebugID()).suppressFor(1.0).detail("Peer", conn->getPeerAddress()).error( unknown_error() );
 		return -1;
 	}
 }
@@ -62,10 +62,10 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 		int r = conn->conn->read( buf, buf + len );
 		return r;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).suppressFor(1.0).detail("Peer", conn->getPeerAddress()).error(e);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).suppressFor(1.0).detail("Peer", conn->getPeerAddress()).error( unknown_error() );
 		return -1;
 	}
 }
@@ -75,7 +75,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		int r = self->session->handshake();
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
-			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0);
+			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
@@ -177,7 +177,7 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 		// addresses against certificates, so we have our own peer verifying logic
 		// to use. For FDB<->external system connections, we can use the standard
 		// hostname-based certificate verification logic.
-		if (host.empty() || host == toIPString(toAddr.ip))
+		if (host.empty() || host == toAddr.ip.toString())
 			return wrap(options->get_policy(TLSOptions::POLICY_VERIFY_PEERS), true, network->connect(clearAddr), std::string(""));
 		else
 			return wrap( options->get_policy(TLSOptions::POLICY_NO_VERIFY_PEERS), true, network->connect( clearAddr ), host );
@@ -206,8 +206,8 @@ void TLSOptions::set_cert_file( std::string const& cert_file ) {
 		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
 		policyInfo.cert_path = cert_file;
 		set_cert_data( readFileBytes( cert_file, CERT_FILE_MAX_SIZE ) );
-	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file);
+	} catch ( Error& e) {
+		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file).error(e).GetLastError();
 		throw;
 	}
 }
@@ -218,8 +218,8 @@ void TLSOptions::set_ca_file(std::string const& ca_file) {
 		policyInfo.ca_path = ca_file;
 		set_ca_data(readFileBytes(ca_file, CERT_FILE_MAX_SIZE));
 	}
-	catch (Error&) {
-		TraceEvent(SevError, "TLSOptionsSetCertAError").detail("Filename", ca_file);
+	catch (Error& e) {
+		TraceEvent(SevError, "TLSOptionsSetCertAError").detail("Filename", ca_file).error(e).GetLastError();
 		throw;
 	}
 }
@@ -262,8 +262,8 @@ void TLSOptions::set_key_file( std::string const& key_file ) {
 		TraceEvent("TLSConnectionSettingKeyFile").detail("KeyFilePath", key_file);
 		policyInfo.key_path = key_file;
 		set_key_data( readFileBytes( key_file, CERT_FILE_MAX_SIZE ) );
-	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetKeyFileError").detail("Filename", key_file);
+	} catch ( Error& e) {
+		TraceEvent(SevError, "TLSOptionsSetKeyFileError").detail("Filename", key_file).error(e).GetLastError();
 		throw;
 	}
 }

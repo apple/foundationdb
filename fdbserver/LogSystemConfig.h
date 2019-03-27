@@ -45,8 +45,8 @@ struct OptionalInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & iface;
-		if( !iface.present() ) ar & ident;
+		serializer(ar, iface);
+		if( !iface.present() ) serializer(ar, ident);
 		else ident = iface.get().id();
 	}
 
@@ -60,7 +60,8 @@ struct TLogSet {
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
-	IRepPolicyRef tLogPolicy;
+	TLogVersion tLogVersion;
+	Reference<IReplicationPolicy> tLogPolicy;
 	bool isLocal;
 	int8_t locality;
 	Version startVersion;
@@ -111,7 +112,13 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & locality & startVersion & satelliteTagLocations;
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			tLogVersion = TLogVersion::V2;
+		} else {
+			serializer(ar, tLogVersion);
+		}
+		ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
 	}
 };
 
@@ -144,7 +151,7 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & epochEnd & logRouterTags;
+		serializer(ar, tLogs, epochEnd, logRouterTags);
 	}
 };
 
@@ -190,13 +197,13 @@ struct LogSystemConfig {
 		return results;
 	}
 
-	int8_t getLocalityForDcId(Optional<Key> dcId) const {
+	std::pair<int8_t,int8_t> getLocalityForDcId(Optional<Key> dcId) const {
 		std::map<int8_t, int> matchingLocalities;
 		std::map<int8_t, int> allLocalities;
 		for( auto& tLogSet : tLogs ) {
 			for( auto& tLog : tLogSet.tLogs ) {
-				if( tLog.present() && tLogSet.locality >= 0 ) {
-					if( tLog.interf().locality.dcId() == dcId ) {
+				if( tLogSet.locality >= 0 ) {
+					if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
 						matchingLocalities[tLogSet.locality]++;
 					} else {
 						allLocalities[tLogSet.locality]++;
@@ -208,8 +215,8 @@ struct LogSystemConfig {
 		for(auto& oldLog : oldTLogs) {
 			for( auto& tLogSet : oldLog.tLogs ) {
 				for( auto& tLog : tLogSet.tLogs ) {
-					if( tLog.present() && tLogSet.locality >= 0 ) {
-						if( tLog.interf().locality.dcId() == dcId ) {
+					if( tLogSet.locality >= 0 ) {
+						if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
 							matchingLocalities[tLogSet.locality]++;
 						} else {
 							allLocalities[tLogSet.locality]++;
@@ -219,31 +226,37 @@ struct LogSystemConfig {
 			}
 		}
 
-		if(!matchingLocalities.empty()) {
-			int8_t bestLocality = -1;
-			int bestLocalityCount = -1;
-			for(auto& it : matchingLocalities) {
-				if(it.second > bestLocalityCount) {
-					bestLocality = it.first;
-					bestLocalityCount = it.second;
-				}
+		int8_t bestLoc = tagLocalityInvalid;
+		int bestLocalityCount = -1;
+		for(auto& it : matchingLocalities) {
+			if(it.second > bestLocalityCount) {
+				bestLoc = it.first;
+				bestLocalityCount = it.second;
 			}
-			return bestLocality;
 		}
 
-		if(!allLocalities.empty()) {
-			int8_t bestLocality = -1;
-			int bestLocalityCount = -1;
-			for(auto& it : allLocalities) {
-				if(it.second > bestLocalityCount) {
-					bestLocality = it.first;
-					bestLocalityCount = it.second;
+		int8_t secondLoc = tagLocalityInvalid;
+		int8_t thirdLoc = tagLocalityInvalid;
+		int secondLocalityCount = -1;
+		int thirdLocalityCount = -1;
+		for(auto& it : allLocalities) {
+			if(bestLoc != it.first) {
+				if(it.second > secondLocalityCount) {
+					thirdLoc = secondLoc;
+					thirdLocalityCount = secondLocalityCount;
+					secondLoc = it.first;
+					secondLocalityCount = it.second;
+				} else if(it.second > thirdLocalityCount) {
+					thirdLoc = it.first;
+					thirdLocalityCount = it.second;
 				}
 			}
-			return bestLocality;
 		}
 
-		return tagLocalityInvalid;
+		if(bestLoc != tagLocalityInvalid) {
+			return std::make_pair(bestLoc, secondLoc);
+		}
+		return std::make_pair(secondLoc, thirdLoc);
 	}
 
 	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
@@ -304,7 +317,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & recoveredAt;
+		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt);
 	}
 };
 

@@ -71,7 +71,7 @@ struct LoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar &ar) {
-		ar & penalty;
+		serializer(ar, penalty);
 	}
 };
 

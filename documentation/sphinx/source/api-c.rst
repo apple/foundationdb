@@ -13,7 +13,6 @@
 .. |reset-func-name| replace:: :func:`reset <fdb_transaction_reset()>`
 .. |reset-func| replace:: :func:`fdb_transaction_reset()`
 .. |cancel-func| replace:: :func:`fdb_transaction_cancel()`
-.. |init-func| replace:: FIXME
 .. |open-func| replace:: FIXME
 .. |set-cluster-file-func| replace:: FIXME
 .. |set-local-address-func| replace:: FIXME
@@ -292,22 +291,6 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-memory-mine|
 
-.. function:: fdb_error_t fdb_future_get_cluster(FDBFuture* future, FDBCluster** out_cluster)
-
-   Extracts a value of type :type:`FDBCluster*` from an :type:`FDBFuture` into a caller-provided variable. |future-warning|
-
-   |future-get-return1| |future-get-return2|.
-
-   |future-memory-yours1| :type:`FDBCluster` |future-memory-yours2| :func:`fdb_cluster_destroy()` |future-memory-yours3|
-
-.. function:: fdb_error_t fdb_future_get_database(FDBFuture* future, FDBDatabase** out_database)
-
-   Extracts a value of type :type:`FDBDatabase*` from an :type:`FDBFuture` into a caller-provided variable. |future-warning|
-
-   |future-get-return1| |future-get-return2|.
-
-   |future-memory-yours1| :type:`FDBDatabase` |future-memory-yours2| ``fdb_database_destroy(*out_database)`` |future-memory-yours3|
-
 .. function:: fdb_error_t fdb_future_get_value(FDBFuture* future, fdb_bool_t* out_present, uint8_t const** out_value, int* out_value_length)
 
    Extracts a database value from an :type:`FDBFuture` into caller-provided variables. |future-warning|
@@ -379,42 +362,6 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
    :data:`value_length`
       The length of the value pointed to by :data:`value`.
 
-Cluster
-=======
-
-.. type:: FDBCluster
-
-   An opaque type that represents a Cluster in the FoundationDB C API.
-
-.. function:: FDBFuture* fdb_create_cluster(const char* cluster_file_path)
-
-   |future-return0| an :type:`FDBCluster` object. |future-return1| call :func:`fdb_future_get_cluster()` to extract the :type:`FDBCluster` object, |future-return2|
-
-   :data:`cluster_file_path`
-      A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
-
-.. function:: void fdb_cluster_destroy(FDBCluster* cluster)
-
-   Destroys an :type:`FDBCluster` object. It must be called exactly once for each successful call to :func:`fdb_future_get_cluster()`. This function only destroys a handle to the cluster -- your cluster will be fine!
-
-.. function:: fdb_error_t fdb_cluster_set_option(FDBCluster* cluster, FDBClusterOption option, uint8_t const* value, int value_length)
-
-   Called to set an option on an :type:`FDBCluster`. |option-parameter| :func:`fdb_cluster_set_option()` returns.
-
-.. type:: FDBClusterOption
-
-   |option-doc|
-
-.. function:: FDBFuture* fdb_cluster_create_database(FDBCluster *cluster, uint8_t const* db_name, int db_name_length)
-
-   |future-return0| an :type:`FDBDatabase` object. |future-return1| call :func:`fdb_future_get_database()` to extract the :type:`FDBDatabase` object, |future-return2|
-
-   :data:`db_name`
-      A pointer to the name of the database to be opened. |no-null| In the current FoundationDB API, the database name *must* be "DB".
-
-   :data:`db_name_length`
-      |length-of| :data:`db_name`.
-
 Database
 ========
 
@@ -424,9 +371,19 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    An opaque type that represents a database in the FoundationDB C API.
 
+.. function:: fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database)
+
+   Creates a new database connected the specified cluster. The caller assumes ownership of the :type:`FDBDatabase` object and must destroy it with :func:`fdb_database_destroy()`.
+
+   :data:`cluster_file_path`
+      A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
+
+   :data:`*out_database`
+      Set to point to the newly created :type:`FDBDatabase`.
+
 .. function:: void fdb_database_destroy(FDBDatabase* database)
 
-   Destroys an :type:`FDBDatabase` object. It must be called exactly once for each successful call to :func:`fdb_future_get_database()`. This function only destroys a handle to the database -- your database will be fine!
+   Destroys an :type:`FDBDatabase` object. It must be called exactly once for each successful call to :func:`fdb_create_database()`. This function only destroys a handle to the database -- your database will be fine!
 
 .. function:: fdb_error_t fdb_database_set_option(FDBDatabase* database, FDBDatabaseOption option, uint8_t const* value, int value_length)
 

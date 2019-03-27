@@ -453,6 +453,16 @@ class Tester
           FDB::api_version(api_version)
           begin
             @db.options.set_location_cache_size(100001)
+            @db.options.set_max_watches(10001)
+            @db.options.set_datacenter_id("dc_id")
+            @db.options.set_machine_id("machine_id")
+            @db.options.set_transaction_timeout(100000)
+            @db.options.set_transaction_timeout(0)
+            @db.options.set_transaction_max_retry_delay(100)
+            @db.options.set_transaction_retry_limit(10)
+            @db.options.set_transaction_retry_limit(-1)
+            @db.options.set_snapshot_ryw_enable()
+            @db.options.set_snapshot_ryw_disable()
 
             @db.transact do |tr|
               tr.options.set_priority_system_immediate
@@ -466,7 +476,8 @@ class Tester
               tr.options.set_retry_limit(50)
               tr.options.set_max_retry_delay(100)
               tr.options.set_used_during_commit_protection_disable
-              tr.options.set_transaction_logging_enable('my_transaction')
+              tr.options.set_debug_transaction_identifier('my_transaction')
+              tr.options.set_log_transaction()
               tr.options.set_read_lock_aware()
               tr.options.set_lock_aware()
 

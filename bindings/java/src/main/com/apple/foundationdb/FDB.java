@@ -54,8 +54,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   to call {@link #open}.
  *  <br>
  *  <h3>Client networking</h3>
- *  The network is started either implicitly with a call to a variant of {@link #open()} or
- *   {@link #createCluster()}, or started explicitly with a call to {@link #startNetwork()}.
+ *  The network is started either implicitly with a call to a variant of {@link #open()}
+ *  or started explicitly with a call to {@link #startNetwork()}.
  *  <br>
  *
  */
@@ -114,8 +114,8 @@ public class FDB {
 	 * Returns a set of options that can be set on a the FoundationDB API. Generally,
 	 *  these options to the top level of the API affect the networking engine and
 	 *  therefore must be set before the network engine is started. The network is started
-	 *  by calls to {@link #startNetwork()} and implicitly by calls to {@link #open()} and
-	 *  {@link #createCluster()} (and their respective variants).
+	 *  by calls to {@link #startNetwork()} or implicitly by a call to {@link #open()} and
+	 *  and its variants.
 	 *
 	 * @return a set of options affecting this instance of the FoundationDB API
 	 */
@@ -218,11 +218,14 @@ public class FDB {
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
+	 * @deprecated Use {@link #open()} instead.
+	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
 	 */
+	@Deprecated
 	public Cluster createCluster() throws IllegalStateException, FDBException {
 		return createCluster(null);
 	}
@@ -231,6 +234,8 @@ public class FDB {
 	 * Connects to the cluster specified by {@code clusterFilePath}. If the FoundationDB network
 	 *  has not been started, it will be started in the course of this call as if
 	 *  {@link #startNetwork()} had been called.
+	 *
+	 * @deprecated Use {@link #open(String)} instead.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -243,6 +248,7 @@ public class FDB {
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
 	 */
+	@Deprecated
 	public Cluster createCluster(String clusterFilePath) throws IllegalStateException, FDBException {
 		return createCluster(clusterFilePath, DEFAULT_EXECUTOR);
 	}
@@ -252,6 +258,8 @@ public class FDB {
 	 *  has not been started, it will be started in the course of this call. The supplied
 	 *  {@link Executor} will be used as the default for the execution of all callbacks that
 	 *  are produced from using the resulting {@link Cluster}.
+	 *
+	 * @deprecated Use {@link #open(String, Executor)} instead.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -265,16 +273,10 @@ public class FDB {
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
 	 */
+	@Deprecated
 	public Cluster createCluster(String clusterFilePath, Executor e)
 			throws FDBException, IllegalStateException {
-		FutureCluster f;
-		synchronized (this) {
-			if (!isConnected()) {
-				startNetwork();
-			}
-			f = new FutureCluster(Cluster_create(clusterFilePath), e);
-		}
-		return f.join();
+		return new Cluster(clusterFilePath, e);
 	}
 
 	/**
@@ -318,26 +320,21 @@ public class FDB {
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open(String clusterFilePath, Executor e) throws FDBException {
-		FutureCluster f;
-		synchronized (this) {
-			if (!isConnected()) {
+		synchronized(this) {
+			if(!isConnected()) {
 				startNetwork();
 			}
-			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
-		Cluster c = f.join();
-		Database db = c.openDatabase(e);
-		c.close();
 
-		return db;
+		return new FDBDatabase(Database_create(clusterFilePath), e);
 	}
 
 	/**
 	 * Initializes networking. Can only be called once. This version of
 	 * {@code startNetwork()} will create a new thread and execute the networking
-	 * event loop on that thread. This method is called upon {@link Database} or
-	 * {@link Cluster} creation by default if the network has not yet
-	 * been started. If one wishes to control what thread the network runs on,
+	 * event loop on that thread. This method is called upon {@link Database}
+	 * creation by default if the network has not yet been started. If one
+	 * wishes to control what thread the network runs on,
 	 * one should use the version of {@link #startNetwork(Executor) startNetwork()}
 	 * that takes an {@link Executor}.<br>
 	 * <br>
@@ -472,5 +469,5 @@ public class FDB {
 
 	private native boolean Error_predicate(int predicate, int code);
 
-	private native long Cluster_create(String clusterFileName);
+	private native long Database_create(String clusterFilePath) throws FDBException;
 }

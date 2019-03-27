@@ -50,7 +50,7 @@ else ifeq ($(PLATFORM),osx)
   java_ARCH := x86_64
 endif
 
-JAVA_GENERATED_SOURCES := bindings/java/src/main/com/apple/foundationdb/NetworkOptions.java bindings/java/src/main/com/apple/foundationdb/ClusterOptions.java bindings/java/src/main/com/apple/foundationdb/DatabaseOptions.java bindings/java/src/main/com/apple/foundationdb/TransactionOptions.java bindings/java/src/main/com/apple/foundationdb/StreamingMode.java bindings/java/src/main/com/apple/foundationdb/ConflictRangeType.java bindings/java/src/main/com/apple/foundationdb/MutationType.java bindings/java/src/main/com/apple/foundationdb/FDBException.java
+JAVA_GENERATED_SOURCES := bindings/java/src/main/com/apple/foundationdb/NetworkOptions.java bindings/java/src/main/com/apple/foundationdb/DatabaseOptions.java bindings/java/src/main/com/apple/foundationdb/TransactionOptions.java bindings/java/src/main/com/apple/foundationdb/StreamingMode.java bindings/java/src/main/com/apple/foundationdb/ConflictRangeType.java bindings/java/src/main/com/apple/foundationdb/MutationType.java bindings/java/src/main/com/apple/foundationdb/FDBException.java
 
 JAVA_SOURCES := $(JAVA_GENERATED_SOURCES) bindings/java/src/main/com/apple/foundationdb/*.java bindings/java/src/main/com/apple/foundationdb/async/*.java bindings/java/src/main/com/apple/foundationdb/tuple/*.java bindings/java/src/main/com/apple/foundationdb/directory/*.java bindings/java/src/main/com/apple/foundationdb/subspace/*.java bindings/java/src/test/com/apple/foundationdb/test/*.java
 

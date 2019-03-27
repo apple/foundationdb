@@ -26,7 +26,6 @@ import java.util.function.Function;
 
 /**
  * A mutable, lexicographically ordered mapping from binary keys to binary values.
- *  A {@code Database} is stored on a FoundationDB {@link Cluster}.
  *  {@link Transaction}s are used to manipulate data within a single
  *  {@code Database} -- multiple, concurrent
  *  {@code Transaction}s on a {@code Database} enforce <b>ACID</b> properties.<br>

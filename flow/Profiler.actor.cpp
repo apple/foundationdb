@@ -33,7 +33,7 @@
 
 #include "flow/Platform.h"
 
-extern volatile int profilingEnabled;
+extern volatile thread_local int profilingEnabled;
 
 static uint64_t gettid() { return syscall(__NR_gettid); }
 

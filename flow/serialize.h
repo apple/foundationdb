@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <array>
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
@@ -62,15 +63,20 @@ inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::WRITER& operator & (Archive& ar, Item& item ) {
+template <class Archive>
+void serializer(Archive& ar) {}
+
+template <class Archive, class Item, class... Items>
+typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
 	save(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
-template <class Archive, class Item>
-inline typename Archive::READER& operator & (Archive& ar, Item& item ) {
+template <class Archive, class Item, class... Items>
+typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
 	load(ar, item);
+	serializer(ar, items...);
 	return ar;
 }
 
@@ -121,7 +127,7 @@ template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
 	static void serialize( Archive& ar, std::pair<T1, T2>& p ) {
-		ar & p.first & p.second;
+		serializer(ar, p.first, p.second);
 	}
 };
 
@@ -145,6 +151,20 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 	ASSERT( ar.protocolVersion() != 0 );
 }
 
+template <class Archive, class T, size_t N>
+inline void save( Archive& ar, const std::array<T, N>& value ) {
+	for(int ii = 0; ii < N; ++ii)
+		ar << value[ii];
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class T, size_t N>
+inline void load( Archive& ar, std::array<T, N>& value ) {
+	for (int ii = 0; ii < N; ii++) {
+		ar >> value[ii];
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
 template <class Archive, class T>
 inline void save( Archive& ar, const std::set<T>& value ) {
 	ar << (int)value.size();
@@ -161,6 +181,27 @@ inline void load( Archive& ar, std::set<T>& value ) {
 	for (int i = 0; i < s; i++) {
 		ar >> currentValue;
 		value.insert(currentValue);
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
+template <class Archive, class K, class V>
+inline void save( Archive& ar, const std::map<K, V>& value ) {
+	ar << (int)value.size();
+	for (const auto &it : value) {
+		ar << it.first << it.second;
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class K, class V>
+inline void load( Archive& ar, std::map<K, V>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	for (int i = 0; i < s; ++i) {
+		std::pair<K, V> p;
+		ar >> p.first >> p.second;
+		value.emplace(p);
 	}
 	ASSERT( ar.protocolVersion() != 0 );
 }
@@ -506,6 +547,11 @@ public:
 		return b;
 	}
 
+	const void* peekBytes( int bytes ) {
+		ASSERT( begin + bytes <= end );
+		return begin;
+	}
+
 	void serializeBytes(void* data, int bytes) {
 		memcpy(data, readBytes(bytes), bytes);
 	}
@@ -529,6 +575,7 @@ public:
 	BinaryReader( const void* data, int length, VersionOptions vo ) {
 		begin = (const char*)data;
 		end = begin + length;
+		check = nullptr;
 		vo.read(*this);
 	}
 	template <class VersionOptions>
@@ -553,8 +600,19 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != nullptr);
+		begin = check;
+		check = nullptr;
+	}
+
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };
@@ -567,7 +625,7 @@ struct SendBuffer {
 
 struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 	int reference_count;
-	enum { DATA_SIZE = 4096 - 28 };
+	enum { DATA_SIZE = 4096 - 28 }; //28 is the size of the PacketBuffer fields
 	uint8_t data[ DATA_SIZE ];
 
 	PacketBuffer() : reference_count(1) {

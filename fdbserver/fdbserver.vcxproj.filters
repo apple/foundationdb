@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ActorCompiler Include="ClusterController.actor.cpp" />
@@ -78,6 +78,9 @@
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
     <ActorCompiler Include="Status.actor.cpp" />
     <ActorCompiler Include="workloads\ConflictRange.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Throttling.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\Throughput.actor.cpp">
@@ -295,7 +298,6 @@
       <Filter>sqlite</Filter>
     </ClCompile>
     <ClCompile Include="VFSAsync.cpp" />
-    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ClCompile Include="workloads\AsyncFile.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
@@ -303,17 +305,19 @@
     <ClCompile Include="workloads\MemoryKeyValueStore.cpp">
       <Filter>workloads</Filter>
     </ClCompile>
+    <ClCompile Include="LatencyBandConfig.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConflictSet.h" />
-    <ClInclude Include="DataDistribution.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ClInclude Include="DataDistribution.actor.h" />
+    <ClInclude Include="DataDistributorInterface.h" />
+    <ClInclude Include="MoveKeys.actor.h" />
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
-    <ClInclude Include="workloads\workloads.h">
+    <ClInclude Include="TesterInterface.actor.h" />
+    <ClInclude Include="workloads\workloads.actor.h">
       <Filter>workloads</Filter>
     </ClInclude>
     <ClInclude Include="IKeyValueStore.h" />
@@ -340,7 +344,7 @@
     </ClInclude>
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="StorageMetrics.h" />
-    <ClInclude Include="Ratekeeper.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="CoroFlow.h" />
@@ -369,6 +373,7 @@
     <ClInclude Include="MemoryPager.h" />
     <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="template_fdb.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">

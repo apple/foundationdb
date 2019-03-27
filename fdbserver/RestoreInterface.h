@@ -33,7 +33,7 @@ struct RestoreInterface {
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
 	UID id() const { return test.getEndpoint().token; }
-	NetworkAddress address() const { return test.getEndpoint().address; }
+	NetworkAddress address() const { return test.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
 		test.getEndpoint( TaskClusterController );
@@ -41,7 +41,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & test;
+		serializer(ar, test);
 	}
 };
 
@@ -54,7 +54,7 @@ struct TestRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & testData & reply;
+		serializer(ar, testData, reply);
 	}
 };
 
@@ -66,7 +66,7 @@ struct TestReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & replyData;
+		serializer(ar, replyData);
 	}
 };
 

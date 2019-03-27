@@ -70,8 +70,15 @@ module FDB
       raise "FoundationDB API version error"
     end
 
+    FDBC.init_c_api()
+
     require_relative 'fdbtuple'
     require_relative 'fdbdirectory'
+
+    if version < 610
+      require_relative 'fdbimpl_v609'
+    end
+
     if version > 22
       require_relative 'fdblocality'
     end

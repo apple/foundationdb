@@ -62,7 +62,6 @@ extern "C" {
 
     /* Pointers to these opaque types represent objects in the FDB API */
     typedef struct FDB_future FDBFuture;
-    typedef struct FDB_cluster FDBCluster;
     typedef struct FDB_database FDBDatabase;
     typedef struct FDB_transaction FDBTransaction;
 
@@ -100,7 +99,7 @@ extern "C" {
     } FDBKeyValue;
 #pragma pack(pop)
 
-    DLLEXPORT void fdb_future_cancel( FDBFuture *f );
+    DLLEXPORT void fdb_future_cancel( FDBFuture* f );
 
     DLLEXPORT void fdb_future_release_memory( FDBFuture* f );
 
@@ -129,12 +128,6 @@ extern "C" {
                         int* out_key_length );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster );
-
-    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_database( FDBFuture* f, FDBDatabase** out_database );
-
-    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_value( FDBFuture* f, fdb_bool_t *out_present,
                           uint8_t const** out_value,
                           int* out_value_length );
@@ -148,17 +141,8 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* f,
                             const char*** out_strings, int* out_count);
 
-    DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster( const char* cluster_file_path );
-
-    DLLEXPORT void fdb_cluster_destroy( FDBCluster* c );
-
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_cluster_set_option( FDBCluster* c, FDBClusterOption option,
-                            uint8_t const* value, int value_length );
-
-    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-    fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
-                                 int db_name_length );
+    fdb_create_database( const char* cluster_file_path, FDBDatabase** out_database );
 
     DLLEXPORT void fdb_database_destroy( FDBDatabase* d );
 
@@ -268,6 +252,35 @@ extern "C" {
     DLLEXPORT const char* fdb_get_client_version();
 
     /* LEGACY API VERSIONS */
+
+#if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
+    typedef struct FDB_cluster FDBCluster;
+
+    typedef enum {
+        // This option is only a placeholder for C compatibility and should not be used
+        FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE=-1
+    } FDBClusterOption;
+#endif
+
+#if FDB_API_VERSION < 610
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_cluster( FDBFuture* f, FDBCluster** out_cluster );
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_database( FDBFuture* f, FDBDatabase** out_database );
+
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster( const char* cluster_file_path );
+
+    DLLEXPORT void fdb_cluster_destroy( FDBCluster* c );
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_cluster_set_option( FDBCluster* c, FDBClusterOption option,
+                            uint8_t const* value, int value_length );
+
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
+                                 int db_name_length );
+#endif
 
 #if FDB_API_VERSION < 23
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t

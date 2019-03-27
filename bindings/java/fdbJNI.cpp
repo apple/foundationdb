@@ -25,7 +25,7 @@
 
 #include <foundationdb/fdb_c.h>
 
-#define JNI_NULL 0
+#define JNI_NULL nullptr 
 
 #if defined(__GNUG__)
 #define thread_local __thread
@@ -38,15 +38,15 @@
 #error Missing thread local storage
 #endif
 
-static JavaVM* g_jvm = 0; 
-static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
-static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
+static JavaVM* g_jvm = nullptr; 
+static thread_local JNIEnv* g_thread_jenv = nullptr;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
+static thread_local jmethodID g_IFutureCallback_call_methodID = JNI_NULL;
 static thread_local bool is_external = false;
 
 void detachIfExternalThread(void *ignore) {
-	if(is_external && g_thread_jenv != 0) {
-		g_thread_jenv = 0;
-		g_IFutureCallback_call_methodID = 0;
+	if(is_external && g_thread_jenv != nullptr) {
+		g_thread_jenv = nullptr;
+		g_IFutureCallback_call_methodID = JNI_NULL;
 		g_jvm->DetachCurrentThread();
 	}
 }
@@ -58,7 +58,7 @@ void throwOutOfMem(JNIEnv *jenv) {
 	if(jenv->ExceptionOccurred())
 		return;
 
-	if( jenv->ThrowNew( illegalArgClass, NULL ) != 0 ) {
+	if( jenv->ThrowNew( illegalArgClass, nullptr ) != 0 ) {
 		if( !jenv->ExceptionOccurred() ) {
 			jenv->FatalError("Could not throw OutOfMemoryError");
 		} else {
@@ -68,7 +68,7 @@ void throwOutOfMem(JNIEnv *jenv) {
 	}
 }
 
-static jthrowable getThrowable(JNIEnv *jenv, fdb_error_t e, const char* msg = NULL) {
+static jthrowable getThrowable(JNIEnv *jenv, fdb_error_t e, const char* msg = nullptr) {
 	jclass excepClass = jenv->FindClass("com/apple/foundationdb/FDBException");
 	if(jenv->ExceptionOccurred())
 		return JNI_NULL;
@@ -128,11 +128,11 @@ static bool findCallbackMethods(JNIEnv *jenv) {
 }
 
 static void callCallback( FDBFuture* f, void* data ) {
-	if (g_thread_jenv == 0) {
+	if (g_thread_jenv == nullptr) {
 		// We are on an external thread and must attach to the JVM.
 		// The shutdown hook will later detach this thread.
 		is_external = true;
-		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
+		if( g_jvm != nullptr && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, nullptr) == JNI_OK ) {
 			if( !findCallbackMethods( g_thread_jenv ) ) {
 				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
 			}
@@ -169,9 +169,9 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1register
 	}
 	FDBFuture *f = (FDBFuture *)future;
 
-	// This is documented as not throwing, but simply returning NULL on OMM.
+	// This is documented as not throwing, but simply returning null on OOM.
 	//  As belt and suspenders, we will check for pending exceptions and then,
-	//  if there are none and the result is NULL, we'll throw our own OMM.
+	//  if there are none and the result is null, we'll throw our own OOM.
 	callback = jenv->NewGlobalRef( callback );
 	if( !callback ) {
 		if( !jenv->ExceptionOccurred() )
@@ -206,7 +206,11 @@ JNIEXPORT jthrowable JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1ge
 		return JNI_NULL;
 	}
 	FDBFuture *sav = (FDBFuture *)future;
-	return getThrowable( jenv, fdb_future_get_error( sav ) );
+	fdb_error_t err = fdb_future_get_error( sav );
+	if( err )
+		return getThrowable( jenv, err );
+	else
+		return JNI_NULL;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1isReady(JNIEnv *jenv, jobject, jlong future) {
@@ -280,7 +284,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureString
 	jclass str_clazz = jenv->FindClass("java/lang/String");
 	if( jenv->ExceptionOccurred() )
 		return JNI_NULL;
-	jobjectArray arr = jenv->NewObjectArray(count, str_clazz, NULL);
+	jobjectArray arr = jenv->NewObjectArray(count, str_clazz, JNI_NULL);
 	if( !arr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
@@ -327,7 +331,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 		return JNI_NULL;
 	}
 
-	jbyteArray lastKey = NULL;
+	jbyteArray lastKey = JNI_NULL;
 	if(count) {
 		lastKey = jenv->NewByteArray(kvs[count - 1].key_length);
 		if( !lastKey ) {
@@ -378,7 +382,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, NULL); 
+	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, JNI_NULL); 
 	if (!keyvalues_barr) {
 		throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return JNI_NULL;
@@ -393,7 +397,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 		return JNI_NULL;
 	}
 
-	jint *length_barr = jenv->GetIntArrayElements(lengthArray, NULL); 
+	jint *length_barr = jenv->GetIntArrayElements(lengthArray, JNI_NULL); 
 	if( !length_barr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
@@ -480,38 +484,6 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureCluster_FutureCluster_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	FDBCluster *cluster;
-	fdb_error_t err = fdb_future_get_cluster(f, &cluster);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return 0;
-	}
-	return (jlong)cluster;
-}
-
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureDatabase_FutureDatabase_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	FDBDatabase *database;
-	fdb_error_t err = fdb_future_get_database(f, &database);
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return 0;
-	}
-	return (jlong)database;
-}
-
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv *jenv, jobject, jlong dbPtr) {
 	if( !dbPtr ) {
 		throwParamNotNull(jenv);
@@ -541,11 +513,11 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 		return;
 	}
 	FDBDatabase *c = (FDBDatabase *)dPtr;
-	uint8_t *barr = NULL;
+	uint8_t *barr = nullptr;
 	int size = 0;
 
-	if(value != 0) {
-		barr = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
+	if(value != JNI_NULL) {
+		barr = (uint8_t *)jenv->GetByteArrayElements( value, JNI_NULL );
 		if (!barr) {
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
 			return;
@@ -553,7 +525,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOpti
 		size = jenv->GetArrayLength( value );
 	}
 	fdb_error_t err = fdb_database_set_option( c, (FDBDatabaseOption)code, barr, size );
-	if(value != 0)
+	if(value != JNI_NULL)
 		jenv->ReleaseByteArrayElements( value, (jbyte *)barr, JNI_ABORT );
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
@@ -564,69 +536,28 @@ JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIE
 	return (jboolean)fdb_error_predicate(predicate, code);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Cluster_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
-	const char* fileName = 0;
-	if(clusterFileName != 0) {
-		fileName = jenv->GetStringUTFChars(clusterFileName, 0);
-		if( jenv->ExceptionOccurred() )
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
+	const char* fileName = nullptr;
+	if(clusterFileName != JNI_NULL) {
+		fileName = jenv->GetStringUTFChars(clusterFileName, JNI_NULL);
+		if(jenv->ExceptionOccurred()) {
 			return 0;
-	}
-	FDBFuture *cluster = fdb_create_cluster( fileName );
-	if(clusterFileName != 0)
-		jenv->ReleaseStringUTFChars( clusterFileName, fileName );
-	return (jlong)cluster;
-}
-
-JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1setOption(JNIEnv *jenv, jobject, jlong cPtr, jint code, jbyteArray value) {
-	if( !cPtr ) {
-		throwParamNotNull(jenv);
-		return;
-	}
-	FDBCluster *c = (FDBCluster *)cPtr;
-	uint8_t *barr = NULL;
-	int size = 0;
-
-	if(value != 0) {
-		barr = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
-		if (!barr) {
-			throwRuntimeEx( jenv, "Error getting handle to native resources" );
-			return;
 		}
-		size = jenv->GetArrayLength( value );
 	}
-	fdb_error_t err = fdb_cluster_set_option( c, (FDBClusterOption)code, barr, size );
-	if(value != 0)
-		jenv->ReleaseByteArrayElements( value, (jbyte *)barr, JNI_ABORT );
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-	}
-}
 
-JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1dispose(JNIEnv *jenv, jobject, jlong cPtr) {
-	if( !cPtr ) {
-		throwParamNotNull(jenv);
-		return;
-	}
-	fdb_cluster_destroy( (FDBCluster *)cPtr );
-}
+	FDBDatabase *db;
+	fdb_error_t err = fdb_create_database(fileName, &db);
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1createDatabase(JNIEnv *jenv, jobject, jlong cPtr, jbyteArray dbNameBytes) {
-	if( !cPtr || !dbNameBytes ) {
-		throwParamNotNull(jenv);
-		return 0;
+	if(clusterFileName != JNI_NULL) {
+		jenv->ReleaseStringUTFChars(clusterFileName, fileName);
 	}
-	FDBCluster *cluster = (FDBCluster *)cPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( dbNameBytes, NULL );
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
+	if(err) {
+		safeThrow(jenv, getThrowable(jenv, err));
 		return 0;
 	}
 
-	int size = jenv->GetArrayLength( dbNameBytes );
-	FDBFuture * f = fdb_cluster_create_database( cluster, barr, size );
-	jenv->ReleaseByteArrayElements( dbNameBytes, (jbyte *)barr, JNI_ABORT );
-	return (jlong)f;
+	return (jlong)db;
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv *jenv, jobject, jlong tPtr, jlong version) {
@@ -655,7 +586,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, NULL );
+	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, JNI_NULL );
 	if(!barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -675,7 +606,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, NULL );
+	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, JNI_NULL );
 	if(!barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -697,14 +628,14 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barrBegin = (uint8_t *)jenv->GetByteArrayElements( keyBeginBytes, NULL );
+	uint8_t *barrBegin = (uint8_t *)jenv->GetByteArrayElements( keyBeginBytes, JNI_NULL );
 	if (!barrBegin) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return 0;
 	}
 
-	uint8_t *barrEnd = (uint8_t *)jenv->GetByteArrayElements( keyEndBytes, NULL );
+	uint8_t *barrEnd = (uint8_t *)jenv->GetByteArrayElements( keyEndBytes, JNI_NULL );
 	if (!barrEnd) {
 		jenv->ReleaseByteArrayElements( keyBeginBytes, (jbyte *)barrBegin, JNI_ABORT );
 		if( !jenv->ExceptionOccurred() )
@@ -728,14 +659,14 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barrKey = (uint8_t *)jenv->GetByteArrayElements( keyBytes, NULL );
+	uint8_t *barrKey = (uint8_t *)jenv->GetByteArrayElements( keyBytes, JNI_NULL );
 	if (!barrKey) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return;
 	}
 
-	uint8_t *barrValue = (uint8_t *)jenv->GetByteArrayElements( valueBytes, NULL );
+	uint8_t *barrValue = (uint8_t *)jenv->GetByteArrayElements( valueBytes, JNI_NULL );
 	if (!barrValue) {
 		jenv->ReleaseByteArrayElements( keyBytes, (jbyte *)barrKey, JNI_ABORT );
 		if( !jenv->ExceptionOccurred() )
@@ -757,7 +688,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1c
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, NULL );
+	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( keyBytes, JNI_NULL );
 	if (!barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -775,14 +706,14 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1c
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barrKeyBegin = (uint8_t *)jenv->GetByteArrayElements( keyBeginBytes, NULL );
+	uint8_t *barrKeyBegin = (uint8_t *)jenv->GetByteArrayElements( keyBeginBytes, JNI_NULL );
 	if (!barrKeyBegin) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return;
 	}
 
-	uint8_t *barrKeyEnd = (uint8_t *)jenv->GetByteArrayElements( keyEndBytes, NULL );
+	uint8_t *barrKeyEnd = (uint8_t *)jenv->GetByteArrayElements( keyEndBytes, JNI_NULL );
 	if (!barrKeyEnd) {
 		jenv->ReleaseByteArrayElements( keyBeginBytes, (jbyte *)barrKeyBegin, JNI_ABORT );
 		if( !jenv->ExceptionOccurred() )
@@ -805,14 +736,14 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1m
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barrKey = (uint8_t *)jenv->GetByteArrayElements( key, NULL );
+	uint8_t *barrKey = (uint8_t *)jenv->GetByteArrayElements( key, JNI_NULL );
 	if (!barrKey) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
 		return;
 	}
 
-	uint8_t *barrValue = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
+	uint8_t *barrValue = (uint8_t *)jenv->GetByteArrayElements( value, JNI_NULL );
 	if (!barrValue) {
 		jenv->ReleaseByteArrayElements( key, (jbyte *)barrKey, JNI_ABORT );
 		if( !jenv->ExceptionOccurred() )
@@ -845,11 +776,11 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		return;
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
-	uint8_t *barr = NULL;
+	uint8_t *barr = nullptr;
 	int size = 0;
 
-	if(value != 0) {
-		barr = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
+	if(value != JNI_NULL) {
+		barr = (uint8_t *)jenv->GetByteArrayElements( value, JNI_NULL );
 		if (!barr) {
 			if( !jenv->ExceptionOccurred() )
 				throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -858,7 +789,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1s
 		size = jenv->GetArrayLength( value );
 	}
 	fdb_error_t err = fdb_transaction_set_option( tr, (FDBTransactionOption)code, barr, size );
-	if(value != 0)
+	if(value != JNI_NULL)
 		jenv->ReleaseByteArrayElements( value, (jbyte *)barr, JNI_ABORT );
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
@@ -897,7 +828,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( key, NULL );
+	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( key, JNI_NULL );
 	if (!barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -944,7 +875,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( key, NULL );
+	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements( key, JNI_NULL );
 	if (!barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -973,7 +904,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1a
 	}
 	FDBTransaction *tr = (FDBTransaction *)tPtr;
 
-	uint8_t *begin_barr = (uint8_t *)jenv->GetByteArrayElements( keyBegin, NULL );
+	uint8_t *begin_barr = (uint8_t *)jenv->GetByteArrayElements( keyBegin, JNI_NULL );
 	if (!begin_barr) {
 		if( !jenv->ExceptionOccurred() )
 			throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -981,7 +912,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1a
 	}
 	int begin_size = jenv->GetArrayLength( keyBegin );
 
-	uint8_t *end_barr = (uint8_t *)jenv->GetByteArrayElements( keyEnd, NULL );
+	uint8_t *end_barr = (uint8_t *)jenv->GetByteArrayElements( keyEnd, JNI_NULL );
 	if (!end_barr) {
 		jenv->ReleaseByteArrayElements( keyBegin, (jbyte *)begin_barr, JNI_ABORT );
 		if( !jenv->ExceptionOccurred() )
@@ -1026,10 +957,10 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Select_1API_1version(JNIE
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1setOption(JNIEnv *jenv, jobject, jint code, jbyteArray value) {
-	uint8_t *barr = NULL;
+	uint8_t *barr = nullptr;
 	int size = 0;
-	if(value != 0) {
-		barr = (uint8_t *)jenv->GetByteArrayElements( value, NULL );
+	if(value != JNI_NULL) {
+		barr = (uint8_t *)jenv->GetByteArrayElements( value, JNI_NULL );
 		if (!barr) {
 			if( !jenv->ExceptionOccurred() )
 				throwRuntimeEx( jenv, "Error getting handle to native resources" );
@@ -1038,7 +969,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1setOption(JNIEnv
 		size = jenv->GetArrayLength( value );
 	}
 	fdb_error_t err = fdb_network_set_option((FDBNetworkOption)code, barr, size);
-	if(value != 0)
+	if(value != JNI_NULL)
 		jenv->ReleaseByteArrayElements( value, (jbyte *)barr, JNI_ABORT );
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
@@ -1060,7 +991,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1run(JNIEnv *jenv
 			return;
 	}
 
-	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, NULL );
+	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, nullptr );
 	if( hookErr ) {
 		safeThrow( jenv, getThrowable( jenv, hookErr ) );
 	}

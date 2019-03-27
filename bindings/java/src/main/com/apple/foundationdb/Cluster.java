@@ -20,33 +20,29 @@
 
 package com.apple.foundationdb;
 
-import java.nio.charset.Charset;
 import java.util.concurrent.Executor;
 
 /**
  * The {@code Cluster} represents a connection to a physical set of cooperating machines
- *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.<br>
+ *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.
+ *
+ * This class is deprecated. Use {@link FDB#open} to open a {@link Database} directly<br>
  * <br>
  * <b>Note:</b> {@code Cluster} objects must be {@link #close closed} when no longer in use
  *  in order to free any associated resources.
  */
+@Deprecated
 public class Cluster extends NativeObjectWrapper {
 	private ClusterOptions options;
 	private final Executor executor;
+	private final String clusterFile;
 
-	private static final Charset UTF8 = Charset.forName("UTF-8");
+	protected Cluster(String clusterFile, Executor executor) {
+		super(0);
 
-	protected Cluster(long cPtr, Executor executor) {
-		super(cPtr);
 		this.executor = executor;
-		this.options = new ClusterOptions((code, parameter) -> {
-			pointerReadLock.lock();
-			try {
-				Cluster_setOption(getPtr(), code, parameter);
-			} finally {
-				pointerReadLock.unlock();
-			}
-		});
+		this.options = new ClusterOptions((code, parameter) -> {});
+		this.clusterFile = clusterFile;
 	}
 
 	/**
@@ -59,19 +55,8 @@ public class Cluster extends NativeObjectWrapper {
 		return options;
 	}
 
-	@Override
-	protected void finalize() throws Throwable {
-		try {
-			checkUnclosed("Cluster");
-			close();
-		}
-		finally {
-			super.finalize();
-		}
-	}
-
 	/**
-	 * Creates a connection to a specific database on an <i>FDB</i> cluster.
+	 * Creates a connection to the database on an <i>FDB</i> cluster.
 	 *
 	 * @return a {@code Future} that will be set to a {@code Database} upon
 	 *         successful connection.
@@ -81,7 +66,7 @@ public class Cluster extends NativeObjectWrapper {
 	}
 
 	/**
-	 * Creates a connection to a specific database on an <i>FDB</i> cluster.
+	 * Creates a connection to the database on an <i>FDB</i> cluster.
 	 *
 	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
 	 *
@@ -89,22 +74,9 @@ public class Cluster extends NativeObjectWrapper {
 	 *         successful connection.
 	 */
 	public Database openDatabase(Executor e) throws FDBException {
-		FutureDatabase futureDatabase;
-		pointerReadLock.lock();
-		try {
-			futureDatabase = new FutureDatabase(Cluster_createDatabase(getPtr(), "DB".getBytes(UTF8)), e);
-		} finally {
-			pointerReadLock.unlock();
-		}
-		return futureDatabase.join();
+		return FDB.instance().open(clusterFile, e);
 	}
 
 	@Override
-	protected void closeInternal(long cPtr) {
-		Cluster_dispose(cPtr);
-	}
-
-	private native void Cluster_dispose(long cPtr);
-	private native long Cluster_createDatabase(long cPtr, byte[] dbName);
-	private native void Cluster_setOption(long cPtr, int code, byte[] value) throws FDBException;
+	protected void closeInternal(long cPtr) {}
 }

@@ -19,10 +19,10 @@
  */
 
 #include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -34,7 +34,7 @@ struct PingWorkloadInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & payloadPing;
+		serializer(ar, payloadPing);
 	}
 };
 
@@ -150,7 +150,7 @@ struct PingWorkload : TestWorkload {
 		loop {
 			wait( poisson( &lastTime, self->actorCount / self->operationsPerSecond ) );
 			auto& peer = g_random->randomChoice(peers);
-			state NetworkAddress addr = peer.getEndpoint().address;
+			state NetworkAddress addr = peer.getEndpoint().getPrimaryAddress();
 			state double before = now();
 
 			LoadedPingRequest req;
@@ -180,10 +180,10 @@ struct PingWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> workerPinger( PingWorkload* self ) {
-		vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		vector<RequestStream<LoadedPingRequest>> peers;
 		for(int i=0; i<workers.size(); i++)
-			peers.push_back( workers[i].first.debugPing );
+			peers.push_back( workers[i].interf.debugPing );
 		vector<Future<Void>> pingers;
 		for(int i=0; i<self->actorCount; i++)
 			pingers.push_back( self->pinger( self, peers ) );
@@ -208,9 +208,9 @@ struct PingWorkload : TestWorkload {
 		state Future<Void> collection = actorCollection( addActor.getFuture() );
 
 		if( self->workerBroadcast ) {
-			vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+			vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 			for( int i=0; i<workers.size(); i++ )
-				endpoints.push_back( workers[i].first.debugPing );
+				endpoints.push_back( workers[i].interf.debugPing );
 		} else {
 			vector<PingWorkloadInterface> peers = wait( self->fetchInterfaces( self, cx ) );
 			for( int i=0; i<peers.size(); i++ )
@@ -225,7 +225,7 @@ struct PingWorkload : TestWorkload {
 	}
 
 	// ACTOR Future<Void> receptionLogger( PingWorkload* self, Future<PingReply> done, NetworkAddress to, UID id ) {
-	// 	PingReply _ = wait( done );
+	// 	wait(success( done ));
 	// 	if( now() > self->testStart + 29 && now() < self->testStart + 31 )
 	// 		TraceEvent("PayloadReplyReceived", id).detail("To", to);
 	// 	return Void();
@@ -251,7 +251,7 @@ struct PingWorkload : TestWorkload {
 				req.payload = self->payloadOut;
 				req.loadReply = true;
 				replies.push_back( success( peers[i].getReply( req ) ) );
-				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().address, pingId ) );
+				// replies.push_back( self->receptionLogger( self, peers[i].payloadPing.getReply( req ), peers[i].payloadPing.getEndpoint().getPrimaryAddress(), pingId ) );
 				// peers[i].payloadPing.send( req );
 				// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 			}

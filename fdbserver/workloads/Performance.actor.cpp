@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -103,11 +103,11 @@ struct PerformanceWorkload : TestWorkload {
 
 	//FIXME: does not use testers which are recruited on workers
 	ACTOR Future<vector<TesterInterface>> getTesters( PerformanceWorkload *self) {
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers;
+		state vector<WorkerDetails> workers;
 
 		loop {
 			choose {
-				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
+				when( vector<WorkerDetails> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
 					workers = w;
 					break; 
 				}
@@ -117,7 +117,7 @@ struct PerformanceWorkload : TestWorkload {
 
 		vector<TesterInterface> ts;
 		for(int i=0; i<workers.size(); i++)
-			ts.push_back(workers[i].first.testerInterface);
+			ts.push_back(workers[i].interf.testerInterface);
 		return ts;
 	}
 

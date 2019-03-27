@@ -18,21 +18,98 @@
  * limitations under the License.
  */
 
+#include "boost/asio.hpp"
+
 #include "flow/network.h"
 #include "flow/flow.h"
+#include "flow/UnitTest.h"
+
+IPAddress::IPAddress() : store({}), isV6addr(false) {}
+
+IPAddress::IPAddress(const IPAddressStore& v6addr) : store(v6addr), isV6addr(true) {}
+
+IPAddress::IPAddress(uint32_t v4addr) : store({}), isV6addr(false) {
+	uint32_t* parts = (uint32_t*)store.data();
+	parts[0] = v4addr;
+}
+
+uint32_t IPAddress::toV4() const {
+	const uint32_t* parts = (uint32_t*)store.data();
+	return parts[0];
+}
+
+bool IPAddress::operator==(const IPAddress& addr) const {
+	return isV6addr == addr.isV6addr && store == addr.store;
+}
+
+bool IPAddress::operator!=(const IPAddress& addr) const {
+	return !(*this == addr);
+}
+
+bool IPAddress::operator<(const IPAddress& addr) const {
+	return isV6() == addr.isV6() ? store < addr.store : isV6() < addr.isV6();
+}
+
+std::string IPAddress::toString() const {
+	if (isV6()) {
+		return boost::asio::ip::address_v6(store).to_string();
+	} else {
+		const uint32_t ip = toV4();
+		return format("%d.%d.%d.%d", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+	}
+}
+
+Optional<IPAddress> IPAddress::parse(std::string str) {
+	try {
+		auto addr = boost::asio::ip::address::from_string(str);
+		return addr.is_v6() ? IPAddress(addr.to_v6().to_bytes()) : IPAddress(addr.to_v4().to_ulong());
+	} catch (...) {
+		return Optional<IPAddress>();
+	}
+}
+
+bool IPAddress::isValid() const {
+	if (!isV6()) {
+		return toV4() != 0;
+	}
+
+	return std::any_of(store.begin(), store.end(), [](uint8_t part) { return part > 0; });
+}
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
+	if (s.empty()) {
+		throw connection_string_invalid();
+	}
+
 	bool isTLS = false;
 	std::string f;
 	if( s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0 ) {
 		isTLS = true;
 		f = s.substr(0, s.size() - 4);
-	} else
+	} else {
 		f = s;
-	int a,b,c,d,port,count=-1;
-	if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a,&b,&c,&d, &port, &count)<5 || count != f.size())
-		throw connection_string_invalid();
-	return NetworkAddress( (a<<24)+(b<<16)+(c<<8)+d, port, true, isTLS );
+	}
+
+	if (f[0] == '[') {
+		// IPv6 address/port pair is represented as "[ip]:port"
+		auto addrEnd = f.find_first_of(']');
+		if (addrEnd == std::string::npos || f[addrEnd + 1] != ':') {
+			throw connection_string_invalid();
+		}
+
+		auto port = std::stoi(f.substr(addrEnd + 2));
+		auto addr = IPAddress::parse(f.substr(1, addrEnd - 1));
+		if (!addr.present()) {
+			throw connection_string_invalid();
+		}
+		return NetworkAddress(addr.get(), port, true, isTLS);
+	} else {
+		// TODO: Use IPAddress::parse
+		int a, b, c, d, port, count = -1;
+		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
+			throw connection_string_invalid();
+		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS);
+	}
 }
 
 std::vector<NetworkAddress> NetworkAddress::parseList( std::string const& addrs ) {
@@ -49,11 +126,7 @@ std::vector<NetworkAddress> NetworkAddress::parseList( std::string const& addrs 
 }
 
 std::string NetworkAddress::toString() const {
-	return format( "%d.%d.%d.%d:%d%s", (ip>>24)&0xff, (ip>>16)&0xff, (ip>>8)&0xff, ip&0xff, port, isTLS() ? ":tls" : "" );
-}
-
-std::string toIPString(uint32_t ip) {
-	return format( "%d.%d.%d.%d", (ip>>24)&0xff, (ip>>16)&0xff, (ip>>8)&0xff, ip&0xff );
+	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
 }
 
 std::string toIPVectorString(std::vector<uint32_t> ips) {
@@ -64,6 +137,21 @@ std::string toIPVectorString(std::vector<uint32_t> ips) {
 		space = " ";
 	}
 	return output;
+}
+
+std::string toIPVectorString(const std::vector<IPAddress>& ips) {
+	std::string output;
+	const char* space = "";
+	for (auto ip : ips) {
+		output += format("%s%s", space, ip.toString().c_str());
+		space = " ";
+	}
+	return output;
+}
+
+std::string formatIpPort(const IPAddress& ip, uint16_t port) {
+	const char* patt = ip.isV6() ? "[%s]:%d" : "%s:%d";
+	return format(patt, ip.toString().c_str(), port);
 }
 
 Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
@@ -81,4 +169,48 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 		(pickEndpoint, [=](NetworkAddress const &addr) -> Future<Reference<IConnection>> {
 		return connect(addr, host);
 	});
+}
+
+TEST_CASE("/flow/network/ipaddress") {
+	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");
+
+	{
+		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800";
+		auto addrParsed = NetworkAddress::parse(addr);
+		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800";
+		ASSERT(addrParsed.isV6());
+		ASSERT(!addrParsed.isTLS());
+		ASSERT(addrParsed.toString() == addrCompressed);
+	}
+
+	{
+		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
+		auto addrParsed = NetworkAddress::parse(addr);
+		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls";
+		ASSERT(addrParsed.isV6());
+		ASSERT(addrParsed.isTLS());
+		ASSERT(addrParsed.toString() == addrCompressed);
+	}
+
+	{
+		auto addr = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+		auto addrCompressed = "2001:db8:85a3::8a2e:370:7334";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(addrParsed.present());
+		ASSERT(addrParsed.get().toString() == addrCompressed);
+	}
+
+	{
+		auto addr = "2001";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(!addrParsed.present());
+	}
+
+	{
+		auto addr = "8.8.8.8:12";
+		auto addrParsed = IPAddress::parse(addr);
+		ASSERT(!addrParsed.present());
+	}
+
+	return Void();
 }

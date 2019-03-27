@@ -66,7 +66,7 @@ struct UniqueGeneration {
 	}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & generation & uid;
+		serializer(ar, generation, uid);
 	}
 };
 
@@ -78,7 +78,7 @@ struct GenerationRegReadRequest {
 	GenerationRegReadRequest( Key key, UniqueGeneration gen ) : key(key), gen(gen) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & gen & reply;
+		serializer(ar, key, gen, reply);
 	}
 };
 
@@ -89,7 +89,7 @@ struct GenerationRegReadReply {
 	GenerationRegReadReply( Optional<Value> value, UniqueGeneration gen, UniqueGeneration rgen ) : value(value), gen(gen), rgen(rgen) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & value & gen & rgen;
+		serializer(ar, value, gen, rgen);
 	}
 };
 
@@ -101,7 +101,7 @@ struct GenerationRegWriteRequest {
 	GenerationRegWriteRequest(KeyValue kv, UniqueGeneration gen) : kv(kv), gen(gen) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & kv & gen & reply;
+		serializer(ar, kv, gen, reply);
 	}
 };
 
@@ -126,7 +126,7 @@ struct CandidacyRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & myInfo & knownLeader & prevChangeID & reply;
+		serializer(ar, key, myInfo, knownLeader, prevChangeID, reply);
 	}
 };
 
@@ -141,7 +141,7 @@ struct LeaderHeartbeatRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & myInfo & prevChangeID & reply;
+		serializer(ar, key, myInfo, prevChangeID, reply);
 	}
 };
 
@@ -155,7 +155,7 @@ struct ForwardRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & conn & reply;
+		serializer(ar, key, conn, reply);
 	}
 };
 

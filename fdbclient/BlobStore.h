@@ -36,7 +36,7 @@ public:
 	struct Stats {
 		Stats() : requests_successful(0), requests_failed(0), bytes_sent(0) {}
 		Stats operator-(const Stats &rhs);
-		void clear() { memset(this, sizeof(*this), 0); }
+		void clear() { memset(this, 0, sizeof(*this)); }
 		json_spirit::mObject getJSON();
 
 		int64_t requests_successful;
@@ -102,8 +102,8 @@ public:
 		}
 	};
 
-	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &secret, BlobKnobs const &knobs = BlobKnobs())
-	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
+	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &secret, BlobKnobs const &knobs = BlobKnobs(), HTTP::Headers extraHeaders = HTTP::Headers())
+	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
 		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 		requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 		requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
@@ -133,8 +133,8 @@ public:
 	// the unconsumed parameters will be added to it.
 	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr, ParametersT *ignored_parameters = nullptr);
 
-	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters.
-	std::string getResourceURL(std::string resource);
+	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters in addition to the passed params string
+	std::string getResourceURL(std::string resource, std::string params);
 
 	struct ReusableConnection {
 		Reference<IConnection> conn;
@@ -150,6 +150,7 @@ public:
 	std::string secret;
 	bool lookupSecret;
 	BlobKnobs knobs;
+	HTTP::Headers extraHeaders;
 
 	// Speed and concurrency limits
 	Reference<IRateControl> requestRate;
@@ -196,6 +197,9 @@ public:
 
 	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
 	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+
+	// Check if a bucket exists
+	Future<bool> bucketExists(std::string const &bucket);
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);

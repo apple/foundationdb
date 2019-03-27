@@ -24,7 +24,7 @@
 
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogSystem.h"
@@ -148,7 +148,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				}
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
-				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().cast_to<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
+				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("ToCommit", toCommit!=NULL);
@@ -178,7 +178,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						}
 					}
 				}
-			} else if( m.param1 == databaseLockedKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
+			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -225,6 +225,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					for (auto& logRange : vecBackupKeys->modify(KeyRangeRef(logRangeBegin, logRangeEnd))) {
 						logRange->value().insert(logDestination);
 					}
+					for (auto& logRange : vecBackupKeys->modify(singleKeyRange(metadataVersionKey))) {
+						logRange->value().insert(logDestination);
+					}
 
 					// Log the modification
 					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", printable(m.param1))
@@ -236,8 +239,20 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					// Notifies all servers that a Master's server epoch ends
 					auto allServers = txnStateStore->readRange(serverTagKeys).get();
 					std::set<Tag> allTags;
-					for (auto &kv : allServers)
-						allTags.insert(decodeServerTagValue(kv.value));
+
+					if(m.param1 == killStorageKey) {
+						int8_t safeLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
+						for (auto &kv : allServers) {
+							Tag t = decodeServerTagValue(kv.value);
+							if(t.locality != safeLocality) {
+								allTags.insert(t);
+							}
+						}
+					} else {
+						for (auto &kv : allServers) {
+							allTags.insert(decodeServerTagValue(kv.value));
+						}
+					}
 
 					if (m.param1 == lastEpochEndKey) {
 						for (auto t : allTags)
@@ -333,6 +348,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			if (range.contains(databaseLockedKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(databaseLockedKey));
 			}
+			if (range.contains(metadataVersionKey)) {
+				if(!initialCommit) txnStateStore->clear(singleKeyRange(metadataVersionKey));
+			}
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
@@ -402,6 +420,21 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 
 							// Remove the backup name from the range
 							logRangeMap.erase(logDestination);
+						}
+
+						bool foundKey = false;
+						for(auto &it : vecBackupKeys->intersectingRanges(normalKeys)) {
+							if(it.value().count(logDestination) > 0) {
+								foundKey = true;
+								break;
+							}
+						}
+						if(!foundKey) {
+							auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
+							for (auto logRange : logRanges) {
+								auto &logRangeMap = logRange->value();
+								logRangeMap.erase(logDestination);
+							}
 						}
 					}
 

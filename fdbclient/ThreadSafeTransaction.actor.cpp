@@ -21,28 +21,16 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
-#include <new>
-
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
+#include <new>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
 
-Reference<IDatabase> constructThreadSafeDatabase( Database db ) {
-	return Reference<IDatabase>( new ThreadSafeDatabase(db.extractPtr()) );
-}
-Future<Reference<IDatabase>> createThreadSafeDatabase( std::string connFilename, int apiVersion ) {
-	Database db = Database::createDatabase( connFilename, apiVersion );
-	return constructThreadSafeDatabase( db );
-}
-ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::create( std::string connFilename, int apiVersion ) {
-	if (!g_network) return ThreadFuture<Reference<IDatabase>>(network_not_setup());
-	return onMainThread( [connFilename, apiVersion](){ return createThreadSafeDatabase( connFilename, apiVersion ); } );
-}
 ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
-	DatabaseContext* db = this->db;
+	DatabaseContext *db = this->db;
 	return onMainThread( [db]() -> Future<Void> {
 		db->checkDeferredError();
 		return db->onConnected();
@@ -52,31 +40,51 @@ ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
 ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabase(Database db) {
 	return onMainThread( [db](){
 		db->checkDeferredError();
-		return Future<Reference<IDatabase>>(constructThreadSafeDatabase(db));
+		DatabaseContext *cx = db.getPtr();
+		cx->addref();
+		return Future<Reference<IDatabase>>(Reference<IDatabase>(new ThreadSafeDatabase(cx)));
 	});
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(this));
-}
-
-Database ThreadSafeDatabase::unsafeGetDatabase() const {
-	db->addref();
-	return Database(db);
+	return Reference<ITransaction>(new ThreadSafeTransaction(Reference<ThreadSafeDatabase>::addRef(this)));
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [db, option, passValue](){ db->setOption(option, passValue.contents()); }, &db->deferredError );
+	onMainThreadVoid( [db, option, passValue](){ 
+		db->checkDeferredError();
+		db->setOption(option, passValue.contents()); 
+	}, &db->deferredError );
+}
+
+ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
+	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
+
+	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
+	// but run its constructor on the main thread
+	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
+
+	onMainThreadVoid([db, connFile, apiVersion](){ 
+		try {
+			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
+		}
+		catch(Error &e) {
+			new (db) DatabaseContext(e);
+		}
+		catch(...) {
+			new (db) DatabaseContext(unknown_error());
+		}
+	}, NULL);
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
-	DatabaseContext* db = this->db;
+	DatabaseContext *db = this->db;
 	onMainThreadVoid( [db](){ db->delref(); }, NULL );
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
+ThreadSafeTransaction::ThreadSafeTransaction( Reference<ThreadSafeDatabase> db ) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -84,10 +92,12 @@ ThreadSafeTransaction::ThreadSafeTransaction( ThreadSafeDatabase *cx ) {
 	// because the reference count of the DatabaseContext is solely managed from the main thread.  If cx is destructed
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
-	DatabaseContext* db = cx->db;
 	ReadYourWritesTransaction *tr = this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid( [tr,db](){ db->addref(); new (tr) ReadYourWritesTransaction( Database(db) ); }, NULL );
+	onMainThreadVoid( [tr, db](){ 
+		db->db->addref(); 
+		new (tr) ReadYourWritesTransaction( Database(db->db) ); 
+	}, NULL );
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
@@ -283,12 +293,12 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 	return onMainThread( [tr, e](){ return tr->onError(e); } );
 }
 
-void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept(true) {
+void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept(true) {
+ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }
@@ -357,8 +367,8 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-ThreadFuture<Reference<IDatabase>> ThreadSafeApi::createDatabase(const char *clusterFilePath) {
-	return ThreadSafeDatabase::create(clusterFilePath, apiVersion);
+Reference<IDatabase> ThreadSafeApi::createDatabase(const char *clusterFilePath) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {

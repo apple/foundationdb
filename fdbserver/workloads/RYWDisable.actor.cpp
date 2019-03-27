@@ -19,10 +19,10 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RYWDisableWorkload : TestWorkload {
@@ -69,7 +69,7 @@ struct RYWDisableWorkload : TestWorkload {
 						Future<Optional<Value>> _ = tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes)));
 					} else if( opType == 2 ) {
 						//TraceEvent("RYWGetAndWait");
-						Optional<Value> _ = wait( tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes))) );
+						wait(success( tr.get( self->keyForIndex(g_random->randomInt(0, self->nodes))) ));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;

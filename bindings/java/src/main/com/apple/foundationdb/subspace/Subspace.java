@@ -46,8 +46,8 @@ import com.apple.foundationdb.tuple.Versionstamp;
  * </p>
  */
 public class Subspace {
-	static final Tuple EMPTY_TUPLE = Tuple.from();
-	static final byte[] EMPTY_BYTES = new byte[0];
+	private static final Tuple EMPTY_TUPLE = Tuple.from();
+	private static final byte[] EMPTY_BYTES = new byte[0];
 
 	private final byte[] rawPrefix;
 
@@ -228,7 +228,7 @@ public class Subspace {
 		if(!contains(key))
 			throw new IllegalArgumentException("Cannot unpack key that is not contained in subspace.");
 
-		return Tuple.fromBytes(Arrays.copyOfRange(key, rawPrefix.length, key.length));
+		return Tuple.fromBytes(key, rawPrefix.length, key.length - rawPrefix.length);
 	}
 
 	/**
@@ -248,8 +248,7 @@ public class Subspace {
 	 * @return the {@link Range} of keyspace corresponding to {@code tuple}
 	 */
 	public Range range(Tuple tuple) {
-		Range p = tuple.range();
-		return new Range(join(rawPrefix, p.begin), join(rawPrefix, p.end));
+		return tuple.range(rawPrefix);
 	}
 
 	/**

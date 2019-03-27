@@ -23,9 +23,12 @@
 #pragma once
 
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/LatencyBandConfig.h"
 
 struct ServerDBInfo {
 	// This structure contains transient information which is broadcast to all workers for a database,
@@ -35,7 +38,9 @@ struct ServerDBInfo {
 	UID id;  // Changes each time any other member changes
 	ClusterControllerFullInterface clusterInterface;
 	ClientDBInfo client;           // After a successful recovery, eventually proxies that communicate with it
+	Optional<DataDistributorInterface> distributor;  // The best guess of current data distributor.
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
+	Optional<RatekeeperInterface> ratekeeper;
 	vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;
@@ -43,6 +48,7 @@ struct ServerDBInfo {
 	LocalityData myLocality;       // (Not serialized) Locality information, if available, for the *local* process
 	LogSystemConfig logSystemConfig;
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
+	Optional<LatencyBandConfig> latencyBandConfig;
 
 	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
 
@@ -51,7 +57,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & clusterInterface & client & master & resolvers & recoveryCount & masterLifetime & logSystemConfig & priorCommittedLogServers & recoveryState;
+		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig);
 	}
 };
 

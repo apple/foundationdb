@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/IKeyValueStore.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 // KeyValueStoreCompressTestData wraps an existing IKeyValueStore and
 // implements the following rudimentary compression scheme:

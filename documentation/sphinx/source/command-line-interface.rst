@@ -101,6 +101,15 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
+fileconfigure
+-------------
+
+The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+
+The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
+
+"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+
 coordinators
 ------------
 
@@ -108,7 +117,7 @@ The ``coordinators`` command is used to change cluster coordinators or descripti
 
 Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
-If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
+If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. Processes with class coordinator will be prioritized. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
 For more information on setting coordinators, see :ref:`configuration-changing-coordination-servers`.
 

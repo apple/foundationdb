@@ -13,15 +13,16 @@
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
     <ActorCompiler Include="CompressedInt.actor.cpp" />
-    <ClCompile Include="boost.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
     <ClCompile Include="FaultInjection.cpp" />
     <ClCompile Include="FileTraceLogWriter.cpp" />
     <ClCompile Include="XmlTraceLogFormatter.cpp" />
+    <ClCompile Include="JsonTraceLogFormatter.cpp" />
     <ClInclude Include="FileTraceLogWriter.h" />
     <ClInclude Include="XmlTraceLogFormatter.h" />
+    <ClInclude Include="JsonTraceLogFormatter.h" />
     <ClInclude Include="MetricSample.h" />
     <ClInclude Include="Profiler.h" />
     <ActorCompiler Include="Profiler.actor.cpp" />
@@ -130,11 +131,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
@@ -152,7 +153,7 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;BOOST_ERROR_CODE_HEADER_ONLY;BOOST_SYSTEM_NO_DEPRECATED;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
@@ -175,7 +176,7 @@
       <Optimization>Full</Optimization>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;FDB_CLEAN_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;BOOST_ERROR_CODE_HEADER_ONLY;BOOST_SYSTEM_NO_DEPRECATED;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;FDB_CLEAN_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <EnablePREfast>false</EnablePREfast>

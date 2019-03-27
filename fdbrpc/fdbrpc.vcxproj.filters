@@ -137,7 +137,6 @@
     <ClInclude Include="Platform.h" />
     <ClInclude Include="ActorFuzz.h" />
     <ClInclude Include="ContinuousSample.h" />
-    <ClInclude Include="EndpointGroup.h" />
     <ClInclude Include="fdbrpc.h" />
     <ClInclude Include="MultiInterface.h" />
     <ClInclude Include="PerfMetric.h" />

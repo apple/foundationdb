@@ -26,7 +26,10 @@
     </ActorCompiler>
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="BackupContainer.h" />
-    <ClInclude Include="BackupAgent.h" />
+    <ActorCompiler Include="BackupAgent.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="BlobStore.h" />
     <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />
@@ -61,14 +64,20 @@
     <ClInclude Include="libb64\cencode.h" />
     <ClInclude Include="libb64\decode.h" />
     <ClInclude Include="libb64\encode.h" />
-    <ClInclude Include="ManagementAPI.h" />
+    <ActorCompiler Include="ManagementAPI.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="MasterProxyInterface.h" />
     <ClInclude Include="md5\md5.h" />
     <ClInclude Include="MonitorLeader.h" />
     <ClInclude Include="MultiVersionAssignmentVars.h" />
     <ClInclude Include="MultiVersionTransaction.h" />
     <ClInclude Include="MutationList.h" />
-    <ClInclude Include="NativeAPI.h" />
+    <ActorCompiler Include="NativeAPI.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="Notified.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
@@ -156,11 +165,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -177,7 +186,7 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
@@ -200,7 +209,7 @@
       <Optimization>Full</Optimization>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <EnablePREfast>false</EnablePREfast>

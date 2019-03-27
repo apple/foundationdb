@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.h"
-#include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
@@ -75,7 +75,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
-		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
+		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("BDBA_Lock");
 		wait(lockDatabase(cx, self->lockid));
 		TraceEvent("BDBA_Abort");

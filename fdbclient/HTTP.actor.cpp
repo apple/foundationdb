@@ -22,6 +22,7 @@
 #include "fdbclient/md5/md5.h"
 #include "fdbclient/libb64/encode.h"
 #include <cctype>
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace HTTP {
 
@@ -30,7 +31,7 @@ namespace HTTP {
 		o.reserve(s.size() * 3);
 		char buf[4];
 		for(auto c : s)
-			if(std::isalnum(c))
+			if(std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 				o.append(&c, 1);
 			else {
 				sprintf(buf, "%%%.02X", c);
@@ -124,7 +125,7 @@ namespace HTTP {
 			// Next search will start at the current end of the buffer - delim size + 1
 			if(sPos >= lookBack)
 				sPos -= lookBack;
-			int _ = wait(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE));
+			wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
 		}
 	}
 
@@ -132,7 +133,7 @@ namespace HTTP {
 	ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string *buf, size_t pos) {
 		state int stop_size = pos + len;
 		while(buf->size() < stop_size)
-			int _ = wait(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE));
+			wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
 		return Void();
 	}
 
@@ -234,28 +235,32 @@ namespace HTTP {
 			pos = 0;
 
 			loop {
-				// Read the line that contains the chunk length as text in hex
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-				state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), NULL, 16);
+				{
+					// Read the line that contains the chunk length as text in hex
+					size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
+					state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), NULL, 16);
 
-				// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the content buffer
-				r->content.erase(pos, lineLen + 2);
+					// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the content buffer
+					r->content.erase(pos, lineLen + 2);
 
-				// If chunkLen is 0 then this marks the end of the content chunks.
-				if(chunkLen == 0)
-					break;
+					// If chunkLen is 0 then this marks the end of the content chunks.
+					if(chunkLen == 0)
+						break;
 
-				// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
-				wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
-				pos += chunkLen;
+					// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
+					wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
+					pos += chunkLen;
+				}
 
-				// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-				if(lineLen != 0)
-					throw http_bad_response();
+				{
+					// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
+					size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
+					if(lineLen != 0)
+						throw http_bad_response();
 
-				// Instead of advancing pos, erase the empty line from the content buffer
-				r->content.erase(pos, 2);
+					// Instead of advancing pos, erase the empty line from the content buffer
+					r->content.erase(pos, 2);
+				}
 			}
 
 			// The content buffer now contains the de-chunked, contiguous content at position 0 to pos.  Save this length.
@@ -292,15 +297,42 @@ namespace HTTP {
 	// Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue itself must live for the life of this actor
 	// and be destroyed by the caller
 	// TODO:  pSent is very hackish, do something better.
-	ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn, std::string verb, std::string resource, HTTP::Headers headers, UnsentPacketQueue *pContent, int contentLen, Reference<IRateControl> sendRate, int64_t *pSent, Reference<IRateControl> recvRate) {
+	ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn, std::string verb, std::string resource, HTTP::Headers headers, UnsentPacketQueue *pContent, int contentLen, Reference<IRateControl> sendRate, int64_t *pSent, Reference<IRateControl> recvRate, std::string requestIDHeader) {
+		state TraceEvent event(SevDebug, "HTTPRequest");
+
 		state UnsentPacketQueue empty;
 		if(pContent == NULL)
 			pContent = &empty;
 
+		// There is no standard http request id header field, so either a global default can be set via a knob
+		// or it can be set per-request with the requestIDHeader argument (which overrides the default)
+		if(requestIDHeader.empty()) {
+			requestIDHeader = CLIENT_KNOBS->HTTP_REQUEST_ID_HEADER;
+		}
+
 		state bool earlyResponse = false;
 		state int total_sent = 0;
+		state double send_start;
+
+		event.detail("DebugID", conn->getDebugID());
+		event.detail("RemoteAddress", conn->getPeerAddress());
+		event.detail("Verb", verb);
+		event.detail("Resource", resource);
+		event.detail("RequestContentLen", contentLen);
 
 		try {
+			state std::string requestID;
+			if(!requestIDHeader.empty()) {
+				requestID = g_random->randomUniqueID().toString();
+				requestID = requestID.insert(20, "-");
+				requestID = requestID.insert(16, "-");
+				requestID = requestID.insert(12, "-");
+				requestID = requestID.insert(8, "-");
+
+				headers[requestIDHeader] = requestID;
+				event.detail("RequestIDSent", requestID);
+			}
+
 			// Write headers to a packet buffer chain
 			PacketBuffer *pFirst = new PacketBuffer();
 			PacketBuffer *pLast = writeRequestHeader(verb, resource, headers, pFirst);
@@ -317,7 +349,7 @@ namespace HTTP {
 			state Reference<HTTP::Response> r(new HTTP::Response());
 			state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
 
-			state double send_start = timer();
+			send_start = timer();
 
 			loop {
 				wait(conn->onWritable());
@@ -346,19 +378,66 @@ namespace HTTP {
 			}
 
 			wait(responseReading);
-
 			double elapsed = timer() - send_start;
-			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
-				printf("[%s] HTTP code=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
-					conn->getDebugID().toString().c_str(), r->code, earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent, (int)r->contentLen);
-			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2)
+
+			event.detail("ResponseCode", r->code);
+			event.detail("ResponseContentLen", r->contentLen);
+			event.detail("Elapsed", elapsed);
+
+			Optional<Error> err;
+			if(!requestIDHeader.empty()) {
+				std::string responseID;
+				auto iid = r->headers.find(requestIDHeader);
+				if(iid != r->headers.end()) {
+					responseID = iid->second;
+				}
+				event.detail("RequestIDReceived", responseID);
+				if(requestID != responseID) {
+					err = http_bad_request_id();
+
+					// Log a non-debug a error
+					Severity sev = SevError;
+					// If the response code is 5xx (server error) and the responseID is empty then just warn
+					if(responseID.empty() && r->code >= 500 && r->code < 600) {
+						sev = SevWarnAlways;
+					}
+
+					TraceEvent(sev, "HTTPRequestFailedIDMismatch")
+						.detail("DebugID", conn->getDebugID())
+						.detail("RemoteAddress", conn->getPeerAddress())
+						.detail("Verb", verb)
+						.detail("Resource", resource)
+						.detail("RequestContentLen", contentLen)
+						.detail("ResponseCode", r->code)
+						.detail("ResponseContentLen", r->contentLen)
+						.detail("RequestIDSent", requestID)
+						.detail("RequestIDReceived", responseID)
+						.error(err.get());
+				}
+			}
+
+			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
+				printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
+					conn->getDebugID().toString().c_str(),
+					(err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
+					r->code, earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent, (int)r->contentLen);
+			}
+			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 				printf("[%s] HTTP RESPONSE:  %s %s\n%s\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str(), r->toString().c_str());
+			}
+
+			if(err.present()) {
+				throw err.get();
+			}
+
 			return r;
 		} catch(Error &e) {
 			double elapsed = timer() - send_start;
-			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
+			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
 				printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
 					conn->getDebugID().toString().c_str(), e.name(), earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent);
+			}
+			event.error(e);
 			throw;
 		}
 	}

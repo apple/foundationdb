@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
@@ -77,7 +78,7 @@ struct UnitTestWorkload : TestWorkload {
 
 		state std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
-			auto test = *t;
+			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
 
 			state Error result = success();
@@ -97,8 +98,6 @@ struct UnitTestWorkload : TestWorkload {
 
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
-
-			auto test = *t;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
 				.error(result, true)
 				.detail("Name", test->name)
