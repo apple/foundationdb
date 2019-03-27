@@ -605,7 +605,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	}
 
 	if (db->get().ratekeeper.present()) {
-		roles.addRole("rate_keeper", db->get().ratekeeper.get());
+		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;

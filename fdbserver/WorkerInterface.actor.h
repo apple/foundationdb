@@ -330,7 +330,7 @@ struct Role {
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
-	static const Role RATE_KEEPER;
+	static const Role RATEKEEPER;
 
 	std::string roleName;
 	std::string abbreviation;
