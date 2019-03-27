@@ -36,7 +36,7 @@ A range file can have one to many data blocks. Each data block has a set of key-
 A data block is encoded as follows: `Header startKey k1v1 k2v2 Padding`.
 
 
-Example:
+    Example:
 
     The client code writes keys in this sequence:
              a c d e f g h i j z
@@ -60,36 +60,26 @@ The code that decodes a range block is in `ACTOR Future<Standalone<VectorRef<Key
 ### Data format in a log file
 A log file can have one to many data blocks. 
 Each block is encoded as  `Header, [Param1, Param2]... padding`. 
-The first 32bits in Param1 and Param2 specifies the length of the Param1 and Param2. 
-Param1 specifies the version when the mutations happened; 
-Param2 encodes the group of mutations happened at the version. 
+The first 32bits in `Param1` and `Param2` specifies the length of the `Param1` and `Param2`. 
+`Param1` specifies the version when the mutations happened; 
+`Param2` encodes the group of mutations happened at the version. 
 
 Note that if the group of mutations is bigger than the block size, the mutation group will be split across multiple data blocks. 
-For example, we may get [Param1, Param2_part0], [Param1, Param2_part1]. By concatenating the Param2_part0 and Param2_part1, we can get the group of all mutations happened in the version specified in Param1.
+For example, we may get `[Param1, Param2_part0]`, `[Param1, Param2_part1]`. By concatenating the `Param2_part0` and `Param2_part1`, we can get the group of all mutations happened in the version specified in `Param1`.
 
-The encoding format for Param1 is as follows:
+The encoding format for `Param1` is as follows:
 `hashValue|commitVersion|part`, 
-where `hashValue` is the hash of the commitVersion, `commitVersion` is the version when the mutations in Param2(s) are taken, and `part` is the part number in case we need to concatenate the Param2 to get the group of all mutations.  
+where `hashValue` is the hash of the commitVersion, `commitVersion` is the version when the mutations in `Param2`(s) are taken, and `part` is the part number in case we need to concatenate the `Param2` to get the group of all mutations.  
  `hashValue` takes 8bits,  `commitVersion` takes 64bits, and `part` takes 32bits. 
 
-Note that in case of concatenating the partial group of mutations in Param2 to get the full group of all mutations, the part number should be continuous.
+Note that in case of concatenating the partial group of mutations in `Param2` to get the full group of all mutations, the part number should be continuous.
 
 The encoding format for the group of mutations, which is Param2 or the concatenated Param2 in case of partial group of mutations in a block,  is as follows:
 `length_of_the_mutation_group | encoded_mutation_1 | … | encoded_mutation_k`.
 The `encoded_mutation_i` is encoded as follows
       `type|kLen|vLen|Key|Value`
-where type is the mutation type, such as Set or Clear, `kLen` and `vLen` respectively are the length of the key and value in the mutation. `Key` and `Value` are the serialized value of the Key and Value in the mutation
+where type is the mutation type, such as Set or Clear, `kLen` and `vLen` respectively are the length of the key and value in the mutation. `Key` and `Value` are the serialized value of the Key and Value in the mutation.
 
 The code related to how a log file is written is in the `struct LogFileWriter` in `namespace fileBackup`. 
 
-The code that decodes a mutation block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len)`
-
-
-
-
-
-
-
-
-
-
+The code that decodes a mutation block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len)`.
