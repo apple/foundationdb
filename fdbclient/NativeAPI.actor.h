@@ -216,8 +216,8 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
-	RequestStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
+struct ReadStats : public ReferenceCounted<ReadStats>, NonCopyable {
+	ReadStats(int requestId) : requestId(requestId), bytesFetched(0), keysFetched(0) {}
 
 	uint64_t requestId;
 	uint64_t bytesFetched;
@@ -227,18 +227,18 @@ struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
 	NetworkAddress storageContacted;
 };
 
-struct RequestStatsList : public ReferenceCounted<RequestStatsList>, NonCopyable {
-	RequestStatsList() : nextRequestId(0) {}
-	std::vector<Reference<RequestStats>> list;
+struct RequestStats : public ReferenceCounted<RequestStats>, NonCopyable {
+	RequestStats() : nextReadId(0) {}
+	std::vector<Reference<ReadStats>> reads;
 	std::vector<NetworkAddress> proxies;
 
-	Reference<RequestStats> getNewRequestStats();
-	Reference<RequestStats> getNewRequestStats(uint64_t requestId);
+	Reference<ReadStats> getNewReadStats();
+	Reference<ReadStats> getNewReadStats(uint64_t requestId);
 
-	uint64_t getNextRequestId();
+	uint64_t getNextReadId();
 
 private:
-	uint64_t nextRequestId;
+	uint64_t nextReadId;
 };
 
 class Transaction : NonCopyable {
@@ -315,7 +315,7 @@ public:
 	int numErrors;
 
 	std::vector<Reference<Watch>> watches;
-	Reference<RequestStatsList> requestStatsList;
+	Reference<RequestStats> requestStats;
 
 	int apiVersionAtLeast(int minVersion) const;
 
@@ -331,8 +331,8 @@ public:
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	void setPriority(uint32_t priorityFlag);
-	Reference<RequestStats> getNewRequestStats();
-	Reference<RequestStats> getNewRequestStats(uint64_t requestId);
+	Reference<ReadStats> getNewReadStats();
+	Reference<ReadStats> getNewReadStats(uint64_t requestId);
 
 	Database cx;
 
