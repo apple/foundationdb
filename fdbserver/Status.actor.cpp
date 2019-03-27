@@ -605,7 +605,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	}
 
 	if (db->get().ratekeeper.present()) {
-		roles.addRole("rate_keeper", db->get().ratekeeper.get());
+		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
@@ -1831,7 +1831,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state std::set<std::string> status_incomplete_reasons;
 	state WorkerDetails mWorker;
 	state WorkerDetails ddWorker; // DataDistributor worker
-	state WorkerDetails rkWorker; // RateKeeper worker
+	state WorkerDetails rkWorker; // Ratekeeper worker
 
 	try {
 		// Get the master Worker interface
@@ -1853,7 +1853,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			ddWorker = _ddWorker.get();
 		}
 
-		// Get the RateKeeper worker interface
+		// Get the Ratekeeper worker interface
 		Optional<WorkerDetails> _rkWorker;
 		if (db->get().ratekeeper.present()) {
 			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );

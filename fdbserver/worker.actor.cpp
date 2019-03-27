@@ -858,13 +858,15 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					recruited = rkInterf->get().get();
 					TEST(true);  // Recruited while already a ratekeeper.
 				} else {
-					startRole(Role::RATE_KEEPER, recruited.id(), interf.id());
+					startRole(Role::RATEKEEPER, recruited.id(), interf.id());
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
 
-					Future<Void> ratekeeper = rateKeeper( recruited, dbInfo );
-					errorForwarders.add( forwardError( errors, Role::RATE_KEEPER, recruited.id(), setWhenDoneOrError( ratekeeper, rkInterf, Optional<RatekeeperInterface>() ) ) );
+					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
+					errorForwarders.add(
+					    forwardError(errors, Role::RATEKEEPER, recruited.id(),
+					                 setWhenDoneOrError(ratekeeperProcess, rkInterf, Optional<RatekeeperInterface>())));
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
@@ -1279,4 +1281,4 @@ const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
 const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
-const Role Role::RATE_KEEPER("RateKeeper", "RK");
+const Role Role::RATEKEEPER("Ratekeeper", "RK");
