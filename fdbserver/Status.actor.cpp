@@ -146,7 +146,7 @@ static Optional<WorkerDetails> getWorker(std::vector<WorkerDetails> const& worke
 				return workers[c];
 		return Optional<WorkerDetails>();
 	}
-	catch (Error &e){
+	catch (Error& ){
 		return Optional<WorkerDetails>();
 	}
 }
@@ -345,7 +345,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 				notExcludedMap[machineId] = false;
 			workerContribMap[machineId] ++;
 		}
-		catch (Error& e) {
+		catch (Error& ) {
 			++failed;
 		}
 	}
@@ -1091,7 +1091,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 		int count = coordinatorLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	}
-	catch (Error &e){
+	catch (Error& ){
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;

@@ -331,7 +331,7 @@ UID getSharedMemoryMachineId() {
 				criticalError(FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
 			return *machineId;
 		}
-		catch (boost::interprocess::interprocess_exception &e) {
+		catch (boost::interprocess::interprocess_exception& ) {
 			try {
 				//If the shared memory already exists, open it read-only in case it was created by another user
 				boost::interprocess::managed_shared_memory segment(boost::interprocess::open_read_only, sharedMemoryIdentifier.c_str());

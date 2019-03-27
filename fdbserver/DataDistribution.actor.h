@@ -250,7 +250,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 //Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize( double dbSizeEstimate );
 
-class DDTeamCollection;
+struct DDTeamCollection;
 ACTOR Future<Void> teamRemover(DDTeamCollection* self);
 ACTOR Future<Void> teamRemoverPeriodic(DDTeamCollection* self);
 ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
