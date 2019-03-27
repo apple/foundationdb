@@ -1682,17 +1682,6 @@ void startNewSimulator() {
 	g_simulator.connectionFailuresDisableDuration = g_random->random01() < 0.5 ? 0 : 1e6;
 }
 
-static double networkLatency() {
-	double a = g_random->random01();
-	const double pFast = 0.999;
-	if (a <= pFast)
-		return FLOW_KNOBS->MIN_NETWORK_LATENCY + FLOW_KNOBS->FAST_NETWORK_LATENCY/pFast * a; // 0.5ms average
-	else{
-		a = (a-pFast) / (1-pFast); // uniform 0-1 again
-		return FLOW_KNOBS->MIN_NETWORK_LATENCY + FLOW_KNOBS->SLOW_NETWORK_LATENCY*a; // long tail up to X ms
-	}
-}
-
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 	TraceEvent("RebootingProcessAttempt").detailext("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskDefaultDelay", TaskDefaultDelay);
 
