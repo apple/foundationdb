@@ -1870,12 +1870,10 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				if (requestStats) {
-					readStats = requestStats->getNewReadStats(readId);
-				}
 				TrackedReply<GetKeyValuesRequest> trackedReply = wait( trackedLoadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 				GetKeyValuesReply rep = trackedReply.reply;
-				if (readStats) {
+				if (requestStats) {
+					readStats = requestStats->getNewReadStats(readId);
 					readStats->storageContacted = trackedReply.address;
 					readStats->keysFetched = rep.data.size();
 					for (const auto &kv : rep.data) {
