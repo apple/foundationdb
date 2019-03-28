@@ -28,6 +28,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/crc32c.h"
 #include "fdbrpc/simulator.h"
+#include <unordered_map>
 
 #if VALGRIND
 #include <memcheck.h>
@@ -168,7 +169,7 @@ public:
 
 	NetworkAddressList localAddresses;
 	std::vector<Future<Void>> listeners;
-	std::map<NetworkAddress, struct Peer*> peers;
+	std::unordered_map<NetworkAddress, struct Peer*> peers;
 	bool warnAlwaysForLargePacket;
 
 	// These declarations must be in exactly this order

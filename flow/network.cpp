@@ -24,38 +24,41 @@
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
 
-IPAddress::IPAddress() : store({}), isV6addr(false) {}
-
-IPAddress::IPAddress(const IPAddressStore& v6addr) : store(v6addr), isV6addr(true) {}
-
-IPAddress::IPAddress(uint32_t v4addr) : store({}), isV6addr(false) {
-	uint32_t* parts = (uint32_t*)store.data();
-	parts[0] = v4addr;
+IPAddress::IPAddress() : isV4addr(true) {
+	addr.v4 = 0;
 }
 
-uint32_t IPAddress::toV4() const {
-	const uint32_t* parts = (uint32_t*)store.data();
-	return parts[0];
+IPAddress::IPAddress(const IPAddressStore& v6addr) : isV4addr(false) {
+	addr.v6 = v6addr;
 }
 
-bool IPAddress::operator==(const IPAddress& addr) const {
-	return isV6addr == addr.isV6addr && store == addr.store;
+IPAddress::IPAddress(uint32_t v4addr) : isV4addr(true) {
+	addr.v4 = v4addr;
+}
+
+bool IPAddress::operator==(const IPAddress& rhs) const {
+	return isV4addr == rhs.isV4addr && (isV4addr ? addr.v4 == rhs.addr.v4 : addr.v6 == rhs.addr.v6);
 }
 
 bool IPAddress::operator!=(const IPAddress& addr) const {
 	return !(*this == addr);
 }
 
-bool IPAddress::operator<(const IPAddress& addr) const {
-	return isV6() == addr.isV6() ? store < addr.store : isV6() < addr.isV6();
+bool IPAddress::operator<(const IPAddress& rhs) const {
+	if(isV4addr != rhs.isV4addr) {
+		return isV4addr < rhs.isV4addr;
+	}
+	if(isV4addr) {
+		return addr.v4 < rhs.addr.v4;
+	}
+	return addr.v6 < rhs.addr.v6;
 }
 
 std::string IPAddress::toString() const {
-	if (isV6()) {
-		return boost::asio::ip::address_v6(store).to_string();
+	if (isV4addr) {
+		return format("%d.%d.%d.%d", (addr.v4 >> 24) & 0xff, (addr.v4 >> 16) & 0xff, (addr.v4 >> 8) & 0xff, addr.v4 & 0xff);
 	} else {
-		const uint32_t ip = toV4();
-		return format("%d.%d.%d.%d", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+		return boost::asio::ip::address_v6(addr.v6).to_string();
 	}
 }
 
@@ -69,11 +72,10 @@ Optional<IPAddress> IPAddress::parse(std::string str) {
 }
 
 bool IPAddress::isValid() const {
-	if (!isV6()) {
-		return toV4() != 0;
+	if (isV4addr) {
+		return addr.v4 != 0;
 	}
-
-	return std::any_of(store.begin(), store.end(), [](uint8_t part) { return part > 0; });
+	return std::any_of(addr.v6.begin(), addr.v6.end(), [](uint8_t part) { return part != 0; });
 }
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
