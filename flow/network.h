@@ -92,24 +92,24 @@ struct IPAddress {
 	explicit IPAddress(const IPAddressStore& v6addr);
 	explicit IPAddress(uint32_t v4addr);
 
-	bool isV6() const { return !isV4addr; }
-	bool isV4() const { return isV4addr; }
+	bool isV6() const { return isV6addr; }
+	bool isV4() const { return !isV6addr; }
 	bool isValid() const;
 
-	IPAddress(const IPAddress& rhs) : isV4addr(rhs.isV4addr) {
-		if(isV4addr) {
-			addr.v4 = rhs.addr.v4;
-		} else {
+	IPAddress(const IPAddress& rhs) : isV6addr(rhs.isV6addr) {
+		if(isV6addr) {
 			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
 		}
 	}
 
 	IPAddress& operator=(const IPAddress& rhs) {
-		isV4addr = rhs.isV4addr;
-		if(isV4addr) {
-			addr.v4 = rhs.addr.v4;
-		} else {
+		isV6addr = rhs.isV6addr;
+		if(isV6addr) {
 			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
 		}
 		return *this;
 	}
@@ -128,16 +128,16 @@ struct IPAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isV4addr);
-		if(isV4addr) {
-			serializer(ar, addr.v4);
-		} else {
+		serializer(ar, isV6addr);
+		if(isV6addr) {
 			serializer(ar, addr.v6);
+		} else {
+			serializer(ar, addr.v4);
 		}
 	}
 
 private:
-	bool isV4addr;
+	bool isV6addr;
 	union {
 		uint32_t v4;
 		IPAddressStore v6;
@@ -199,15 +199,15 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-		    int result = 0;
-		    if (na.ip.isV6()) {
-					result = crc32c_append( 0xfdbeefdb, (uint8_t*)na.ip.toV6().data(), 16 );
-		    } else {
-			    result = na.ip.toV4();
-		    }
-		    return (result << 16) + na.port;
-	    }
-    };
+			int result = 0;
+			if (na.ip.isV6()) {
+				result = crc32c_append( 0xfdbeefdb, (uint8_t*)na.ip.toV6().data(), 16 );
+			} else {
+				result = na.ip.toV4();
+			}
+			return (result << 16) + na.port;
+		}
+	};
 }
 
 struct NetworkAddressList {
