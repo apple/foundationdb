@@ -268,7 +268,7 @@ struct GetHealthMetricsReply
 		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
 		BinaryWriter bw(IncludeVersion());
 		bw << this->healthMetrics;
-		serialized = Standalone<StringRef>(bw.toStringRef());
+		serialized = bw.toValue();
 	}
 
 	template <class Ar>

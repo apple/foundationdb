@@ -908,9 +908,10 @@ void ILogSystem::BufferedCursor::combineMessages() {
 		messageWriter << t;
 	}
 	messageWriter.serializeBytes(msg.message);
-	msg.arena = Arena();
+	Standalone<StringRef> val = messageWriter.toValue();
+	msg.arena = val.arena();
 	msg.tags = tags;
-	msg.message = StringRef(msg.arena, messageWriter.toStringRef());
+	msg.message = val;
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::BufferedCursor::cloneNoMore() {

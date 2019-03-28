@@ -773,14 +773,12 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Arena getArena() { return arena; }
-	StringRef getMessages(int loc) {
-		return StringRef( arena, messagesWriter[loc].toStringRef() );  // FIXME: Unnecessary copy!
+	Standalone<StringRef> getMessages(int loc) {
+		return messagesWriter[loc].toValue();
 	}
 
 private:
 	Reference<ILogSystem> logSystem;
-	Arena arena;
 	vector<Tag> next_message_tags;
 	vector<Tag> prev_tags;
 	vector<BinaryWriter> messagesWriter;

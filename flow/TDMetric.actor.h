@@ -87,7 +87,7 @@ struct KeyWithWriter {
 	void operator=( KeyWithWriter&& r ) { key = std::move(r.key); writer = std::move(r.writer); writerOffset = r.writerOffset; }
 
 	StringRef value() {
-		return StringRef(writer.toStringRef().substr(writerOffset));
+		return StringRef(writer.toValue().substr(writerOffset));
 	}
 };
 
@@ -540,7 +540,7 @@ struct FieldLevel {
 					// Otherwise, insert but first, patch the header if this block is old enough
 					if(data.rollTime <= lastTimeRequiringHeaderPatch) {
 						ASSERT(previousHeader.present());
-						FieldLevel<T>::updateSerializedHeader(data.writer.toStringRef(), previousHeader.get());
+						FieldLevel<T>::updateSerializedHeader(data.writer.toValue(), previousHeader.get());
 					}
 
 					batch.inserts.push_back(KeyWithWriter(mk.packDataKey(data.start), data.writer));
@@ -1243,7 +1243,7 @@ public:
 		// TOOD: If it is useful, this could be the current header value of the most recently logged level.
 		wr << FieldHeader<TimeAndValue<T>>();
 		enc.write(wr, tv);
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	void onEnable() {
