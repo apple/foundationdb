@@ -201,7 +201,7 @@ namespace std
 		{
 			int result = 0;
 			if (na.ip.isV6()) {
-				result = crc32c_append( 0xfdbeefdb, (uint8_t*)na.ip.toV6().data(), 16 );
+				result = ((uint16_t*) na.ip.toV6().data())[7];
 			} else {
 				result = na.ip.toV4();
 			}
