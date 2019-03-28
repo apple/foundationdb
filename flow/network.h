@@ -28,6 +28,7 @@
 #include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
+#include "fdbrpc/crc32c.h"
 
 enum {
 	TaskMaxPriority = 1000000,
@@ -95,10 +96,28 @@ struct IPAddress {
 	bool isV4() const { return !isV6addr; }
 	bool isValid() const;
 
+	IPAddress(const IPAddress& rhs) : isV6addr(rhs.isV6addr) {
+		if(isV6addr) {
+			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
+		}
+	}
+
+	IPAddress& operator=(const IPAddress& rhs) {
+		isV6addr = rhs.isV6addr;
+		if(isV6addr) {
+			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
+		}
+		return *this;
+	}
+
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
-	uint32_t toV4() const;
-	const IPAddressStore& toV6() const { return store; }
+	uint32_t toV4() const { return addr.v4; }
+	const IPAddressStore& toV6() const { return addr.v6; }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -110,17 +129,19 @@ struct IPAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, isV6addr);
-		if (isV6addr) {
-			serializer(ar, store);
+		if(isV6addr) {
+			serializer(ar, addr.v6);
 		} else {
-			uint32_t* parts = (uint32_t*)store.data();
-			serializer(ar, parts[0]);
+			serializer(ar, addr.v4);
 		}
 	}
 
 private:
 	bool isV6addr;
-	IPAddressStore store;
+	union {
+		uint32_t v4;
+		IPAddressStore v6;
+	} addr;
 };
 
 struct NetworkAddress {
@@ -170,6 +191,24 @@ struct NetworkAddress {
 		}
 	}
 };
+
+namespace std
+{
+	template <>
+	struct hash<NetworkAddress>
+	{
+		size_t operator()(const NetworkAddress& na) const
+		{
+			int result = 0;
+			if (na.ip.isV6()) {
+				result = crc32c_append( 0xfdbeefdb, (uint8_t*)na.ip.toV6().data(), 16 );
+			} else {
+				result = na.ip.toV4();
+			}
+			return (result << 16) + na.port;
+		}
+	};
+}
 
 struct NetworkAddressList {
 	NetworkAddress address;

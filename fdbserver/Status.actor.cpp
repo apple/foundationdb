@@ -1252,24 +1252,6 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 	return statusObjData;
 }
 
-namespace std
-{
-	template <>
-	struct hash<NetworkAddress>
-	{
-		size_t operator()(const NetworkAddress& na) const
-		{
-		    int result = 0;
-		    if (na.ip.isV6()) {
-			    result = hashlittle(na.ip.toV6().data(), 16, 0);
-		    } else {
-			    result = na.ip.toV4();
-		    }
-		    return (result << 16) + na.port;
-	    }
-    };
-}
-
 ACTOR template <class iface>
 static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, std::vector<std::string> eventNames) {
 	state vector<Future<Optional<TraceEventFields>>> futures;

@@ -154,16 +154,10 @@ public:
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
-	template <class Ar>
-	void loadEndpoint(Ar& ar, Endpoint& e) {
-		ar >> e;
-		loadedEndpoint(e);
-	}
+	Endpoint loadedEndpoint(const UID& token);
 
 private:
 	class TransportData* self;
-
-	void loadedEndpoint(Endpoint&);
 };
 
 inline bool Endpoint::isLocal() const {
