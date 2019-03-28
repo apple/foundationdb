@@ -411,10 +411,10 @@ private:
 		int p = size;
 		size += s;
 		if (size > allocated) {
-			if(size <= 512) {
-				allocated = 512;
-			} else if(size <= 4096) {
-				allocated = 4096;
+			if(size <= 512-sizeof(ArenaBlock)) {
+				allocated = 512-sizeof(ArenaBlock);
+			} else if(size <= 4096-sizeof(ArenaBlock)) {
+				allocated = 4096-sizeof(ArenaBlock);
 			} else {
 				allocated = std::max(allocated*2, size);
 			}
