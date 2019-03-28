@@ -61,7 +61,9 @@
                         "log",
                         "storage",
                         "resolver",
-                        "cluster_controller"
+                        "cluster_controller",
+                        "data_distributor",
+                        "ratekeeper"
                      ]
                   },
                   "data_version":12341234,
