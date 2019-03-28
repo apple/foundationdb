@@ -130,7 +130,7 @@ public:
 			newInfo.id = g_random->randomUniqueID();
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
-			} else if (t == ProcessClass::RateKeeperClass) {
+			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			}
 			serverInfo->set( newInfo );
@@ -1101,7 +1101,7 @@ public:
 	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) {
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
-		if ((role != ProcessClass::DataDistributor && role != ProcessClass::RateKeeper) || pid == masterProcessId.get()) {
+		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) || pid == masterProcessId.get()) {
 			return false;
 		}
 		return isProxyOrResolver(pid);
@@ -1416,13 +1416,13 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 
 	auto& masterWorker = self->id_worker[self->masterProcessId.get()];
 	const ServerDBInfo& db = self->db.serverInfo->get();
-	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::RateKeeper);
+	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
 
 	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
 	   (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
-		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::RateKeeper);
+		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::Ratekeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
 			rkFitness = ProcessClass::ExcludeFit;
 		}
@@ -2547,10 +2547,10 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::RateKeeper, ProcessClass::NeverAssign, self->db.config, id_used);
+			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Ratekeeper, ProcessClass::NeverAssign, self->db.config, id_used);
 			InitializeRatekeeperRequest req(g_random->randomUniqueID());
 			state WorkerDetails worker = rkWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::RateKeeper)) {
+			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
@@ -2595,9 +2595,9 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 		if ( self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get() ) {
 			choose {
 				when(wait(waitFailureClient( self->db.serverInfo->get().ratekeeper.get().waitFailure, SERVER_KNOBS->RATEKEEPER_FAILURE_TIME )))  {
-					TraceEvent("ClusterController_RateKeeperDied", self->id)
+					TraceEvent("ClusterController_RatekeeperDied", self->id)
 					.detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
-					self->db.clearInterf(ProcessClass::RateKeeperClass);
+					self->db.clearInterf(ProcessClass::RatekeeperClass);
 				}
 				when(wait(self->recruitRatekeeper.onChange())) {}
 			}

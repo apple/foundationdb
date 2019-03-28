@@ -369,7 +369,7 @@ func (o TransactionOptions) SetPrioritySystemImmediate() error {
 	return o.setOpt(200, nil)
 }
 
-// Specifies that this transaction should be treated as low priority and that default priority transactions should be processed first. Useful for doing batch work simultaneously with latency-sensitive work
+// Specifies that this transaction should be treated as low priority and that default priority transactions will be processed first. Batch priority transactions will also be throttled at load levels smaller than for other types of transactions and may be fully cut off in the event of machine failures. Useful for doing batch work simultaneously with latency-sensitive work
 func (o TransactionOptions) SetPriorityBatch() error {
 	return o.setOpt(201, nil)
 }

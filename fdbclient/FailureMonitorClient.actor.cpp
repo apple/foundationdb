@@ -22,9 +22,10 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <unordered_set>
 
 struct FailureMonitorClientState : ReferenceCounted<FailureMonitorClientState> {
-	std::set<NetworkAddress> knownAddrs;
+	std::unordered_set<NetworkAddress> knownAddrs;
 	double serverFailedTimeout;
 
 	FailureMonitorClientState() {
@@ -77,7 +78,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 								changedAddresses.insert( reply.changes[c].addresses.secondaryAddress.get() );
 							}
 						}
-						for(auto it : fmState->knownAddrs)
+						for(auto& it : fmState->knownAddrs)
 							if (!changedAddresses.count( it ))
 								monitor->setStatus( it, FailureStatus() );
 						fmState->knownAddrs.clear();
