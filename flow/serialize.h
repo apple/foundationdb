@@ -277,7 +277,7 @@ inline _IncludeVersion IncludeVersion( uint64_t defaultVersion = currentProtocol
 inline _AssumeVersion AssumeVersion( uint64_t version ) { return _AssumeVersion(version); }
 inline _Unversioned Unversioned() { return _Unversioned(); }
 
-static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL, 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
+//static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL, 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
 
 class BinaryWriter : NonCopyable {
 public:

@@ -129,7 +129,7 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	is.testonly_assertBalanced();
 
 	int count = 0;
-	for (auto i : is) ++count;
+	for (auto& i : is) ++count;
 
 	ASSERT(count*3 == is.sumTo(is.end()));
 
@@ -232,7 +232,7 @@ TEST_CASE("/flow/IndexedSet/random ops") {
 
 		auto before = timer();
 		is.erase(ib, ie);
-		auto erase_time = timer() - before;
+		//auto erase_time = timer() - before;
 		is.testonly_assertBalanced();
 
 		int count = 0, incount = 0;
@@ -399,7 +399,7 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	for (int i = 0; i<100000; i++) {
 		int b = g_random->randomInt(1, (int)allNumbers.size());
 		int64_t ntotal = int64_t(b)*(b - 1) / 2;
-		int64_t nmax = int64_t(b + 1)*(b) / 2;
+		//int64_t nmax = int64_t(b + 1)*(b) / 2;
 		int64_t n = ntotal;// + g_random->randomInt( 0, int(std::max<int64_t>(1<<30,nmax-ntotal)) );
 		auto ii = is.index(n);
 		int ib = ii != is.end() ? *ii : 1000000;

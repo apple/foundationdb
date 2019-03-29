@@ -703,7 +703,6 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 		for(int i= 0; i < workloads.size(); i++)
 			metricTasks.push_back( workloads[i].metrics.template getReply<vector<PerfMetric>>() );
 		wait( waitForAllReady( metricTasks ) );
-		int failedMetrics = 0;
 		for(int i = 0; i < metricTasks.size(); i++) {
 			if(!metricTasks[i].isError())
 				metricsResults.push_back( metricTasks[i].get() );

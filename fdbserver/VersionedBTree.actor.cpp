@@ -220,7 +220,6 @@ static std::vector<BoundaryAndPage> buildPages(bool minimalBoundaries, StringRef
 		// If flush then write a page using records from start to i.  It's guaranteed that pageUpperBound has been set above.
 		if(flush) {
 			end = i == iEnd;  // i could have been moved above
-			int count = i - start;
 			debug_printf("Flushing page start=%d i=%d\nlower='%s'\nupper='%s'\n", start, i, pageLowerBound.toHexString(20).c_str(), pageUpperBound.toHexString(20).c_str());
 			ASSERT(pageLowerBound <= pageUpperBound);
 			for(int j = start; j < i; ++j) {

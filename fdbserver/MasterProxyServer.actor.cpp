@@ -1152,8 +1152,6 @@ ACTOR static Future<Void> transactionStarter(
 		vector<vector<GetReadVersionRequest>> start(2);  // start[0] is transactions starting with !(flags&CAUSAL_READ_RISKY), start[1] is transactions starting with flags&CAUSAL_READ_RISKY
 		Optional<UID> debugID;
 
-		double leftToStart = 0;
-		double batchLeftToStart = 0;
 		int requestsToStart = 0;
 		while (!transactionQueue.empty() && requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
 			auto& req = transactionQueue.top().first;
@@ -1196,9 +1194,7 @@ ACTOR static Future<Void> transactionStarter(
 		.detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
 		.detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] - systemTransactionsStarted[0] - systemTransactionsStarted[1])
 		.detail("TransactionBudget", transactionBudget)
-		.detail("BatchTransactionBudget", batchTransactionBudget)
-		.detail("LastLeftToStart", leftToStart)
-		.detail("LastBatchLeftToStart", batchLeftToStart);*/
+		.detail("BatchTransactionBudget", batchTransactionBudget);*/
 
 		transactionCount += transactionsStarted[0] + transactionsStarted[1];
 		batchTransactionCount += batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];

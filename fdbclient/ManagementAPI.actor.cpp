@@ -36,7 +36,7 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;
 	char *p;
-	auto ign = strtol(s.c_str(), &p, 10);
+	strtol(s.c_str(), &p, 10);
 	return (*p == 0);
 }
 

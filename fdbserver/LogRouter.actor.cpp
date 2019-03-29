@@ -57,7 +57,6 @@ struct LogRouterData {
 				int64_t messagesErased = 0;
 
 				while(!self->version_messages.empty() && self->version_messages.front().first == version) {
-					auto const& m = self->version_messages.front();
 					++messagesErased;
 
 					self->version_messages.pop_front();

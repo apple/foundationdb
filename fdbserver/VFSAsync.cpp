@@ -223,14 +223,13 @@ static int VFSAsyncFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 }
 
 static int asyncLock(sqlite3_file *pFile, int eLock){
-	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
+	//VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 
 	//TraceEvent("FileLock").detail("File", p->filename).detail("Fd", p->file->debugFD()).detail("PrevLockLevel", p->lockLevel).detail("Op", eLock).detail("LockCount", *p->pLockCount);
 
 	return eLock == EXCLUSIVE_LOCK ? SQLITE_BUSY : SQLITE_OK;
 }
 static int asyncUnlock(sqlite3_file *pFile, int eLock) {
-	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 	assert( eLock <= SHARED_LOCK );
 
 	return SQLITE_OK;
