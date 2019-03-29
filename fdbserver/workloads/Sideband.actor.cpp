@@ -93,7 +93,7 @@ struct SidebandWorkload : TestWorkload {
 	ACTOR Future<Void> persistInterface( SidebandWorkload *self, Database cx ) {
 		state Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion()); wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toStringRef();
+		state Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
 			try {
 				Optional<Value> val = wait( tr.get( StringRef( format("Sideband/Client/%d", self->clientId) ) ) );

@@ -199,9 +199,10 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			int result = 0;
+			size_t result = 0;
 			if (na.ip.isV6()) {
-				result = crc32c_append( 0xfdbeefdb, (uint8_t*)na.ip.toV6().data(), 16 );
+				uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
+				result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
 			} else {
 				result = na.ip.toV4();
 			}
