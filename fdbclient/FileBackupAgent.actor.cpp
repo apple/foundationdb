@@ -3534,6 +3534,7 @@ public:
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		printf("[Debug] submitRestore\n");
 
 		// Get old restore config for this tag
 		state KeyBackedTag tag = makeRestoreTag(tagName.toString());

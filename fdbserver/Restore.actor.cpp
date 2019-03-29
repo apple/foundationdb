@@ -3893,7 +3893,20 @@ int restoreStatusIndex = 0;
 
 
 ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
-	printf("[Lock] DB will be locked\n");
+	printf("[Lock] DB will be locked, uid:%s, lockDB:%d\n", uid.toString().c_str(), lockDB);
+	
+	ASSERT( lockDB );
+
+	loop {
+		try {
+			wait(lockDatabase(cx, uid));
+			break;
+		} catch( Error &e ) {
+			printf("Transaction Error when we lockDB. Error:%s\n", e.what());
+			wait(tr->onError(e));
+		}
+	}
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
@@ -3901,10 +3914,7 @@ ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			if (lockDB)
-				wait(lockDatabase(tr, uid));
-			else
-				wait(checkDatabaseLock(tr, uid));
+			wait(checkDatabaseLock(tr, uid));
 
 			tr->commit();
 			break;
@@ -3913,6 +3923,7 @@ ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
 			wait(tr->onError(e));
 		}
 	}
+
 
 	return Void();
 }
