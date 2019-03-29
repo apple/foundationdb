@@ -1838,9 +1838,12 @@ void addMutation( Reference<T>& target, Version version, MutationRef const& muta
 }
 
 template <class T>
-void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update) {
-	for(auto& m : update.mutations) {
-		splitMutation(data, map, m, update.version);
+void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const& update, vector<int>& execIndex) {
+	for(int i = 0; i < update.mutations.size(); i++) {
+		splitMutation(data, map, update.mutations[i], update.version);
+		if (update.mutations[i].type == MutationRef::Exec) {
+			execIndex.push_back(i);
+		}
 	}
 }
 
@@ -1860,91 +1863,105 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 			}
 		}
 	} else if (m.type == MutationRef::Exec) {
-		std::string cmd = m.param1.toString();
-		int len = m.param2.size();
-		if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
-			TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
-			return;
-		}
-		ExecCmdValueString execArg(m.param2.toString());
-		auto uidStr = execArg.getBinaryArgValue("uid");
-
-		int err = 0;
-		if (!g_network->isSimulated() || cmd != execSnap) {
-			// Run the exec command
-			auto binPath = execArg.getBinaryPath();
-			auto dataFolder = "path=" + data->folder;
-			vector<std::string> paramList;
-			// bin path
-			paramList.push_back(binPath);
-			// user passed arguments
-			auto listArgs = execArg.getBinaryArgs();
-			execArg.dbgPrint();
-			for (auto elem : listArgs) {
-				paramList.push_back(elem);
-			}
-			// additional arguments
-			paramList.push_back(dataFolder);
-			const char* version = FDB_VT_VERSION;
-			std::string versionString = "version=";
-			versionString += version;
-			paramList.push_back(versionString);
-			std::string roleString = "role=storage";
-			paramList.push_back(roleString);
-			err = fdbFork(binPath, paramList);
-		} else {
-			// copy the files
-			TraceEvent("ExecTraceStorage")
-			    .detail("StorageFolder", data->folder)
-			    .detail("LocalMachineId", data->thisServerID.toString())
-			    .detail("DurableVersion", data->durableVersion.get());
-
-			std::string folder = abspath(data->folder);
-
-			std::string folderFrom = folder + "/.";
-			std::string folderTo = folder + "-snap-" + uidStr;
-
-			std::string folderToCreateCmd = "mkdir " + folderTo;
-			std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
-
-			TraceEvent("ExecTraceStorageSnapcommands")
-			    .detail("FolderToCreateCmd", folderToCreateCmd)
-			    .detail("FolderCopyCmd", folderCopyCmd);
-
-			vector<std::string> paramList;
-			std::string cpBin = "/bin/cp";
-			std::string mkdirBin = "/bin/mkdir";
-
-			paramList.push_back(mkdirBin);
-			paramList.push_back(folderTo);
-			err = fdbFork(mkdirBin, paramList);
-			TraceEvent("MkdirStatus").detail("Errno", err);
-
-			if (err == 0) {
-				paramList.clear();
-				paramList.push_back(cpBin);
-				paramList.push_back("-a");
-				paramList.push_back(folderFrom);
-				paramList.push_back(folderTo);
-				err = fdbFork(cpBin, paramList);
-			}
-		}
-		auto tokenStr = "ExecTrace/storage/" + uidStr;
-		TraceEvent te = TraceEvent("ExecTraceStorage");
-		te.detail("Uid", uidStr);
-		te.detail("Status", err);
-		te.detail("Role", "storage");
-		te.detail("Version", ver);
-		te.detail("Mutation", m.toString());
-		te.detail("Mid", data->thisServerID.toString());
-		te.detail("DurableVersion", data->durableVersion.get());
-		te.detail("DataVersion", data->version.get());
-		te.detail("Tag", data->tag.toString());
-		if (cmd == execSnap) {
-			te.trackLatest(tokenStr.c_str());
-		}
 	} else
 		ASSERT(false);  // Unknown mutation type in splitMutations
+}
+
+ACTOR Future<Void>
+snapHelper(StorageServer* data, MutationRef m, Version ver)
+{
+	state std::string cmd = m.param1.toString();
+	int len = m.param2.size();
+
+	if ((cmd == execDisableTLogPop) || (cmd == execEnableTLogPop)) {
+		TraceEvent("IgnoreNonSnapCommands").detail("ExecCommand", cmd);
+		return Void();
+	}
+	ExecCmdValueString execArg(m.param2.toString());
+	state std::string uidStr = execArg.getBinaryArgValue("uid");
+	state int err = 0;
+	state Future<int> cmdErr;
+
+	if (!g_network->isSimulated() || cmd != execSnap) {
+		// Run the exec command
+		auto binPath = execArg.getBinaryPath();
+		auto dataFolder = "path=" + data->folder;
+		vector<std::string> paramList;
+		// bin path
+		paramList.push_back(binPath);
+		// user passed arguments
+		auto listArgs = execArg.getBinaryArgs();
+		execArg.dbgPrint();
+		for (auto elem : listArgs) {
+			paramList.push_back(elem);
+		}
+		// additional arguments
+		paramList.push_back(dataFolder);
+		const char* version = FDB_VT_VERSION;
+		std::string versionString = "version=";
+		versionString += version;
+		paramList.push_back(versionString);
+		std::string roleString = "role=storage";
+		paramList.push_back(roleString);
+		cmdErr = spawnProcess(binPath, paramList, 3.0);
+		wait(success(cmdErr));
+		err = cmdErr.get();
+	} else {
+		// copy the files
+		TraceEvent("ExecTraceStorage")
+		    .detail("StorageFolder", data->folder)
+		    .detail("LocalMachineId", data->thisServerID.toString())
+		    .detail("DurableVersion", data->durableVersion.get());
+
+		std::string folder = abspath(data->folder);
+
+		state std::string folderFrom = folder + "/.";
+		state std::string folderTo = folder + "-snap-" + uidStr;
+
+		std::string folderToCreateCmd = "mkdir " + folderTo;
+		std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
+
+		TraceEvent("ExecTraceStorageSnapcommands")
+		    .detail("FolderToCreateCmd", folderToCreateCmd)
+		    .detail("FolderCopyCmd", folderCopyCmd);
+
+		vector<std::string> paramList;
+		std::string mkdirBin = "/bin/mkdir";
+
+		paramList.push_back(mkdirBin);
+		paramList.push_back(folderTo);
+		cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+		wait(success(cmdErr));
+		err = cmdErr.get();
+		TraceEvent("MkdirStatus").detail("Errno", err);
+		if (err == 0) {
+			vector<std::string> paramList;
+			std::string cpBin = "/bin/cp";
+			paramList.clear();
+			paramList.push_back(cpBin);
+			paramList.push_back("-a");
+			paramList.push_back(folderFrom);
+			paramList.push_back(folderTo);
+			cmdErr = spawnProcess(cpBin, paramList, 3.0);
+			wait(success(cmdErr));
+			err = cmdErr.get();
+		}
+	}
+	auto tokenStr = "ExecTrace/storage/" + uidStr;
+	TraceEvent te = TraceEvent("ExecTraceStorage");
+	te.detail("Uid", uidStr);
+	te.detail("Status", err);
+	te.detail("Role", "storage");
+	te.detail("Version", ver);
+	te.detail("Mutation", m.toString());
+	te.detail("Mid", data->thisServerID.toString());
+	te.detail("DurableVersion", data->durableVersion.get());
+	te.detail("DataVersion", data->version.get());
+	te.detail("Tag", data->tag.toString());
+	if (cmd == execSnap) {
+		te.trackLatest(tokenStr.c_str());
+	}
+	return Void();
 }
 
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
@@ -2054,21 +2071,30 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				if (this_block.more) {
 					Key nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
 					if (nfk != keys.end) {
-						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
+						state std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
 
 						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
 						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
-						auto otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+						state AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
 						keys = shard->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
 						// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
 						// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
-						for(auto u = updatesToSplit.begin(); u != updatesToSplit.end(); ++u)
-							splitMutations(data, data->shards, *u);
+						state vector<int> execIdxVec;
+						state std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
+						for(; u != updatesToSplit.end(); ++u) {
+							ASSERT(execIdxVec.size() == 0);
+							splitMutations(data, data->shards, *u, execIdxVec);
+							for (auto execIdx : execIdxVec) {
+								TraceEvent("TIMEFORSNAP");
+								wait(snapHelper(data, u->mutations[execIdx], u->version));
+							}
+							execIdxVec.clear();
+						}
 
 						TEST( true );
 						TEST( shard->updates.size() );
@@ -2675,6 +2701,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
+				if (pUpdate->mutations[mutationNum].type == MutationRef::Exec) {
+					TraceEvent("TIMEFORSNAP");
+					wait(snapHelper(data, pUpdate->mutations[mutationNum], pUpdate->version));
+				}
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
 				if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
@@ -2746,6 +2776,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 						case MutationRef::CompareAndClear:
 							++data->counters.atomicMutations;
 							break;
+					}
+					if (msg.type == MutationRef::Exec) {
+						TraceEvent("TIMETOTAKESNAP");
+						wait(snapHelper(data, msg, ver));
 					}
 				}
 				else

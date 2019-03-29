@@ -2684,7 +2684,7 @@ void* loadFunction(void* lib, const char* func_name) {
 }
 
 int
-fdbFork(const std::string& path, const std::vector<std::string>& args)
+fdbForkSpawn(const std::string& path, const std::vector<std::string>& args)
 {
     std::vector<char*> paramList;
     for (int i = 0; i < args.size(); i++) {
@@ -2703,20 +2703,38 @@ fdbFork(const std::string& path, const std::vector<std::string>& args)
 		TraceEvent(SevWarnAlways, "CommandFailedToSpawn").detail("Cmd", path);
 		throw platform_error();
 	} else if (pid > 0) {
-        int status;
-        waitpid(pid, &status, 0);
-        if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-			TraceEvent(SevWarnAlways, "CommandFailed")
-			    .detail("Cmd", path)
-			    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-			return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-		}
-		TraceEvent("CommandStatus").detail("Cmd", path).detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
-	} else {
-		execv(const_cast<char*>(path.c_str()), &paramList[0]);
-        _exit(EXIT_FAILURE);
+		// parent process returns with child's pid
+		return pid;
 	}
-	return 0;
+	// child process
+	execv(const_cast<char*>(path.c_str()), &paramList[0]);
+	_exit(EXIT_FAILURE);
+	return pid;
+}
+
+int fdbForkWaitPid(pid_t pid, bool isSync)
+{
+	int status;
+	int err = waitpid(pid, &status, (!isSync) ? WNOHANG : 0);
+	if (isSync) {
+		err = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+		return err;
+	}
+	if (err == 0) {
+		return EINPROGRESS;
+	}
+
+	if (err == -1 || WIFSIGNALED(status)) {
+		err = -1;
+	} else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+		err = 0;
+	} else {
+		err = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+	}
+	TraceEvent((err == 0) ? SevInfo : SevWarnAlways, "CommandStatus")
+		.detail("Pid", pid)
+		.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+	return err;
 }
 
 

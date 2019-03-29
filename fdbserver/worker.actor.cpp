@@ -693,7 +693,6 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	}
 }
 
-<<<<<<< HEAD
 ACTOR Future<Void> workerServer(
 		Reference<ClusterConnectionFile> connFile,
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
@@ -701,16 +700,8 @@ ACTOR Future<Void> workerServer(
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
 		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
 		std::string metricsConnFile, std::string metricsPrefix,
-		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold) {
-=======
-ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                LocalityData locality,
-                                Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                ProcessClass initialClass, std::string folder, int64_t memoryLimit,
-                                std::string metricsConnFile, std::string metricsPrefix,
-                                Promise<Void> recoveredDiskFiles, std::string _coordFolder) {
->>>>>>> 2d5af668... Snapshot based backup and resotre implementation
+		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold,
+		std::string _coordFolder, std::string whiteListBinPaths) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -1181,13 +1172,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
 			}
-			when(ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
+			when(state ExecuteRequest req = waitNext(interf.execReq.getFuture())) {
 				int len = req.execPayLoad.size();
-				ExecCmdValueString execArg(req.execPayLoad.toString());
+				state ExecCmdValueString execArg(req.execPayLoad.toString());
 				execArg.dbgPrint();
-				auto uidStr = execArg.getBinaryArgValue("uid");
-
-				int err = 0;
+				state std::string uidStr = execArg.getBinaryArgValue("uid");
+				state int err = 0;
+				state Future<int> cmdErr;
 				if (!g_network->isSimulated()) {
 					// bin path
 					auto snapBin = execArg.getBinaryPath();
@@ -1208,12 +1199,14 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					paramList.push_back(versionString);
 					std::string roleString = "role=coordinator";
 					paramList.push_back(roleString);
-					err = fdbFork(snapBin, paramList);
+					cmdErr = spawnProcess(snapBin, paramList, 3.0);
+					wait(success(cmdErr));
+					err = cmdErr.get();
 				} else {
 					// copy the files
 					std::string folder = coordFolder;
-					std::string folderFrom = "./" + folder + "/.";
-					std::string folderTo = "./" + folder + "-snap-" + uidStr;
+					state std::string folderFrom = "./" + folder + "/.";
+					state std::string folderTo = "./" + folder + "-snap-" + uidStr;
 
 					std::string folderToCreateCmd = "mkdir " + folderTo;
 					std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
@@ -1223,21 +1216,25 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					    .detail("FolderCopyCmd", folderCopyCmd);
 
 					vector<std::string> paramList;
-					std::string cpBin = "/bin/cp";
 					std::string mkdirBin = "/bin/mkdir";
 
 					paramList.push_back(mkdirBin);
 					paramList.push_back(folderTo);
-					err = fdbFork(mkdirBin, paramList);
+					cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+					wait(success(cmdErr));
+					err = cmdErr.get();
 					TraceEvent("MkdirStatus").detail("Errno", err);
-
 					if (err == 0) {
+						vector<std::string> paramList;
+						std::string cpBin = "/bin/cp";
 						paramList.clear();
 						paramList.push_back(cpBin);
 						paramList.push_back("-a");
 						paramList.push_back(folderFrom);
 						paramList.push_back(folderTo);
-						err = fdbFork(cpBin, paramList);
+						cmdErr = spawnProcess(cpBin, paramList, 3.0);
+						wait(success(cmdErr));
+						err = cmdErr.get();
 					}
 				}
 
@@ -1247,7 +1244,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				te.detail("Status", err);
 				te.detail("Role", "coordinator");
 				te.detail("Value", coordFolder);
-				te.detail("ExecPayLoad", req.execPayLoad.toString());
+				te.detail("ExecPayLoad", execArg.getCmdValueString());
 				te.trackLatest(tokenStr.c_str());
 				req.reply.send(Void());
 			}
@@ -1439,6 +1436,48 @@ ACTOR Future<Void> fdbd(
 		Error err = checkIOTimeout(e);
 		throw err;
 	}
+}
+
+ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime)
+{
+	state pid_t pid = -1;
+	try {
+		pid = fdbForkSpawn(binPath, paramList);
+	} catch (Error& e) {
+		TraceEvent("fdbForkSpawnFailed")
+			.detail("Error", e.what());
+	}
+	if (pid < 0) {
+		return -1;
+	}
+
+	state double sleepTime = 0;
+	state int err = 0;
+	while (true) {
+		err = fdbForkWaitPid(pid, g_network->isSimulated() ? true : false);
+		if (g_network->isSimulated()) {
+			if (err == pid) {
+				return 0;
+			}
+			return err;
+		}
+		if (err != EINPROGRESS) {
+			break;
+		}
+
+		sleepTime += 0.1;
+		wait(delay(0.1));
+		if (sleepTime > maxWaitTime) {
+			TraceEvent(SevWarnAlways, "SpawnProcessTookTooLong")
+				.detail("Error", EINPROGRESS);
+			kill(pid, SIGTERM);
+			// FIXME, we can end up here in a rare situation,
+			// make this asynchronous
+			fdbForkWaitPid(pid, true);
+			return -1;
+		}
+	}
+	return err;
 }
 
 const Role Role::WORKER("Worker", "WK", false);
