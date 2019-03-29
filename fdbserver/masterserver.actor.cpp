@@ -1295,7 +1295,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	if (self->lastEpochEnd != 0) {
 		if(self->forceRecovery) {
 			BinaryWriter bw(Unversioned());
-			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toStringRef());
+			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toValue());
 		}
 
 		// This transaction sets \xff/lastEpochEnd, which the shard servers can use to roll back speculatively
@@ -1305,7 +1305,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		// This transaction is by itself in a batch (has its own version number), which simplifies storage servers slightly (they assume there are no modifications to serverKeys in the same batch)
 		// The proxy also expects the lastEpochEndKey mutation to be first in the transaction
 		BinaryWriter bw(Unversioned());
-		tr.set(recoveryCommitRequest.arena, lastEpochEndKey, (bw << self->lastEpochEnd).toStringRef());
+		tr.set(recoveryCommitRequest.arena, lastEpochEndKey, (bw << self->lastEpochEnd).toValue());
 
 		if(self->forceRecovery) {
 			tr.set(recoveryCommitRequest.arena, rebootWhenDurableKey, StringRef());

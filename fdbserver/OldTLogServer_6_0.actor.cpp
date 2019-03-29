@@ -202,7 +202,7 @@ static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
 	wr << id;
 	wr << tag;
 	wr << bigEndian64( version );
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 static Key persistTagPoppedKey( UID id, Tag tag ) {
@@ -210,7 +210,7 @@ static Key persistTagPoppedKey( UID id, Tag tag ) {
 	wr.serializeBytes( persistTagPoppedKeys.begin );
 	wr << id;
 	wr << tag;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 static Value persistTagPoppedValue( Version popped ) {
@@ -480,7 +480,7 @@ void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
-	auto loc = queue->push( wr.toStringRef() );
+	auto loc = queue->push( wr.toValue() );
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 	logData->versionLocation[qe.version] = loc;
 }
@@ -583,7 +583,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg)
 						wr << msg->second.toStringRef();
 
-					self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tagData->tag, currentVersion ), wr.toStringRef() ) );
+					self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tagData->tag, currentVersion ), wr.toValue() ) );
 
 					Future<Void> f = yield(TaskUpdateStorage);
 					if(!f.isReady()) {
@@ -1052,7 +1052,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
 			endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 		else
-			messages.serializeBytes( messages2.toStringRef() );
+			messages.serializeBytes( messages2.toValue() );
 	} else {
 		peekMessagesFromMemory( logData, req, messages, endVersion );
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().address).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
@@ -1061,7 +1061,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	reply.messages = messages.toStringRef();
+	reply.messages = messages.toValue();
 	reply.end = endVersion;
 
 	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().address);

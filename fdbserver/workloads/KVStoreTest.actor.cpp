@@ -288,7 +288,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
 		for(i=0; i<workload->nodeCount; i++) {
-			test.store->set( KeyValueRef( test.makeKey( i ), wr.toStringRef() ) );
+			test.store->set( KeyValueRef( test.makeKey( i ), wr.toValue() ) );
 			if (!((i+1) % 10000) || i+1==workload->nodeCount) {
 				wait( lastCommit );
 				lastCommit = test.store->commit();
@@ -310,7 +310,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 					++test.lastSet;
 					BinaryWriter wr(Unversioned()); wr << test.lastSet;
 					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+					test.set( KeyValueRef( test.randomKey(), wr.toValue() ) );
 					++workload->sets;
 				}
 				++commitsStarted;
@@ -339,7 +339,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 					++test.lastSet;
 					BinaryWriter wr(Unversioned()); wr << test.lastSet;
 					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+					test.set( KeyValueRef( test.randomKey(), wr.toValue() ) );
 					++workload->sets;
 				} else {
 					// Read

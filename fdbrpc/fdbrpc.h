@@ -318,6 +318,11 @@ public:
 		return waitValueOrSignal(getReply(value), makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope), getEndpoint());
 	}
 
+	template <class X>
+	Future<ErrorOr<X>> getReplyUnlessFailedFor(double sustainedFailureDuration, double sustainedFailureSlope) const {
+		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
+	}
+
 	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T>(0, 1, endpoint)) {}
 
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
