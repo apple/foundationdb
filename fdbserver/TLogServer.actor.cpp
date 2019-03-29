@@ -1846,8 +1846,9 @@ ACTOR Future<Void> tLogCommit(
 
 	if ((execVersion != invalidVersion) &&
         execVersion <= logData->queueCommittedVersion.get()) {
-        int err = 0;
+        state int err = 0;
         auto uidStr = execArg.getBinaryArgValue("uid");
+        state Future<int> cmdErr;
         if (!g_network->isSimulated()) {
             // Run the exec command
             auto snapBin = execArg.getBinaryPath();
@@ -1871,11 +1872,13 @@ ACTOR Future<Void> tLogCommit(
             paramList.push_back(versionString);
             std::string roleString = "role=tlog";
             paramList.push_back(roleString);
-            err = fdbFork(snapBin, paramList);
+            cmdErr = spawnProcess(snapBin, paramList, 3.0);
+            wait(success(cmdErr));
+            err = cmdErr.get();
         } else {
             // copy the entire directory
-            std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
-            std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
+            state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
+            state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
 
             std::string tLogFolderToCreateCmd = "mkdir " + tLogFolderTo;
             std::string tLogFolderCopyCmd =
@@ -1886,19 +1889,25 @@ ACTOR Future<Void> tLogCommit(
 			    .detail("TLogFolderCopyCmd", tLogFolderCopyCmd);
 
 			vector<std::string> paramList;
-            std::string cpBin = "/bin/cp";
             std::string mkdirBin = "/bin/mkdir";
 
             paramList.push_back(mkdirBin);
             paramList.push_back(tLogFolderTo);
-            err = fdbFork(mkdirBin, paramList);
+			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+			wait(success(cmdErr));
+			err = cmdErr.get();
+			TraceEvent("MkdirStatus").detail("Errno", err);
             if (err == 0) {
+				vector<std::string> paramList;
+				std::string cpBin = "/bin/cp";
                 paramList.clear();
                 paramList.push_back(cpBin);
                 paramList.push_back("-a");
                 paramList.push_back(tLogFolderFrom);
                 paramList.push_back(tLogFolderTo);
-                err = fdbFork(cpBin, paramList);
+                cmdErr = spawnProcess(cpBin, paramList, 3.0);
+                wait(success(cmdErr));
+                err = cmdErr.get();
             }
         }
 		TraceEvent("TLogCommitExecTraceLog")

@@ -533,14 +533,22 @@ bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
 void* loadFunction(void* lib, const char* func_name);
 
-// wrapper to execv
+// spwans a process with fork and execv, caller needs to use fdbForkWaitPid to
+// find the status of the process and cleanup the resources
 //  takes two arguments:
 //   1. path to the binary
 //   2. list of arguments
 //  returns:
+//   returns pid of the process being spawned
 //   throws platform_error() if it is not able to spawn the process
-//   returns 0 on success or status from the command being run
-int fdbFork(const std::string& path, const std::vector<std::string>& args);
+int fdbForkSpawn(const std::string& path, const std::vector<std::string>& args);
+
+// checks the completion of the process spawned by fdbForkSpawn
+// returns
+// - 0 for successful completion and
+// - EINPROGRESS if pid is still running
+// - exit code or -1 otherwise
+int fdbForkWaitPid(pid_t pid, bool isSync = false);
 
 #ifdef _WIN32
 inline static int ctzll( uint64_t value ) {

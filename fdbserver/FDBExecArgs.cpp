@@ -20,6 +20,10 @@ void ExecCmdValueString::setCmdValueString(std::string const& pCmdValueString) {
 	parseCmdValue();
 }
 
+std::string ExecCmdValueString::getCmdValueString() {
+	return cmdValueString;
+}
+
 std::string ExecCmdValueString::getBinaryPath() {
 	return binaryPath;
 }

@@ -21,6 +21,7 @@ public: // interfaces
 	std::vector<std::string> getBinaryArgs();
 	std::string getBinaryArgValue(std::string const& key);
 	void setCmdValueString(std::string const& cmdValueString);
+	std::string getCmdValueString(void);
 
 public: // helper functions
 	void dbgPrint();
