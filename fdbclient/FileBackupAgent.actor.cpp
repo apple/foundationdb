@@ -3250,6 +3250,8 @@ namespace fileBackup {
 
 			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
 
+			printf("restorable.present:%d, which must be present!\n", restorable.present());
+
 			if(!restorable.present())
 				throw restore_missing_data();
 
@@ -3260,10 +3262,13 @@ namespace fileBackup {
 			// Order does not matter, they will be put in order when written to the restoreFileMap below.
 			state std::vector<RestoreConfig::RestoreFile> files;
 
+			printf("restorable.get() ranges:%d logs:%d\n", restorable.get().ranges.size(), restorable.get().logs.size());
 			for(const RangeFile &f : restorable.get().ranges) {
+				printf("Add file:%s\n", f.toString().c_str());
 				files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
 			}
 			for(const LogFile &f : restorable.get().logs) {
+				printf("Add file:%s\n", f.toString().c_str());
 				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
 			}
 
@@ -3276,7 +3281,9 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+					printf("taskBucket->keepRunning start\n");
 					wait(taskBucket->keepRunning(tr, task));
+					printf("taskBucket->keepRunning end\n");
 
 					state std::vector<RestoreConfig::RestoreFile>::iterator i = start;
 
@@ -3309,6 +3316,8 @@ namespace fileBackup {
 					wait(tr->onError(e));
 				}
 			}
+
+			printf("StartFullRestoreTaskFunc::_execute finish\n");
 
 			return Void();
 		}
@@ -3539,6 +3548,7 @@ public:
 		// Get old restore config for this tag
 		state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 		state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
+		printf("oldUidAndAborted present:%d\n", oldUidAndAborted.present());
 		if(oldUidAndAborted.present()) {
 			if (oldUidAndAborted.get().first == uid) {
 				if (oldUidAndAborted.get().second) {
@@ -3585,6 +3595,7 @@ public:
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix);
 
+		printf("fileBackup::StartFullRestoreTaskFunc::addTask uid:%s\n", uid.toString().c_str());
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
 		if (lockDB)
@@ -3608,7 +3619,7 @@ public:
 				Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 				if(!current.present()) {
 					if(verbose)
-						printf("Tag: %s  State: %s\n", tagName.toString().c_str(), FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
+						printf("waitRestore: Tag: %s  State: %s\n", tagName.toString().c_str(), FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
 					return ERestoreState::UNITIALIZED;
 				}
 

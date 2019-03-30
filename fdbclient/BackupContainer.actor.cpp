@@ -991,7 +991,7 @@ public:
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
 
-			printf("[INFO] Number of all logs:%d\n", logs.size());
+			printf("[INFO] Number of all logs:%d targetVersion:%lld\n", logs.size(), targetVersion);
 			printf("[INFO] Use the following log files for restore\n");
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
@@ -1010,7 +1010,7 @@ public:
 					if(i->beginVersion == end) {
 						restorable.logs.push_back(*i);
 						end = i->endVersion;
-						printf("\t[INFO] Log File:%s\n", i->toString().c_str());
+						printf("\t[INFO] Log File:%s\n", i != logs.end() ? i->toString().c_str() : "[End]");
 					}
 				}
 
@@ -1018,6 +1018,8 @@ public:
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
+
+			printf("[INFO] Number of all logs:%d Done\n", logs.size());
 		}
 
 		return Optional<RestorableFileSet>();
