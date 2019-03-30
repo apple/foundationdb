@@ -1509,7 +1509,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData, st
 
 	for(auto& it : missingFinalCommit) {
 		TraceEvent("TLogCommitMissingFinalCommit", self->dbgid).detail("LogId", logData->logId).detail("Version", it->version.get()).detail("QueueVer", it->queueCommittedVersion.get());
-		TEST(true); //A TLog was replaced before having a change to commit its queue
+		TEST(true); //A TLog was replaced before having a chance to commit its queue
 		it->queueCommittedVersion.set(it->version.get());
 	}
 	return Void();
