@@ -15,7 +15,7 @@ Features
 * Added configuration option to choose log spilling implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
 * Added configuration option to choose log system implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
 * Batch priority transactions are now limited separately by ratekeeper and will be throttled at lower levels of cluster saturation. This makes it possible to run a more intense background load at saturation without significantly affecting normal priority transactions. It is still recommended not to run excessive loads at batch priority. `(PR #1198) <https://github.com/apple/foundationdb/pull/1198>`_
-* Restore now requires the destnation cluster to be specified explicitly to avoid confusion. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
+* Restore now requires the destination cluster to be specified explicitly to avoid confusion. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Restore target version can now be specified by timestamp if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Backup status and describe commands now have a --json output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 * Separate data distribution out from master as a new role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
@@ -29,10 +29,21 @@ Features
 * Deprecated transaction option ``TRANSACTION_LOGGING_ENABLE``. Added two new transaction options ``DEBUG_TRANSACTION_IDENTIFIER`` and ``LOG_TRANSACTION`` that sets an identifier for the transaction and logs the transaction to the trace file respectively. `(PR #1200) <https://github.com/apple/foundationdb/pull/1200>`_
 * Clients can now specify default transaction timeouts and retry limits to all transactions through a database option. `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
 * The "timeout", "max retry delay", and "retry limit" transaction options are no longer reset when the transaction is reset after a call to ``onError`` (as of API version 610). `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
+* Added the ``force_recovery_with_data_loss`` command to fdbcli. When a cluster is configured with usable_regions=2, this command will force the database to recover in the remote region. `(PR #1168) <https://github.com/apple/foundationdb/pull/1168>`_
+* Added a limit to the number of status requests the cluster controller will handle. `(PR #1093) <https://github.com/apple/foundationdb/pull/1093>`_ (submitted by tclinken)
+* Added a ``coordinator`` process class. Processes with this class can only be used as a coordinator, and ``coordinators auto`` will prefer to chose processes of this class. `(PR #1069) <https://github.com/apple/foundationdb/pull/1069>`_ (submitted by tclinken)
+* The ``consistencycheck`` fdbserver role will check the entire database at most once every week. `(PR #1126) <https://github.com/apple/foundationdb/pull/1126>`_
+* Added the metadata version key (``\xff/metadataVersion``). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
+* The ``fdbdr switch`` command verifies a ``dr_agent`` exists in both directions. `(Issue #1220) <https://github.com/apple/foundationdb/issues/1220>`_
+* Transaction logs that cannot commit to disk for more than 5 seconds are marked as degraded. The cluster controller will prefer to recruit transaction logs on other processes before using degraded processes. `(Issue #690) <https://github.com/apple/foundationdb/issues/690>`_
+* The ``memory`` storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. `(PR #1314) <https://github.com/apple/foundationdb/pull/1314>`_
+* Trace logs can be output as JSON instead of XML using the ``--trace_format`` command line option. `(PR #976) <https://github.com/apple/foundationdb/pull/976>`_ (by mpilman)
 
 Performance
 -----------
 
+* Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. `(PR #1311) <https://github.com/apple/foundationdb/pull/1311>`_
+* Clients no longer attempt to connect to the master during recovery. `(PR #1317) <https://github.com/apple/foundationdb/pull/1317>`_
 * Java: Succesful commits and range reads no longer create ``FDBException`` objects to reduce memory pressure. `(Issue #1235) <https://github.com/apple/foundationdb/issues/1235>`_
 
 Fixes
@@ -42,9 +53,15 @@ Fixes
 * In some cases, calling ``OnError`` with a non-retryable error would partially reset a transaction. As of API version 610, the transaction will no longer be reset in these cases and will instead put the transaction into an error state. `(PR #1298) <https://github.com/apple/foundationdb/pull/1298>`_
 * Standardized datetime string format across all backup and restore command options and outputs. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 * Read workload status metrics would disappear when a storage server was missing. `(PR #1348) <https://github.com/apple/foundationdb/pull/1348>`_
+* The ``coordinators auto`` command could recruit multiple coordinators with the same zone ID. `(Issue #988) <https://github.com/apple/foundationdb/issues/988>`_
+* The version of a cluster after a restore could have been lower than the restore version, making version stamp operations get smaller. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
+* If a process changed its process class while being rebooted, it could recruited for the cluster controller using its previous process class. `(PR #1350) <https://github.com/apple/foundationdb/pull/1350>`_
+* Fixed a few thread safety issues. `(PR #1085) <https://github.com/apple/foundationdb/pull/1085>`_
 
 Status
 ------
+
+* Degraded processes are reported in ``status json``. `(Issue #690) <https://github.com/apple/foundationdb/issues/690>`_
 
 Bindings
 --------
