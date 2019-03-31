@@ -1,25 +1,33 @@
 set(FDBBACKUP_SRCS
   backup.actor.cpp)
 
-actor_set(FDBBACKUP_BUILD "${FDBBACKUP_SRCS}")
-add_executable(fdbbackup "${FDBBACKUP_BUILD}")
-actor_compile(fdbbackup "${FDBBACKUP_SRCS}")
+add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
-install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
-install(PROGRAMS $<TARGET_FILE:fdbbackup>
-  DESTINATION ${FDB_LIB_DIR}/foundationdb/backup_agent
-  RENAME backup_agent
-  COMPONENT clients)
-install(PROGRAMS $<TARGET_FILE:fdbbackup>
-  DESTINATION ${FDB_BIN_DIR}
-  RENAME fdbrestore
-  COMPONENT clients)
-install(PROGRAMS $<TARGET_FILE:fdbbackup>
-  DESTINATION ${FDB_BIN_DIR}
-  RENAME dr_agent
-  COMPONENT clients)
-install(PROGRAMS $<TARGET_FILE:fdbbackup>
-  DESTINATION ${FDB_BIN_DIR}
-  RENAME fdbdr
-  COMPONENT clients)
+if(NOT OPEN_FOR_IDE)
+  fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
+  install_symlink(
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR fdbmonitor
+    FILE_NAME fdbbackup
+    LINK_NAME backup_agent/backup_agent)
+  install_symlink(
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME fdbrestore)
+  install_symlink(
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME dr_agent)
+  install_symlink(
+    COMPONENT clients
+    FILE_DIR bin
+    LINK_DIR bin
+    FILE_NAME fdbbackup
+    LINK_NAME fdbdr)
+endif()

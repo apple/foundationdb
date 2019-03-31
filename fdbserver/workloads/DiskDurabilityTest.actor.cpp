@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -82,13 +82,14 @@ struct DiskDurabilityTest : TestWorkload {
 
 		state int64_t size = wait( file->size() );
 		state bool failed = false;
+		state int verifyPages;
 
 		// Verify
 		state Transaction tr(db);
 		loop {
 			try {
 				state Standalone<RangeResultRef> r = wait( tr.getRange( self->range, GetRangeLimits(1000000) ) );
-				state int verifyPages = r.size();
+				verifyPages = r.size();
 				state int i;
 				for(i=0; i<r.size(); i++) {
 					int bytesRead = wait( file->read( page, 4096, self->decodeKey(r[i].key)*4096 ) );

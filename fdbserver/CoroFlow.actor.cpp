@@ -23,6 +23,7 @@
 #include "fdbrpc/libcoroutine/Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 
 Coro *current_coro = 0, *main_coro = 0;
@@ -236,7 +237,7 @@ public:
 		TraceEvent("WorkPool_Stop").detail("Workers", pool->workers.size()).detail("Idle", pool->idle.size())
 			.detail("Work", pool->work.size());
 
-		for(int i=0; i<pool->work.size(); i++)
+		for (uint32_t i=0; i<pool->work.size(); i++)
 			pool->work[i]->cancel();   // What if cancel() does something to this?
 		pool->work.clear();
 		for(int i=0; i<pool->workers.size(); i++)

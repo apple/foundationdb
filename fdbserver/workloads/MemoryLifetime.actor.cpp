@@ -19,10 +19,10 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -152,9 +152,8 @@ struct MemoryLifetime : KVWorkload {
 					tr = ReadYourWritesTransaction(cx);
 					wait( delay(0.01) );
 					//we cannot check the contents like other operations so just touch all the values to make sure we dont crash
-					for(int i = 0; i < getAddress_res1.size(); i++) {
-						int a,b,c,d,count=-1;
-						ASSERT(sscanf(getAddress_res1[i], "%d.%d.%d.%d%n", &a,&b,&c,&d, &count)==4 && count == strlen(getAddress_res1[i]));
+					for (int i = 0; i < getAddress_res1.size(); i++) {
+						ASSERT(IPAddress::parse(getAddress_res1[i]).present());
 					}
 				}
 				if(now() - startTime > self->testDuration)

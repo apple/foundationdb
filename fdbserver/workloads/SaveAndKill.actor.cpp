@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 
 #undef state
@@ -60,6 +60,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.LoadFile(self->restartInfo.c_str());
 
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
+		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
 		ini.SetValue("META", "connectionString",  g_simulator.connectionString.c_str());
 		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());
@@ -81,26 +82,29 @@ struct SaveAndKillWorkload : TestWorkload {
 		int j = 0;
 		for(auto processIterator = allProcessesMap.begin(); processIterator != allProcessesMap.end(); processIterator++) {
 			ISimulator::ProcessInfo* process = processIterator->second;
-			std::string zoneId = printable(process->locality.zoneId());
-			const char* zoneIdString = zoneId.c_str();
+			std::string machineId = printable(process->locality.machineId());
+			const char* machineIdString = machineId.c_str();
 			if (strcmp(process->name, "TestSystem") != 0) {
-				if (machines.find(zoneId) == machines.end()) {
-					machines.insert(std::pair<std::string, int>(zoneId, 1));
-					ini.SetValue("META", format("%d", j).c_str(), zoneIdString);
-					ini.SetValue(zoneIdString, "dcUID", (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
-					ini.SetValue(zoneIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
-					ini.SetValue(zoneIdString, format("ipAddr%d", process->address.port-1).c_str(), format("%d", process->address.ip).c_str());
-					ini.SetValue(zoneIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
-					ini.SetValue(zoneIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
+				if (machines.find(machineId) == machines.end()) {
+					machines.insert(std::pair<std::string, int>(machineId, 1));
+					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
+					ini.SetValue(machineIdString, "dcUID", (process->locality.dcId().present()) ? process->locality.dcId().get().printable().c_str() : "");
+					ini.SetValue(machineIdString, "zoneId", (process->locality.zoneId().present()) ? process->locality.zoneId().get().printable().c_str() : "");
+					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
+					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					             process->address.ip.toString().c_str());
+					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
+					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
 					j++;
 				}
 				else {
-					ini.SetValue(zoneIdString, format("ipAddr%d", process->address.port-1).c_str(), format("%d", process->address.ip).c_str());
-					int oldValue = machines.find(zoneId)->second;
-					ini.SetValue(zoneIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
-					ini.SetValue(zoneIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
-					machines.erase(machines.find(zoneId));
-					machines.insert(std::pair<std::string, int>(zoneId, oldValue+1));
+					ini.SetValue(machineIdString, format("ipAddr%d", process->address.port - 1).c_str(),
+					             process->address.ip.toString().c_str());
+					int oldValue = machines.find(machineId)->second;
+					ini.SetValue(machineIdString, format("%d", process->address.port-1).c_str(), process->dataFolder);
+					ini.SetValue(machineIdString, format("c%d", process->address.port-1).c_str(), process->coordinationFolder);
+					machines.erase(machines.find(machineId));
+					machines.insert(std::pair<std::string, int>(machineId, oldValue+1));
 				}
 			}
 		}

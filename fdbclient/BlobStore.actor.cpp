@@ -28,6 +28,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
 #include "rapidxml/rapidxml.hpp"
+#include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
 
@@ -146,10 +147,14 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef t(url);
 		StringRef prefix = t.eat("://");
 		if(prefix != LiteralStringRef("blobstore"))
-			throw std::string("Invalid blobstore URL.");
-		StringRef cred   =   t.eat("@");
-		StringRef hostPort = t.eat("/");
-		StringRef resource = t.eat("?");
+			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
+		StringRef cred = t.eat("@");
+		uint8_t foundSeparator = 0;
+		StringRef hostPort = t.eatAny("/?", &foundSeparator);
+		StringRef resource;
+		if(foundSeparator == '/') {
+			 resource = t.eat("?");
+		}
 
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef h(hostPort);
@@ -160,12 +165,31 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef service = h.eat();
 
 		BlobKnobs knobs;
+		HTTP::Headers extraHeaders;
 		while(1) {
 			StringRef name = t.eat("=");
 			if(name.size() == 0)
 				break;
 			StringRef value = t.eat("&");
 
+			// Special case for header
+			if(name == LiteralStringRef("header")) {
+				StringRef originalValue = value;
+				StringRef headerFieldName = value.eat(":");
+				StringRef headerFieldValue = value;
+				if(headerFieldName.size() == 0 || headerFieldValue.size() == 0) {
+					throw format("'%s' is not a valid value for '%s' parameter.  Format is <FieldName>:<FieldValue> where strings are not empty.", originalValue.toString().c_str(), name.toString().c_str());
+				}
+				std::string &fieldValue = extraHeaders[headerFieldName.toString()];
+				// RFC 2616 section 4.2 says header field names can repeat but only if it is valid to concatenate their values with comma separation
+				if(!fieldValue.empty()) {
+					fieldValue.append(",");
+				}
+				fieldValue.append(headerFieldValue.toString());
+				continue;
+			}
+
+			// See if the parameter is a knob
 			// First try setting a dummy value (all knobs are currently numeric) just to see if this parameter is known to BlobStoreEndpoint.
 			// If it is, then we will set it to a good value or throw below, so the dummy set has no bad side effects.
 			bool known = knobs.set(name, 0);
@@ -196,7 +220,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef key = c.eat(":");
 		StringRef secret = c.eat();
 
-		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs));
+		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
 
 	} catch(std::string &err) {
 		if(error != nullptr)
@@ -206,7 +230,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	}
 }
 
-std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
+std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) {
 	std::string hostPort = host;
 	if(!service.empty()) {
 		hostPort.append(":");
@@ -219,9 +243,29 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 		s = std::string(":") + secret;
 
 	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
-	std::string p = knobs.getURLParameters();
-	if(!p.empty())
-		r.append("?").append(p);
+
+	// Get params that are deviations from knob defaults
+	std::string knobParams = knobs.getURLParameters();
+	if(!knobParams.empty()) {
+		if(!params.empty()) {
+			params.append("&");
+		}
+		params.append(knobParams);
+	}
+
+	for(auto &kv : extraHeaders) {
+		if(!params.empty()) {
+			params.append("&");
+		}
+		params.append("header=");
+		params.append(HTTP::urlEncode(kv.first));
+		params.append(":");
+		params.append(HTTP::urlEncode(kv.second));
+	}
+
+	if(!params.empty())
+		r.append("?").append(params);
+
 	return r;
 }
 
@@ -494,6 +538,16 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
 	headers["Accept"] = "application/xml";
+
+	// Merge extraHeaders into headers
+	for(auto &kv : bstore->extraHeaders) {
+		std::string &fieldValue = headers[kv.first];
+		if(!fieldValue.empty()) {
+			fieldValue.append(",");
+		}
+		fieldValue.append(kv.second);
+	}
+
 	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
@@ -505,6 +559,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
+		state Reference<HTTP::Response> r;
 
 		try {
 			// Start connecting
@@ -534,7 +589,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
 			if(r->headers["Connection"] != "close")
@@ -1036,7 +1092,7 @@ Future<std::string> BlobStoreEndpoint::uploadPart(std::string const &bucket, std
 }
 
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, BlobStoreEndpoint::MultiPartSetT parts) {
-	state UnsentPacketQueue part_list();  // NonCopyable state var so must be declared at top of actor
+	state UnsentPacketQueue part_list;  // NonCopyable state var so must be declared at top of actor
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";

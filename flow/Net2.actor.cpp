@@ -55,7 +55,7 @@ using namespace boost::asio::ip;
 //
 //                                                       xyzdev
 //                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061020001LL;
+const uint64_t currentProtocolVersion        = 0x0FDB00B061050001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -123,7 +123,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics);
+	Net2(bool useThreadPool, bool useMetrics);
 	void run();
 	void initMetrics();
 
@@ -172,7 +172,7 @@ public:
 	TDMetricCollection tdmetrics;
 	double currentTime;
 	bool stopped;
-	std::map< uint32_t, bool > addressOnHostCache;
+	std::map<IPAddress, bool> addressOnHostCache;
 
 	uint64_t numYields;
 
@@ -226,8 +226,16 @@ public:
 	std::vector<std::string> blobCredentialFiles;
 };
 
+static boost::asio::ip::address tcpAddress(IPAddress const& n) {
+	if (n.isV6()) {
+		return boost::asio::ip::address_v6(n.toV6());
+	} else {
+		return boost::asio::ip::address_v4(n.toV4());
+	}
+}
+
 static tcp::endpoint tcpEndpoint( NetworkAddress const& n ) {
-	return tcp::endpoint( boost::asio::ip::address_v4( n.ip ), n.port );
+	return tcp::endpoint(tcpAddress(n.ip), n.port);
 }
 
 class BindPromise {
@@ -237,7 +245,7 @@ class BindPromise {
 public:
 	BindPromise( const char* errContext, UID errID ) : errContext(errContext), errID(errID) {}
 	BindPromise( BindPromise const& r ) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept(true) : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise&& r) BOOST_NOEXCEPT : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
 	Future<Void> getFuture() { return p.getFuture(); }
 
@@ -458,7 +466,9 @@ private:
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
 			wait( f );
-			conn->accept( NetworkAddress(peer_endpoint.address().to_v4().to_ulong(), peer_endpoint.port()) );
+			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
+			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
+			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
 
 			return conn;
 		} catch (...) {
@@ -471,7 +481,7 @@ private:
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
-	explicit PromiseTask( Promise<Void>&& promise ) noexcept(true) : promise(std::move(promise)) {}
+	explicit PromiseTask( Promise<Void>&& promise ) BOOST_NOEXCEPT : promise(std::move(promise)) {}
 
 	virtual void operator()() {
 		promise.send(Void());
@@ -479,7 +489,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
+Net2::Net2(bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
@@ -725,7 +735,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
 		int i = std::min<double>(NetworkMetrics::SLOW_EVENT_BINS-1, log( elapsed/1e6 ) / log(2.));
 		int s = ++networkMetrics.countSlowEvents[i];
-		uint64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
+		int64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
 
 		//printf("SlowTask: %d, %d yields\n", (int)(elapsed/1e6), numYields);
 
@@ -850,13 +860,14 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		}
 
 		std::vector<NetworkAddress> addrs;
-		
+
 		tcp::resolver::iterator end;
 		while(iter != end) {
 			auto endpoint = iter->endpoint();
-			// Currently only ipv4 is supported by NetworkAddress
 			auto addr = endpoint.address();
-			if(addr.is_v4()) {
+			if (addr.is_v6()) {
+				addrs.push_back(NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port()));
+			} else {
 				addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
 			}
 			++iter;
@@ -890,9 +901,10 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 	try {
 		boost::asio::io_service ioService;
 		boost::asio::ip::udp::socket socket(ioService);
-		boost::asio::ip::udp::endpoint endpoint(boost::asio::ip::address_v4(addr.ip), 1);
+		boost::asio::ip::udp::endpoint endpoint(tcpAddress(addr.ip), 1);
 		socket.connect(endpoint);
-		bool local = socket.local_endpoint().address().to_v4().to_ulong() == addr.ip;
+		bool local = addr.ip.isV6() ? socket.local_endpoint().address().to_v6().to_bytes() == addr.ip.toV6()
+		                            : socket.local_endpoint().address().to_v4().to_ulong() == addr.ip.toV4();
 		socket.close();
 		if (local) TraceEvent(SevInfo, "AddressIsOnHost").detail("Address", addr);
 		return addressOnHostCache[ addr.ip ] = local;
@@ -997,9 +1009,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(localAddress, useThreadPool, useMetrics);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
@@ -1099,7 +1111,7 @@ void net2_test() {
 	finished2.block();
 
 
-	g_network = newNet2(NetworkAddress::parse("127.0.0.1:12345"));  // for promise serialization below
+	g_network = newNet2();  // for promise serialization below
 
 	Endpoint destination;
 

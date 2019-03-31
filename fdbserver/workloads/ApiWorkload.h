@@ -22,7 +22,7 @@
 #define FDBSERVER_APIWORKLOAD_H
 #pragma once
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"

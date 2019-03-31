@@ -30,6 +30,7 @@ import datetime
 import platform
 import os
 import sys
+import multiprocessing
 
 from fdb import six
 
@@ -37,6 +38,8 @@ _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
 
 _open_file = open
+
+_thread_local_storage = threading.local()
 
 import weakref
 
@@ -593,7 +596,27 @@ class Future(_FDBBase):
         return bool(self.capi.fdb_future_is_ready(self.fpointer))
 
     def block_until_ready(self):
-        self.capi.fdb_future_block_until_ready(self.fpointer)
+        # Checking readiness is faster than using the callback, so it saves us time if we are already
+        # ready. It also doesn't add much to the cost of this function
+        if not self.is_ready():
+            # Blocking in the native client from the main thread prevents Python from handling signals.
+            # To avoid that behavior, we implement the blocking in Python using semaphores and on_ready.
+            # Using a Semaphore is faster than an Event, and we create only one per thread to avoid the 
+            # cost of creating one every time.
+            semaphore = getattr(_thread_local_storage, 'future_block_semaphore', None)
+            if semaphore is None:
+                semaphore = multiprocessing.Semaphore(0)
+                _thread_local_storage.future_block_semaphore = semaphore
+
+            self.on_ready(lambda self: semaphore.release())
+
+            try:
+                semaphore.acquire()
+            except:
+                # If this semaphore didn't actually get released, then we need to replace our thread-local
+                # copy so that later callers still function correctly
+                _thread_local_storage.future_block_semaphore = multiprocessing.Semaphore(0)
+                raise
 
     def on_ready(self, callback):
         def cb_and_delref(ignore):
@@ -1284,6 +1307,7 @@ def optionalParamToBytes(v):
 
 
 _FDBBase.capi = _capi
+_CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
 def init_c_api():
     _capi.fdb_select_api_version_impl.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -1326,8 +1350,6 @@ def init_c_api():
 
     _capi.fdb_future_is_ready.argtypes = [ctypes.c_void_p]
     _capi.fdb_future_is_ready.restype = ctypes.c_int
-
-    _CBFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
     _capi.fdb_future_set_callback.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _capi.fdb_future_set_callback.restype = int

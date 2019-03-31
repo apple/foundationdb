@@ -4,8 +4,10 @@ set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
 set(USE_GOLD_LINKER OFF CACHE BOOL "Use gold linker")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
+
+add_compile_options(-DCMAKE_BUILD)
+add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
 find_package(Threads REQUIRED)
 if(ALLOC_INSTRUMENTATION)
@@ -31,8 +33,11 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 if (NOT OPEN_FOR_IDE)
   add_definitions(-DNO_INTELLISENSE)
 endif()
-add_definitions(-DUSE_UCONTEXT)
-enable_language(ASM)
+if(WIN32)
+  add_definitions(-DUSE_USEFIBERS)
+else()
+  add_definitions(-DUSE_UCONTEXT)
+endif()
 
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
@@ -40,7 +45,11 @@ set(CMAKE_REQUIRED_LIBRARIES c)
 
 
 if(WIN32)
-  add_compile_options(/W3 /EHsc)
+  # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
+  # this sets the windows target version to Windows 7
+  set(WINDOWS_TARGET 0x0601)
+  add_compile_options(/W3 /EHsc /std:c++14 /bigobj $<$<CONFIG:Release>:/Zi>)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
 else()
   if(USE_GOLD_LINKER)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")

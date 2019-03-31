@@ -39,7 +39,7 @@ struct ClusterInterface {
 	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
 	UID id() const { return openDatabase.getEndpoint().token; }
-	NetworkAddress address() const { return openDatabase.getEndpoint().address; }
+	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
 	void initEndpoints() {
 		openDatabase.getEndpoint( TaskClusterController );
@@ -117,28 +117,30 @@ struct OpenDatabaseRequest {
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 	Arena arena;
-	StringRef issues, traceLogGroup;
+	StringRef traceLogGroup;
+	VectorRef<StringRef> issues;
 	VectorRef<ClientVersionRef> supportedVersions;
+	int connectedCoordinatorsNum; // Number of coordinators connected by the client
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, reply, arena);
+		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply, arena);
 	}
 };
 
 struct SystemFailureStatus {
-	NetworkAddress address;
+	NetworkAddressList addresses;
 	FailureStatus status;
 
-	SystemFailureStatus() : address(0,0) {}
-	SystemFailureStatus( NetworkAddress const& a, FailureStatus const& s ) : address(a), status(s) {}
+	SystemFailureStatus() {}
+	SystemFailureStatus( NetworkAddressList const& a, FailureStatus const& s ) : addresses(a), status(s) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, address, status);
+		serializer(ar, addresses, status);
 	}
 };
 
@@ -155,11 +157,12 @@ struct FailureMonitoringRequest {
 
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
+	NetworkAddressList addresses;
 	ReplyPromise< struct FailureMonitoringReply > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, senderStatus, failureInformationVersion, reply);
+		serializer(ar, senderStatus, failureInformationVersion, addresses, reply);
 	}
 };
 
@@ -223,13 +226,15 @@ struct GetClientWorkersRequest {
 };
 
 struct ForceRecoveryRequest {
+	Key dcId;
 	ReplyPromise<Void> reply;
 
 	ForceRecoveryRequest() {}
+	explicit ForceRecoveryRequest(Key dcId) : dcId(dcId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, dcId, reply);
 	}
 };
 

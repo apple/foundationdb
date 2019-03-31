@@ -19,9 +19,9 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BulkLoadWorkload : TestWorkload {
@@ -83,7 +83,7 @@ struct BulkLoadWorkload : TestWorkload {
 					for(int i = 0; i < self->writesPerTransaction; i++)
 						tr.set( format( "/bulkload/%04x/%04x/%08x", self->clientId, actorId, idx + i ), self->value );
 					tr.makeSelfConflicting();
-					Version _ = wait( tr.getReadVersion() );
+					wait(success( tr.getReadVersion() ));
 					wait( tr.commit() );
 					break;
 				} catch (Error& e) {

@@ -21,10 +21,10 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

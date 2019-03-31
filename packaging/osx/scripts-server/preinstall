@@ -1,5 +1,8 @@
 #!/bin/bash
 
+mkdir -p -m 0700 $SERVERDIR/usr/local/foundationdb/data
+mkdir -p -m 0700 $SERVERDIR/usr/local/foundationdb/logs
+
 if [ -f /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist ]; then
    /bin/launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist || :
 fi

@@ -92,9 +92,9 @@ public:
 	inline explicit Arena( size_t reservedSize );
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) noexcept(true);
+	Arena(Arena && r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) noexcept(true);
+	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
 	inline void dependsOn( const Arena& p );
 	inline size_t getSize() const;
@@ -116,7 +116,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 {
 	enum {
 		SMALL = 64,
-		LARGE = 4097 // If size == used == LARGE, then use hugeSize, hugeUsed
+		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
 	};
 
 	enum { NOT_TINY = 255, TINY_HEADER = 6 };
@@ -227,7 +227,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				else if (reqSize <= 512) { b = (ArenaBlock*)FastAllocator<512>::allocate(); b->bigSize = 512; INSTRUMENT_ALLOCATE("Arena512"); }
 				else if (reqSize <= 1024) { b = (ArenaBlock*)FastAllocator<1024>::allocate(); b->bigSize = 1024; INSTRUMENT_ALLOCATE("Arena1024"); }
 				else if (reqSize <= 2048) { b = (ArenaBlock*)FastAllocator<2048>::allocate(); b->bigSize = 2048; INSTRUMENT_ALLOCATE("Arena2048"); }
-				else { b = (ArenaBlock*)FastAllocator<4096>::allocate(); b->bigSize = 4096; INSTRUMENT_ALLOCATE("Arena4096"); }
+				else if (reqSize <= 4096) { b = (ArenaBlock*)FastAllocator<4096>::allocate(); b->bigSize = 4096; INSTRUMENT_ALLOCATE("Arena4096"); }
+				else { b = (ArenaBlock*)FastAllocator<8192>::allocate(); b->bigSize = 8192; INSTRUMENT_ALLOCATE("Arena8192"); }
 				b->tinySize = b->tinyUsed = NOT_TINY;
 				b->bigUsed = sizeof(ArenaBlock);
 			} else {
@@ -238,6 +239,11 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				b->tinySize = b->tinyUsed = NOT_TINY;
 				b->bigSize = reqSize;
 				b->bigUsed = sizeof(ArenaBlock);
+
+				if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
+					TraceEvent("HugeArenaSample").detail("Size", reqSize).backtrace();
+				}
+				g_hugeArenaMemory += reqSize;
 
 				// If the new block has less free space than the old block, make the old block depend on it
 				if (next && !next->isTiny() && next->unused() >= reqSize-dataSize) {
@@ -269,10 +275,12 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 			else if (bigSize <= 1024) { FastAllocator<1024>::release(this); INSTRUMENT_RELEASE("Arena1024"); }
 			else if (bigSize <= 2048) { FastAllocator<2048>::release(this); INSTRUMENT_RELEASE("Arena2048"); }
 			else if (bigSize <= 4096) { FastAllocator<4096>::release(this); INSTRUMENT_RELEASE("Arena4096"); }
+			else if (bigSize <= 8192) { FastAllocator<8192>::release(this); INSTRUMENT_RELEASE("Arena8192"); }
 			else {
 				#ifdef ALLOC_INSTRUMENTATION
 					allocInstr[ "ArenaHugeKB" ].dealloc( (bigSize+1023)>>10 );
 				#endif
+				g_hugeArenaMemory -= bigSize;
 				delete[] (uint8_t*)this;
 			}
 		}
@@ -288,12 +296,12 @@ inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
 		ArenaBlock::create((int)reservedSize,impl);
 }
 inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) noexcept(true) : impl(std::move(r.impl)) {}
+inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
 inline Arena& Arena::operator=(const Arena& r) {
 	impl = r.impl;
 	return *this;
 }
-inline Arena& Arena::operator=(Arena&& r) noexcept(true) {
+inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
 	impl = std::move(r.impl);
 	return *this;
 }
@@ -322,6 +330,96 @@ template <class Archive>
 inline void save( Archive& ar, const Arena& p ) {
 	// No action required
 }
+
+template <class T>
+class Optional {
+public:
+	Optional() : valid(false) {}
+	Optional(const Optional<T>& o) : valid(o.valid) {
+		if (valid) new (&value) T(o.get());
+	}
+
+	template <class U>
+	Optional(const U& t) : valid(true) { new (&value) T(t); }
+
+	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
+	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
+	Use .castTo<>() instead.
+	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
+
+	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
+		if (valid) new (&value) T(a, o.get());
+	}
+	int expectedSize() const { return valid ? get().expectedSize() : 0; }
+
+	template <class R> Optional<R> castTo() const {
+		return map<R>([](const T& v){ return (R)v; });
+	}
+
+	template <class R> Optional<R> map(std::function<R(T)> f) const {
+		if (present()) {
+			return Optional<R>(f(get()));
+		}
+		else {
+			return Optional<R>();
+		}
+	}
+
+	~Optional() {
+		if (valid) ((T*)&value)->~T();
+	}
+
+	Optional & operator=(Optional const& o) {
+		if (valid) {
+			valid = false;
+			((T*)&value)->~T();
+		}
+		if (o.valid) {
+			new (&value) T(o.get());
+			valid = true;
+		}
+		return *this;
+	}
+
+	bool present() const { return valid; }
+	T& get() {
+		UNSTOPPABLE_ASSERT(valid);
+		return *(T*)&value;
+	}
+	T const& get() const {
+		UNSTOPPABLE_ASSERT(valid);
+		return *(T const*)&value;
+	}
+	T orDefault(T const& default_value) const { if (valid) return get(); else return default_value; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		// SOMEDAY: specialize for space efficiency?
+		if (valid && Ar::isDeserializing)
+			(*(T *)&value).~T();
+		serializer(ar, valid);
+		if (valid) {
+			if (Ar::isDeserializing) new (&value) T();
+			serializer(ar, *(T*)&value);
+		}
+	}
+
+	bool operator == (Optional const& o) const {
+		return present() == o.present() && (!present() || get() == o.get());
+	}
+	bool operator != (Optional const& o) const {
+		return !(*this == o);
+	}
+	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
+	bool operator < (Optional const& o) const {
+		if (present() != o.present()) return o.present();
+		if (!present()) return false;
+		return get() < o.get();
+	}
+private:
+	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
+	bool valid;
+};
 
 //#define STANDALONE_ALWAYS_COPY
 
@@ -523,7 +621,26 @@ public:
 		return r;
 	}
 	StringRef eat(const char *sep) {
-		return eat(StringRef((const uint8_t *)sep, strlen(sep)));
+		return eat(StringRef((const uint8_t *)sep, (int)strlen(sep)));
+	}
+	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
+	// and remove that sequence (including the sep byte) from *this
+	// Returns and removes all bytes from *this if no bytes within sep were found
+	StringRef eatAny(StringRef sep, uint8_t *foundSeparator) {
+		auto iSep = std::find_first_of(begin(), end(), sep.begin(), sep.end());
+		if(iSep != end()) {
+			if(foundSeparator != nullptr) {
+				*foundSeparator = *iSep;
+			}
+			const int i = iSep - begin();
+			StringRef token = substr(0, i);
+			*this = substr(i + 1);
+			return token;
+		}
+		return eat();
+	}
+	StringRef eatAny(const char *sep, uint8_t *foundSeparator) {
+		return eatAny(StringRef((const uint8_t *)sep, strlen(sep)), foundSeparator);
 	}
 
 private:
@@ -543,6 +660,14 @@ private:
 inline static Standalone<StringRef> makeString( int length ) {
 	Standalone<StringRef> returnString;
 	uint8_t *outData = new (returnString.arena()) uint8_t[length];
+	((StringRef&)returnString) = StringRef(outData, length);
+	return returnString;
+}
+
+inline static Standalone<StringRef> makeAlignedString( int alignment, int length ) {
+	Standalone<StringRef> returnString;
+	uint8_t *outData = new (returnString.arena()) uint8_t[alignment + length];
+	outData = (uint8_t*)((((uintptr_t)outData + (alignment - 1)) / alignment) * alignment);
 	((StringRef&)returnString) = StringRef(outData, length);
 	return returnString;
 }

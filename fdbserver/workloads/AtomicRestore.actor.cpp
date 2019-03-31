@@ -19,8 +19,8 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -74,16 +74,19 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Wait");
-		int _ = wait( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) );
+		wait(success( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) ));
 		TraceEvent("AtomicRestore_BackupStart");
 		wait( delay(self->restoreAfter * g_random->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");
 
 		loop {
 			std::vector<Future<Version>> restores;
-
-			for (auto &range : self->backupRanges) {
-				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
+			if (g_random->random01() < 0.5) {
+				for (auto &range : self->backupRanges)
+					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
+			}
+			else {
+				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 			}
 			try {
 				wait(waitForAll(restores));

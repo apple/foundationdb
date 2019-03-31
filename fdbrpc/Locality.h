@@ -26,9 +26,10 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, FastRestoreClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, FastRestoreClass, DataDistributorClass, CoordinatorClass, RatekeeperClass, InvalidClass = -1 };
+
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -49,6 +50,9 @@ public:
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
 		else if (s=="fast_restore") _class = FastRestoreClass;
+		else if (s=="data_distributor") _class = DataDistributorClass;
+		else if (s=="coordinator") _class = CoordinatorClass;
+		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 	}
 
@@ -65,6 +69,9 @@ public:
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
 		else if (classStr=="fast_restore") _class = FastRestoreClass;
+		else if (classStr=="data_distributor") _class = DataDistributorClass;
+		else if (classStr=="coordinator") _class = CoordinatorClass;
+		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -96,6 +103,9 @@ public:
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
 			case FastRestoreClass: return "fast_restore";
+			case DataDistributorClass: return "data_distributor";
+			case CoordinatorClass: return "coordinator";
+			case RatekeeperClass: return "ratekeeper";
 			default: return "invalid";
 		}
 	}

@@ -76,6 +76,8 @@ foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
 compile_commands.json
+flow/actorcompiler/obj
+flow/coveragetool/obj
 
 # Temporary and user configuration files
 *~
@@ -86,3 +88,4 @@ compile_commands.json
 .DS_Store
 temp/
 /compile_commands.json
+/.ccls-cache

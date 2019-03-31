@@ -27,6 +27,7 @@
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
+#include "flow/Stats.h"
 
 struct StorageServerInterface {
 	enum { 
@@ -61,7 +62,7 @@ struct StorageServerInterface {
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( g_random->randomUniqueID() ) {}
-	NetworkAddress address() const { return getVersion.getEndpoint().address; }
+	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar> 
@@ -107,7 +108,7 @@ struct GetValueReply : public LoadBalancedReply {
 	}
 };
 
-struct GetValueRequest {
+struct GetValueRequest : TimedRequest {
 	Key key;
 	Version version;
 	Optional<UID> debugID;
@@ -150,7 +151,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyValuesRequest {
+struct GetKeyValuesRequest : TimedRequest {
 	Arena arena;
 	KeySelectorRef begin, end;
 	Version version;		// or latestVersion
@@ -178,7 +179,7 @@ struct GetKeyReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyRequest {
+struct GetKeyRequest : TimedRequest {
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
@@ -345,11 +346,14 @@ struct StorageQueuingMetricsReply {
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
-	Version v; // current storage server version
+	Version version; // current storage server version
+	Version durableVersion; // latest version durable on storage server
+	double cpuUsage;
+	double diskUsage;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, v, storageBytes);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, version, storageBytes, durableVersion, cpuUsage, diskUsage);
 	}
 };
 

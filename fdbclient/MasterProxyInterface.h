@@ -1,3 +1,4 @@
+
 /*
  * MasterProxyInterface.h
  *
@@ -26,11 +27,14 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 
+#include "flow/Stats.h"
+
 struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
 	LocalityData locality;
+	bool provisional;
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
@@ -42,15 +46,19 @@ struct MasterProxyInterface {
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 
+	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
 	bool operator != (MasterProxyInterface const& r) const { return id() != r.id(); }
-	NetworkAddress address() const { return commit.getEndpoint().address; }
+	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, commit, getConsistentReadVersion, getKeyServersLocations, waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion, txnState);
+		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
+				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
+				   txnState, getHealthMetrics);
 	}
 
 	void initEndpoints() {
@@ -64,24 +72,25 @@ struct MasterProxyInterface {
 struct CommitID {
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
+	Optional<Value> metadataVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId);
+		serializer(ar, version, txnBatchId, metadataVersion);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId ) : version(version), txnBatchId(txnBatchId) {}
+	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion) {}
 };
 
-struct CommitTransactionRequest {
+struct CommitTransactionRequest : TimedRequest {
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
 		FLAG_FIRST_IN_BATCH = 0x2
 	};
 
-	bool isLockAware() const { return flags & FLAG_IS_LOCK_AWARE; }
-	bool firstInBatch() const { return flags & FLAG_FIRST_IN_BATCH; }
+	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
+	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 	
 	Arena arena;
 	CommitTransactionRef transaction;
@@ -113,20 +122,22 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 struct GetReadVersionReply {
 	Version version;
 	bool locked;
+	Optional<Value> metadataVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked);
+		serializer(ar, version, locked, metadataVersion);
 	}
 };
 
-struct GetReadVersionRequest {
+struct GetReadVersionRequest : TimedRequest {
 	enum { 
 		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,
 		PRIORITY_BATCH = 1 << 24
 	};
-	enum { 
+	enum {
+		FLAG_USE_PROVISIONAL_PROXIES = 2,
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
@@ -224,6 +235,49 @@ struct TxnStateRequest {
 	template <class Ar> 
 	void serialize(Ar& ar) { 
 		serializer(ar, data, sequence, last, reply, arena);
+	}
+};
+
+struct GetHealthMetricsRequest
+{
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply, detailed);
+	}
+};
+
+struct GetHealthMetricsReply
+{
+	Standalone<StringRef> serialized;
+	HealthMetrics healthMetrics;
+
+	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics()) :
+		healthMetrics(healthMetrics)
+	{
+		update(healthMetrics, true, true);
+	}
+
+	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput)
+	{
+		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
+		BinaryWriter bw(IncludeVersion());
+		bw << this->healthMetrics;
+		serialized = bw.toValue();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serialized);
+		if (ar.isDeserializing) {
+			BinaryReader br(serialized, IncludeVersion());
+			br >> healthMetrics;
+		}
 	}
 };
 

@@ -45,7 +45,7 @@ public:
 		if(r.capacity() > 0)
 			arr = (T*)aligned_alloc(__alignof(T), capacity()*sizeof(T));
 		ASSERT(capacity() >= end || end == 0);
-		for(int i=0; i<end; i++)
+		for (uint32_t i=0; i<end; i++)
 			new (&arr[i]) T(r[i]);
 		// FIXME: Specialization for POD types using memcpy?
 	}
@@ -60,18 +60,18 @@ public:
 		if(r.capacity() > 0)
 			arr = (T*)aligned_alloc(__alignof(T), capacity()*sizeof(T));
 		ASSERT(capacity() >= end || end == 0);
-		for(int i=0; i<end; i++)
+		for (uint32_t i=0; i<end; i++)
 			new (&arr[i]) T(r[i]);
 		// FIXME: Specialization for POD types using memcpy?
 	}
 
-	Deque(Deque&& r) noexcept(true) : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
+	Deque(Deque&& r) BOOST_NOEXCEPT : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
 		r.arr = 0;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
 
-	void operator=(Deque&& r) noexcept(true) {
+	void operator=(Deque&& r) BOOST_NOEXCEPT {
 		cleanup();
 
 		begin = r.begin;
@@ -87,7 +87,7 @@ public:
 	bool operator == (const Deque& r) const { 
 		if(size() != r.size())
 			return false;
-		for(int i=0; i<size(); i++)
+		for (uint32_t i=0; i<size(); i++)
 			if((*this)[i] != r[i])
 				return false;
 		return true;
@@ -130,7 +130,7 @@ public:
 	}
 
 	void clear() {
-		for (int i = begin; i != end; i++)
+		for (uint32_t i = begin; i != end; i++)
 			arr[i&mask].~T();
 		begin = end = 0;
 	}

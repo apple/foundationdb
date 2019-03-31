@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -65,7 +65,7 @@ struct SlowTaskWorkload : TestWorkload {
 		for(int j=0; j<1000; j++)
 			try {
 				throw success();
-			} catch (Error& e) {
+			} catch (Error& ) {
 				++*exc_count;
 			}
 	}

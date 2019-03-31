@@ -22,7 +22,7 @@
 #define FDBCLIENT_READYOURWRITES_H
 #pragma once
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RYWIterator.h"
 #include <list>
@@ -42,13 +42,9 @@ struct ReadYourWritesTransactionOptions {
 	int snapshotRywEnabled;
 
 	ReadYourWritesTransactionOptions() {}
-	explicit ReadYourWritesTransactionOptions(Transaction const& tr) { reset(tr); }
-	void reset(Transaction const& tr) {
-		memset(this, 0, sizeof(*this));
-		timeoutInSeconds = 0.0;
-		maxRetries = -1;
-		snapshotRywEnabled = tr.apiVersionAtLeast(300) ? 1 : 0;
-	}
+	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
+	void reset(Transaction const& tr);
+	void fullReset(Transaction const& tr);
 	bool getAndResetWriteConflictDisabled();
 };
 
@@ -111,8 +107,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
-	void operator=(ReadYourWritesTransaction&& r) noexcept(true);
-	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept(true);
+	void operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
 
 	virtual void addref() { ReferenceCounted<ReadYourWritesTransaction>::addref(); }
 	virtual void delref() { ReferenceCounted<ReadYourWritesTransaction>::delref(); }
@@ -130,7 +126,7 @@ public:
 
 	void getWriteConflicts( KeyRangeMap<bool> *result );
 
-	Database getDatabase(){
+	Database getDatabase() {
 		return tr.getDatabase();
 	}
 private:
@@ -151,6 +147,7 @@ private:
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
+	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)
 	void updateConflictMap( KeyRangeRef const& keys, WriteMap::iterator& it ); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
 	void writeRangeToNativeTransaction( KeyRangeRef const& keys );

@@ -206,7 +206,11 @@ JNIEXPORT jthrowable JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1ge
 		return JNI_NULL;
 	}
 	FDBFuture *sav = (FDBFuture *)future;
-	return getThrowable( jenv, fdb_future_get_error( sav ) );
+	fdb_error_t err = fdb_future_get_error( sav );
+	if( err )
+		return getThrowable( jenv, err );
+	else
+		return JNI_NULL;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1isReady(JNIEnv *jenv, jobject, jlong future) {

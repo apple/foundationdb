@@ -26,10 +26,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Knobs.h"
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this structure
@@ -103,14 +104,15 @@ struct RecruitRemoteFromConfigurationRequest {
 	DatabaseConfiguration configuration;
 	Optional<Key> dcId;
 	int logRouterCount;
+	std::vector<UID> exclusionWorkerIds;
 	ReplyPromise< struct RecruitRemoteFromConfigurationReply > reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
-	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount) {}
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount, const std::vector<UID> &exclusionWorkerIds) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount), exclusionWorkerIds(exclusionWorkerIds){}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, configuration, dcId, logRouterCount, reply);
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
 	}
 };
 
@@ -166,15 +168,18 @@ struct RegisterWorkerRequest {
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	Generation generation;
+	Optional<DataDistributorInterface> distributorInterf;
+	Optional<RatekeeperInterface> ratekeeperInterf;
 	ReplyPromise<RegisterWorkerReply> reply;
+	bool degraded;
 
-	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation) : 
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation) {}
+	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, reply);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, reply, degraded);
 	}
 };
 
@@ -182,7 +187,7 @@ struct GetWorkersRequest {
 	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
-	ReplyPromise<vector<std::pair<WorkerInterface, ProcessClass>>> reply;
+	ReplyPromise<vector<WorkerDetails>> reply;
 
 	GetWorkersRequest() : flags(0) {}
 	explicit GetWorkersRequest(int fl) : flags(fl) {}
@@ -219,7 +224,7 @@ struct RegisterMasterRequest {
 
 struct GetServerDBInfoRequest {
 	UID knownServerInfoID;
-	Standalone<StringRef> issues;
+	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise< struct ServerDBInfo > reply;
 

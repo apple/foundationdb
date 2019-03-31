@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -159,7 +159,7 @@ struct StorefrontWorkload : TestWorkload {
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-						tr.set( orderKey, wr.toStringRef() );
+						tr.set( orderKey, wr.toValue() );
 
 						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
@@ -250,7 +250,7 @@ struct StorefrontWorkload : TestWorkload {
 							itemList.push_back( it->first );
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-					if( wr.toStringRef() != val.get().toString() ) {
+					if( wr.toValue() != val.get().toString() ) {
 						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
 						return false;
 					}

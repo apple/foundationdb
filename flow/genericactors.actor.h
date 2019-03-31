@@ -294,12 +294,12 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 }
 
 template<class T>
-Future<Void> store(Future<T> what, T &out) {
+Future<Void> store(T &out, Future<T> what) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });
 }
 
 template<class T>
-Future<Void> storeOrThrow(Future<Optional<T>> what, T &out, Error e = key_not_found()) {
+Future<Void> storeOrThrow(T &out, Future<Optional<T>> what, Error e = key_not_found()) {
 	return map(what, [&out,e](Optional<T> const &o) {
 		if(!o.present())
 			throw e;
@@ -775,6 +775,42 @@ Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
 	return Void();
 }
 
+ACTOR template <class T>
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+	state bool isEqual = var->get() == val;
+	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
+	loop {
+		choose {
+			when( wait( resetDelay ) ) {
+				var->set( val );
+				isEqual = true;
+				resetDelay = Never();
+			}
+			when( wait( var->onChange() ) ) {}
+		}
+		if( isEqual && var->get() != val ) {
+			isEqual = false;
+			resetDelay = delay(time);
+		}
+		if( !isEqual && var->get() == val ) {
+			isEqual = true;
+			resetDelay = Never();
+		}
+	}
+}
+
+ACTOR template <class T>
+Future<Void> setWhenDoneOrError( Future<Void> condition, Reference<AsyncVar<T>> var, T val ) {
+	try {
+		wait( condition );
+	}
+	catch ( Error& e ) {
+		if (e.code() == error_code_actor_cancelled) throw;
+	}
+	var->set( val );
+	return Void();
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
@@ -1186,11 +1222,11 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		FlowLock* lock;
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
-		Releaser( FlowLock& lock, int amount = 1 ) : lock(&lock), remaining(amount) {}
-		Releaser(Releaser&& r) noexcept(true) : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		Releaser( FlowLock& lock, int64_t amount = 1 ) : lock(&lock), remaining(amount) {}
+		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) { if (remaining) lock->release(remaining); lock = r.lock; remaining = r.remaining; r.remaining = 0; }
 
-		void release( int amount = -1 ) {
+		void release( int64_t amount = -1 ) {
 			if( amount == -1 || amount > remaining )
 				amount = remaining;
 
@@ -1203,23 +1239,22 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	};
 
 	FlowLock() : permits(1), active(0) {}
-	explicit FlowLock(int permits) : permits(permits), active(0) {}
+	explicit FlowLock(int64_t permits) : permits(permits), active(0) {}
 
-	Future<Void> take(int taskID = TaskDefaultYield, int amount = 1) {
-		ASSERT(amount <= permits);
-		if (active + amount <= permits) {
+	Future<Void> take(int taskID = TaskDefaultYield, int64_t amount = 1) {
+		if (active + amount <= permits || active == 0) {
 			active += amount;
 			return safeYieldActor(this, taskID, amount);
 		}
 		return takeActor(this, taskID, amount);
 	}
-	void release( int amount = 1 ) {
-		ASSERT( active > 0 || amount == 0 );
+	void release( int64_t amount = 1 ) {
+		ASSERT( (active > 0 || amount == 0) && active - amount >= 0 );
 		active -= amount;
 
 		while( !takers.empty() ) {
-			if( active + takers.begin()->second <= permits ) {
-				std::pair< Promise<Void>, int > next = std::move( *takers.begin() );
+			if( active + takers.begin()->second <= permits || active == 0 ) {
+				std::pair< Promise<Void>, int64_t > next = std::move( *takers.begin() );
 				active += next.second;
 				takers.pop_front();
 				next.first.send(Void());
@@ -1232,21 +1267,21 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	Future<Void> releaseWhen( Future<Void> const& signal, int amount = 1 ) { return releaseWhenActor( this, signal, amount ); }
 
 	// returns when any permits are available, having taken as many as possible up to the given amount, and modifies amount to the number of permits taken
-	Future<Void> takeUpTo(int& amount) {
+	Future<Void> takeUpTo(int64_t& amount) {
 		return takeMoreActor(this, &amount);
 	}
 
-	int available() const { return permits - active; }
-	int activePermits() const { return active; }
+	int64_t available() const { return permits - active; }
+	int64_t activePermits() const { return active; }
 	int waiters() const { return takers.size(); }
 private:
-	std::list< std::pair< Promise<Void>, int > > takers;
-	const int permits;
-	int active;
+	std::list< std::pair< Promise<Void>, int64_t > > takers;
+	const int64_t permits;
+	int64_t active;
 	Promise<Void> broken_on_destruct;
 
-	ACTOR static Future<Void> takeActor(FlowLock* lock, int taskID, int amount) {
-		state std::list<std::pair<Promise<Void>, int>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
+	ACTOR static Future<Void> takeActor(FlowLock* lock, int taskID, int64_t amount) {
+		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
 
 		try {
 			wait( it->first.getFuture() );
@@ -1269,15 +1304,15 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> takeMoreActor(FlowLock* lock, int* amount) {
+	ACTOR static Future<Void> takeMoreActor(FlowLock* lock, int64_t* amount) {
 		wait(lock->take());
-		int extra = std::min( lock->available(), *amount-1 );
+		int64_t extra = std::min( lock->available(), *amount-1 );
 		lock->active += extra;
 		*amount = 1 + extra;
 		return Void();
 	}
 
-	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, int taskID, int amount) {
+	ACTOR static Future<Void> safeYieldActor(FlowLock* lock, int taskID, int64_t amount) {
 		try {
 			choose{
 				when(wait(yield(taskID))) {}
@@ -1290,7 +1325,7 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> releaseWhenActor( FlowLock* self, Future<Void> signal, int amount ) {
+	ACTOR static Future<Void> releaseWhenActor( FlowLock* self, Future<Void> signal, int64_t amount ) {
 		wait(signal);
 		self->release(amount);
 		return Void();
@@ -1425,7 +1460,7 @@ public:
 		futures = f.futures;
 	}
 
-	AndFuture(AndFuture&& f) noexcept(true) {
+	AndFuture(AndFuture&& f) BOOST_NOEXCEPT {
 		futures = std::move(f.futures);
 	}
 
@@ -1445,7 +1480,7 @@ public:
 		futures = f.futures;
 	}
 
-	void operator=(AndFuture&& f) noexcept(true) {
+	void operator=(AndFuture&& f) BOOST_NOEXCEPT {
 		futures = std::move(f.futures);
 	}
 

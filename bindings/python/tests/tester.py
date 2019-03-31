@@ -21,6 +21,7 @@
 
 
 import ctypes
+import math
 import sys
 import os
 import struct
@@ -41,8 +42,10 @@ import fdb.tuple
 from directory_extension import DirectoryExtension
 
 from cancellation_timeout_tests import test_timeouts
+from cancellation_timeout_tests import test_db_timeouts
 from cancellation_timeout_tests import test_cancellation
 from cancellation_timeout_tests import test_retry_limits
+from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
 random.seed(0)
@@ -122,6 +125,20 @@ class Instruction:
         self.stack.push(self.index, val)
 
 
+def test_db_options(db):
+    db.options.set_max_watches(100001)
+    db.options.set_datacenter_id("dc_id")
+    db.options.set_machine_id("machine_id")
+    db.options.set_transaction_timeout(100000)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_timeout(0)
+    db.options.set_transaction_max_retry_delay(100)
+    db.options.set_transaction_retry_limit(10)
+    db.options.set_transaction_retry_limit(-1)
+    db.options.set_snapshot_ryw_enable()
+    db.options.set_snapshot_ryw_disable()
+
+
 @fdb.transactional
 def test_options(tr):
     tr.options.set_priority_system_immediate()
@@ -135,7 +152,8 @@ def test_options(tr):
     tr.options.set_retry_limit(50)
     tr.options.set_max_retry_delay(100)
     tr.options.set_used_during_commit_protection_disable()
-    tr.options.set_transaction_logging_enable('my_transaction')
+    tr.options.set_debug_transaction_identifier('my_transaction')
+    tr.options.set_log_transaction()
     tr.options.set_read_lock_aware()
     tr.options.set_lock_aware()
 
@@ -498,6 +516,8 @@ class Tester:
                 elif inst.op == six.u("ENCODE_FLOAT"):
                     f_bytes = inst.pop()
                     f = struct.unpack(">f", f_bytes)[0]
+                    if not math.isnan(f) and not math.isinf(f) and not f == -0.0 and f == int(f):
+                        f = int(f)
                     inst.push(fdb.tuple.SingleFloat(f))
                 elif inst.op == six.u("ENCODE_DOUBLE"):
                     d_bytes = inst.pop()
@@ -524,11 +544,14 @@ class Tester:
                     try:
                         db.options.set_location_cache_size(100001)
 
+                        test_db_options(db)
                         test_options(db)
                         test_watches(db)
                         test_cancellation(db)
                         test_retry_limits(db)
+                        test_db_retry_limits(db)
                         test_timeouts(db)
+                        test_db_timeouts(db)
                         test_combinations(db)
                         test_locality(db)
                         test_predicates()

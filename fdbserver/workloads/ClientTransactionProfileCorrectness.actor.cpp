@@ -1,7 +1,8 @@
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -13,8 +14,9 @@ SSSSSSSSSS       - 10 bytes Version Stamp
 RRRRRRRRRRRRRRRR - 16 bytes Transaction id
 NNNN             - 4 Bytes Chunk number (Big Endian)
 TTTT             - 4 Bytes Total number of chunks (Big Endian)
+XXXX             - Variable length user provided transaction identifier
 */
-StringRef sampleTrInfoKey = LiteralStringRef("\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/");
+StringRef sampleTrInfoKey = LiteralStringRef("\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/");
 static const auto chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
 static const auto numChunksStartIndex = sampleTrInfoKey.toString().find('T');
 static const int chunkFormatSize = 4;

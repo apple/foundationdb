@@ -77,7 +77,7 @@ struct OpenFileInfo : NonCopyable {
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
 	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) noexcept(true) : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);

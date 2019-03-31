@@ -14,7 +14,6 @@
     <ActorCompiler Include="TDMetric.actor.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="boost.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
     <ClCompile Include="Hash3.c" />

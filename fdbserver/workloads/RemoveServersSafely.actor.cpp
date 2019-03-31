@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbserver/WorkerInterface.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <>
@@ -65,7 +65,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		std::map<Optional<Standalone<StringRef>>, AddressExclusion> machinesMap; // Locality Zone Id -> ip address
 		std::vector<AddressExclusion> processAddrs;	// IF (killProcesses) THEN ip:port ELSE ip addresses   unique list of the machines
-		std::map<uint32_t, Optional<Standalone<StringRef>>> ip_dcid;
+		std::map<IPAddress, Optional<Standalone<StringRef>>> ip_dcid;
 		auto processes = getServers();
 		for(auto& it : processes) {
 			AddressExclusion machineIp(it->address.ip);
@@ -378,7 +378,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 			TraceEvent("RemoveAndKill", functionId).detail("Step", removeViaClear ? "ClearMachines" : "KillMachines").detail("Addresses", describe(killAddrs)).detail("Processes", killProcArray.size()).detail("Zones", zoneIds.size()).detail("ClusterAvailable", g_simulator.isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator.killMachine( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly );
+				killedMachine = g_simulator.killZone( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly );
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine").detailext("ZoneId", zoneId).detail(removeViaClear ? "Cleared" : "Killed", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
 			}
 		}

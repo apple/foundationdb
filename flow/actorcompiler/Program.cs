@@ -33,16 +33,21 @@ namespace actorcompiler
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  actorcompiler [input] [output]");
+                Console.WriteLine("  actorcompiler <input> <output> [--disable-actor-without-wait-warning]");
                 return 100;
             }
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
             string input = args[0], output = args[1], outputtmp = args[1] + ".tmp";
+            ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
+            if (args.Contains("--disable-actor-without-wait-warning"))
+            {
+                errorMessagePolicy.DisableActorWithoutWaitWarning = true;
+            }
             try
             {
                 var inputData = File.ReadAllText(input);
                 using (var outputStream = new StreamWriter(outputtmp))
-                    new ActorParser(inputData, input.Replace('\\', '/')).Write(outputStream, output.Replace('\\', '/'));
+                    new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy).Write(outputStream, output.Replace('\\', '/'));
                 if (File.Exists(output))
                 {
                     File.SetAttributes(output, FileAttributes.Normal);

@@ -20,7 +20,7 @@
 
 #include "fdbserver/QuietDatabase.h"
 
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

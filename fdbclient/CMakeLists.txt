@@ -3,7 +3,7 @@ set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.h
   Atomic.h
   AutoPublicAddress.cpp
-  BackupAgent.h
+  BackupAgent.actor.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
@@ -34,7 +34,7 @@ set(FDBCLIENT_SRCS
   Knobs.cpp
   Knobs.h
   ManagementAPI.actor.cpp
-  ManagementAPI.h
+  ManagementAPI.actor.h
   MasterProxyInterface.h
   MetricLogger.actor.cpp
   MetricLogger.h
@@ -45,7 +45,7 @@ set(FDBCLIENT_SRCS
   MultiVersionTransaction.h
   MutationList.h
   NativeAPI.actor.cpp
-  NativeAPI.h
+  NativeAPI.actor.h
   Notified.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
@@ -84,14 +84,9 @@ set(FDBCLIENT_SRCS
   ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp
-  COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/vexillographer/fdb.options cpp ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vexillographer/fdb.options vexillographer
-  COMMENT "Generate FDBOptions c++ files")
-add_custom_target(fdboptions DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
+vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
-actor_set(FDBCLIENT_BUILD "${FDBCLIENT_SRCS}")
-add_library(fdbclient STATIC ${FDBCLIENT_BUILD})
+add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS})
 add_dependencies(fdbclient fdboptions)
-actor_compile(fdbclient "${FDBCLIENT_SRCS}")
 target_link_libraries(fdbclient PUBLIC fdbrpc)
