@@ -2917,7 +2917,8 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::TRACK_REQUEST_STATS:
 			validateOptionValue(value, false);
-			options.trackRequestStats = true;
+			requestStats = Reference<RequestStats>(new RequestStats());
+			break;
 
 		case FDBTransactionOptions::MAX_RETRY_DELAY:
 			validateOptionValue(value, true);
