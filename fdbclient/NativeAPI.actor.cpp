@@ -2433,6 +2433,8 @@ void TransactionOptions::reset(Database const& cx) {
 
 void Transaction::reset() {
 	tr = CommitTransactionRequest();
+	if (options.trackRequestStats)
+		requestStats = Reference<RequestStats>(new RequestStats());
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -2917,6 +2919,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::TRACK_REQUEST_STATS:
 			validateOptionValue(value, false);
+			options.trackRequestStats = true;
 			requestStats = Reference<RequestStats>(new RequestStats());
 			break;
 
