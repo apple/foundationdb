@@ -31,7 +31,7 @@ Features
 * The "timeout", "max retry delay", and "retry limit" transaction options are no longer reset when the transaction is reset after a call to ``onError`` (as of API version 610). `(Issue #775) <https://github.com/apple/foundationdb/issues/775>`_
 * Added the ``force_recovery_with_data_loss`` command to fdbcli. When a cluster is configured with usable_regions=2, this command will force the database to recover in the remote region. `(PR #1168) <https://github.com/apple/foundationdb/pull/1168>`_
 * Added a limit to the number of status requests the cluster controller will handle. `(PR #1093) <https://github.com/apple/foundationdb/pull/1093>`_ (submitted by tclinken)
-* Added a ``coordinator`` process class. Processes with this class can only be used as a coordinator, and ``coordinators auto`` will prefer to chose processes of this class. `(PR #1069) <https://github.com/apple/foundationdb/pull/1069>`_ (submitted by tclinken)
+* Added a ``coordinator`` process class. Processes with this class can only be used as a coordinator, and ``coordinators auto`` will prefer to choose processes of this class. `(PR #1069) <https://github.com/apple/foundationdb/pull/1069>`_ (submitted by tclinken)
 * The ``consistencycheck`` fdbserver role will check the entire database at most once every week. `(PR #1126) <https://github.com/apple/foundationdb/pull/1126>`_
 * Added the metadata version key (``\xff/metadataVersion``). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
 * The ``fdbdr switch`` command verifies a ``dr_agent`` exists in both directions. `(Issue #1220) <https://github.com/apple/foundationdb/issues/1220>`_
