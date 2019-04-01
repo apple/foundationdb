@@ -19,9 +19,9 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbserver/RestoreInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -456,8 +456,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Try doing a restore without clearing the keys
 		if (rowCount > 0) {
 			try {
-				// MX: change to my restore agent code
-				Version _ = wait(backupAgent->restore(cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked));
+				//TODO: MX: change to my restore agent code
+				TraceEvent(SevError, "MXFastRestore").detail("RestoreFunction", "ShouldChangeToMyOwnRestoreLogic");
+				wait(success(backupAgent->restore(cx, cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true, normalKeys, Key(), Key(), self->locked)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID);
 				ASSERT(false);
 			}
@@ -548,7 +549,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
-					wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
+					//TODO: MX: Need to check if restore can be successful even after we attemp dirty restore
+					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
+					//wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
 				// MX: Clear DB before restore
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
@@ -612,6 +615,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Sometimes kill and restart the restore
 				if(BUGGIFY) {
+					TraceEvent(SevError, "FastRestore").detail("Buggify", "NotImplementedYet");
 					wait(delay(g_random->randomInt(0, 10)));
 					for(restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
 						FileBackupAgent::ERestoreState rs = wait(backupAgent.abortRestore(cx, restoreTags[restoreIndex]));
@@ -622,7 +626,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 								tr->clear(self->backupRanges[restoreIndex]);
 								return Void();
 							}));
-							restores[restoreIndex] = backupAgent.restore(cx, restoreTags[restoreIndex], KeyRef(lastBackupContainer->getURL()), true, -1, true, self->backupRanges[restoreIndex], Key(), Key(), self->locked);
+							//TODO: Not Implemented yet
+							//restores[restoreIndex] = backupAgent.restore(cx, restoreTags[restoreIndex], KeyRef(lastBackupContainer->getURL()), true, -1, true, self->backupRanges[restoreIndex], Key(), Key(), self->locked);
 						}
 					}
 				}

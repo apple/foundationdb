@@ -107,7 +107,7 @@ struct RestoreCommandInterface {
 	bool operator != (RestoreCommandInterface const& r) const { return id() != r.id(); }
 	UID id() const { return cmd.getEndpoint().token; }
 
-	NetworkAddress address() const { return cmd.getEndpoint().addresses[0]; }
+	NetworkAddress address() const { return cmd.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
 		cmd.getEndpoint( TaskClusterController );

@@ -24,9 +24,9 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Backup agent header
-#include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupAgent.actor.h"
 //#include "FileBackupAgent.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 

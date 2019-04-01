@@ -624,7 +624,7 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 const Value restoreCommandInterfaceValue( RestoreCommandInterface const& cmdInterf ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << cmdInterf;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 RestoreCommandInterface decodeRestoreCommandInterfaceValue( ValueRef const& value ) {
@@ -640,7 +640,7 @@ RestoreCommandInterface decodeRestoreCommandInterfaceValue( ValueRef const& valu
 const Value restoreRequestTriggerValue (int const numRequests) {
 	BinaryWriter wr(IncludeVersion());
 	wr << numRequests;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
 	int s;
@@ -653,7 +653,7 @@ const int decodeRestoreRequestTriggerValue( ValueRef const& value ) {
 const Value restoreRequestDoneValue (int const numRequests) {
 	BinaryWriter wr(IncludeVersion());
 	wr << numRequests;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 const int decodeRestoreRequestDoneValue( ValueRef const& value ) {
 	int s;
@@ -666,13 +666,13 @@ const Key restoreRequestKeyFor( int const& index ) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( restoreRequestKeys.begin );
 	wr << index;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 const Value restoreRequestValue( RestoreRequest const& request ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << request;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 RestoreRequest decodeRestoreRequestValue( ValueRef const& value ) {
@@ -687,11 +687,11 @@ const Key restoreStatusKeyFor ( StringRef statusType) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreStatusKey);
 	wr << statusType;
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 const Value restoreStatusValue( double const& val ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << (long) val;
-	return wr.toStringRef();
+	return wr.toValue();
 }

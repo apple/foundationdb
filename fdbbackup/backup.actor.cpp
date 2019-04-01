@@ -2170,31 +2170,6 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 	return Void();
 }
 
-Reference<IBackupContainer> openBackupContainer(const char *name, std::string destinationContainer) {
-	// Error, if no dest container was specified
-	if (destinationContainer.empty()) {
-		fprintf(stderr, "ERROR: No backup destination was specified.\n");
-		printHelpTeaser(name);
-		throw backup_error();
-	}
-
-	std::string error;
-	Reference<IBackupContainer> c;
-	try {
-		c = IBackupContainer::openContainer(destinationContainer);
-	}
-	catch (Error& e) {
-		if(!error.empty())
-			error = std::string("[") + error + "]";
-		fprintf(stderr, "ERROR (%s) on %s %s\n", e.what(), destinationContainer.c_str(), error.c_str());
-		printHelpTeaser(name);
-		throw;
-	}
-
-	return c;
-}
-
-
 ACTOR Future<Void> dumpBackupData(const char *name, std::string destinationContainer, Version beginVersion, Version endVersion) {
 	state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 
@@ -3618,7 +3593,7 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runFastRestoreAgent(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
+					f = stopAfter( runFastRestoreAgent(db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
 					break;
 				case RESTORE_WAIT:
 					printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
