@@ -81,16 +81,6 @@ void setProcessID(JNIEnv* env, jobject self, jlong processID) {
 	}
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wwritable-strings"
-JNINativeMethod workloadMethods[] = { { "log", "(ILjava/lang/String;Ljava/util/Map;)V",
-										reinterpret_cast<void*>(&printTrace) },
-									  { "sendVoid", "(J)V", reinterpret_cast<void*>(&sendVoid) },
-									  { "sendBool", "(JZ)V", reinterpret_cast<void*>(&sendBool) },
-									  { "setProcessID", "(J)V", reinterpret_cast<void*>(&setProcessID) }
-};
-#pragma GCC diagnostic pop
-
 struct JVMContext {
 	JNIEnv* env = nullptr;
 	JavaVM* jvm = nullptr;
@@ -101,12 +91,58 @@ struct JVMContext {
 	jclass fdbClass;
 	jobject fdbObject;
 	bool success = true;
+	std::unique_ptr<JNINativeMethod[]>  workloadMethods;
+	int numWorkloadMethods;
+	//  this is a bit ugly - but JNINativeMethod requires
+	// char*  not const char *
+	std::vector<char*> charArrays;
+
+	void setWorkloadMethods(const std::initializer_list<std::tuple<StringRef, StringRef, void*>>& methods) {
+		charArrays.reserve(charArrays.size() + 2*methods.size());
+		numWorkloadMethods = methods.size();
+		workloadMethods.reset(new JNINativeMethod[numWorkloadMethods]);
+		int i = 0;
+		for (const auto& t : methods) {
+			auto& w = workloadMethods[i];
+			charArrays.push_back(new char[std::get<0>(t).size()]);
+			char* name = charArrays.back();
+			charArrays.push_back(new char[std::get<1>(t).size()]);
+			char* sig = charArrays.back();
+			w.name = name;
+			w.signature = sig;
+			w.fnPtr = std::get<2>(t);
+			++i;
+		}
+	}
 
 	template<class Args>
 	JVMContext(Args&& jvmArgs)
 		: jvmArgs(std::forward<Args>(jvmArgs))
 		, fdbClass(nullptr)
 		, fdbObject(nullptr) {
+		setWorkloadMethods({
+				{
+					std::make_tuple<StringRef, StringRef, void*>(
+						LiteralStringRef("log"),
+						LiteralStringRef("(ILjava/lang/String;Ljava/util/Map;)V"),
+						reinterpret_cast<void*>(&printTrace))
+				},
+				{
+					std::make_tuple<StringRef, StringRef, void*>(
+						LiteralStringRef("sendVoid"),
+						LiteralStringRef("(J)V"),
+						reinterpret_cast<void*>(&sendVoid))
+				},
+				{ std::make_tuple<StringRef, StringRef, void*>(
+						LiteralStringRef("sendBool"),
+						LiteralStringRef("(JZ)V"),
+						reinterpret_cast<void*>(&sendBool))
+				},
+				{ std::make_tuple<StringRef, StringRef, void*>(
+						LiteralStringRef("setProcessID"),
+						LiteralStringRef("(J)V"),
+						reinterpret_cast<void*>(&setProcessID))
+				}});
 		init();
 	}
 
@@ -120,6 +156,9 @@ struct JVMContext {
 			jvm->DestroyJavaVM();
 		}
 		for (auto& arr : jvmArgs) {
+			delete[] arr;
+		}
+		for (auto& arr : charArrays) {
 			delete[] arr;
 		}
 		TraceEvent(SevDebug, "JVMContextDestructDone");
@@ -196,9 +235,9 @@ struct JVMContext {
 		TraceEvent(SevDebug, "RegisterNatives")
 			.detail("ThrowableClass", format("%x", reinterpret_cast<uintptr_t>(throwableClass)))
 			.detail("WorkloadClass", format("%x", reinterpret_cast<uintptr_t>(workloadClass)))
-			.detail("NumMethods", sizeof(workloadMethods)/sizeof(workloadMethods[0]));
+			.detail("NumMethods", numWorkloadMethods);
 		flushTraceFileVoid();
-		env->RegisterNatives(workloadClass, workloadMethods, sizeof(workloadMethods)/sizeof(workloadMethods[0]));
+		env->RegisterNatives(workloadClass, workloadMethods.get(), numWorkloadMethods);
 		success = checkException() && success;
 		initializeFDB();
 	}
