@@ -312,7 +312,7 @@ struct LogSystemConfig {
 		}
 
 		for( auto& i : r.tLogs ) {
-				for( auto& j : oldTLogs[0].tLogs ) {
+			for( auto& j : oldTLogs[0].tLogs ) {
 				if( i.isEqualIds(j) ) {
 					return true;
 				}

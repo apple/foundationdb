@@ -283,7 +283,7 @@ struct ILogSystem {
 		virtual bool hasMessage() = 0;
 
 		//pre: only callable if hasMessage() returns true
-		//return the tags associated with the message for teh current sequence
+		//return the tags associated with the message for the current sequence
 		virtual const std::vector<Tag>& getTags() = 0;
 
 		//pre: only callable if hasMessage() returns true

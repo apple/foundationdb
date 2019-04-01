@@ -373,7 +373,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	int unpoppedRecoveredTags;
 
 	Reference<TagData> getTagData(Tag tag) {
-		int idx = tag.locality >= 0 ? 2*tag.locality : 1-(2*tag.locality);
+		int idx = tag.toTagDataIndex();
 		if(idx >= tag_data.size()) {
 			tag_data.resize(idx+1);
 		}
@@ -389,8 +389,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			popped = recoveredAt + 1;
 		}
 		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, nothingPersistent, poppedRecently, unpoppedRecovered) );
-		int idx = tag.locality >= 0 ? 2*tag.locality : 1-(2*tag.locality);
-		tag_data[idx][tag.id] = newTagData;
+		tag_data[tag.toTagDataIndex()][tag.id] = newTagData;
 		return newTagData;
 	}
 
