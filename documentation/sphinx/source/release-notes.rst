@@ -18,7 +18,8 @@ Features
 * Restore now accepts a timestamp that can be used to determine the restore version if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Backup ``status`` and ``describe`` commands now have a ``--json`` output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 * Separated data distribution from master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
-* Separated ratekeeper from master into its own role. `(PR ##1176) <https://github.com/apple/foundationdb/pull/1176>`_
+* Separated ratekeeper from master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
+
 * Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
 * Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
 * FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
