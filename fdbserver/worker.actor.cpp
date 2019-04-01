@@ -407,7 +407,6 @@ void updateCpuProfiler(ProfilerRequest req) {
 			options->filter_in_thread = &filter_in_thread;
 			options->filter_in_thread_arg = NULL;
 			ProfilerStartWithOptions(path, options);
-			free(workingDir);
 			break;
 		}
 		case ProfilerRequest::Action::DISABLE:
