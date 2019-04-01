@@ -146,7 +146,7 @@ static Optional<WorkerDetails> getWorker(std::vector<WorkerDetails> const& worke
 				return workers[c];
 		return Optional<WorkerDetails>();
 	}
-	catch (Error &e){
+	catch (Error& ){
 		return Optional<WorkerDetails>();
 	}
 }
@@ -345,7 +345,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 				notExcludedMap[machineId] = false;
 			workerContribMap[machineId] ++;
 		}
-		catch (Error& e) {
+		catch (Error& ) {
 			++failed;
 		}
 	}
@@ -599,6 +599,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	roles.addRole("master", db->get().master);
 	roles.addRole("cluster_controller", db->get().clusterInterface.clientInterface);
+
+	if (db->get().distributor.present()) {
+		roles.addRole("data_distributor", db->get().distributor.get());
+	}
+
+	if (db->get().ratekeeper.present()) {
+		roles.addRole("ratekeeper", db->get().ratekeeper.get());
+	}
 
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
@@ -1091,7 +1099,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 		int count = coordinatorLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	}
-	catch (Error &e){
+	catch (Error& ){
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;
@@ -1242,24 +1250,6 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 	}
 
 	return statusObjData;
-}
-
-namespace std
-{
-	template <>
-	struct hash<NetworkAddress>
-	{
-		size_t operator()(const NetworkAddress& na) const
-		{
-		    int result = 0;
-		    if (na.ip.isV6()) {
-			    result = hashlittle(na.ip.toV6().data(), 16, 0);
-		    } else {
-			    result = na.ip.toV4();
-		    }
-		    return (result << 16) + na.port;
-	    }
-    };
 }
 
 ACTOR template <class iface>
@@ -1823,7 +1813,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state std::set<std::string> status_incomplete_reasons;
 	state WorkerDetails mWorker;
 	state WorkerDetails ddWorker; // DataDistributor worker
-	state WorkerDetails rkWorker; // RateKeeper worker
+	state WorkerDetails rkWorker; // Ratekeeper worker
 
 	try {
 		// Get the master Worker interface
@@ -1845,7 +1835,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			ddWorker = _ddWorker.get();
 		}
 
-		// Get the RateKeeper worker interface
+		// Get the Ratekeeper worker interface
 		Optional<WorkerDetails> _rkWorker;
 		if (db->get().ratekeeper.present()) {
 			_rkWorker = getWorker( workers, db->get().ratekeeper.get().address() );

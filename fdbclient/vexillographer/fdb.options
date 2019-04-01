@@ -172,7 +172,7 @@ description is not currently required but encouraged.
     <Option name="priority_system_immediate" code="200"
             description="Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one. Use is discouraged outside of low-level tools" />
     <Option name="priority_batch" code="201"
-            description="Specifies that this transaction should be treated as low priority and that default priority transactions should be processed first. Useful for doing batch work simultaneously with latency-sensitive work" />
+            description="Specifies that this transaction should be treated as low priority and that default priority transactions will be processed first. Batch priority transactions will also be throttled at load levels smaller than for other types of transactions and may be fully cut off in the event of machine failures. Useful for doing batch work simultaneously with latency-sensitive work" />
     <Option name="initialize_new_database" code="300"
             description="This is a write-only transaction which sets the initial configuration. This option is designed for use by database system tools only." />
     <Option name="access_system_keys" code="301"

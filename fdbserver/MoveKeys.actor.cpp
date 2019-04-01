@@ -73,9 +73,9 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		// Take the lock
 		if(isWrite) {
 			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
-			tr->set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
+			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
 			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toStringRef() );
+			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 		}
 
 		return Void();
@@ -83,7 +83,7 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		if(isWrite) {
 			// Touch the lock, preventing overlapping attempts to take it
 			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << g_random->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toStringRef() );
+			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
 			tr->makeSelfConflicting();
 		}

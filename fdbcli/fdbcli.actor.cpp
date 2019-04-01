@@ -578,7 +578,7 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 		for (StatusObjectReader coor : coordinatorsArr)
 			outputString += format("\n  %s  (%s)", coor["address"].get_str().c_str(), coor["reachable"].get_bool() ? "reachable" : "unreachable");
 	}
-	catch (std::runtime_error& e){
+	catch (std::runtime_error& ){
 		outputString = "\n  Unable to retrieve list of coordination servers";
 	}
 
@@ -609,7 +609,7 @@ std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::st
 				}
 			}
 		}
-		catch (std::exception &e) {
+		catch (std::exception& ) {
 			// If an entry in the process map is badly formed then something will throw. Since we are
 			// looking for a positive match, just ignore any read execeptions and move on to the next proc
 		}
@@ -811,7 +811,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){ }
+			catch (std::runtime_error& ){ }
 
 
 			// Check if cluster controllable is reachable
@@ -882,7 +882,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){}
+			catch (std::runtime_error& ){}
 
 			if (fatalRecoveryState){
 				printf("%s", outputString.c_str());
@@ -948,7 +948,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
 			}
-			catch (std::runtime_error& e) {
+			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve configuration status";
 			}
@@ -1057,7 +1057,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += "\n  Server time            - " + serverTime;
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve cluster status";
 			}
@@ -1148,7 +1148,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += "unknown";
 
 			}
-			catch (std::runtime_error& e) {
+			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
@@ -1165,7 +1165,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					operatingSpaceString += format("\n  Log server             - %.1f GB free on most full server", std::max(val / 1e9, 0.0));
 
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				operatingSpaceString = "";
 			}
 
@@ -1202,7 +1202,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							performanceLimited += format("\n  Most limiting process: %s", procAddr.c_str());
 					}
 				}
-				catch (std::exception &e) {
+				catch (std::exception& ) {
 					// If anything here throws (such as for an incompatible type) ignore it.
 				}
 
@@ -1266,7 +1266,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve workload status";
 			}
@@ -1404,7 +1404,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							workerDetails[addrNum] = line;
 						}
 
-						catch (std::runtime_error& e) {
+						catch (std::runtime_error& ) {
 							std::string noMetrics = format("  %-22s (no metrics available)", address.c_str());
 							workerDetails[addrNum] = noMetrics;
 						}
@@ -1412,7 +1412,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					for (auto w : workerDetails)
 						outputString += "\n" + format("%s", w.second.c_str());
 				}
-				catch (std::runtime_error& e){
+				catch (std::runtime_error& ){
 					outputString = outputStringCache;
 					outputString += "\n  Unable to retrieve process performance details";
 				}
@@ -1469,7 +1469,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							printf("The database is available, but has issues (type 'status' for more information).\n");
 						}
 					}
-					catch (std::runtime_error& e){
+					catch (std::runtime_error& ){
 						printf("The database is available, but has issues (type 'status' for more information).\n");
 					}
 				}
@@ -1479,7 +1479,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					printf("WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				printf("Unable to determine database state, type 'status' for more information.\n");
 			}
 
@@ -1490,7 +1490,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			printf("%s\n", json_spirit::write_string(json_spirit::mValue(statusObj.obj()), json_spirit::Output_options::pretty_print).c_str());
 		}
 	}
-	catch (Error &e){
+	catch (Error& ){
 		if (hideErrorMessages)
 			return;
 		if (level == StatusClient::MINIMAL) {
@@ -2302,6 +2302,7 @@ struct CLIOptions {
 	std::string clusterFile;
 	bool trace;
 	std::string traceDir;
+	std::string traceFormat;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2398,9 +2399,10 @@ struct CLIOptions {
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
 			case OPT_TRACE_FORMAT:
-				if (!selectTraceFormatter(args.OptionArg())) {
+				if (!validateTraceFormat(args.OptionArg())) {
 					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 				}
+				traceFormat = args.OptionArg();
 				break;
 			case OPT_VERSION:
 				printVersion();
@@ -3395,6 +3397,9 @@ int main(int argc, char **argv) {
 		else
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(opt.traceDir));
 
+		if (!opt.traceFormat.empty()) {
+			setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(opt.traceFormat));
+		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
 

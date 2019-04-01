@@ -25,6 +25,7 @@
 #include "flow/flow.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FlowTransport.h" // Endpoint
+#include <unordered_map>
 
 using std::vector;
 
@@ -135,7 +136,7 @@ public:
 
 	void reset();
 private:
-	Map< NetworkAddress, FailureStatus > addressStatus;
+	std::unordered_map< NetworkAddress, FailureStatus > addressStatus;
 	YieldedAsyncMap< Endpoint, bool > endpointKnownFailed;
 
 	friend class OnStateChangedActorActor;

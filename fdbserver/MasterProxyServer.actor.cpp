@@ -832,7 +832,7 @@ ACTOR Future<Void> commitBatch(
 				}
 
 				// Define the mutation type and and location
-				backupMutation.param1 = wr.toStringRef();
+				backupMutation.param1 = wr.toValue();
 				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
 					
 				auto& tags = self->tagsForKey(backupMutation.param1);

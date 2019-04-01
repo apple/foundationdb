@@ -37,6 +37,8 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	struct tm out;
+	out.tm_isdst = -1; // This field is not set by strptime. -1 tells mktime to determine whether DST is in effect
+
 	std::string timeOnly = timestamp.substr(0, 19);
 
 	// TODO:  Use std::get_time implementation for all platforms once supported
@@ -566,7 +568,7 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 				for(int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
 				}
-				decodeBackupLogValue(req.arena, req.transaction.mutations, mutationSize, bw.toStringRef(), addPrefix, removePrefix, group.groupKey, keyVersion);
+				decodeBackupLogValue(req.arena, req.transaction.mutations, mutationSize, bw.toValue(), addPrefix, removePrefix, group.groupKey, keyVersion);
 				newBeginVersion = group.groupKey + 1;
 				if(mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;

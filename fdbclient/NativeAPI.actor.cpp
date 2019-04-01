@@ -372,7 +372,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
 					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
-					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + user_provided_id + std::string(4, '\x00'));
+					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toValue().toString() + "/" + user_provided_id + std::string(4, '\x00'));
 					int32_t pos = littleEndian32(clientLatencyName.size());
 					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int32_t), &pos, sizeof(int32_t));
 					if (i == num_chunks - 1) {
@@ -1151,7 +1151,7 @@ AddressExclusion AddressExclusion::parse( StringRef const& key ) {
 			return AddressExclusion();
 		}
 		return AddressExclusion(addr.ip, addr.port);
-	} catch (Error& e) {
+	} catch (Error& ) {
 		TraceEvent(SevWarnAlways, "AddressExclusionParseError").detail("String", printable(key));
 		return AddressExclusion();
 	}
@@ -2291,7 +2291,7 @@ void Transaction::makeSelfConflicting() {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
 	wr << g_random->randomUniqueID();
-	auto r = singleKeyRange( wr.toStringRef(), tr.arena );
+	auto r = singleKeyRange( wr.toValue(), tr.arena );
 	tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
 	tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
 }

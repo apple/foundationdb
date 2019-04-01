@@ -26,9 +26,9 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RateKeeperClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RatekeeperClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, RateKeeper, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -50,7 +50,7 @@ public:
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
-		else if (s=="ratekeeper") _class = RateKeeperClass;
+		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 	}
 
@@ -68,7 +68,7 @@ public:
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
-		else if (classStr=="ratekeeper") _class = RateKeeperClass;
+		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -101,7 +101,7 @@ public:
 			case ClusterControllerClass: return "cluster_controller";
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
-			case RateKeeperClass: return "ratekeeper";
+			case RatekeeperClass: return "ratekeeper";
 			default: return "invalid";
 		}
 	}
