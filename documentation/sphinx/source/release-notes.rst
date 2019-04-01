@@ -36,8 +36,8 @@ Features
 * Added the metadata version key (``\xff/metadataVersion``). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
 * The ``fdbdr switch`` command verifies a ``dr_agent`` exists in both directions. `(Issue #1220) <https://github.com/apple/foundationdb/issues/1220>`_
 * Transaction logs that cannot commit to disk for more than 5 seconds are marked as degraded. The cluster controller will prefer to recruit transaction logs on other processes before using degraded processes. `(Issue #690) <https://github.com/apple/foundationdb/issues/690>`_
-* The ``memory`` storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. `(PR #1314) <https://github.com/apple/foundationdb/pull/1314>`_
-* Trace logs can be output as JSON instead of XML using the ``--trace_format`` command line option. `(PR #976) <https://github.com/apple/foundationdb/pull/976>`_ (by mpilman)
+* The ``memory`` storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. Existing clusters will NOT automatically change their configuration. `(PR #1314) <https://github.com/apple/foundationdb/pull/1314>`_
+* Trace logs can be output as JSON instead of XML using the ``--trace_format`` command line option. `(PR #976) <https://github.com/apple/foundationdb/pull/976>`_ (by atn34)
 * Added ``modify`` command to fdbbackup for modifying parameters of a running backup. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 * Added 'header' parameter to blobstore backup URLs for setting custom HTTP headers. `(PR #1237) <https://github.com/apple/foundationdb/pull/1237>`_
 
@@ -56,8 +56,8 @@ Fixes
 * Read workload status metrics would disappear when a storage server was missing. `(PR #1348) <https://github.com/apple/foundationdb/pull/1348>`_
 * The ``coordinators auto`` command could recruit multiple coordinators with the same zone ID. `(Issue #988) <https://github.com/apple/foundationdb/issues/988>`_
 * The data version of a cluster after a restore could have been lower than the restore version, making versionstamp operations get smaller. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
-* If a process changed its process class while being rebooted, it could recruited for the cluster controller using its previous process class. `(PR #1350) <https://github.com/apple/foundationdb/pull/1350>`_
 * Fixed a few thread safety issues with slow task profiling. `(PR #1085) <https://github.com/apple/foundationdb/pull/1085>`_
+* Changing the class of a process would not change its preference for becoming the cluster controller. `(PR #1350) <https://github.com/apple/foundationdb/pull/1350>`_
 * The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. `(PR #1053) <https://github.com/apple/foundationdb/pull/1053>`_
 * The ``include`` command in fdbcli would falsely include all machines with IP addresses that
   have the included IP address as a prefix (for example ``include 1.0.0.1`` would also include
