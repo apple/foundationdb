@@ -6,8 +6,6 @@ testTitle=SnapTestPre
         testID=0
         clearAfterTest=false
         snapCheck=false
-        dumpAfterTest=true
-
 
 testTitle=SnapTestTakeSnap
 ;Take snap and do read/write
@@ -29,7 +27,6 @@ testTitle=SnapTestTakeSnap
         testID=1
         clearAfterTest=false
         snapCheck=true
-        dumpAfterTest=true
 
 testTitle=SnapTestPost
 ;write 1000 Keys ending with odd numbers
@@ -39,7 +36,6 @@ testTitle=SnapTestPost
         testID=2
         clearAfterTest=false
         snapCheck=false
-        dumpAfterTest=true
 
 testTitle=SnapTestShutdown
 ;save and shutdown
