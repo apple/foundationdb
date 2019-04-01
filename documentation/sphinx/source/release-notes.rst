@@ -77,6 +77,7 @@ Other Changes
 -------------
 
 * Migrated to Boost 1.67. `(PR #1242) <https://github.com/apple/foundationdb/pull/1242>`_
+* IPv4 address in trace log filename is no longer zero-padded. `(PR #1157) <https://github.com/apple/foundationdb/pull/1157>`_
 
 Earlier release notes
 ---------------------
