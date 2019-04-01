@@ -309,8 +309,8 @@ public:
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
-protected:
 	static thread_local ProcessInfo* currentProcess;
+protected:
 	Mutex mutex;
 
 private:
