@@ -976,7 +976,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		what.serializeBinaryWriter(wr);
-		Standalone<StringRef> copy = wr.toStringRef();
+		Standalone<StringRef> copy = wr.toValue();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif

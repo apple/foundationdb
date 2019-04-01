@@ -298,7 +298,7 @@ public:
 	}
 	void* getData() { return data; }
 	int getLength() { return size; }
-	Standalone<StringRef> toStringRef() { return Standalone<StringRef>( StringRef(data,size), arena ); }
+	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
 	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
@@ -321,7 +321,7 @@ public:
 	static Standalone<StringRef> toValue( T const& t, VersionOptions vo ) {
 		BinaryWriter wr(vo);
 		wr << t;
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	static int bytesNeeded( uint64_t val ) {

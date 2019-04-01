@@ -241,7 +241,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 				b->bigUsed = sizeof(ArenaBlock);
 
 				if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
-					TraceEvent("HugeArenaSample").detail("Size", reqSize).backtrace();
+					hugeArenaSample(reqSize);
 				}
 				g_hugeArenaMemory += reqSize;
 

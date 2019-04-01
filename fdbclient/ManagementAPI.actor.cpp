@@ -154,11 +154,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
-		out[p+"storage_replication_policy"] = policyWriter.toStringRef().toString();
+		out[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
-		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+		out[p+"log_replication_policy"] = policyWriter.toValue().toString();
 		return out;
 	}
 
@@ -194,7 +194,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
-		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
+		out[p+"remote_log_policy"] = policyWriter.toValue().toString();
 		return out;
 	}
 
@@ -224,7 +224,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
-		outConf[p+"storage_replication_policy"] = policyWriter.toStringRef().toString();
+		outConf[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 	}
 
 	if(!outConf.count(p + "log_replication_policy") && outConf.count(p + "log_replicas")) {
@@ -232,7 +232,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, logPolicy);
-		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+		outConf[p+"log_replication_policy"] = policyWriter.toValue().toString();
 	}
 	return ConfigurationResult::SUCCESS;
 }
@@ -1308,10 +1308,10 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 			if (!mode) {
 				BinaryWriter wrMyOwner(Unversioned());
 				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
+				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
 			}
 
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
+			tr.set( dataDistributionModeKey, wr.toValue() );
 
 			wait( tr.commit() );
 			return oldMode;

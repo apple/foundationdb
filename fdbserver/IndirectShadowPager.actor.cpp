@@ -698,14 +698,14 @@ void IndirectShadowPager::logVersion(StringRef versionKey, Version version) {
 	BinaryWriter v(Unversioned());
 	v << version;
 
-	pageTableLog->set(KeyValueRef(versionKey, v.toStringRef()));
+	pageTableLog->set(KeyValueRef(versionKey, v.toValue()));
 }
 
 void IndirectShadowPager::logPagesAllocated() {
 	BinaryWriter v(Unversioned());
 	v << pagerFile.getPagesAllocated();
 
-	pageTableLog->set(KeyValueRef(PAGES_ALLOCATED_KEY, v.toStringRef()));
+	pageTableLog->set(KeyValueRef(PAGES_ALLOCATED_KEY, v.toValue()));
 }
 
 void IndirectShadowPager::logPageTableUpdate(LogicalPageID logicalPageID, Version version, PhysicalPageID physicalPageID) {
@@ -715,7 +715,7 @@ void IndirectShadowPager::logPageTableUpdate(LogicalPageID logicalPageID, Versio
 	BinaryWriter v(Unversioned());
 	v << physicalPageID;
 
-	pageTableLog->set(KeyValueRef(k.toStringRef(), v.toStringRef()));
+	pageTableLog->set(KeyValueRef(k.toValue(), v.toValue()));
 }
 
 void IndirectShadowPager::logPageTableClearToEnd(LogicalPageID logicalPageID, Version start) {
@@ -725,7 +725,7 @@ void IndirectShadowPager::logPageTableClearToEnd(LogicalPageID logicalPageID, Ve
 	BinaryWriter e(Unversioned());
 	e << TABLE_ENTRY_PREFIX.begin()[0] << bigEndian(logicalPageID);
 
-	pageTableLog->clear(KeyRangeRef(b.toStringRef(), strinc(e.toStringRef())));
+	pageTableLog->clear(KeyRangeRef(b.toValue(), strinc(e.toValue())));
 }
 
 void IndirectShadowPager::logPageTableClear(LogicalPageID logicalPageID, Version start, Version end) {
@@ -735,7 +735,7 @@ void IndirectShadowPager::logPageTableClear(LogicalPageID logicalPageID, Version
 	BinaryWriter e(Unversioned());
 	e << TABLE_ENTRY_PREFIX.begin()[0] << bigEndian(logicalPageID) << bigEndian(end);
 
-	pageTableLog->clear(KeyRangeRef(b.toStringRef(), e.toStringRef()));
+	pageTableLog->clear(KeyRangeRef(b.toValue(), e.toValue()));
 }
 
 const StringRef IndirectShadowPager::LATEST_VERSION_KEY = LiteralStringRef("\xff/LatestVersion");
