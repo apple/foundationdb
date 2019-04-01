@@ -55,7 +55,7 @@ Fixes
 * Standardized datetime string format across all backup and restore command options and outputs. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
 * Read workload status metrics would disappear when a storage server was missing. `(PR #1348) <https://github.com/apple/foundationdb/pull/1348>`_
 * The ``coordinators auto`` command could recruit multiple coordinators with the same zone ID. `(Issue #988) <https://github.com/apple/foundationdb/issues/988>`_
-* The version of a cluster after a restore could have been lower than the restore version, making version stamp operations get smaller. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
+* The data version of a cluster after a restore could have been lower than the restore version, making versionstamp operations get smaller. `(PR #1213) <https://github.com/apple/foundationdb/pull/1213>`_
 * If a process changed its process class while being rebooted, it could recruited for the cluster controller using its previous process class. `(PR #1350) <https://github.com/apple/foundationdb/pull/1350>`_
 * Fixed a few thread safety issues. `(PR #1085) <https://github.com/apple/foundationdb/pull/1085>`_
 * The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. `(PR #1053) <https://github.com/apple/foundationdb/pull/1053>`_
