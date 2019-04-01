@@ -330,7 +330,7 @@ struct Role {
 	static const Role TESTER;
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
-	static const Role RATE_KEEPER;
+	static const Role RATEKEEPER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -392,7 +392,7 @@ ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest i
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> rateKeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

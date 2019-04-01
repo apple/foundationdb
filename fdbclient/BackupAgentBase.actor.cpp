@@ -37,6 +37,8 @@ std::string BackupAgentBase::formatTime(int64_t epochs) {
 
 int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	struct tm out;
+	out.tm_isdst = -1; // This field is not set by strptime. -1 tells mktime to determine whether DST is in effect
+
 	std::string timeOnly = timestamp.substr(0, 19);
 
 	// TODO:  Use std::get_time implementation for all platforms once supported

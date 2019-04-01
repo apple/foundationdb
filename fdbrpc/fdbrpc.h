@@ -150,15 +150,15 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
-	auto const& ep = value.getEndpoint();
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
-	ASSERT(!ep.getPrimaryAddress().isValid() || ep.getPrimaryAddress().isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
 }
 
 template <class Ar, class T>
 void load(Ar& ar, ReplyPromise<T>& value) {
-	Endpoint endpoint;
-	FlowTransport::transport().loadEndpoint(ar, endpoint);
+	UID token;
+	ar >> token;
+	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromise<T>(endpoint);
 	networkSender(value.getFuture(), endpoint);
 }
@@ -364,7 +364,7 @@ void save(Ar& ar, const RequestStream<T>& value) {
 template <class Ar, class T>
 void load(Ar& ar, RequestStream<T>& value) {
 	Endpoint endpoint;
-	FlowTransport::transport().loadEndpoint(ar, endpoint);
+	ar >> endpoint;
 	value = RequestStream<T>(endpoint);
 }
 

@@ -294,7 +294,7 @@ ACTOR Future<Void> trackEachStorageServer(
 ACTOR Future<Void> monitorServerListChange(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
-	state Database db = openDBOnServer(dbInfo, TaskRateKeeper, true, true);
+	state Database db = openDBOnServer(dbInfo, TaskRatekeeper, true, true);
 	state std::map<UID, StorageServerInterface> oldServers;
 	state Transaction tr(db);
 
@@ -394,7 +394,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
 		/*if( g_random->random01() < 0.1 ) {
-			std::string name = "RateKeeperUpdateRate" + limits.context;
+			std::string name = "RatekeeperUpdateRate" + limits.context;
 			TraceEvent(name, ss.id)
 				.detail("MinFreeSpace", minFreeSpace)
 				.detail("SpringBytes", springBytes)
@@ -633,7 +633,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 	}
 }
 
-ACTOR Future<Void> rateKeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state RatekeeperData self;
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
