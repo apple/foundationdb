@@ -13,7 +13,6 @@ testTitle=SnapCyclePre
         testID=1
         clearAfterTest=false
         snapCheck=true
-        dumpAfterTest=true
 
 testTitle=SnapCycleShutdown
 ;save and shutdown

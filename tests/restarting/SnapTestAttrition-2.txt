@@ -5,5 +5,4 @@ numSnaps=1
 maxSnapDelay=3.0
 testID=3
 snapCheck=false
-dumpAfterTest=true
 restartInfoLocation=simfdb/restartInfo.ini

@@ -6,8 +6,6 @@ testTitle=SnapTestPre
         testID=0
         clearAfterTest=false
         snapCheck=false
-        dumpAfterTest=true
-
 
 testTitle=SnapTestTakeSnap
 ;Take snap and do read/write
@@ -29,7 +27,6 @@ testTitle=SnapTestTakeSnap
         testID=1
         clearAfterTest=false
         snapCheck=false
-        dumpAfterTest=true
 
         testName=Attrition
         testDuration=20.0
@@ -42,7 +39,6 @@ testTitle=SnapTestPost
         testID=2
         clearAfterTest=false
         snapCheck=false
-        dumpAfterTest=true
 
 ; save and shutdown
 testTitle=SnapSimpleShutdown
