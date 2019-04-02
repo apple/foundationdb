@@ -688,8 +688,6 @@ To drop the dead datacenter do the follow steps:
 
 If you are running in a configuration without a satellite datacenter, or you have lost all machines in a region simultaneously, the ``force_recovery_with_data_loss`` command from ``fdbcli`` allows you to force a recovery to the other region.  This will discard the portion of the mutation log which did not make it across the WAN. Once the database has recovered, immediately follow the previous steps to drop the dead region the normal way.
 
-.. warning:: In 6.0 the ``force_recovery_with_data_loss`` command from ``fdbcli`` can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster. In general this command has not be tested to same degree as the rest of the codebase, and should only be used in extreme emergencies.
-
 Region change safety
 --------------------
 
@@ -742,8 +740,6 @@ The 6.0 release still has a number of rough edges related to region configuratio
     * ``two_satellite_fast`` does not hide latency properly when configured with more than 4 satellite transaction logs.
 
     * While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.
-
-    * ``force_recovery_with_data_loss`` can cause data inconsistencies if it is used when processes from both non-satellite datacenters are still in the cluster.
 
 .. _guidelines-process-class-config:
 
