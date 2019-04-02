@@ -3772,7 +3772,7 @@ public:
 					printf("%s\n", details.c_str());
 				}
 
-			ERestoreState status_ = wait(restore.stateEnum().getD(tr));
+				ERestoreState status_ = wait(restore.stateEnum().getD(tr));
 				status = status_;
 				state bool runnable = wait(restore.isRunnable(tr));
 
@@ -4251,9 +4251,10 @@ public:
 				wait(tr->commit());
 				break;
 			} catch(Error &e) {
-				if(e.code() != error_code_restore_duplicate_tag) {
-					wait(tr->onError(e));
+				if(e.code() == error_code_restore_duplicate_tag) {
+					throw;
 				}
+				wait(tr->onError(e));
 			}
 		}
 
