@@ -96,6 +96,7 @@ struct JVMContext {
 	//  this is a bit ugly - but JNINativeMethod requires
 	// char*  not const char *
 	std::vector<char*> charArrays;
+	std::set<std::string> classPath;
 
 	void setWorkloadMethods(const std::initializer_list<std::tuple<StringRef, StringRef, void*>>& methods) {
 		charArrays.reserve(charArrays.size() + 2*methods.size());
@@ -173,6 +174,30 @@ struct JVMContext {
 		}
 		TraceEvent(SevDebug, "JVMContextDestructDone");
 		flushTraceFileVoid();
+	}
+
+	bool addToClassPath(const std::string& path) {
+		TraceEvent("TryAddToClassPath")
+			.detail("Path", "path");
+		flushTraceFileVoid();
+		if (!success) {
+			return false;
+		}
+		if (classPath.count(path) > 0) {
+			// already added
+			return true;
+		}
+		auto addFileMethod = env->GetStaticMethodID(workloadClass, "addFile", "(Ljava/lang/String;)V");
+		if (!checkException()) {
+			return false;
+		}
+		auto p = env->NewStringUTF(path.c_str());
+		env->CallStaticVoidMethod(workloadClass, addFileMethod, p);
+		if (!checkException()) {
+			return false;
+		}
+		classPath.insert(path);
+		return true;
 	}
 
 	bool checkException() {
@@ -261,6 +286,7 @@ struct JavaWorkload : TestWorkload {
 	// This means, that we have to share the VM across workloads.
 	static std::weak_ptr<JVMContext> globalVM;
 	std::shared_ptr<JVMContext> vm;
+	std::vector<std::string> classPath;
 
 	std::string className;
 
@@ -275,6 +301,7 @@ struct JavaWorkload : TestWorkload {
 			return;
 		}
 		auto jvmOptions = getOption(options, LiteralStringRef("jvmOptions"), std::vector<std::string>{});
+		classPath = getOption(options, LiteralStringRef("classPath"), std::vector<std::string>{});
 		vm = globalVM.lock();
 		if (!vm) {
 			std::vector<char*> args;
@@ -292,6 +319,8 @@ struct JavaWorkload : TestWorkload {
 			success = vm->success;
 		}
 		if (success) {
+			TraceEvent("JVMRunning");
+			flushTraceFileVoid();
 			try {
 				createContext();
 			} catch (Error& e) {
@@ -332,6 +361,19 @@ struct JavaWorkload : TestWorkload {
 	}
 
 	void createContext() {
+		TraceEvent("AddClassPaths")
+			.detail("Num", classPath.size());
+		flushTraceFileVoid();
+		for (const auto& p : classPath) {
+			if (!vm->addToClassPath(p)) {
+				TraceEvent("AddToClassPathFailed")
+					.detail("Path", p);
+				success = false;
+				return;
+			}
+			TraceEvent("AddToClassPath")
+				.detail("Path", p);
+		}
 		std::transform(className.begin(), className.end(), className.begin(), [](char c) {
 			if (c == '.') return '/';
 			return c;
@@ -379,6 +421,7 @@ struct JavaWorkload : TestWorkload {
 			vm->env->CallVoidMethod(hashMap, put, key, value);
 			vm->env->DeleteLocalRef(key);
 			vm->env->DeleteLocalRef(value);
+			kv.value = LiteralStringRef("");
 		}
 		auto workloadContextClass = findClass("com/apple/foundationdb/testing/WorkloadContext");
 		auto workloadContextConstructor = getMethodID(workloadContextClass, "<init>", "(Ljava/util/Map;IIJJ)V");
