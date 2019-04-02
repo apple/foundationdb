@@ -8,8 +8,8 @@ Release Notes
 Features
 --------
 
-* Improved replication mechanism using a new hierarchical technique that significantly reduces the frequency of data loss events even when multiple fault-tolerance zones permanently fail at the same time.  `(PR #964) <https://github.com/apple/foundationdb/pull/964>`_.
-* Added background actor to remove redundant teams from team collection so that the healthy team number is guaranteed to not exceed the desired number. `(PR #1139) <https://github.com/apple/foundationdb/pull/1139>`_
+* Improved replication mechanism using a new hierarchical technique that significantly reduces the frequency of data loss events even when multiple fault-tolerance zones permanently fail at the same time. After upgrading to 6.1 clusters will experience a low level of background data movement to store data in accordance with the new policy. `(PR #964) <https://github.com/apple/foundationdb/pull/964>`_.
+* Added a background actor to remove redundant teams from team collection so that the healthy team number is guaranteed to not exceed the desired number. `(PR #1139) <https://github.com/apple/foundationdb/pull/1139>`_
 * Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. `(PR #1084) <https://github.com/apple/foundationdb/pull/1084>`_
 * Added configuration option to choose log spilling implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
 * Added configuration option to choose log system implementation `(PR #1160) <https://github.com/apple/foundationdb/pull/1160>`_
@@ -17,8 +17,8 @@ Features
 * Restore now requires the destination cluster to be specified explicitly to avoid confusion. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Restore now accepts a timestamp that can be used to determine the restore version if the original cluster is available. `(PR #1240) <https://github.com/apple/foundationdb/pull/1240>`_
 * Backup ``status`` and ``describe`` commands now have a ``--json`` output option. `(PR #1248) <https://github.com/apple/foundationdb/pull/1248>`_
-* Separated data distribution from master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
-* Separated ratekeeper from master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
+* Separated data distribution from the master into its own role. `(PR #1062) <https://github.com/apple/foundationdb/pull/1062>`_
+* Separated ratekeeper from the master into its own role. `(PR #1176) <https://github.com/apple/foundationdb/pull/1176>`_
 
 * Added a ``CompareAndClear`` atomic op that clears a key if its value matches the supplied value. `(PR #1105) <https://github.com/apple/foundationdb/pull/1105>`_
 * Added support for IPv6. `(PR #1176) <https://github.com/apple/foundationdb/pull/1178>`_
