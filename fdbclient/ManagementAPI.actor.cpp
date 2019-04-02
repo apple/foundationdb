@@ -1293,6 +1293,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait( tr.get(healthyZoneKey) );
 			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
 				printf("No ongoing maintenance.\n");
@@ -1311,6 +1312,7 @@ ACTOR Future<Void> clearHealthyZone( Database cx ) {
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
 			return Void();
@@ -1324,6 +1326,7 @@ ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
 			tr.set(healthyZoneKey, healthyZoneValue(zoneId, readVersion + (seconds*CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
 			wait(tr.commit());

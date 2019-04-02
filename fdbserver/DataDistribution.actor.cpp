@@ -2733,6 +2733,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if(val.present()) {
 				auto p = decodeHealthyZoneValue(val.get());
