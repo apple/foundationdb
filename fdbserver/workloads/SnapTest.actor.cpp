@@ -158,13 +158,17 @@ public: // workload functions
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
+		state vector<int64_t> keys;
+
+		for (int i = 0; i < 1000; i++) {
+			keys.push_back(g_random->randomInt64(0, INT64_MAX - 2));
+		}
 
 		state int retry = 0;
 		loop {
 			tr.reset();
 			try {
-				for (int i = 0; i < 1000; i++) {
-					int64_t id = g_random->randomInt64(0, INT64_MAX - 2);
+				for (auto id : keys) {
 					if (even) {
 						if (id % 2 != 0) {
 							id++;
@@ -264,6 +268,7 @@ public: // workload functions
 					begin = firstGreaterThan(kvRange.end()[-1].key);
 				} catch (Error& e) {
 					wait(tr.onError(e));
+					cnt = 0;
 				}
 			}
 			TraceEvent("VerifyCntValue").detail("Value", cnt);
@@ -376,7 +381,7 @@ public: // workload functions
 		for (auto const& worker : workers) {
 			address_workers[worker.interf.address()] = worker.interf;
 		}
-		vector<TLogInterface> tLogServers = self->dbInfo->get().logSystemConfig.allPresentLogs();
+		vector<TLogInterface> tLogServers = self->dbInfo->get().logSystemConfig.allLocalLogs();
 
 		for (auto s : tLogServers) {
 			auto it = address_workers.find(s.address());
@@ -385,7 +390,7 @@ public: // workload functions
 				TraceEvent("TLogWorker")
 				    .detail("Address", s.address())
 				    .detail("Id", s.id())
-				    .detail("Localit", s.locality.toString());
+				    .detail("Locality", s.locality.toString());
 			}
 		}
 
@@ -620,7 +625,7 @@ public: // workload functions
 					ASSERT(tLogMessages[k].get().toString() != emptyStr);
 					getMinAndMaxTLogVersions(tLogMessages[k].get(), execVersion, tag, minTLogVersion, maxTLogVersion);
 					if (minTLogVersion != -1 && maxTLogVersion != -1) {
-						if ((durableVersion > minTLogVersion) && (durableVersion < maxTLogVersion)) {
+						if ((durableVersion >= minTLogVersion - 1) && (durableVersion < maxTLogVersion)) {
 							++numDurableVersionChecks;
 							TraceEvent("Successs!!!");
 						}
