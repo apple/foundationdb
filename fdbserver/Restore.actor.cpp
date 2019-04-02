@@ -213,7 +213,7 @@ public:
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
-	struct RestoreFile {
+	struct RestoreFileFR {
 		Version version;
 		std::string fileName;
 		bool isRange;  // false for log file
@@ -224,6 +224,7 @@ public:
 		int64_t cursor; //The start block location to be restored. All blocks before cursor have been scheduled to load and restore
 
 		Tuple pack() const {
+			fprintf(stderr, "MyRestoreFile, filename:%s\n", fileName.c_str());
 			return Tuple()
 					.append(version)
 					.append(StringRef(fileName))
@@ -234,8 +235,8 @@ public:
 					.append(beginVersion)
 					.append(cursor);
 		}
-		static RestoreFile unpack(Tuple const &t) {
-			RestoreFile r;
+		static RestoreFileFR unpack(Tuple const &t) {
+			RestoreFileFR r;
 			int i = 0;
 			r.version = t.getInt(i++);
 			r.fileName = t.getString(i++).toString();
@@ -248,7 +249,7 @@ public:
 			return r;
 		}
 
-		bool operator<(const RestoreFile& rhs) const { return endVersion < rhs.endVersion; }
+		bool operator<(const RestoreFileFR& rhs) const { return endVersion < rhs.endVersion; }
 
 		std::string toString() const {
 //			return "UNSET4TestHardness";
@@ -258,7 +259,7 @@ public:
 		}
 	};
 
-	typedef KeyBackedSet<RestoreFile> FileSetT;
+	typedef KeyBackedSet<RestoreFileFR> FileSetT;
 	FileSetT fileSet() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
@@ -380,7 +381,7 @@ public:
 
 };
 
-typedef RestoreConfig::RestoreFile RestoreFile;
+typedef RestoreConfig::RestoreFileFR RestoreFileFR;
 
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfig is copied
 namespace parallelFileRestore {
@@ -746,14 +747,14 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	// TODO: RestoreStatus
 	// Information of the backup files to be restored, and the restore progress
 	struct LoadingStatus {
-		RestoreFile file;
+		RestoreFileFR file;
 		int64_t start; // Starting point of the block in the file to load
 		int64_t length;// Length of block to load
 		LoadingState state; // Loading state of the particular file block
 		UID node; // The loader node ID that responsible for the file block
 
 		explicit LoadingStatus() {}
-		explicit LoadingStatus(RestoreFile file, int64_t start, int64_t length, UID node): file(file), start(start), length(length), state(LoadingState::Init), node(node) {}
+		explicit LoadingStatus(RestoreFileFR file, int64_t start, int64_t length, UID node): file(file), start(start), length(length), state(LoadingState::Init), node(node) {}
 	};
 	std::map<int64_t, LoadingStatus> loadingStatus; // first is the global index of the loading cmd, starting from 0
 
@@ -762,8 +763,8 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	std::map<CMDUID, int> processedCmd;
 
 
-	std::vector<RestoreFile> allFiles; // All backup files to be processed in all version batches
-	std::vector<RestoreFile> files; // Backup files to be parsed and applied: range and log files in 1 version batch
+	std::vector<RestoreFileFR> allFiles; // All backup files to be processed in all version batches
+	std::vector<RestoreFileFR> files; // Backup files to be parsed and applied: range and log files in 1 version batch
 	std::map<Version, Version> forbiddenVersions; // forbidden version range [first, second)
 
 	// Temporary data structure for parsing range and log files into (version, <K, V, mutationType>)
@@ -1115,7 +1116,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 		throw restore_missing_data();
 	}
 
-//	state std::vector<RestoreFile> files;
+//	state std::vector<RestoreFileFR> files;
 	if (!rd->files.empty()) {
 		printf("[WARNING] global files are not empty! files.size()=%d. We forcely clear files\n", rd->files.size());
 		rd->files.clear();
@@ -1126,13 +1127,13 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
  	for(const RangeFile &f : restorable.get().ranges) {
 // 		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
+		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize};
  		rd->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
 // 		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
+		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion};
 		rd->files.push_back(file);
  	}
 
@@ -2404,8 +2405,8 @@ void printRestorableFileSet(Optional<RestorableFileSet> files) {
  	return;
 }
 
-std::vector<RestoreFile> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
-	std::vector<RestoreFile> files;
+std::vector<RestoreFileFR> getRestoreFiles(Optional<RestorableFileSet> fileSet) {
+	std::vector<RestoreFileFR> files;
 
  	for(const RangeFile &f : fileSet.get().ranges) {
  		files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
@@ -2429,7 +2430,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 	state Key removePrefix = request.removePrefix;
 	state bool lockDB = request.lockDB;
 	state UID randomUid = request.randomUid;
-	//state VectorRef<RestoreFile> files; // return result
+	//state VectorRef<RestoreFileFR> files; // return result
 
 	ASSERT( lockDB == true );
 
@@ -2460,13 +2461,13 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
  	for(const RangeFile &f : restorable.get().ranges) {
  		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.version, f.fileName, true, f.blockSize, f.fileSize, 0};
+		RestoreFileFR file = {f.version, f.fileName, true, f.blockSize, f.fileSize, 0};
  		rd->files.push_back(file);
  	}
  	for(const LogFile &f : restorable.get().logs) {
  		TraceEvent("FoundLogFileMX").detail("FileInfo", f.toString());
 		printf("[INFO] FoundLogFile, fileInfo:%s\n", f.toString().c_str());
-		RestoreFile file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, 0};
+		RestoreFileFR file = {f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, 0};
 		rd->files.push_back(file);
  	}
 

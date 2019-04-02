@@ -561,8 +561,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}));
 
 				// restore database
-				TraceEvent("BARW_Restore", randomID).detail("LastBackupContainer", lastBackupContainer->getURL()).detail("RestoreAfter", self->restoreAfter).detail("BackupTag", printable(self->backupTag));
-				printf("MX:BARW_Restore, LastBackupContainer url:%s BackupTag:%s\n",lastBackupContainer->getURL().c_str(), printable(self->backupTag).c_str() );
+				TraceEvent("BAFRW_Restore", randomID).detail("LastBackupContainer", lastBackupContainer->getURL()).detail("RestoreAfter", self->restoreAfter).detail("BackupTag", printable(self->backupTag));
+				printf("MX:BAFRW_Restore, LastBackupContainer url:%s BackupTag:%s\n",lastBackupContainer->getURL().c_str(), printable(self->backupTag).c_str() );
 				
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait( container->describeBackup() );
