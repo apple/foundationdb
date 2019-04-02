@@ -1065,10 +1065,10 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 			for(auto& region : result.get().regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
-			replicasFutures.push_back(tr.get(healthyZoneKey));
+			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
 
 			choose {
-				when( wait( waitForAll(replicasFutures) ) ) {
+				when( wait( waitForAll(replicasFutures) && success(healthyZoneValue) ) ) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
 						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
@@ -1077,10 +1077,12 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 					}
 					LoadConfigurationResult res;
 					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
-					if(replicasFutures.back().get().present() && decodeHealthyZoneValue(replicasFutures.back().get().get()).second > tr.getReadVersion().get()) {
-						auto healthyZone = decodeHealthyZoneValue(replicasFutures.back().get().get());
-						res.healthyZone = healthyZone.first;
-						res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					if(healthyZoneValue.get().present()) {
+						auto healthyZone = decodeHealthyZoneValue(healthyZoneValue.get().get());
+						if(healthyZone.second > tr.getReadVersion().get()) {
+							res.healthyZone = healthyZone.first;
+							res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+						}
 					}
 					loadResult = res;
 				}
