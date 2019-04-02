@@ -598,6 +598,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
+	Future<Void> clearHealthyZoneFuture;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -633,7 +634,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), teamBuilder(Void()),
 	    badTeamRemover(Void()), redundantTeamRemover(Void()), configuration(configuration),
-	    readyToStart(readyToStart),
+	    readyToStart(readyToStart), clearHealthyZoneFuture(Void()),
 	    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution)),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution)),
@@ -2746,6 +2747,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 			state Future<Void> watchFuture = tr.watch(healthyZoneKey);
 			wait(tr.commit());
 			wait(watchFuture);
+			tr.reset();
 		} catch(Error& e) {
 			wait( tr.onError(e) );
 		}
@@ -2845,6 +2847,10 @@ ACTOR Future<Void> storageServerFailureTracker(
 				status->isFailed = !status->isFailed;
 				if(!status->isFailed && !server->teams.size()) {
 					self->doBuildTeams = true;
+				}
+				if(status->isFailed && self->healthyZone.get().present() && self->clearHealthyZoneFuture.isReady()) {
+					self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
+					self->healthyZone.set(Optional<Key>());
 				}
 
 				TraceEvent("StatusMapChange", self->distributorId).detail("ServerID", interf.id()).detail("Status", status->toString())

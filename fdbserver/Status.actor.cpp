@@ -544,7 +544,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    Database cx, Optional<DatabaseConfiguration> configuration, std::set<std::string>* incomplete_reasons) {
+    Database cx, Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 	state double metric;
@@ -657,6 +657,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (event.size() > 0) {
 				std::string zoneID = event.getValue("ZoneID");
 				statusObj["fault_domain"] = zoneID;
+				if(healthyZone.present() && healthyZone == workerItr->interf.locality.zoneId()) {
+					statusObj["under_maintenance"] = true;
+				}
 
 				std::string MachineID = event.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
@@ -1017,9 +1020,17 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx, JsonBuil
 	return statusObj;
 }
 
-ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
+struct LoadConfigurationResult {
+	bool fullReplication;
+	Optional<Key> healthyZone;
+	double healthyZoneSeconds;
+
+	LoadConfigurationResult() : fullReplication(true), healthyZoneSeconds(0) {}
+};
+
+ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>>> loadConfiguration(Database cx, JsonBuilderArray *messages, std::set<std::string> *status_incomplete_reasons){
 	state Optional<DatabaseConfiguration> result;
-	state Optional<bool> fullReplication;
+	state Optional<LoadConfigurationResult> loadResult;
 	state Transaction tr(cx);
 	state Future<Void> getConfTimeout = delay(5.0);
 
@@ -1054,6 +1065,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 			for(auto& region : result.get().regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
+			replicasFutures.push_back(tr.get(healthyZoneKey));
 
 			choose {
 				when( wait( waitForAll(replicasFutures) ) ) {
@@ -1063,8 +1075,14 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 							unreplicated++;
 						}
 					}
-
-					fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
+					LoadConfigurationResult res;
+					res.fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
+					if(replicasFutures.back().get().present() && decodeHealthyZoneValue(replicasFutures.back().get().get()).second > tr.getReadVersion().get()) {
+						auto healthyZone = decodeHealthyZoneValue(replicasFutures.back().get().get());
+						res.healthyZone = healthyZone.first;
+						res.healthyZoneSeconds = (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					}
+					loadResult = res;
 				}
 				when(wait(getConfTimeout)) {
 					messages->push_back(JsonString::makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
@@ -1076,7 +1094,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 			wait(tr.onError(e));
 		}
 	}
-	return std::make_pair(result, fullReplication);
+	return std::make_pair(result, loadResult);
 }
 
 static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
@@ -1585,11 +1603,14 @@ static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Asyn
 	return oldTlogsArray;
 }
 
-static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
+static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleMachines, int minReplicasRemaining, bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
 	int32_t maxMachineFailures = configuration.maxMachineFailuresTolerated();
+	if(underMaintenance) {
+		maxMachineFailures--;
+	}
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
@@ -1913,16 +1934,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
 
 		state Optional<DatabaseConfiguration> configuration;
-		state Optional<bool> fullReplication;
+		state Optional<LoadConfigurationResult> loadResult;
 
 		if(statusCode != RecoveryStatus::configuration_missing) {
-			std::pair<Optional<DatabaseConfiguration>,Optional<bool>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+			std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfigurationResult>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
 			configuration = loadResults.first;
-			fullReplication = loadResults.second;
+			loadResult = loadResults.second;
 		}
 
-		if(fullReplication.present()) {
-			statusObj["full_replication"] = fullReplication.get();
+		if(loadResult.present()) {
+			statusObj["full_replication"] = loadResult.get().fullReplication;
+			if(loadResult.get().healthyZone.present()) {
+				statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
+				statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
+			}
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
@@ -1964,7 +1989,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			if(configuration.present()) {
 				int extraTlogEligibleMachines = getExtraTLogEligibleMachines(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleMachines, minReplicasRemaining);
+				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleMachines, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
@@ -2033,7 +2058,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, proxies, cx, configuration, loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientVersionMap, clientStatusInfoMap);
 
