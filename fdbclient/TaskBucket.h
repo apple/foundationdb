@@ -27,7 +27,7 @@
 #include "flow/genericactors.actor.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/KeyBackedTypes.h"

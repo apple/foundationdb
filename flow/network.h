@@ -22,10 +22,13 @@
 #define FLOW_OPENNETWORK_H
 #pragma once
 
+#include <array>
 #include <string>
 #include <stdint.h>
+#include "boost/asio.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
+#include "fdbrpc/crc32c.h"
 
 enum {
 	TaskMaxPriority = 1000000,
@@ -33,7 +36,7 @@ enum {
 	TaskFlushTrace = 10500,
 	TaskWriteSocket = 10000,
 	TaskPollEIO = 9900,
-	TaskDiskIOComplete = 9150, 
+	TaskDiskIOComplete = 9150,
 	TaskLoadBalancedEndpoint = 9000,
 	TaskReadSocket = 9000,
 	TaskCoordinationReply = 8810,
@@ -48,6 +51,7 @@ enum {
 	TaskTLogPeek = 8590,
 	TaskTLogCommitReply = 8580,
 	TaskTLogCommit = 8570,
+	TaskTLogSpilledPeekReply = 8567,
 	TaskProxyGetRawCommittedVersion = 8565,
 	TaskProxyResolverReply = 8560,
 	TaskProxyCommitBatcher = 8550,
@@ -65,6 +69,7 @@ enum {
 	TaskUnknownEndpoint = 4000,
 	TaskMoveKeys = 3550,
 	TaskDataDistributionLaunch = 3530,
+	TaskRatekeeper = 3510,
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
@@ -75,25 +80,101 @@ enum {
 
 class Void;
 
+struct IPAddress {
+	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
+	// only the first 32bits are relevant and rest are initialized to
+	// 0.
+	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
+	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
+	              "IPAddressStore must be std::array<uint8_t, 16>");
+
+	IPAddress();
+	explicit IPAddress(const IPAddressStore& v6addr);
+	explicit IPAddress(uint32_t v4addr);
+
+	bool isV6() const { return isV6addr; }
+	bool isV4() const { return !isV6addr; }
+	bool isValid() const;
+
+	IPAddress(const IPAddress& rhs) : isV6addr(rhs.isV6addr) {
+		if(isV6addr) {
+			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
+		}
+	}
+
+	IPAddress& operator=(const IPAddress& rhs) {
+		isV6addr = rhs.isV6addr;
+		if(isV6addr) {
+			addr.v6 = rhs.addr.v6;
+		} else {
+			addr.v4 = rhs.addr.v4;
+		}
+		return *this;
+	}
+
+	// Returns raw v4/v6 representation of address. Caller is responsible
+	// to call these functions safely.
+	uint32_t toV4() const { return addr.v4; }
+	const IPAddressStore& toV6() const { return addr.v6; }
+
+	std::string toString() const;
+	static Optional<IPAddress> parse(std::string str);
+
+	bool operator==(const IPAddress& addr) const;
+	bool operator!=(const IPAddress& addr) const;
+	bool operator<(const IPAddress& addr) const;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, isV6addr);
+		if(isV6addr) {
+			serializer(ar, addr.v6);
+		} else {
+			serializer(ar, addr.v4);
+		}
+	}
+
+private:
+	bool isV6addr;
+	union {
+		uint32_t v4;
+		IPAddressStore v6;
+	} addr;
+};
+
 struct NetworkAddress {
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
-	uint32_t ip;
+	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
-	NetworkAddress() : ip(0), port(0), flags(FLAG_PRIVATE) {}
-	NetworkAddress( uint32_t ip, uint16_t port ) : ip(ip), port(port), flags(FLAG_PRIVATE) {}
-	NetworkAddress( uint32_t ip, uint16_t port, bool isPublic, bool isTLS ) : ip(ip), port(port),
-		flags( (isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0 ) ) {}
+	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE) {}
+	NetworkAddress(const IPAddress& address, uint16_t port, bool isPublic, bool isTLS)
+	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)) {}
+	NetworkAddress(uint32_t ip, uint16_t port, bool isPublic, bool isTLS)
+	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS) {}
 
-	bool operator == (NetworkAddress const& r) const { return ip==r.ip && port==r.port && flags==r.flags; }
-	bool operator != (NetworkAddress const& r) const { return ip!=r.ip || port!=r.port || flags!=r.flags; }
-	bool operator< (NetworkAddress const& r) const { if (flags != r.flags) return flags < r.flags; if (ip != r.ip) return ip < r.ip; return port<r.port; }
-	bool isValid() const { return ip != 0 || port != 0; }
+	NetworkAddress(uint32_t ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
+	NetworkAddress(const IPAddress& ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
+
+	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
+	bool operator!=(NetworkAddress const& r) const { return ip != r.ip || port != r.port || flags != r.flags; }
+	bool operator<(NetworkAddress const& r) const {
+		if (flags != r.flags)
+			return flags < r.flags;
+		else if (ip != r.ip)
+			return ip < r.ip;
+		return port < r.port;
+	}
+
+	bool isValid() const { return ip.isValid() || port != 0; }
 	bool isPublic() const { return !(flags & FLAG_PRIVATE); }
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
+	bool isV6() const { return ip.isV6(); }
 
 	static NetworkAddress parse( std::string const& );
 	static std::vector<NetworkAddress> parseList( std::string const& );
@@ -101,12 +182,63 @@ struct NetworkAddress {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBinaryItem(*this);
+		if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			uint32_t ipV4;
+			serializer(ar, ipV4, port, flags);
+			ip = IPAddress(ipV4);
+		} else {
+			serializer(ar, ip, port, flags);
+		}
 	}
 };
 
-std::string toIPString(uint32_t ip);
+namespace std
+{
+	template <>
+	struct hash<NetworkAddress>
+	{
+		size_t operator()(const NetworkAddress& na) const
+		{
+			size_t result = 0;
+			if (na.ip.isV6()) {
+				uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
+				result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
+			} else {
+				result = na.ip.toV4();
+			}
+			return (result << 16) + na.port;
+		}
+	};
+}
+
+struct NetworkAddressList {
+	NetworkAddress address;
+	Optional<NetworkAddress> secondaryAddress;
+
+	bool operator==(NetworkAddressList const& r) const { return address == r.address && secondaryAddress == r.secondaryAddress; }
+	bool operator!=(NetworkAddressList const& r) const { return address != r.address || secondaryAddress != r.secondaryAddress; }
+	bool operator<(NetworkAddressList const& r) const {
+		if (address != r.address)
+			return address < r.address;
+		return secondaryAddress < r.secondaryAddress;
+	}
+
+	std::string toString() const {
+		if(!secondaryAddress.present()) {
+			return address.toString();
+		}
+		return address.toString() + ", " + secondaryAddress.get().toString();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, address, secondaryAddress);
+	}
+};
+
 std::string toIPVectorString(std::vector<uint32_t> ips);
+std::string toIPVectorString(const std::vector<IPAddress>& ips);
+std::string formatIpPort(const IPAddress& ip, uint16_t port);
 
 template <class T> class Future;
 template <class T> class Promise;
@@ -144,7 +276,7 @@ public:
 
 	// Closes the underlying connection eventually if it is not already closed.
 	virtual void close() = 0;
-	
+
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
 
@@ -158,7 +290,7 @@ public:
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	// (or may throw an error if the connection dies)
 	// The SendBuffer chain cannot be empty, and the limit must be positive.
-	// Important non-obvious behavior:  The caller is committing to write the contents of the buffer chain up to the limit.  If all of those bytes could 
+	// Important non-obvious behavior:  The caller is committing to write the contents of the buffer chain up to the limit.  If all of those bytes could
 	// not be sent in this call to write() then further calls must be made to write the remainder.  An IConnection implementation can make decisions
 	// based on the entire byte set that the caller was attempting to write even if it is unable to write all of it immediately.
 	// Due to limitations of TLSConnection, callers must also avoid reallocations that reduce the amount of written data in the first buffer in the chain.
@@ -184,10 +316,11 @@ public:
 
 typedef void*	flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
+typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(NetworkAddress localAddress, bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
@@ -197,7 +330,8 @@ public:
 
 	enum enumGlobal {
 		enFailureMonitor = 0, enFlowTransport = 1, enTDMetrics = 2, enNetworkConnections = 3,
-		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10
+		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10,
+		enNetworkAddressesFunc = 11
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -253,6 +387,13 @@ public:
 	{
 		flowGlobalType netAddressFuncPtr = reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressFunc));
 		return (netAddressFuncPtr) ? reinterpret_cast<NetworkAddressFuncPtr>(netAddressFuncPtr)() : NetworkAddress();
+	}
+
+	// Shorthand for transport().getLocalAddresses()
+	static NetworkAddressList getLocalAddresses()
+	{
+		flowGlobalType netAddressesFuncPtr = reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressesFunc));
+		return (netAddressesFuncPtr) ? reinterpret_cast<NetworkAddressesFuncPtr>(netAddressesFuncPtr)() : NetworkAddressList();
 	}
 
 	NetworkMetrics networkMetrics;

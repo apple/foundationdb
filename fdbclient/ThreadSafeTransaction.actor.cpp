@@ -21,17 +21,17 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
-#include <new>
-
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
+#include <new>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
 
 ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
-	return onMainThread( [this]() -> Future<Void> {
+	DatabaseContext *db = this->db;
+	return onMainThread( [db]() -> Future<Void> {
 		db->checkDeferredError();
 		return db->onConnected();
 	} );
@@ -47,28 +47,34 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	return Reference<ITransaction>(new ThreadSafeTransaction(Reference<ThreadSafeDatabase>::addRef(this)));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db));
 }
 
 void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
+	DatabaseContext *db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
-	onMainThreadVoid( [this, option, passValue](){ db->setOption(option, passValue.contents()); }, &db->deferredError );
+	onMainThreadVoid( [db, option, passValue](){ 
+		db->checkDeferredError();
+		db->setOption(option, passValue.contents()); 
+	}, &db->deferredError );
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
-	db = NULL; // All accesses to db happen on the main thread, so this pointer will be set by the time anybody uses it
-
 	Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first));
-	onMainThreadVoid([this, connFile, apiVersion](){ 
+
+	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
+	// but run its constructor on the main thread
+	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
+
+	onMainThreadVoid([db, connFile, apiVersion](){ 
 		try {
-			Database db = Database::createDatabase(connFile, apiVersion);
-			this->db = db.extractPtr();
+			Database::createDatabase(connFile, apiVersion, LocalityData(), db).extractPtr();
 		}
 		catch(Error &e) {
-			this->db = new DatabaseContext(e);
+			new (db) DatabaseContext(e);
 		}
 		catch(...) {
-			this->db = new DatabaseContext(unknown_error());
+			new (db) DatabaseContext(unknown_error());
 		}
 	}, NULL);
 }
@@ -78,7 +84,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid( [db](){ db->delref(); }, NULL );
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction( Reference<ThreadSafeDatabase> db ) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -88,10 +94,12 @@ ThreadSafeTransaction::ThreadSafeTransaction( Reference<ThreadSafeDatabase> db )
 	// these operations).
 	ReadYourWritesTransaction *tr = this->tr = ReadYourWritesTransaction::allocateOnForeignThread();
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid( [tr, db](){ 
-		db->db->addref(); 
-		new (tr) ReadYourWritesTransaction( Database(db->db) ); 
-	}, NULL );
+	onMainThreadVoid(
+	    [tr, cx]() {
+		    cx->addref();
+		    new (tr) ReadYourWritesTransaction(Database(cx));
+	    },
+	    NULL);
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
@@ -287,12 +295,12 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 	return onMainThread( [tr, e](){ return tr->onError(e); } );
 }
 
-void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept(true) {
+void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept(true) {
+ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT {
 	tr = r.tr;
 	r.tr = NULL;
 }

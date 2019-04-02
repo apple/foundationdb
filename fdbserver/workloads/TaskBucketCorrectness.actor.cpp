@@ -28,7 +28,7 @@
 #include "fdbclient/Tuple.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SayHelloTaskFunc : TaskFuncBase {

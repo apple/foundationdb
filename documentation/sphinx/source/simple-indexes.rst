@@ -69,8 +69,8 @@ Code
 In this example, we’re storing user data based on user_ID but sometimes need to retrieve users based on their zipcode. We use a transactional function to set user data and its index and another to retrieve data using the index.
 ::
 
- user = Subspace(('user',))
- index = Subspace(('zipcode_index',))
+ user = fdb.Subspace(('user',))
+ index = fdb.Subspace(('zipcode_index',))
  
  @fdb.transactional
  def set_user(tr, ID, name, zipcode):
@@ -80,11 +80,14 @@ In this example, we’re storing user data based on user_ID but sometimes need t
  # Normal lookup
  @fdb.transactional
  def get_user(tr, ID):
-     return tr[user[ID]]
+     for k,v in tr[user[ID].range()]:
+         return v
+
+     return None
  
  # Index lookup
  @fdb.transactional
- def get_user_IDs_in_region(tr, region):
-     return [index.unpack(k)[1] for k, _ in tr[index[region].range()]]
+ def get_user_IDs_in_region(tr, zipcode):
+     return [index.unpack(k)[1] for k, _ in tr[index[zipcode].range()]]
 
 That's just about all you need to create an index.

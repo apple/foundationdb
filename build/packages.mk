@@ -22,9 +22,10 @@ TARGETS += packages
 CLEAN_TARGETS += packages_clean
 
 PACKAGE_BINARIES = fdbcli fdbserver fdbbackup fdbmonitor fdbrestore fdbdr dr_agent backup_agent
-PACKAGE_CONTENTS := $(addprefix bin/, $(PACKAGE_BINARIES)) $(addprefix bin/, $(addsuffix .debug, $(PACKAGE_BINARIES))) lib/libfdb_c.$(DLEXT) bindings/python/fdb/fdboptions.py bindings/c/foundationdb/fdb_c_options.g.h
+PROJECT_BINARIES = $(addprefix bin/, $(PACKAGE_BINARIES))
+PACKAGE_CONTENTS := $(PROJECT_BINARIES) $(addprefix bin/, $(addsuffix .debug, $(PACKAGE_BINARIES))) lib/libfdb_c.$(DLEXT) bindings/python/fdb/fdboptions.py bindings/c/foundationdb/fdb_c_options.g.h
 
-packages: TGZ FDBSERVERAPI
+packages: TGZ BINS FDBSERVERAPI
 
 TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.$(DLEXT)
 	@echo "Archiving      tgz"
@@ -32,9 +33,17 @@ TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.$(DLEXT)
 	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz
 	@bash -c "tar -czf packages/FoundationDB-$(PLATFORM)-$(VERSION)-$(PKGRELEASE).tar.gz bin/{fdbmonitor{,.debug},fdbcli{,.debug},fdbserver{,.debug},fdbbackup{,.debug},fdbdr{,.debug},fdbrestore{,.debug},dr_agent{,.debug},coverage.{fdbclient,fdbserver,fdbrpc,flow}.xml} lib/libfdb_c.$(DLEXT){,-debug} lib/libfdb_java.$(DLEXT)* bindings/python/fdb/*.py bindings/c/*.h"
 
+BINS: packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz
+
 packages_clean:
 	@echo "Cleaning       packages"
-	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz packages/fdb-tests-$(VERSION).tar.gz packages/fdb-headers-$(VERSION).tar.gz packages/fdb-bindings-$(VERSION).tar.gz packages/fdb-server-$(VERSION)-$(PLATFORM).tar.gz
+	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz packages/fdb-tests-$(VERSION).tar.gz packages/fdb-headers-$(VERSION).tar.gz packages/fdb-bindings-$(VERSION).tar.gz packages/fdb-server-$(VERSION)-$(PLATFORM).tar.gz
+
+packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz: $(PROJECT_BINARIES) versions.target
+	@echo "Packaging      binaries"
+	@mkdir -p packages
+	@rm -f packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz
+	@bash -c "tar -czf packages/foundationdb-binaries-$(VERSION)-$(PLATFORM).tar.gz $(PROJECT_BINARIES)"
 
 packages/fdb-server-$(VERSION)-$(PLATFORM).tar.gz: bin/fdbserver bin/fdbcli lib/libfdb_c.$(DLEXT)
 	@echo "Packaging      fdb server api"

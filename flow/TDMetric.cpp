@@ -79,7 +79,7 @@ const Standalone<StringRef> MetricKeyRef::packLatestKey() const {
 	wr.serializeBytes( prefix );
 	wr.serializeBytes( LiteralStringRef("\x01TDMetricsLastValue\x00") );
 	writeMetricName(wr);
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
@@ -95,7 +95,7 @@ const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
 	wr.serializeAsTuple(level);
 	if(time >= 0)
 		wr.serializeAsTuple(time);
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
@@ -111,7 +111,7 @@ const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
 	wr.serializeBytes( LiteralStringRef("\x00\x01") );
 	wr.serializeBytes( fieldType );
 	wr.serializeBytes( LiteralStringRef("\x00") );
-	return wr.toStringRef();
+	return wr.toValue();
 }
 
 bool TDMetricCollection::canLog(int level) {

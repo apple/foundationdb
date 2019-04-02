@@ -28,7 +28,8 @@
 
 struct JSONSchemas {
 	static const KeyRef statusSchema;
-	static const KeyRef configurationSchema;
+	static const KeyRef clusterConfigurationSchema;
+	static const KeyRef latencyBandConfigurationSchema;
 };
 
 #endif /* FDBCLIENT_SCHEMAS_H */

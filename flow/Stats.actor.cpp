@@ -19,6 +19,7 @@
  */
 
 #include "flow/Stats.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
 : name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0)

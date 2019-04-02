@@ -19,14 +19,14 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -47,7 +47,7 @@
 #include "fdbcli/linenoise/linenoise.h"
 #endif
 
-#ifndef WIN32
+#if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
 
@@ -523,10 +523,13 @@ void initHelp() {
 		"<type> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
+	helpMap["force_recovery_with_data_loss"] = CommandHelp(
+		"force_recovery_with_data_loss <DCID>",
+		"Force the database to recover into DCID",
+		"A forced recovery will cause the database to lose the most recently committed mutations. The amount of mutations that will be lost depends on how far behind the remote datacenter is. This command will change the region configuration to have a positive priority for the chosen DCID, and a negative priority for all other DCIDs. This command will set usable_regions to 1. If the database has already recovered, this command does nothing.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
-	hiddenCommands.insert("force_recovery_with_data_loss");
 }
 
 void printVersion() {
@@ -575,7 +578,7 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 		for (StatusObjectReader coor : coordinatorsArr)
 			outputString += format("\n  %s  (%s)", coor["address"].get_str().c_str(), coor["reachable"].get_bool() ? "reachable" : "unreachable");
 	}
-	catch (std::runtime_error& e){
+	catch (std::runtime_error& ){
 		outputString = "\n  Unable to retrieve list of coordination servers";
 	}
 
@@ -606,7 +609,7 @@ std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::st
 				}
 			}
 		}
-		catch (std::exception &e) {
+		catch (std::exception& ) {
 			// If an entry in the process map is badly formed then something will throw. Since we are
 			// looking for a positive match, just ignore any read execeptions and move on to the next proc
 		}
@@ -667,6 +670,38 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 	}
 
 	return outputString;
+}
+
+int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
+	StatusObjectReader machineMap;
+	int numOfNonExcludedMachines = 0;
+	if (statusObjCluster.get("machines", machineMap)) {
+		for (auto mach : machineMap.obj()) {
+			StatusObjectReader machine(mach.second);
+			if (machine.has("excluded") && !machine.last().get_bool())
+				numOfNonExcludedMachines++;
+		}
+	}
+	return numOfNonExcludedMachines;
+}
+
+std::pair<int, int> getNumOfNonExcludedProcessAndZones(StatusObjectReader statusObjCluster) {
+	StatusObjectReader processesMap;
+	std::set<std::string> zones;
+	int numOfNonExcludedProcesses = 0;
+	if (statusObjCluster.get("processes", processesMap)) {
+		for (auto proc : processesMap.obj()) {
+			StatusObjectReader process(proc.second);
+			if (process.has("excluded") && process.last().get_bool())
+				continue;
+			numOfNonExcludedProcesses++;
+			std::string zoneId;
+			if (process.get("locality.zoneid", zoneId)) {
+				zones.insert(zoneId);
+			}
+		}
+	}
+	return { numOfNonExcludedProcesses, zones.size() };
 }
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
@@ -751,9 +786,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
-								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
-									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
+									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
+									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
+								}
 							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
 								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
@@ -774,7 +811,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){ }
+			catch (std::runtime_error& ){ }
 
 
 			// Check if cluster controllable is reachable
@@ -845,7 +882,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){}
+			catch (std::runtime_error& ){}
 
 			if (fatalRecoveryState){
 				printf("%s", outputString.c_str());
@@ -863,6 +900,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			// If there is a configuration message then there is no configuration information to display
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
+			bool isOldMemory = false;
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no configuration?
@@ -877,6 +915,9 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				outputString += "\n  Storage engine         - ";
 				if (statusObjConfig.get("storage_engine", strVal)){
+					if(strVal == "memory-1") {
+						isOldMemory = true;
+					}
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -907,7 +948,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
 			}
-			catch (std::runtime_error& e) {
+			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve configuration status";
 			}
@@ -1016,7 +1057,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += "\n  Server time            - " + serverTime;
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve cluster status";
 			}
@@ -1107,7 +1148,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += "unknown";
 
 			}
-			catch (std::runtime_error& e) {
+			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
@@ -1124,7 +1165,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					operatingSpaceString += format("\n  Log server             - %.1f GB free on most full server", std::max(val / 1e9, 0.0));
 
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				operatingSpaceString = "";
 			}
 
@@ -1136,6 +1177,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			// Workload section
 			outputString += "\n\nWorkload:";
 			outputStringCache = outputString;
+			bool foundLogAndStorage = false;
 			try {
 				// Determine which rates are unknown
 				StatusObjectReader statusObjWorkload;
@@ -1160,7 +1202,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							performanceLimited += format("\n  Most limiting process: %s", procAddr.c_str());
 					}
 				}
-				catch (std::exception &e) {
+				catch (std::exception& ) {
 					// If anything here throws (such as for an incompatible type) ignore it.
 				}
 
@@ -1188,6 +1230,22 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				std::vector<std::string> messagesAddrs;
 				for (auto proc : processesMap.obj()){
 					StatusObjectReader process(proc.second);
+					if(process.has("roles")) {
+						StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+						bool storageRole = false;
+						bool logRole = false;
+						for (StatusObjectReader role : rolesArray) {
+							if (role["role"].get_str() == "storage") {
+								storageRole = true;
+							}
+							else if (role["role"].get_str() == "log") {
+								logRole = true;
+							}
+						}
+						if(storageRole && logRole) {
+							foundLogAndStorage = true;
+						}
+					}
 					if (process.has("messages")) {
 						StatusArray processMessagesArr = process.last().get_array();
 						if (processMessagesArr.size()){
@@ -1208,7 +1266,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					}
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve workload status";
 			}
@@ -1346,7 +1404,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							workerDetails[addrNum] = line;
 						}
 
-						catch (std::runtime_error& e) {
+						catch (std::runtime_error& ) {
 							std::string noMetrics = format("  %-22s (no metrics available)", address.c_str());
 							workerDetails[addrNum] = noMetrics;
 						}
@@ -1354,7 +1412,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					for (auto w : workerDetails)
 						outputString += "\n" + format("%s", w.second.c_str());
 				}
-				catch (std::runtime_error& e){
+				catch (std::runtime_error& ){
 					outputString = outputStringCache;
 					outputString += "\n  Unable to retrieve process performance details";
 				}
@@ -1371,6 +1429,14 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			if (clientTime != ""){
 				outputString += "\n\nClient time: " + clientTime;
 			}
+
+			if(processesMap.obj().size() > 1 && isOldMemory) {
+				outputString += "\n\nWARNING: type `configure memory' to switch to a safer method of persisting data on the transaction logs.";
+			}
+			if(processesMap.obj().size() > 9 && foundLogAndStorage) {
+				outputString += "\n\nWARNING: A single process is both a transaction log and a storage server.\n  For best performance use dedicated disks for the transaction logs by setting process classes.";
+			}
+
 			printf("%s\n", outputString.c_str());
 		}
 
@@ -1403,7 +1469,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							printf("The database is available, but has issues (type 'status' for more information).\n");
 						}
 					}
-					catch (std::runtime_error& e){
+					catch (std::runtime_error& ){
 						printf("The database is available, but has issues (type 'status' for more information).\n");
 					}
 				}
@@ -1413,7 +1479,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					printf("WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
 				}
 			}
-			catch (std::runtime_error& e){
+			catch (std::runtime_error& ){
 				printf("Unable to determine database state, type 'status' for more information.\n");
 			}
 
@@ -1424,7 +1490,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			printf("%s\n", json_spirit::write_string(json_spirit::mValue(statusObj.obj()), json_spirit::Output_options::pretty_print).c_str());
 		}
 	}
-	catch (Error &e){
+	catch (Error& ){
 		if (hideErrorMessages)
 			return;
 		if (level == StatusClient::MINIMAL) {
@@ -1648,7 +1714,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 	StatusObject configJSON = config.get_obj();
 
 	json_spirit::mValue schema;
-	if(!json_spirit::read_string( JSONSchemas::configurationSchema.toString(), schema )) {
+	if(!json_spirit::read_string( JSONSchemas::clusterConfigurationSchema.toString(), schema )) {
 		ASSERT(false);
 	}
 
@@ -1780,10 +1846,6 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 			try {
 				// SOMEDAY: Check for keywords
 				auto const& addr = NetworkAddress::parse( t->toString() );
-				if( addr.isTLS() != isClusterTLS ) {
-					printf("ERROR: cannot use coordinator with incompatible TLS state: `%s'\n", t->toString().c_str());
-					return true;
-				}
 				if (addresses.count(addr)){
 					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
 					return true;
@@ -1994,7 +2056,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		wait( makeInterruptable(waitForExcludedServers(db,addresses)) );
 
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
-		std::map<uint32_t, std::set<uint16_t>> workerPorts;
+		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for(auto addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
@@ -2013,7 +2075,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					"excluded the correct machines or processes before removing them from the cluster:\n");
 			for(auto addr : absentExclusions) {
 				if(addr.port == 0)
-					printf("  %s\n", toIPString(addr.ip).c_str());
+					printf("  %s\n", addr.ip.toString().c_str());
 				else
 					printf("  %s\n", addr.toString().c_str());
 			}
@@ -2152,7 +2214,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 
@@ -2240,6 +2302,7 @@ struct CLIOptions {
 	std::string clusterFile;
 	bool trace;
 	std::string traceDir;
+	std::string traceFormat;
 	int exit_timeout;
 	Optional<std::string> exec;
 	bool initialStatusCheck;
@@ -2336,9 +2399,10 @@ struct CLIOptions {
 			case OPT_STATUS_FROM_JSON:
 				return printStatusFromJSON(args.OptionArg());
 			case OPT_TRACE_FORMAT:
-				if (!selectTraceFormatter(args.OptionArg())) {
+				if (!validateTraceFormat(args.OptionArg())) {
 					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 				}
+				traceFormat = args.OptionArg();
 				break;
 			case OPT_VERSION:
 				printVersion();
@@ -2558,7 +2622,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if( tokencmp(tokens[0], "waitopen")) {
-					Version _ = wait( getTransaction(db,tr,options,intrans)->getReadVersion() );
+					wait(success( getTransaction(db,tr,options,intrans)->getReadVersion() ));
 					continue;
 				}
 
@@ -2778,11 +2842,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
-					if(tokens.size() != 1) {
+					if(tokens.size() != 2) {
 						printUsage(tokens[0]);
 						is_error = true;
+						continue;
 					}
-					wait( makeInterruptable( forceRecovery( ccf ) ) );
+					wait( makeInterruptable( forceRecovery( ccf, tokens[1] ) ) );
 					continue;
 				}
 
@@ -3169,10 +3234,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						if(tokencmp(tokens[1], "on")) {
-							int _ = wait(setDDMode(db, 1));
+							wait(success(setDDMode(db, 1)));
 							printf("Data distribution is enabled\n");
 						} else if(tokencmp(tokens[1], "off")) {
-							int _ = wait(setDDMode(db, 0));
+							wait(success(setDDMode(db, 0)));
 							printf("Data distribution is disabled\n");
 						} else {
 							printf("Usage: datadistribution <on|off>\n");
@@ -3332,6 +3397,9 @@ int main(int argc, char **argv) {
 		else
 			setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(opt.traceDir));
 
+		if (!opt.traceFormat.empty()) {
+			setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(opt.traceFormat));
+		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
 	}
 

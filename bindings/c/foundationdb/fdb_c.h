@@ -99,7 +99,7 @@ extern "C" {
     } FDBKeyValue;
 #pragma pack(pop)
 
-    DLLEXPORT void fdb_future_cancel( FDBFuture *f );
+    DLLEXPORT void fdb_future_cancel( FDBFuture* f );
 
     DLLEXPORT void fdb_future_release_memory( FDBFuture* f );
 

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(SolutionDir)versions.target" />
   <PropertyGroup Condition="'$(Release)' != 'true' ">
@@ -57,7 +57,9 @@
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="MemoryPager.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
-    <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ClCompile Include="LatencyBandConfig.cpp" />
+    <ActorCompiler Include="OldTLogServer_4_6.actor.cpp" />
+    <ActorCompiler Include="OldTLogServer_6_0.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
@@ -115,6 +117,7 @@
     <ActorCompiler Include="workloads\SelectorCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\KVStoreTest.actor.cpp" />
     <ActorCompiler Include="workloads\StreamingRead.actor.cpp" />
+    <ActorCompiler Include="workloads\Throttling.actor.cpp" />
     <ActorCompiler Include="workloads\Throughput.actor.cpp" />
     <ActorCompiler Include="workloads\WriteBandwidth.actor.cpp" />
     <ActorCompiler Include="workloads\QueuePush.actor.cpp" />
@@ -156,13 +159,17 @@
     <ClInclude Include="CoordinatedState.h" />
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="CoroFlow.h" />
-    <ClInclude Include="DataDistribution.h" />
+    <ActorCompiler Include="DataDistribution.actor.h">
+          <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ClInclude Include="DataDistributorInterface.h" />
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />
     <ClInclude Include="IKeyValueStore.h" />
     <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="IPager.h" />
     <ClInclude Include="IVersionedStore.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
     <ClInclude Include="LeaderElection.h" />
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="LogSystem.h" />
@@ -170,7 +177,10 @@
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
     <ClInclude Include="MemoryPager.h" />
-    <ClInclude Include="MoveKeys.h" />
+    <ActorCompiler Include="MoveKeys.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="NetworkTest.h" />
     <ActorCompiler Include="Orderer.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
@@ -181,7 +191,7 @@
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="QuietDatabase.h" />
-    <ClInclude Include="Ratekeeper.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
     <ClInclude Include="RestoreInterface.h" />
@@ -198,15 +208,21 @@
     <ClInclude Include="template_fdb.h" />
     <ClInclude Include="TLogInterface.h" />
     <ClInclude Include="WaitFailure.h" />
-    <ClInclude Include="TesterInterface.h" />
-    <ClInclude Include="WorkerInterface.h" />
+    <ActorCompiler Include="TesterInterface.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="WorkerInterface.actor.h" />
     <ActorCompiler Include="workloads\BulkSetup.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
     <ActorCompiler Include="workloads\AsyncFile.actor.h" />
     <ClInclude Include="workloads\ApiWorkload.h" />
     <ClInclude Include="workloads\MemoryKeyValueStore.h" />
-    <ClInclude Include="workloads\workloads.h" />
+    <ActorCompiler Include="workloads\workloads.actor.h">
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
+      <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
+    </ActorCompiler>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{8E959DA5-5925-45CE-BFC4-C84EB632A29A}</ProjectGUID>
@@ -239,11 +255,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_52_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
     <CustomBuildBeforeTargets>PreBuildEvent</CustomBuildBeforeTargets>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -264,7 +280,7 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;NTDDI_VERSION=0x05020000;_DEBUG;_HAS_ITERATOR_DEBUGGING=0;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
@@ -285,7 +301,7 @@
       <Optimization>Full</Optimization>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TLS_DISABLED;WIN32;_WIN32_WINNT=0x0502;WINVER=0x0502;BOOST_ALL_NO_LIB;NTDDI_VERSION=0x05020000;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <EnablePREfast>false</EnablePREfast>

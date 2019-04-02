@@ -43,7 +43,7 @@ public:
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
 
-	KeyValueRef const& kv( Arena& arena );
+	const KeyValueRef* kv(Arena& arena);
 
 	RYWIterator& operator++();
 

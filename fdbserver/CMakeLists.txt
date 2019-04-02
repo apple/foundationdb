@@ -10,9 +10,10 @@ set(FDBSERVER_SRCS
   CoroFlow.actor.cpp
   CoroFlow.h
   DataDistribution.actor.cpp
-  DataDistribution.h
+  DataDistribution.actor.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
+  DataDistributorInterface.h
   DBCoreState.h
   DiskQueue.actor.cpp
   fdbserver.actor.cpp
@@ -27,6 +28,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
+  LatencyBandConfig.cpp
+  LatencyBandConfig.h
   LeaderElection.actor.cpp
   LeaderElection.h
   LogProtocolMessage.h
@@ -42,17 +45,18 @@ set(FDBSERVER_SRCS
   MemoryPager.actor.cpp
   MemoryPager.h
   MoveKeys.actor.cpp
-  MoveKeys.h
+  MoveKeys.actor.h
   networktest.actor.cpp
   NetworkTest.h
-  OldTLogServer.actor.cpp
+  OldTLogServer_4_6.actor.cpp
+  OldTLogServer_6_0.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h
   QuietDatabase.actor.cpp
   QuietDatabase.h
   Ratekeeper.actor.cpp
-  Ratekeeper.h
+  RatekeeperInterface.h
   RecoveryState.h
   Restore.actor.cpp
   RestoreInterface.h
@@ -77,7 +81,7 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   template_fdb.h
   tester.actor.cpp
-  TesterInterface.h
+  TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp
@@ -85,7 +89,7 @@ set(FDBSERVER_SRCS
   WaitFailure.actor.cpp
   WaitFailure.h
   worker.actor.cpp
-  WorkerInterface.h
+  WorkerInterface.actor.h
   workloads/ApiCorrectness.actor.cpp
   workloads/ApiWorkload.actor.cpp
   workloads/ApiWorkload.h
@@ -126,6 +130,7 @@ set(FDBSERVER_SRCS
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
   workloads/KVStoreTest.actor.cpp
+  workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
@@ -158,6 +163,7 @@ set(FDBSERVER_SRCS
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
+  workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
   workloads/UnitPerf.actor.cpp
@@ -167,19 +173,16 @@ set(FDBSERVER_SRCS
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
   workloads/WorkerErrors.actor.cpp
-  workloads/workloads.h
+  workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
-actor_set(FDBSERVER_BUILD "${FDBSERVER_SRCS}")
-add_executable(fdbserver ${FDBSERVER_BUILD})
-actor_compile(fdbserver "${FDBSERVER_SRCS}")
+add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient)
 
-install(TARGETS fdbserver DESTINATION ${FDB_SBIN_DIR} COMPONENT server)
-
+fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)

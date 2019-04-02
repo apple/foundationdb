@@ -77,31 +77,6 @@ import com.apple.foundationdb.tuple.Tuple;
 public interface Transaction extends AutoCloseable, ReadTransaction, TransactionContext {
 
 	/**
-	 * Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
-	 * Snapshot reads selectively relax FoundationDB's isolation property, reducing
-	 * <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
-	 * but making reasoning about concurrency harder.<br>
-	 * <br>
-	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
-	 *
-	 * @return a read-only view of this {@code Transaction} with relaxed isolation properties
-	 */
-	ReadTransaction snapshot();
-
-	/**
-	 * Directly sets the version of the database at which to execute reads.  The
-	 *  normal operation of a transaction is to determine an appropriately recent
-	 *  version; this call overrides that behavior.  If the version is set too
-	 *  far in the past, {@code past_version} errors will be thrown from read operations.
-	 *  <i>Infrequently used.</i>
-	 *
-	 * @param version the version at which to read from the database
-	 */
-	void setReadVersion(long version);
-
-
-	/**
 	 * Adds a range of keys to the transaction's read conflict ranges as if you
 	 * had read the range. As a result, other transactions that write a key in
 	 * this range could cause the transaction to fail with a conflict.
@@ -116,7 +91,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * the key. As a result, other transactions that concurrently write this key
 	 * could cause the transaction to fail with a conflict.
 	 *
-	 * @param key the key to be added to the range
+	 * @param key the key to be added to the read conflict range set
 	 */
 	void addReadConflictKey(byte[] key);
 

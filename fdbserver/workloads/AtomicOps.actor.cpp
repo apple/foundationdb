@@ -19,11 +19,11 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AtomicOpsWorkload : TestWorkload {
@@ -165,47 +165,53 @@ struct AtomicOpsWorkload : TestWorkload {
 		state int g = 0;
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
+			state Standalone<RangeResultRef> log;
 			loop {
 				try {
-					Key begin(format("log%08x", g));
-					state Standalone<RangeResultRef> log = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
-					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
-					for(auto& kv : log) {
-						uint64_t intValue = 0;
-						memcpy(&intValue, kv.value.begin(), kv.value.size());
-						tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
-					}
-
-					Key begin(format("ops%08x", g));
-					Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
-					uint64_t zeroValue = 0;
-					tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
-					for(auto& kv : ops) {
-						uint64_t intValue = 0;
-						memcpy(&intValue, kv.value.begin(), kv.value.size());
-						tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
-					}
-
-					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-						TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
-					}
-
-					if( self->opType == MutationRef::AddValue ) {
-						uint64_t opsResult=0;
-						Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
-						memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
-						uint64_t logResult=0;
+					{
+						Key begin(format("log%08x", g));
+						Standalone<RangeResultRef> log_ = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+						log = log_;
+						uint64_t zeroValue = 0;
+						tr.set(LiteralStringRef("xlogResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
 						for(auto& kv : log) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
-							logResult += intValue;
-						}
-						if(logResult != opsResult) {
-							TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
+							tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
 						}
 					}
-					break;
+
+					{
+						Key begin(format("ops%08x", g));
+						Standalone<RangeResultRef> ops = wait( tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY) );
+						uint64_t zeroValue = 0;
+						tr.set(LiteralStringRef("xopsResult"), StringRef((const uint8_t*) &zeroValue, sizeof(zeroValue)));
+						for(auto& kv : ops) {
+							uint64_t intValue = 0;
+							memcpy(&intValue, kv.value.begin(), kv.value.size());
+							tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
+						}
+
+						if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
+							TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+						}
+
+						if( self->opType == MutationRef::AddValue ) {
+							uint64_t opsResult=0;
+							Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
+							memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
+							uint64_t logResult=0;
+							for(auto& kv : log) {
+								uint64_t intValue = 0;
+								memcpy(&intValue, kv.value.begin(), kv.value.size());
+								logResult += intValue;
+							}
+							if(logResult != opsResult) {
+								TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
+							}
+						}
+						break;
+					}
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
 				}

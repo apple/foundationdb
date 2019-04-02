@@ -60,7 +60,12 @@ class RandomGenerator(object):
             sign = -1 if random.random() < 0.5 else 1
             exponent = random.randint(-(1 << (exp_bits - 1)) - 10, (1 << (exp_bits - 1) - 1))
             mantissa = random.random()
-            return sign * math.pow(2, exponent) * mantissa
+
+            result = sign * math.pow(2, exponent) * mantissa
+            if random.random() < 0.05:
+                result = float(int(result))
+
+            return result
 
     def random_tuple(self, max_size, incomplete_versionstamps=False):
         size = random.randint(1, max_size)

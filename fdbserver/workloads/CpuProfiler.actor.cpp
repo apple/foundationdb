@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
@@ -69,11 +69,11 @@ struct CpuProfilerWorkload : TestWorkload
 			//If we are turning the profiler on, get a list of workers in the system
 			if(enabled)
 			{
-				vector<std::pair<WorkerInterface, ProcessClass>> _workers = wait( getWorkers( self->dbInfo ) );
+				vector<WorkerDetails> _workers = wait( getWorkers( self->dbInfo ) );
 				vector<WorkerInterface> workers;
 				for(int i = 0; i < _workers.size(); i++) {
-					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].second.toString()) != self->roles.cend()) {
-						workers.push_back(_workers[i].first);
+					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].processClass.toString()) != self->roles.cend()) {
+						workers.push_back(_workers[i].interf);
 					}
 				}
 				self->profilingWorkers = workers;
@@ -90,7 +90,8 @@ struct CpuProfilerWorkload : TestWorkload
 				req.duration = 0; //unused
 
 				//The profiler output name will be the ip.port.prof
-				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." + format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
+				req.outputFile = StringRef(self->profilingWorkers[i].address().ip.toString() + "." +
+				                           format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
 
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}

@@ -21,14 +21,18 @@
 package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -37,9 +41,11 @@ import com.apple.foundationdb.FDB;
 
 class TupleUtil {
 	private static final byte nil = 0x00;
-	private static final BigInteger[] size_limits;
-	private static final Charset UTF8;
-	private static final IterableComparator iterableComparator;
+	private static final Charset UTF8 = StandardCharsets.UTF_8;
+	private static final BigInteger LONG_MIN_VALUE = BigInteger.valueOf(Long.MIN_VALUE);
+	private static final BigInteger LONG_MAX_VALUE = BigInteger.valueOf(Long.MAX_VALUE);
+	private static final int UUID_BYTES = 2 * Long.BYTES;
+	private static final IterableComparator iterableComparator = new IterableComparator();
 
 	private static final byte BYTES_CODE            = 0x01;
 	private static final byte STRING_CODE           = 0x02;
@@ -56,81 +62,182 @@ class TupleUtil {
 
 	private static final byte[] NULL_ARR           = new byte[] {nil};
 	private static final byte[] NULL_ESCAPED_ARR   = new byte[] {nil, (byte)0xFF};
-	private static final byte[] BYTES_ARR          = new byte[]{0x01};
-	private static final byte[] STRING_ARR         = new byte[]{0x02};
-	private static final byte[] NESTED_ARR         = new byte[]{0x05};
-	private static final byte[] FALSE_ARR          = new byte[]{0x26};
-	private static final byte[] TRUE_ARR           = new byte[]{0x27};
-	private static final byte[] VERSIONSTAMP_ARR   = new byte[]{0x33};
 
-	static {
-		size_limits = new BigInteger[9];
-		for(int i = 0; i < 9; i++) {
-			size_limits[i] = (BigInteger.ONE).shiftLeft(i * 8).subtract(BigInteger.ONE);
+	static class DecodeState {
+		final List<Object> values;
+		int end;
+		int nullCount; // Basically a hack to allow findTerminator to return the terminator and null count
+
+		DecodeState() {
+			values = new ArrayList<>();
+			end = 0;
 		}
-		UTF8 = Charset.forName("UTF-8");
-		iterableComparator = new IterableComparator();
+
+		void add(Object value, int end) {
+			values.add(value);
+			this.end = end;
+		}
+
+		int findNullTerminator(byte[] bytes, int from, int to) {
+			nullCount = 0;
+			int x = from;
+			while(x < to) {
+				if(bytes[x] == 0x00) {
+					if(x + 1 >= to || bytes[x + 1] != (byte)0xFF) {
+						return x;
+					}
+					else {
+						nullCount++;
+						x += 2;
+					}
+				}
+				else {
+					x += 1;
+				}
+			}
+			throw new IllegalArgumentException("No terminator found for bytes starting at " + from);
+		}
 	}
 
-	static class DecodeResult {
-		final int end;
-		final Object o;
+	static class EncodeState {
+		final ByteBuffer encodedBytes;
+		int totalLength;
+		int versionPos;
 
-		DecodeResult(int pos, Object o) {
-			this.end = pos;
-			this.o = o;
+		EncodeState(ByteBuffer dest) {
+			encodedBytes = dest;
+			encodedBytes.order(ByteOrder.BIG_ENDIAN);
+			totalLength = 0;
+			versionPos = -1;
 		}
-	}
 
-	static class EncodeResult {
-		final int totalLength;
-		final int versionPos;
-
-		EncodeResult(int totalLength, int versionPos) {
-			this.totalLength = totalLength;
+		EncodeState add(byte[] encoded, int versionPos) {
+			if(versionPos >= 0 && this.versionPos >= 0) {
+				throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
+			}
+			encodedBytes.put(encoded);
+			totalLength += encoded.length;
 			this.versionPos = versionPos;
+			return this;
 		}
-	}
 
-	static int byteLength(byte[] bytes) {
-		for(int i = 0; i < bytes.length; i++) {
-			if(bytes[i] == 0x00) continue;
-			return bytes.length - i;
+		EncodeState add(byte[] encoded) {
+			encodedBytes.put(encoded);
+			totalLength += encoded.length;
+			return this;
 		}
-		return 0;
-	}
 
-	/**
-	 * Takes the Big-Endian byte representation of a floating point number and adjusts
-	 * it so that it sorts correctly. For encoding, if the sign bit is 1 (the number
-	 * is negative), then we need to flip all of the bits; otherwise, just flip the
-	 * sign bit. For decoding, if the sign bit is 0 (the number is negative), then
-	 * we also need to flip all of the bits; otherwise, just flip the sign bit.
-	 * This will mutate in place the given array.
-	 *
-	 * @param bytes Big-Endian IEEE encoding of a floating point number
-	 * @param start the (zero-indexed) first byte in the array to mutate
-	 * @param encode <code>true</code> if we encoding the float and <code>false</code> if we are decoding
-	 * @return the encoded {@code byte[]}
-	 */
-	static byte[] floatingPointCoding(byte[] bytes, int start, boolean encode) {
-		if(encode && (bytes[start] & (byte)0x80) != (byte)0x00) {
-			for(int i = start; i < bytes.length; i++) {
-				bytes[i] = (byte) (bytes[i] ^ 0xff);
+		EncodeState add(byte[] encoded, int offset, int length) {
+			encodedBytes.put(encoded, offset, length);
+			totalLength += length;
+			return this;
+		}
+
+		EncodeState addNullEscaped(byte[] encoded) {
+			int nullCount = ByteArrayUtil.nullCount(encoded);
+			if(nullCount == 0) {
+				encodedBytes.put(encoded);
 			}
-		} else if(!encode && (bytes[start] & (byte)0x80) != (byte)0x80) {
-			for(int i = start; i < bytes.length; i++) {
-				bytes[i] = (byte) (bytes[i] ^ 0xff);
+			else {
+				ByteArrayUtil.replace(encoded, 0, encoded.length, NULL_ARR, NULL_ESCAPED_ARR, encodedBytes);
 			}
-		} else {
-			bytes[start] = (byte) (0x80 ^ bytes[start]);
+			totalLength += encoded.length + nullCount;
+			return this;
 		}
 
-		return bytes;
+		EncodeState add(byte b) {
+			encodedBytes.put(b);
+			totalLength++;
+			return this;
+		}
+
+		EncodeState add(int i) {
+			encodedBytes.putInt(i);
+			totalLength += Integer.BYTES;
+			return this;
+		}
+
+		EncodeState add(long l) {
+			encodedBytes.putLong(l);
+			totalLength += Long.BYTES;
+			return this;
+		}
 	}
 
-	public static byte[] join(List<byte[]> items) {
-		return ByteArrayUtil.join(null, items);
+	private static boolean useOldVersionOffsetFormat() {
+		return FDB.instance().getAPIVersion() < 520;
+	}
+
+	// These four functions are for adjusting the encoding of floating point numbers so
+	// that when their byte representation is written out in big-endian order, unsigned
+	// lexicographic byte comparison orders the values in the same way as the semantic
+	// ordering of the values. This means flipping all bits for negative values and flipping
+	// only the most-significant bit (i.e., the sign bit as all values in Java are signed)
+	// in the case that the number is positive. For these purposes, 0.0 is positive and -0.0
+	// is negative.
+
+	private static int encodeFloatBits(float f) {
+		int intBits = Float.floatToRawIntBits(f);
+		return (intBits < 0) ? (~intBits) : (intBits ^ Integer.MIN_VALUE);
+	}
+
+	private static long encodeDoubleBits(double d) {
+		long longBits = Double.doubleToRawLongBits(d);
+		return (longBits < 0L) ? (~longBits) : (longBits ^ Long.MIN_VALUE);
+	}
+
+	private static float decodeFloatBits(int i) {
+		int origBits = (i >= 0) ? (~i) : (i ^ Integer.MIN_VALUE);
+		return Float.intBitsToFloat(origBits);
+	}
+
+	private static double decodeDoubleBits(long l) {
+		long origBits = (l >= 0) ? (~l) : (l ^ Long.MIN_VALUE);
+		return Double.longBitsToDouble(origBits);
+	}
+
+	// Get the minimal number of bytes in the representation of a long.
+	private static int minimalByteCount(long i) {
+		return (Long.SIZE + 7 - Long.numberOfLeadingZeros(i >= 0 ? i : -i)) / 8;
+	}
+
+	private static int minimalByteCount(BigInteger i) {
+		int bitLength = (i.compareTo(BigInteger.ZERO) >= 0) ? i.bitLength() : i.negate().bitLength();
+		return (bitLength + 7) / 8;
+	}
+
+	private static void adjustVersionPosition300(byte[] packed, int delta) {
+		int offsetOffset = packed.length - Short.BYTES;
+		ByteBuffer buffer = ByteBuffer.wrap(packed, offsetOffset, Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+		int versionPosition = buffer.getShort() + delta;
+		if(versionPosition > 0xffff) {
+			throw new IllegalArgumentException("Tuple has incomplete version at position " + versionPosition + " which is greater than the maximum " + 0xffff);
+		}
+		if(versionPosition < 0) {
+			throw new IllegalArgumentException("Tuple has an incomplete version at a negative position");
+		}
+		buffer.position(offsetOffset);
+		buffer.putShort((short)versionPosition);
+	}
+
+	private static void adjustVersionPosition520(byte[] packed, int delta) {
+		int offsetOffset = packed.length - Integer.BYTES;
+		ByteBuffer buffer = ByteBuffer.wrap(packed, offsetOffset, Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+		int versionPosition = buffer.getInt() + delta;
+		if(versionPosition < 0) {
+			throw new IllegalArgumentException("Tuple has an incomplete version at a negative position");
+		}
+		buffer.position(offsetOffset);
+		buffer.putInt(versionPosition);
+	}
+
+	static void adjustVersionPosition(byte[] packed, int delta) {
+		if(useOldVersionOffsetFormat()) {
+			adjustVersionPosition300(packed, delta);
+		}
+		else {
+			adjustVersionPosition520(packed, delta);
+		}
 	}
 
 	static int getCodeFor(Object o) {
@@ -159,318 +266,334 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unsupported data type: " + o.getClass().getName());
 	}
 
-	static EncodeResult encode(Object t, boolean nested, List<byte[]> encoded) {
+	static void encode(EncodeState state, Object t, boolean nested) {
 		if(t == null) {
 			if(nested) {
-				encoded.add(NULL_ESCAPED_ARR);
-				return new EncodeResult(NULL_ESCAPED_ARR.length, -1);
+				state.add(NULL_ESCAPED_ARR);
 			}
 			else {
-				encoded.add(NULL_ARR);
-				return new EncodeResult(NULL_ARR.length, -1);
+				state.add(nil);
 			}
 		}
-		if(t instanceof byte[])
-			return encode((byte[]) t, encoded);
-		if(t instanceof String)
-			return encode((String)t, encoded);
-		if(t instanceof BigInteger)
-			return encode((BigInteger)t, encoded);
-		if(t instanceof Float)
-			return encode((Float)t, encoded);
-		if(t instanceof Double)
-			return encode((Double)t, encoded);
-		if(t instanceof Boolean)
-			return encode((Boolean)t, encoded);
-		if(t instanceof UUID)
-			return encode((UUID)t, encoded);
-		if(t instanceof Number)
-			return encode(((Number)t).longValue(), encoded);
-		if(t instanceof Versionstamp)
-			return encode((Versionstamp)t, encoded);
-		if(t instanceof List<?>)
-			return encode((List<?>)t, encoded);
-		if(t instanceof Tuple)
-			return encode(((Tuple)t).getItems(), encoded);
-		throw new IllegalArgumentException("Unsupported data type: " + t.getClass().getName());
+		else if(t instanceof byte[])
+			encode(state, (byte[]) t);
+		else if(t instanceof String)
+			encode(state, (String)t);
+		else if(t instanceof Float)
+			encode(state, (Float)t);
+		else if(t instanceof Double)
+			encode(state, (Double)t);
+		else if(t instanceof Boolean)
+			encode(state, (Boolean)t);
+		else if(t instanceof UUID)
+			encode(state, (UUID)t);
+		else if(t instanceof BigInteger)
+			encode(state, (BigInteger)t);
+		else if(t instanceof Number)
+			encode(state, ((Number)t).longValue());
+		else if(t instanceof Versionstamp)
+			encode(state, (Versionstamp)t);
+		else if(t instanceof List<?>)
+			encode(state, (List<?>)t);
+		else if(t instanceof Tuple)
+			encode(state, (Tuple)t);
+		else
+			throw new IllegalArgumentException("Unsupported data type: " + t.getClass().getName());
 	}
 
-	static EncodeResult encode(Object t, List<byte[]> encoded) {
-		return encode(t, false, encoded);
+	static void encode(EncodeState state, Object t) {
+		encode(state, t, false);
 	}
 
-	static EncodeResult encode(byte[] bytes, List<byte[]> encoded) {
-		encoded.add(BYTES_ARR);
-		byte[] escaped = ByteArrayUtil.replace(bytes, NULL_ARR, NULL_ESCAPED_ARR);
-		encoded.add(escaped);
-		encoded.add(new byte[] {nil});
-
-		//System.out.println("Joining bytes...");
-		return new EncodeResult(2 + escaped.length,-1);
+	static void encode(EncodeState state, byte[] bytes) {
+		state.add(BYTES_CODE).addNullEscaped(bytes).add(nil);
 	}
 
-	static EncodeResult encode(String s, List<byte[]> encoded) {
-		encoded.add(STRING_ARR);
-		byte[] escaped = ByteArrayUtil.replace(s.getBytes(UTF8), NULL_ARR, NULL_ESCAPED_ARR);
-		encoded.add(escaped);
-		encoded.add(NULL_ARR);
-
-		//System.out.println("Joining string...");
-		return new EncodeResult(2 + escaped.length, -1);
+	static void encode(EncodeState state, String s) {
+		StringUtil.validate(s);
+		byte[] bytes = s.getBytes(UTF8);
+		state.add(STRING_CODE).addNullEscaped(bytes).add(nil);
 	}
 
-	static EncodeResult encode(BigInteger i, List<byte[]> encoded) {
+	static void encode(EncodeState state, BigInteger i) {
 		//System.out.println("Encoding integral " + i);
 		if(i.equals(BigInteger.ZERO)) {
-			encoded.add(new byte[]{INT_ZERO_CODE});
-			return new EncodeResult(1,-1);
+			state.add(INT_ZERO_CODE);
+			return;
 		}
-		byte[] bytes = i.toByteArray();
+		int n = minimalByteCount(i);
+		if(n > 0xff) {
+			throw new IllegalArgumentException("BigInteger magnitude is too large (more than 255 bytes)");
+		}
 		if(i.compareTo(BigInteger.ZERO) > 0) {
-			if(i.compareTo(size_limits[size_limits.length-1]) > 0) {
-				int length = byteLength(bytes);
-				if(length > 0xff) {
-					throw new IllegalArgumentException("BigInteger magnitude is too large (more than 255 bytes)");
+			byte[] bytes = i.toByteArray();
+			if(n > Long.BYTES) {
+				state.add(POS_INT_END);
+				state.add((byte)n);
+				state.add(bytes, bytes.length - n, n);
+			}
+			else {
+				//System.out.println("  -- integral has 'n' of " + n + " and output bytes of " + bytes.length);
+				state.add((byte)(INT_ZERO_CODE + n));
+				state.add(bytes, bytes.length - n, n);
+			}
+		}
+		else {
+			byte[] bytes = i.subtract(BigInteger.ONE).toByteArray();
+			if(n > Long.BYTES) {
+				state.add(NEG_INT_START);
+				state.add((byte)(n ^ 0xff));
+				if(bytes.length >= n) {
+					state.add(bytes, bytes.length - n, n);
 				}
-				byte[] result = new byte[length + 2];
-				result[0] = POS_INT_END;
-				result[1] = (byte)(length);
-				System.arraycopy(bytes, bytes.length - length, result, 2, length);
-				encoded.add(result);
-				return new EncodeResult(result.length, -1);
+				else {
+					for(int x = 0; x < n - bytes.length; x++) {
+						state.add((byte)0x00);
+					}
+					state.add(bytes, 0, bytes.length);
+				}
 			}
-			int n = ByteArrayUtil.bisectLeft(size_limits, i);
-			assert n <= size_limits.length;
-			//byte[] bytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(i).array();
-			//System.out.println("  -- integral has 'n' of " + n + " and output bytes of " + bytes.length);
-			byte[] result = new byte[n+1];
-			result[0] = (byte)(INT_ZERO_CODE + n);
-			System.arraycopy(bytes, bytes.length - n, result, 1, n);
-			encoded.add(result);
-			return new EncodeResult(result.length, -1);
-		}
-		if(i.negate().compareTo(size_limits[size_limits.length-1]) > 0) {
-			int length = byteLength(i.negate().toByteArray());
-			if(length > 0xff) {
-				throw new IllegalArgumentException("BigInteger magnitude is too large (more than 255 bytes)");
+			else {
+				state.add((byte)(INT_ZERO_CODE - n));
+				if(bytes.length >= n) {
+					state.add(bytes, bytes.length - n, n);
+				}
+				else {
+					for(int x = 0; x < n - bytes.length; x++) {
+						state.add((byte)0x00);
+					}
+					state.add(bytes, 0, bytes.length);
+				}
 			}
-			BigInteger offset = BigInteger.ONE.shiftLeft(length*8).subtract(BigInteger.ONE);
-			byte[] adjusted = i.add(offset).toByteArray();
-			byte[] result = new byte[length + 2];
-			result[0] = NEG_INT_START;
-			result[1] = (byte)(length ^ 0xff);
-			if(adjusted.length >= length) {
-				System.arraycopy(adjusted, adjusted.length - length, result, 2, length);
-			} else {
-				Arrays.fill(result, 2, result.length - adjusted.length, (byte)0x00);
-				System.arraycopy(adjusted, 0, result, result.length - adjusted.length, adjusted.length);
-			}
-			encoded.add(result);
-			return new EncodeResult(result.length, -1);
 		}
-		int n = ByteArrayUtil.bisectLeft(size_limits, i.negate());
-
-		assert n >= 0 && n < size_limits.length; // can we do this? it seems to be required for the following statement
-
-		long maxv = size_limits[n].add(i).longValue();
-		byte[] adjustedBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(maxv).array();
-		byte[] result = new byte[n+1];
-		result[0] = (byte)(20 - n);
-		System.arraycopy(adjustedBytes, adjustedBytes.length - n, result, 1, n);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
 	}
 
-	static EncodeResult encode(Integer i, List<byte[]> encoded) {
-		return encode(i.longValue(), encoded);
-	}
-
-	static EncodeResult encode(long i, List<byte[]> encoded) {
-		return encode(BigInteger.valueOf(i), encoded);
-	}
-
-	static EncodeResult encode(Float f, List<byte[]> encoded) {
-		byte[] result = ByteBuffer.allocate(5).order(ByteOrder.BIG_ENDIAN).put(FLOAT_CODE).putFloat(f).array();
-		floatingPointCoding(result, 1, true);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
-	}
-
-	static EncodeResult encode(Double d, List<byte[]> encoded) {
-		byte[] result = ByteBuffer.allocate(9).order(ByteOrder.BIG_ENDIAN).put(DOUBLE_CODE).putDouble(d).array();
-		floatingPointCoding(result, 1, true);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
-	}
-
-	static EncodeResult encode(Boolean b, List<byte[]> encoded) {
-		if (b) {
-			encoded.add(TRUE_ARR);
-		} else {
-			encoded.add(FALSE_ARR);
+	static void encode(EncodeState state, long i) {
+		if(i == 0L) {
+			state.add(INT_ZERO_CODE);
+			return;
 		}
-		return new EncodeResult(1, -1);
+		int n = minimalByteCount(i);
+		// First byte encodes number of bytes (as difference from INT_ZERO_CODE)
+		state.add((byte)(INT_ZERO_CODE + (i >= 0 ? n : -n)));
+		// For positive integers, copy the bytes in big-endian order excluding leading 0x00 bytes.
+		// For negative integers, copy the bytes of the one's complement representation excluding
+		// the leading 0xff bytes. As Java stores negative values in two's complement, we subtract 1
+		// from negative values.
+		long val = Long.reverseBytes((i >= 0) ? i : (i - 1)) >> (Long.SIZE - 8 * n);
+		for(int x = 0; x < n; x++) {
+			state.add((byte)(val & 0xff));
+			val >>= 8;
+		}
 	}
 
-	static EncodeResult encode(UUID uuid, List<byte[]> encoded) {
-		byte[] result = ByteBuffer.allocate(17).put(UUID_CODE).order(ByteOrder.BIG_ENDIAN)
-				.putLong(uuid.getMostSignificantBits()).putLong(uuid.getLeastSignificantBits())
-				.array();
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
+	static void encode(EncodeState state, Float f) {
+		state.add(FLOAT_CODE).add(encodeFloatBits(f));
 	}
 
-	static EncodeResult encode(Versionstamp v, List<byte[]> encoded) {
-		encoded.add(VERSIONSTAMP_ARR);
-		encoded.add(v.getBytes());
-		return new EncodeResult(1 + Versionstamp.LENGTH, (v.isComplete() ? -1 : 1));
+	static void encode(EncodeState state, Double d) {
+		state.add(DOUBLE_CODE).add(encodeDoubleBits(d));
 	}
 
-	static EncodeResult encode(List<?> value, List<byte[]> encoded) {
-		int lenSoFar = 0;
-		int versionPos = -1;
-		encoded.add(NESTED_ARR);
+	static void encode(EncodeState state, Boolean b) {
+		state.add(b ? TRUE_CODE : FALSE_CODE);
+	}
+
+	static void encode(EncodeState state, UUID uuid) {
+		state.add(UUID_CODE).add(uuid.getMostSignificantBits()).add(uuid.getLeastSignificantBits());
+	}
+
+	static void encode(EncodeState state, Versionstamp v) {
+		state.add(VERSIONSTAMP_CODE);
+		if(v.isComplete()) {
+			state.add(v.getBytes());
+		}
+		else {
+			state.add(v.getBytes(), state.totalLength);
+		}
+	}
+
+	static void encode(EncodeState state, List<?> value) {
+		state.add(NESTED_CODE);
 		for(Object t : value) {
-			EncodeResult childResult = encode(t, true, encoded);
-			if(childResult.versionPos > 0) {
-				if(versionPos > 0) {
-					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
-				}
-				versionPos = lenSoFar + childResult.versionPos;
-			}
-			lenSoFar += childResult.totalLength;
+			encode(state, t, true);
 		}
-		encoded.add(NULL_ARR);
-		return new EncodeResult(lenSoFar + 2, (versionPos < 0 ? -1 : versionPos + 1));
+		state.add(nil);
 	}
 
-	static DecodeResult decode(byte[] rep, int pos, int last) {
+	static void encode(EncodeState state, Tuple value) {
+		encode(state, value.elements);
+	}
+
+	static void decode(DecodeState state, byte[] rep, int pos, int last) {
 		//System.out.println("Decoding '" + ArrayUtils.printable(rep) + "' at " + pos);
 
 		// SOMEDAY: codes over 127 will be a problem with the signed Java byte mess
 		int code = rep[pos];
 		int start = pos + 1;
 		if(code == nil) {
-			return new DecodeResult(start, null);
+			state.add(null, start);
 		}
-		if(code == BYTES_CODE) {
-			int end = ByteArrayUtil.findTerminator(rep, (byte)0x0, (byte)0xff, start, last);
+		else if(code == BYTES_CODE) {
+			int end = state.findNullTerminator(rep, start, last);
 			//System.out.println("End of byte string: " + end);
-			byte[] range = ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, new byte[] { nil });
+			byte[] range;
+			if(state.nullCount == 0) {
+				range = Arrays.copyOfRange(rep, start, end);
+			}
+			else {
+				ByteBuffer dest = ByteBuffer.allocate(end - start - state.nullCount);
+				ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, NULL_ARR, dest);
+				range = dest.array();
+			}
 			//System.out.println(" -> byte string contents: '" + ArrayUtils.printable(range) + "'");
-			return new DecodeResult(end + 1, range);
+			state.add(range, end + 1);
 		}
-		if(code == STRING_CODE) {
-			int end = ByteArrayUtil.findTerminator(rep, (byte)0x0, (byte)0xff, start, last);
+		else if(code == STRING_CODE) {
+			int end = state.findNullTerminator(rep, start, last);
 			//System.out.println("End of UTF8 string: " + end);
-			byte[] stringBytes = ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, new byte[] { nil });
-			String str = new String(stringBytes, UTF8);
+			String str;
+			ByteBuffer byteBuffer;
+			if(state.nullCount == 0) {
+				byteBuffer = ByteBuffer.wrap(rep, start, end - start);
+			}
+			else {
+				byteBuffer = ByteBuffer.allocate(end - start - state.nullCount);
+				ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, NULL_ARR, byteBuffer);
+				byteBuffer.position(0);
+			}
+			try {
+				CharsetDecoder decoder = UTF8.newDecoder().onMalformedInput(CodingErrorAction.REPORT);
+				str = decoder.decode(byteBuffer).toString();
+			}
+			catch(CharacterCodingException e) {
+				throw new IllegalArgumentException("malformed UTF-8 string", e);
+			}
 			//System.out.println(" -> UTF8 string contents: '" + str + "'");
-			return new DecodeResult(end + 1, str);
+			state.add(str, end + 1);
 		}
-		if(code == FLOAT_CODE) {
-			byte[] resBytes = Arrays.copyOfRange(rep, start, start+4);
-			floatingPointCoding(resBytes, 0, false);
-			float res = ByteBuffer.wrap(resBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
-			return new DecodeResult(start + 4, res);
+		else if(code == FLOAT_CODE) {
+			int rawFloatBits = ByteBuffer.wrap(rep, start, Float.BYTES).getInt();
+			float res = decodeFloatBits(rawFloatBits);
+			state.add(res, start + Float.BYTES);
 		}
-		if(code == DOUBLE_CODE) {
-			byte[] resBytes = Arrays.copyOfRange(rep, start, start+8);
-			floatingPointCoding(resBytes, 0, false);
-			double res = ByteBuffer.wrap(resBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
-			return new DecodeResult(start + 8, res);
+		else if(code == DOUBLE_CODE) {
+			long rawDoubleBits = ByteBuffer.wrap(rep, start, Double.BYTES).getLong();
+			double res = decodeDoubleBits(rawDoubleBits);
+			state.add(res, start + Double.BYTES);
 		}
-		if(code == FALSE_CODE) {
-			return new DecodeResult(start, false);
+		else if(code == FALSE_CODE) {
+			state.add(false, start);
 		}
-		if(code == TRUE_CODE) {
-			return new DecodeResult(start, true);
+		else if(code == TRUE_CODE) {
+			state.add(true, start);
 		}
-		if(code == UUID_CODE) {
-			ByteBuffer bb = ByteBuffer.wrap(rep, start, 16).order(ByteOrder.BIG_ENDIAN);
+		else if(code == UUID_CODE) {
+			ByteBuffer bb = ByteBuffer.wrap(rep, start, UUID_BYTES).order(ByteOrder.BIG_ENDIAN);
 			long msb = bb.getLong();
 			long lsb = bb.getLong();
-			return new DecodeResult(start + 16, new UUID(msb, lsb));
+			state.add(new UUID(msb, lsb), start + UUID_BYTES);
 		}
-		if(code == POS_INT_END) {
+		else if(code == POS_INT_END) {
 			int n = rep[start] & 0xff;
-			return new DecodeResult(start + n + 1, new BigInteger(ByteArrayUtil.join(new byte[]{0x00}, Arrays.copyOfRange(rep, start+1, start+n+1))));
+			byte[] intBytes = new byte[n + 1];
+			System.arraycopy(rep, start + 1, intBytes, 1, n);
+			BigInteger res = new BigInteger(intBytes);
+			state.add(res, start + n + 1);
 		}
-		if(code == NEG_INT_START) {
+		else if(code == NEG_INT_START) {
 			int n = (rep[start] ^ 0xff) & 0xff;
-			BigInteger origValue = new BigInteger(ByteArrayUtil.join(new byte[]{0x00}, Arrays.copyOfRange(rep, start+1, start+n+1)));
+			byte[] intBytes = new byte[n + 1];
+			System.arraycopy(rep, start + 1, intBytes, 1, n);
+			BigInteger origValue = new BigInteger(intBytes);
 			BigInteger offset = BigInteger.ONE.shiftLeft(n*8).subtract(BigInteger.ONE);
-			return new DecodeResult(start + n + 1, origValue.subtract(offset));
+			state.add(origValue.subtract(offset), start + n + 1);
 		}
-		if(code > NEG_INT_START && code < POS_INT_END) {
+		else if(code > NEG_INT_START && code < POS_INT_END) {
 			// decode a long
-			byte[] longBytes = new byte[9];
-			boolean upper = code >= INT_ZERO_CODE;
-			int n = upper ? code - 20 : 20 - code;
+			boolean positive = code >= INT_ZERO_CODE;
+			int n = positive ? code - INT_ZERO_CODE : INT_ZERO_CODE - code;
 			int end = start + n;
 
-			if(rep.length < end) {
-				throw new RuntimeException("Invalid tuple (possible truncation)");
+			if(last < end) {
+				throw new IllegalArgumentException("Invalid tuple (possible truncation)");
 			}
 
-			System.arraycopy(rep, start, longBytes, longBytes.length-n, n);
-			if (!upper)
-				for(int i=longBytes.length-n; i<longBytes.length; i++)
-					longBytes[i] = (byte)(longBytes[i] ^ 0xff);
-
-			BigInteger val = new BigInteger(longBytes);
-			if (!upper) val = val.negate();
-
-			// Convert to long if in range -- otherwise, leave as BigInteger.
-			if (val.compareTo(BigInteger.valueOf(Long.MIN_VALUE))<0||
-				val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
-				// This can occur if the thing can be represented with 8 bytes but not
-				// the right sign information.
-				return new DecodeResult(end, val);
+			if(positive && (n < Long.BYTES || rep[start] > 0)) {
+				long res = 0L;
+				for(int i = start; i < end; i++) {
+					res = (res << 8) | (rep[i] & 0xff);
+				}
+				state.add(res, end);
 			}
-			return new DecodeResult(end, val.longValue());
+			else if(!positive && (n < Long.BYTES || rep[start] < 0)) {
+				long res = ~0L;
+				for(int i = start; i < end; i++) {
+					res = (res << 8) | (rep[i] & 0xff);
+				}
+				state.add(res + 1, end);
+			}
+			else {
+				byte[] longBytes = new byte[9];
+				System.arraycopy(rep, start, longBytes, longBytes.length-n, n);
+				if (!positive)
+					for(int i=longBytes.length-n; i<longBytes.length; i++)
+						longBytes[i] = (byte)(longBytes[i] ^ 0xff);
+
+				BigInteger val = new BigInteger(longBytes);
+				if (!positive) val = val.negate();
+
+				// Convert to long if in range -- otherwise, leave as BigInteger.
+				if (val.compareTo(LONG_MIN_VALUE) >= 0 && val.compareTo(LONG_MAX_VALUE) <= 0) {
+					state.add(val.longValue(), end);
+				} else {
+					// This can occur if the thing can be represented with 8 bytes but requires using
+					// the most-significant bit as a normal bit instead of the sign bit.
+					state.add(val, end);
+				}
+			}
 		}
-		if(code == VERSIONSTAMP_CODE) {
-			return new DecodeResult(
-					start + Versionstamp.LENGTH,
-					Versionstamp.fromBytes(Arrays.copyOfRange(rep, start, start + Versionstamp.LENGTH)));
+		else if(code == VERSIONSTAMP_CODE) {
+			if(start + Versionstamp.LENGTH > last) {
+				throw new IllegalArgumentException("Invalid tuple (possible truncation)");
+			}
+			Versionstamp val = Versionstamp.fromBytes(Arrays.copyOfRange(rep, start, start + Versionstamp.LENGTH));
+			state.add(val, start + Versionstamp.LENGTH);
 		}
-		if(code == NESTED_CODE) {
-			List<Object> items = new LinkedList<Object>();
+		else if(code == NESTED_CODE) {
+			DecodeState subResult = new DecodeState();
 			int endPos = start;
-			while(endPos < rep.length) {
+			boolean foundEnd = false;
+			while(endPos < last) {
 				if(rep[endPos] == nil) {
-					if(endPos + 1 < rep.length && rep[endPos+1] == (byte)0xff) {
-						items.add(null);
+					if(endPos + 1 < last && rep[endPos+1] == (byte)0xff) {
+						subResult.add(null, endPos + 2);
 						endPos += 2;
 					} else {
 						endPos += 1;
+						foundEnd = true;
 						break;
 					}
 				} else {
-					DecodeResult subResult = decode(rep, endPos, last);
-					items.add(subResult.o);
+					decode(subResult, rep, endPos, last);
 					endPos = subResult.end;
 				}
 			}
-			return new DecodeResult(endPos, items);
+			if(!foundEnd) {
+				throw new IllegalArgumentException("No terminator found for nested tuple starting at " + start);
+			}
+			state.add(subResult.values, endPos);
 		}
-		throw new IllegalArgumentException("Unknown tuple data type " + code + " at index " + pos);
-	}
-
-	static int compareSignedBigEndian(byte[] arr1, byte[] arr2) {
-		if(arr1[0] < 0 && arr2[0] < 0) {
-			return -1 * ByteArrayUtil.compareUnsigned(arr1, arr2);
-		} else if(arr1[0] < 0) {
-			return -1;
-		} else if(arr2[0] < 0) {
-			return 1;
-		} else {
-			return ByteArrayUtil.compareUnsigned(arr1, arr2);
+		else {
+			throw new IllegalArgumentException("Unknown tuple data type " + code + " at index " + pos);
 		}
 	}
 
 	static int compareItems(Object item1, Object item2) {
+		if(item1 == item2) {
+			// If we have pointer equality, just return 0 immediately.
+			return 0;
+		}
 		int code1 = TupleUtil.getCodeFor(item1);
 		int code2 = TupleUtil.getCodeFor(item2);
 
@@ -486,36 +609,42 @@ class TupleUtil {
 			return ByteArrayUtil.compareUnsigned((byte[])item1, (byte[])item2);
 		}
 		if(code1 == STRING_CODE) {
-			return ByteArrayUtil.compareUnsigned(((String)item1).getBytes(UTF8), ((String)item2).getBytes(UTF8));
+			return StringUtil.compareUtf8((String)item1, (String)item2);
 		}
 		if(code1 == INT_ZERO_CODE) {
-			BigInteger bi1;
-			if(item1 instanceof BigInteger) {
-				bi1 = (BigInteger)item1;
-			} else {
-				bi1 = BigInteger.valueOf(((Number)item1).longValue());
+			if(item1 instanceof Long && item2 instanceof Long) {
+				// This should be the common case, so it's probably worth including as a way out.
+				return Long.compare((Long)item1, (Long)item2);
 			}
-			BigInteger bi2;
-			if(item2 instanceof BigInteger) {
-				bi2 = (BigInteger)item2;
-			} else {
-				bi2 = BigInteger.valueOf(((Number)item2).longValue());
+			else {
+				BigInteger bi1;
+				if (item1 instanceof BigInteger) {
+					bi1 = (BigInteger) item1;
+				} else {
+					bi1 = BigInteger.valueOf(((Number) item1).longValue());
+				}
+				BigInteger bi2;
+				if (item2 instanceof BigInteger) {
+					bi2 = (BigInteger) item2;
+				} else {
+					bi2 = BigInteger.valueOf(((Number) item2).longValue());
+				}
+				return bi1.compareTo(bi2);
 			}
-			return bi1.compareTo(bi2);
-		}
-		if(code1 == DOUBLE_CODE) {
-			// This is done over vanilla double comparison basically to handle NaN
-			// sorting correctly.
-			byte[] dBytes1 = ByteBuffer.allocate(8).putDouble((Double)item1).array();
-			byte[] dBytes2 = ByteBuffer.allocate(8).putDouble((Double)item2).array();
-			return compareSignedBigEndian(dBytes1, dBytes2);
 		}
 		if(code1 == FLOAT_CODE) {
-			// This is done for the same reason that double comparison is done
-			// that way.
-			byte[] fBytes1 = ByteBuffer.allocate(4).putFloat((Float)item1).array();
-			byte[] fBytes2 = ByteBuffer.allocate(4).putFloat((Float)item2).array();
-			return compareSignedBigEndian(fBytes1, fBytes2);
+			// This is done over vanilla float comparison basically to handle NaNs
+			// sorting correctly.
+			int fbits1 = encodeFloatBits((Float)item1);
+			int fbits2 = encodeFloatBits((Float)item2);
+			return Integer.compareUnsigned(fbits1, fbits2);
+		}
+		if(code1 == DOUBLE_CODE) {
+			// This is done over vanilla double comparison basically to handle NaNs
+			// sorting correctly.
+			long dbits1 = encodeDoubleBits((Double)item1);
+			long dbits2 = encodeDoubleBits((Double)item2);
+			return Long.compareUnsigned(dbits1, dbits2);
 		}
 		if(code1 == FALSE_CODE) {
 			return Boolean.compare((Boolean)item1, (Boolean)item2);
@@ -538,77 +667,130 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unknown tuple data type: " + item1.getClass());
 	}
 
-	static List<Object> unpack(byte[] bytes, int start, int length) {
-		List<Object> items = new LinkedList<>();
-		int pos = start;
-		int end = start + length;
-		while(pos < end) {
-			DecodeResult decoded = decode(bytes, pos, end);
-			items.add(decoded.o);
-			pos = decoded.end;
+	static List<Object> unpack(byte[] bytes) {
+		try {
+			DecodeState decodeState = new DecodeState();
+			int pos = 0;
+			int end = bytes.length;
+			while (pos < end) {
+				decode(decodeState, bytes, pos, end);
+				pos = decodeState.end;
+			}
+			return decodeState.values;
 		}
-		return items;
+		catch(IndexOutOfBoundsException | BufferOverflowException e) {
+			throw new IllegalArgumentException("Invalid tuple (possible truncation)", e);
+		}
 	}
 
-	static EncodeResult encodeAll(List<Object> items, byte[] prefix, List<byte[]> encoded) {
-		if(prefix != null) {
-			encoded.add(prefix);
-		}
-		int lenSoFar = (prefix == null) ? 0 : prefix.length;
-		int versionPos = -1;
+	static void encodeAll(EncodeState state, List<Object> items) {
 		for(Object t : items) {
-			EncodeResult result = encode(t, encoded);
-			if(result.versionPos > 0) {
-				if(versionPos > 0) {
-					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
-				}
-				versionPos = result.versionPos + lenSoFar;
-			}
-			lenSoFar += result.totalLength;
+			encode(state, t);
 		}
-		//System.out.println("Joining whole tuple...");
-		return new EncodeResult(lenSoFar, versionPos);
 	}
 
-	static byte[] pack(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 0 : 1));
-		EncodeResult result = encodeAll(items, prefix, encoded);
-		if(result.versionPos > 0) {
+	static void pack(ByteBuffer dest, List<Object> items) {
+		ByteOrder origOrder = dest.order();
+		EncodeState state = new EncodeState(dest);
+		encodeAll(state, items);
+		dest.order(origOrder);
+		if(state.versionPos >= 0) {
 			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
-		} else {
-			return ByteArrayUtil.join(null, encoded);
 		}
 	}
 
-	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 1 : 2));
-		EncodeResult result = encodeAll(items, prefix, encoded);
-		if(result.versionPos < 0) {
-			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
-		} else {
-			if(result.versionPos > 0xffff) {
-				throw new IllegalArgumentException("Tuple has incomplete version at position " + result.versionPos + " which is greater than the maximum " + 0xffff);
-			}
-			if (FDB.instance().getAPIVersion() < 520) {
-				encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
-			} else {
-				encoded.add(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(result.versionPos).array());
-			}
-			return ByteArrayUtil.join(null, encoded);
+	static byte[] pack(List<Object> items, int expectedSize) {
+		ByteBuffer dest = ByteBuffer.allocate(expectedSize);
+		pack(dest, items);
+		return dest.array();
+	}
+
+	static byte[] packWithVersionstamp(List<Object> items, int expectedSize) {
+		ByteBuffer dest = ByteBuffer.allocate(expectedSize);
+		EncodeState state = new EncodeState(dest);
+		encodeAll(state, items);
+		if(state.versionPos < 0) {
+			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple packInternal with versionstamp");
 		}
+		else {
+			if(useOldVersionOffsetFormat() && state.versionPos > 0xffff) {
+				throw new IllegalArgumentException("Tuple has incomplete version at position " + state.versionPos + " which is greater than the maximum " + 0xffff);
+			}
+			dest.order(ByteOrder.LITTLE_ENDIAN);
+			if (useOldVersionOffsetFormat()) {
+				dest.putShort((short)state.versionPos);
+			} else {
+				dest.putInt(state.versionPos);
+			}
+			return dest.array();
+		}
+	}
+
+	static int getPackedSize(List<?> items, boolean nested) {
+		int packedSize = 0;
+		for(Object item : items) {
+			if(item == null)
+				packedSize += nested ? 2 : 1;
+			else if(item instanceof byte[]) {
+				byte[] bytes = (byte[])item;
+				packedSize += 2 + bytes.length + ByteArrayUtil.nullCount((byte[])item);
+			}
+			else if(item instanceof String) {
+				int strPackedSize = StringUtil.packedSize((String)item);
+				packedSize += 2 + strPackedSize;
+			}
+			else if(item instanceof Float)
+				packedSize += 1 + Float.BYTES;
+			else if(item instanceof Double)
+				packedSize += 1 + Double.BYTES;
+			else if(item instanceof Boolean)
+				packedSize += 1;
+			else if(item instanceof UUID)
+				packedSize += 1 + UUID_BYTES;
+			else if(item instanceof BigInteger) {
+				BigInteger bigInt = (BigInteger)item;
+				int byteCount = minimalByteCount(bigInt);
+				// If byteCount <= 8, then the encoding uses 1 byte for both the size
+				// and type code. If byteCount > 8, then there is 1 byte for the type code
+				// and 1 byte for the length. In both cases, the value is followed by
+				// the byte count.
+				packedSize += byteCount + ((byteCount <= 8) ? 1 : 2);
+			}
+			else if(item instanceof Number)
+				packedSize += 1 + minimalByteCount(((Number)item).longValue());
+			else if(item instanceof Versionstamp) {
+				packedSize += 1 + Versionstamp.LENGTH;
+				Versionstamp versionstamp = (Versionstamp)item;
+				if(!versionstamp.isComplete()) {
+					int suffixSize = useOldVersionOffsetFormat() ? Short.BYTES : Integer.BYTES;
+					packedSize += suffixSize;
+				}
+			}
+			else if(item instanceof List<?>)
+				packedSize += 2 + getPackedSize((List<?>)item, true);
+			else if(item instanceof Tuple)
+				packedSize += 2 + ((Tuple)item).getPackedSize(true);
+			else
+				throw new IllegalArgumentException("unknown type " + item.getClass() + " for tuple packing");
+		}
+		return packedSize;
 	}
 
 	static boolean hasIncompleteVersionstamp(Stream<?> items) {
 		return items.anyMatch(item -> {
 			if(item == null) {
 				return false;
-			} else if(item instanceof Versionstamp) {
+			}
+			else if(item instanceof Versionstamp) {
 				return !((Versionstamp) item).isComplete();
-			} else if(item instanceof Tuple) {
+			}
+			else if(item instanceof Tuple) {
 				return hasIncompleteVersionstamp(((Tuple) item).stream());
-			} else if(item instanceof Collection<?>) {
+			}
+			else if(item instanceof Collection<?>) {
 				return hasIncompleteVersionstamp(((Collection) item).stream());
-			} else {
+			}
+			else {
 				return false;
 			}
 		});
@@ -616,26 +798,33 @@ class TupleUtil {
 
 	public static void main(String[] args) {
 		try {
-			byte[] bytes = pack(Collections.singletonList(4), null);
-			assert 4 == (Integer)(decode(bytes, 0, bytes.length).o);
-		} catch (Exception e) {
+			byte[] bytes = pack(Collections.singletonList(4), 2);
+			DecodeState result = new DecodeState();
+			decode(result, bytes, 0, bytes.length);
+			int val = ((Number)result.values.get(0)).intValue();
+			assert 4 == val;
+		}
+		catch(Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());
 		}
 
 		try {
-			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), null);
-			String string = (String)(decode(bytes, 0, bytes.length).o);
+			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), 15);
+			DecodeState result = new DecodeState();
+			decode(result, bytes, 0, bytes.length);
+			String string = (String)result.values.get(0);
 			System.out.println("contents -> " + string);
 			assert "\u021Aest \u0218tring".equals(string);
-		} catch (Exception e) {
+		}
+		catch(Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());
 		}
 
 		/*Object[] a = new Object[] { "\u0000a", -2, "b\u0001", 12345, ""};
 		List<Object> o = Arrays.asList(a);
-		byte[] packed = pack( o, null );
+		byte[] packed = packInternal( o, null );
 		System.out.println("packed length: " + packed.length);
 		o = unpack( packed, 0, packed.length );
 		System.out.println("unpacked elements: " + o);

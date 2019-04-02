@@ -52,7 +52,7 @@ public:  // Internal use only
 
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction( Reference<ThreadSafeDatabase> db );
+	explicit ThreadSafeTransaction(DatabaseContext* cx);
 	~ThreadSafeTransaction();
 
 	void cancel();
@@ -96,8 +96,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(NULL) {}
-	void operator=(ThreadSafeTransaction&& r) noexcept(true);
-	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept(true);
+	void operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
 
 	void reset();
 

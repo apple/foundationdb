@@ -23,6 +23,8 @@
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
+#include "flow/Knobs.h"
+#include "flow/flow.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -85,6 +87,24 @@ ThreadInitFunction threadInitFunction = 0;  // See ThreadCleanup.cpp in the C bi
 void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) { 
 	ASSERT( !threadInitFunction );
 	threadInitFunction = f; 
+}
+
+int64_t g_hugeArenaMemory = 0;
+
+double hugeArenaLastLogged = 0;
+std::map<std::string, std::pair<int,int>> hugeArenaTraces;
+
+void hugeArenaSample(int size) {
+	auto& info = hugeArenaTraces[platform::get_backtrace()];
+	info.first++;
+	info.second+=size;
+	if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
+		for(auto& it : hugeArenaTraces) {
+			TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+		}
+		hugeArenaLastLogged = now();
+		hugeArenaTraces.clear();
+	}
 }
 
 #ifdef ALLOC_INSTRUMENTATION
@@ -231,7 +251,8 @@ static int64_t getSizeCode(int i) {
 		case 1024: return 7;
 		case 2048: return 8;
 		case 4096: return 9;
-		default: return 10;
+		case 8192: return 10;
+		default: return 11;
 	}
 }
 
@@ -426,6 +447,9 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
+	if(FLOW_KNOBS && g_nondeterministic_random && g_nondeterministic_random->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
+	}
 	block = (void **)::allocate(magazine_size * Size, false);
 #endif
 
@@ -483,6 +507,7 @@ void releaseAllThreadMagazines() {
 	FastAllocator<1024>::releaseThreadMagazines();
 	FastAllocator<2048>::releaseThreadMagazines();
 	FastAllocator<4096>::releaseThreadMagazines();
+	FastAllocator<8192>::releaseThreadMagazines();
 }
 
 int64_t getTotalUnusedAllocatedMemory() {
@@ -497,6 +522,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 	unusedMemory += FastAllocator<1024>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
 
 	return unusedMemory;
 }
@@ -510,4 +536,5 @@ template class FastAllocator<512>;
 template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
+template class FastAllocator<8192>;
 

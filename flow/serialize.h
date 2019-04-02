@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <array>
 #include <set>
 #include "flow/Error.h"
 #include "flow/Arena.h"
@@ -150,6 +151,20 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 	ASSERT( ar.protocolVersion() != 0 );
 }
 
+template <class Archive, class T, size_t N>
+inline void save( Archive& ar, const std::array<T, N>& value ) {
+	for(int ii = 0; ii < N; ++ii)
+		ar << value[ii];
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class T, size_t N>
+inline void load( Archive& ar, std::array<T, N>& value ) {
+	for (int ii = 0; ii < N; ii++) {
+		ar >> value[ii];
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
 template <class Archive, class T>
 inline void save( Archive& ar, const std::set<T>& value ) {
 	ar << (int)value.size();
@@ -166,6 +181,27 @@ inline void load( Archive& ar, std::set<T>& value ) {
 	for (int i = 0; i < s; i++) {
 		ar >> currentValue;
 		value.insert(currentValue);
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+
+template <class Archive, class K, class V>
+inline void save( Archive& ar, const std::map<K, V>& value ) {
+	ar << (int)value.size();
+	for (const auto &it : value) {
+		ar << it.first << it.second;
+	}
+	ASSERT( ar.protocolVersion() != 0 );
+}
+template <class Archive, class K, class V>
+inline void load( Archive& ar, std::map<K, V>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	for (int i = 0; i < s; ++i) {
+		std::pair<K, V> p;
+		ar >> p.first >> p.second;
+		value.emplace(p);
 	}
 	ASSERT( ar.protocolVersion() != 0 );
 }
@@ -262,16 +298,16 @@ public:
 	}
 	void* getData() { return data; }
 	int getLength() { return size; }
-	StringRef toStringRef() { return StringRef(data,size); }
+	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
 	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
-	BinaryWriter( BinaryWriter&& rhs ) : data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
+	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
 		rhs.data = 0;
 	}
 	void operator=( BinaryWriter&& r) {
-		delete[] data;
+		arena = std::move(r.arena);
 		data = r.data;
 		size = r.size;
 		allocated = r.allocated;
@@ -280,13 +316,12 @@ public:
 		r.allocated = 0;
 		r.data = 0;
 	}
-	~BinaryWriter() { delete[] data; }
 
 	template <class T, class VersionOptions>
 	static Standalone<StringRef> toValue( T const& t, VersionOptions vo ) {
 		BinaryWriter wr(vo);
 		wr << t;
-		return wr.toStringRef();
+		return wr.toValue();
 	}
 
 	static int bytesNeeded( uint64_t val ) {
@@ -367,6 +402,7 @@ public:
 	uint64_t protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(uint64_t pv) { m_protocolVersion = pv; }
 private:
+	Arena arena;
 	uint8_t* data;
 	int size, allocated;
 	uint64_t m_protocolVersion;
@@ -375,10 +411,17 @@ private:
 		int p = size;
 		size += s;
 		if (size > allocated) {
-			allocated = std::max(allocated*2, size);
-			uint8_t* newData = new uint8_t[allocated];
+			if(size <= 512-sizeof(ArenaBlock)) {
+				allocated = 512-sizeof(ArenaBlock);
+			} else if(size <= 4096-sizeof(ArenaBlock)) {
+				allocated = 4096-sizeof(ArenaBlock);
+			} else {
+				allocated = std::max(allocated*2, size);
+			}
+			Arena newArena;
+			uint8_t* newData = new ( newArena ) uint8_t[ allocated ];
 			memcpy(newData, data, p);
-			delete[] data;
+			arena = newArena;
 			data = newData;
 		}
 		return data+p;
@@ -511,6 +554,11 @@ public:
 		return b;
 	}
 
+	const void* peekBytes( int bytes ) {
+		ASSERT( begin + bytes <= end );
+		return begin;
+	}
+
 	void serializeBytes(void* data, int bytes) {
 		memcpy(data, readBytes(bytes), bytes);
 	}
@@ -534,6 +582,7 @@ public:
 	BinaryReader( const void* data, int length, VersionOptions vo ) {
 		begin = (const char*)data;
 		end = begin + length;
+		check = nullptr;
 		vo.read(*this);
 	}
 	template <class VersionOptions>
@@ -558,8 +607,19 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != nullptr);
+		begin = check;
+		check = nullptr;
+	}
+
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };
@@ -572,7 +632,7 @@ struct SendBuffer {
 
 struct PacketBuffer : SendBuffer, FastAllocated<PacketBuffer> {
 	int reference_count;
-	enum { DATA_SIZE = 4096 - 28 };
+	enum { DATA_SIZE = 4096 - 28 }; //28 is the size of the PacketBuffer fields
 	uint8_t data[ DATA_SIZE ];
 
 	PacketBuffer() : reference_count(1) {

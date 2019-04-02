@@ -26,16 +26,13 @@
 #include "flow/flow.h"
 #include "fdbrpc/Locality.h"
 
-class LocalityData;
+struct LocalityData;
 struct LocalitySet;
 struct LocalityGroup;
 struct KeyValueMap;
 struct LocalityRecord;
 struct StringToIntMap;
 struct IReplicationPolicy;
-
-typedef Reference<LocalitySet>	LocalitySetRef;
-typedef Reference<IReplicationPolicy>	IRepPolicyRef;
 
 extern int g_replicationdebug;
 

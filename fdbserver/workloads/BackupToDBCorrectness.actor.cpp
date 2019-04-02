@@ -19,8 +19,8 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -347,7 +347,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state int64_t taskCount = wait( backupAgent->getTaskCount(tr) );
 				state int waitCycles = 0;
 
-				if ((taskCount) && (0)) {
+				if ((taskCount) && false) {
 					TraceEvent("BARW_EndingNonzeroTaskCount", randomID).detail("BackupTag", printable(tag)).detail("TaskCount", taskCount).detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long) taskCount);
 					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
@@ -524,7 +524,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						throw;
 				}
 
-				int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
+				wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
 				wait(restoreAgent.unlockBackup(cx, self->restoreTag));
 			}
 

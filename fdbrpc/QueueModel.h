@@ -59,7 +59,7 @@ public:
 		laggingRequests.cancel();
 	}
 private:
-	std::map<uint64_t, QueueData> data;
+	std::unordered_map<uint64_t, QueueData> data;
 };
 
 /* old queue model

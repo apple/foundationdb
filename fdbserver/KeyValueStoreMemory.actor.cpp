@@ -139,13 +139,6 @@ public:
 
 	virtual Future<Void> commit(bool sequential) {
 		if(getAvailableSize() <= 0) {
-			if(g_network->isSimulated()) { //FIXME: known bug in simulation we are supressing
-				int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
-				TraceEvent(SevWarnAlways, "KeyValueStoreMemory_OutOfSpace", id);
-				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)
-					.detail("RandomUnseed", unseed);
-				flushAndExit(0);
-			}
 			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
 			return Never();
 		}
@@ -453,23 +446,25 @@ private:
 
 		try {
 			loop {
-				Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
-				if (data.size() != sizeof(OpHeader)) {
-					if (data.size()) {
-						TEST(true);  // zero fill partial header in KeyValueStoreMemory
-						memset(&h, 0, sizeof(OpHeader));
-						memcpy(&h, data.begin(), data.size());
-						zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+				{
+					Standalone<StringRef> data = wait( self->log->readNext( sizeof(OpHeader) ) );
+					if (data.size() != sizeof(OpHeader)) {
+						if (data.size()) {
+							TEST(true);  // zero fill partial header in KeyValueStoreMemory
+							memset(&h, 0, sizeof(OpHeader));
+							memcpy(&h, data.begin(), data.size());
+							zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
+						}
+						TraceEvent("KVSMemRecoveryComplete", self->id)
+							.detail("Reason", "Non-header sized data read")
+							.detail("DataSize", data.size())
+							.detail("ZeroFillSize", zeroFillSize)
+							.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+							.detail("NextReadLoc", self->log->getNextReadLocation());
+						break;
 					}
-					TraceEvent("KVSMemRecoveryComplete", self->id)
-						.detail("Reason", "Non-header sized data read")
-						.detail("DataSize", data.size())
-						.detail("ZeroFillSize", zeroFillSize)
-						.detail("SnapshotEndLocation", uncommittedSnapshotEnd)
-						.detail("NextReadLoc", self->log->getNextReadLocation());
-					break;
+					h = *(OpHeader*)data.begin();
 				}
-				h = *(OpHeader*)data.begin();
 				Standalone<StringRef> data = wait( self->log->readNext( h.len1 + h.len2+1 ) );
 				if (data.size() != h.len1 + h.len2 + 1) {
 					zeroFillSize = h.len1 + h.len2 + 1 - data.size();
@@ -720,7 +715,7 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 
 IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
-	IDiskQueue *log = openDiskQueue( basename, ext, logID);
+	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V0 );
 	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
 }
 

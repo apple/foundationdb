@@ -139,7 +139,7 @@ func APIVersion(version int) error {
 			if e == 2203 {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
-					return fmt.Errorf("This version of the FoundationDB Go binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d.", version, maxSupportedVersion)
+					return fmt.Errorf("This version of the FoundationDB Go binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d.", headerVersion, maxSupportedVersion)
 				}
 				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
@@ -366,6 +366,30 @@ type Key []byte
 // FDBKey allows Key to (trivially) satisfy the KeyConvertible interface.
 func (k Key) FDBKey() Key {
 	return k
+}
+
+// String describes the key as a human readable string.
+func (k Key) String() string {
+	return Printable(k)
+}
+
+// Printable returns a human readable version of a byte array. The bytes that correspond with
+// ASCII printable characters [32-127) are passed through. Other bytes are
+// replaced with \x followed by a two character zero-padded hex code for byte.
+func Printable(d []byte) string {
+	buf := new(bytes.Buffer)
+	for _, b := range d {
+		if b >= 32 && b < 127 && b != '\\' {
+			buf.WriteByte(b)
+			continue
+		}
+		if b == '\\' {
+			buf.WriteString("\\\\")
+			continue
+		}
+		buf.WriteString(fmt.Sprintf("\\x%02x", b))
+	}
+	return buf.String()
 }
 
 func panicToError(e *error) {

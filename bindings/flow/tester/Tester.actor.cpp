@@ -41,7 +41,8 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
 const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION)/sizeof(int);
 
-static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<DatabaseContext> const& db, StringRef const& prefix);
+static Future<Void> runTest(Reference<FlowTesterData> const& data, Reference<Database> const& db,
+                            StringRef const& prefix);
 
 THREAD_FUNC networkThread( void* api ) {
 	// This is the fdb_flow network we're running on a thread
@@ -353,7 +354,7 @@ struct PopFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
 		for(StackItem item : items) {
-			Standalone<StringRef> _ = wait(item.value);
+			wait(success(item.value));
 		}
 		return Void();
 	}
@@ -388,7 +389,7 @@ struct LogStackFunc : InstructionFunc {
 
 	ACTOR static Future<Void> logStack(Reference<FlowTesterData> data, std::map<int, StackItem> entries, Standalone<StringRef> prefix) {
 		loop {
-			state Reference<Transaction> tr(new Transaction(data->db));
+			state Reference<Transaction> tr = data->db->createTransaction();
 			try {
 				for(auto it : entries) {
 					Tuple tk;
@@ -534,7 +535,7 @@ struct NewTransactionFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		trMap[data->trName] = Reference<Transaction>(new Transaction(data->db));
+		trMap[data->trName] = data->db->createTransaction();
 		return Void();
 	}
 };
@@ -550,7 +551,7 @@ struct UseTransactionFunc : InstructionFunc {
 		data->trName = name;
 
 		if(trMap.count(data->trName) == 0) {
-			trMap[data->trName] = Reference<Transaction>(new Transaction(data->db));
+			trMap[data->trName] = data->db->createTransaction();
 		}
 		return Void();
 	}
@@ -681,7 +682,7 @@ struct SetReadVersionFunc : InstructionFunc {
 	static const char* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
-		instruction->tr->setVersion(data->lastVersion);
+		instruction->tr->setReadVersion(data->lastVersion);
 		return Void();
 	}
 };
@@ -1323,6 +1324,20 @@ struct StartThreadFunc : InstructionFunc {
 const char* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
+ACTOR template <class Function>
+Future<decltype(fake<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
+                                                                                 Function func) {
+	state Reference<ReadTransaction> tr = db->createTransaction();
+	loop {
+		try {
+			state decltype(fake<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
+			return result;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // WAIT_EMPTY
 struct WaitEmptyFunc : InstructionFunc {
 	static const char* name;
@@ -1333,23 +1348,21 @@ struct WaitEmptyFunc : InstructionFunc {
 			return Void();
 
 		Standalone<StringRef> s1 = wait(items[0].value);
-		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
+		Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
 		// printf("=========WAIT_EMPTY:%s\n", printable(prefix).c_str());
 
-		state Reference<Transaction> tr(new Transaction(data->db));
-		loop {
-			try {
-				FDBStandalone<RangeResultRef> results = wait(tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1));
-				if(results.size() > 0) {
-					throw not_committed();
-				}
-				break;
-			}
-			catch(Error &e) {
-				wait(tr->onError(e));
-			}
-		}
+		wait(read(data->db,
+		          [=](Reference<ReadTransaction> tr) -> Future<Void> { return checkEmptyPrefix(tr, prefix); }));
 
+		return Void();
+	}
+
+private:
+	ACTOR static Future<Void> checkEmptyPrefix(Reference<ReadTransaction> tr, Standalone<StringRef> prefix) {
+		FDBStandalone<RangeResultRef> results = wait(tr->getRange(KeyRangeRef(prefix, strinc(prefix)), 1));
+		if (results.size() > 0) {
+			throw not_committed();
+		}
 		return Void();
 	}
 };
@@ -1529,7 +1542,27 @@ struct UnitTestsFunc : InstructionFunc {
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
 
-		state Reference<Transaction> tr(new Transaction(data->db));
+		const uint64_t locationCacheSize = 100001;
+		const uint64_t maxWatches = 10001;
+		const uint64_t timeout = 60*1000;
+		const uint64_t noTimeout = 0;
+		const uint64_t retryLimit = 50;
+		const uint64_t noRetryLimit = -1;
+		const uint64_t maxRetryDelay = 100;
+
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_LOCATION_CACHE_SIZE, Optional<StringRef>(StringRef((const uint8_t*)&locationCacheSize, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MAX_WATCHES, Optional<StringRef>(StringRef((const uint8_t*)&maxWatches, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_DATACENTER_ID, Optional<StringRef>(LiteralStringRef("dc_id")));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MACHINE_ID, Optional<StringRef>(LiteralStringRef("machine_id")));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&noTimeout, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_MAX_RETRY_DELAY, Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&noRetryLimit, 8)));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_ENABLE);
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE);
+
+		state Reference<Transaction> tr = data->db->createTransaction();
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_BATCH);
@@ -1538,11 +1571,8 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
-		const uint64_t timeout = 60*1000;
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
-		const uint64_t retryLimit = 50;
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
-		const uint64_t maxRetryDelay = 100;
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_MAX_RETRY_DELAY, Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_USED_DURING_COMMIT_PROTECTION_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE, Optional<StringRef>(LiteralStringRef("my_transaction")));
@@ -1560,7 +1590,7 @@ const char* UnitTestsFunc::name = "UNIT_TESTS";
 REGISTER_INSTRUCTION_FUNC(UnitTestsFunc);
 
 ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, StringRef prefix) {
-	state Reference<Transaction> tr(new Transaction(data->db));
+	state Reference<Transaction> tr = data->db->createTransaction();
 
 	// get test instructions
 	state Tuple testSpec;
@@ -1610,7 +1640,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 
 			state Reference<InstructionData> instruction = Reference<InstructionData>(new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
 			if (isDatabase) {
-				state Reference<Transaction> tr(new Transaction(data->db));
+				state Reference<Transaction> tr = data->db->createTransaction();
 				instruction->tr = tr;
 			}
 			else {
@@ -1644,7 +1674,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 	return Void();
 }
 
-ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<DatabaseContext> db, StringRef prefix) {
+ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, StringRef prefix) {
 	ASSERT(data);
 	try {
 		data->db = db;
@@ -1693,7 +1723,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1736,7 +1766,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(NetworkAddress(), false);
+		g_network = newNet2(false);
 
 		API *fdb = FDB::API::selectAPIVersion(610);
 
@@ -1744,7 +1774,7 @@ ACTOR void _test_versionstamp() {
 		startThread(networkThread, fdb);
 
 		auto db = fdb->createDatabase();
-		state Reference<Transaction> tr(new Transaction(db));
+		state Reference<Transaction> tr = db->createTransaction();
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 

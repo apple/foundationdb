@@ -117,7 +117,7 @@ The ``coordinators`` command is used to change cluster coordinators or descripti
 
 Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
-If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
+If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. Processes with class coordinator will be prioritized. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
 For more information on setting coordinators, see :ref:`configuration-changing-coordination-servers`.
 

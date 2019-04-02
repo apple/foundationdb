@@ -19,11 +19,11 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
@@ -65,7 +65,7 @@ struct LowLatencyWorkload : TestWorkload {
 					try {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Version _ = wait(tr.getReadVersion());
+						wait(success(tr.getReadVersion()));
 						break;
 					} catch( Error &e ) {
 						wait( tr.onError(e) );

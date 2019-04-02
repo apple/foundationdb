@@ -19,7 +19,7 @@
  */
 
 #include <ctime>
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -259,6 +259,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 	state int64_t commitsStarted = 0;
 	//test.store = makeDummyKeyValueStore();
 	state int extraBytes = workload->valueBytes - sizeof(test.lastSet);
+	state int i;
 	ASSERT( extraBytes >= 0 );
 	state char* extraValue = new char[extraBytes];
 	memset(extraValue, '.', extraBytes);
@@ -286,9 +287,8 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		state double setupBegin = timer();
 		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
-		state int i;
 		for(i=0; i<workload->nodeCount; i++) {
-			test.store->set( KeyValueRef( test.makeKey( i ), wr.toStringRef() ) );
+			test.store->set( KeyValueRef( test.makeKey( i ), wr.toValue() ) );
 			if (!((i+1) % 10000) || i+1==workload->nodeCount) {
 				wait( lastCommit );
 				lastCommit = test.store->commit();
@@ -310,7 +310,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 					++test.lastSet;
 					BinaryWriter wr(Unversioned()); wr << test.lastSet;
 					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+					test.set( KeyValueRef( test.randomKey(), wr.toValue() ) );
 					++workload->sets;
 				}
 				++commitsStarted;
@@ -339,7 +339,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 					++test.lastSet;
 					BinaryWriter wr(Unversioned()); wr << test.lastSet;
 					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+					test.set( KeyValueRef( test.randomKey(), wr.toValue() ) );
 					++workload->sets;
 				} else {
 					// Read

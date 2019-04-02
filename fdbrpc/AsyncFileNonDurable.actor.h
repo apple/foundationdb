@@ -44,7 +44,7 @@ Future<Void> sendErrorOnProcess( ISimulator::ProcessInfo* const& process, Promis
 ACTOR template <class T> 
 Future<T> sendErrorOnShutdown( Future<T> in ) {
 	choose {
-		when( ISimulator::KillType _ = wait( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() ) ) {
+		when( wait(success( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() )) ) {
 			throw io_error().asInjectedFault();
 		}
 		when( T rep = wait( in ) ) {
@@ -64,14 +64,14 @@ public:
 	}
 
 	ACTOR Future<Void> doShutdown( AsyncFileDetachable* self ) {
-		ISimulator::KillType _ = wait( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() );
+		wait(success( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() ));
 		self->file = Reference<IAsyncFile>();
 		return Void();
 	}
 	
 	ACTOR static Future<Reference<IAsyncFile>> open( Future<Reference<IAsyncFile>> wrappedFile ) {
 		choose {
-			when( ISimulator::KillType _ = wait( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() ) ) {
+			when( wait(success( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() )) ) {
 				throw io_error().asInjectedFault();
 			}
 			when( Reference<IAsyncFile> f = wait( wrappedFile ) ) {
@@ -637,14 +637,14 @@ private:
 		if(durable)
 			wait(allModifications);
 		else
-			ErrorOr<Void> _ = wait(errorOr(allModifications));
+			wait(success(errorOr(allModifications)));
 
 		if(!durable) {
 			//Sometimes sync the file if writes were made durably.  Before a file is first synced, it is stored in a temporary file and then renamed to the correct
 			//location once sync is called.  By not calling sync, we simulate a failure to fsync the directory storing the file
 			if(self->hasBeenSynced && writeDurable && g_random->random01() < 0.5) {
 				TEST(true); //AsyncFileNonDurable kill was durable and synced
-				ErrorOr<Void> _ = wait(errorOr(self->file->sync()));
+				wait(success(errorOr(self->file->sync())));
 			}
 
 			//Setting this promise could trigger the deletion of the AsyncFileNonDurable; after this none of its members should be used

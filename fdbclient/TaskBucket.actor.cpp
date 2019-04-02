@@ -20,6 +20,7 @@
 
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
@@ -135,15 +136,19 @@ public:
 		// Get keyspace for the specified priority level
 		state Subspace space = taskBucket->getAvailableSpace(priority);
 
-		// Get a task key that is <= a random UID task key, if successful then return it
-		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		{
+			// Get a task key that is <= a random UID task key, if successful then return it
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
+			if(space.contains(k))
+				return Optional<Key>(k);
+		}
 
-		// Get a task key that is <= the maximum possible UID, if successful return it.
-		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
-		if(space.contains(k))
-			return Optional<Key>(k);
+		{
+			// Get a task key that is <= the maximum possible UID, if successful return it.
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
+			if(space.contains(k))
+				return Optional<Key>(k);
+		}
 
 		return Optional<Key>();
 	}
@@ -519,7 +524,7 @@ public:
 
 		// Check all available priorities for keys
 		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
-		for(unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
+		for(int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then the taskbucket is not empty so return false
@@ -542,7 +547,7 @@ public:
 
 		// Check all available priorities for emptiness
 		state std::vector<Future<Standalone<RangeResultRef>>> resultFutures;
-		for(unsigned int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
+		for(int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then return true as the level is 'busy'
@@ -591,7 +596,7 @@ public:
 
 				bool is_busy = wait(isBusy(tr, taskBucket));
 				if (!is_busy) {
-					Key _ = wait(addIdle(tr, taskBucket));
+					wait(success(addIdle(tr, taskBucket)));
 				}
 
 				Optional<Value> val = wait(tr->get(taskBucket->active.key()));

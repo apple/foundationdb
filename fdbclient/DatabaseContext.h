@@ -22,7 +22,7 @@
 #define DatabaseContext_h
 #pragma once
 
-#include "fdbclient/NativeAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/ClientDBInfo.h"
@@ -46,8 +46,12 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
-class DatabaseContext : public ReferenceCounted<DatabaseContext>, NonCopyable {
+class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
+	static DatabaseContext* allocateOnForeignThread() {
+		return (DatabaseContext*)DatabaseContext::operator new(sizeof(DatabaseContext));
+	}
+
 	// For internal (fdbserver) use only
 	static Database create( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Reference<ClusterConnectionFile> connFile, LocalityData const& clientLocality );
 	static Database create( Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, int taskID=TaskDefaultEndpoint, bool lockAware=false, int apiVersion=Database::API_VERSION_LATEST );
@@ -62,9 +66,10 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	Reference<ProxyInfo> getMasterProxies();
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
+	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
+	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
+	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
 	void addWatch();
@@ -101,6 +106,7 @@ public:
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	bool provisional;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
@@ -115,8 +121,8 @@ public:
 
 	// Client status updater
 	struct ClientStatusUpdater {
-		std::vector<BinaryWriter> inStatusQ;
-		std::vector<BinaryWriter> outStatusQ;
+		std::vector< std::pair<std::string, BinaryWriter> > inStatusQ;
+		std::vector< std::pair<std::string, BinaryWriter> > outStatusQ;
 		Future<Void> actor;
 	};
 	ClientStatusUpdater clientStatusUpdater;
@@ -146,6 +152,11 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
+	double transactionTimeout;
+	int transactionMaxRetries;
+	double transactionMaxBackoff;
+	int snapshotRywEnabled;
+
 	Future<Void> logger;
 
 	int taskID;
@@ -159,6 +170,13 @@ public:
 	Reference<Cluster> cluster;
 
 	int apiVersion;
+
+	int mvCacheInsertLocation;
+	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
+
+	HealthMetrics healthMetrics;
+	double healthMetricsLastUpdated;
+	double detailedHealthMetricsLastUpdated;
 };
 
 #endif

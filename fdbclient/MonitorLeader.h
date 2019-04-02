@@ -30,19 +30,19 @@
 class ClientCoordinators;
 
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader );
+Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum = Reference<AsyncVar<int>>() );
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 
 #pragma region Implementation
 
-Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
+Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo, Reference<AsyncVar<int>> const& connectedCoordinatorsNum  );
 
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader ) {
+Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum ) {
 	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
-	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo );
+	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo, connectedCoordinatorsNum );
 	return m || asyncDeserialize( serializedInfo, outKnownLeader );
 }
 

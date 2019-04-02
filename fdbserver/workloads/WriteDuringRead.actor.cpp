@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.h"
-#include "fdbserver/TesterInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/workloads.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/Atomic.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -357,7 +357,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool* doingCommit, double* startTime, Key timebombStr ) {
+	ACTOR Future<Void> commitAndUpdateMemory( ReadYourWritesTransaction *tr, WriteDuringReadWorkload* self, bool *cancelled, bool readYourWritesDisabled, bool snapshotRYWDisabled, bool readAheadDisabled, bool useBatchPriority, bool* doingCommit, double* startTime, Key timebombStr ) {
 		state UID randomID = g_nondeterministic_random->randomUniqueID();
 		//TraceEvent("WDRCommit", randomID);
 		try {
@@ -407,6 +407,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 			if(readAheadDisabled)
 				tr->setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
+			if(useBatchPriority)
+				tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
 			if(self->useSystemKeys)
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->addWriteConflictRange( self->conflictRange );
@@ -574,6 +576,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		state bool readYourWritesDisabled = g_random->random01() < 0.5;
 		state bool readAheadDisabled = g_random->random01() < 0.5;
 		state bool snapshotRYWDisabled = g_random->random01() < 0.5;
+		state bool useBatchPriority = g_random->random01() < 0.5;
 		state int64_t timebomb = g_random->random01() < 0.01 ? g_random->randomInt64(1, 6000) : 0;
 		state std::vector<Future<Void>> operations;
 		state ActorCollection commits(false);
@@ -614,6 +617,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 				tr.setOption( FDBTransactionOptions::SNAPSHOT_RYW_DISABLE );
 			if( readAheadDisabled )
 				tr.setOption( FDBTransactionOptions::READ_AHEAD_DISABLE );
+			if( useBatchPriority )
+				tr.setOption( FDBTransactionOptions::PRIORITY_BATCH );
 			if( self->useSystemKeys )
 				tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::TIMEOUT, timebombStr );
@@ -647,7 +652,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									g_random->random01() > 0.5, readYourWritesDisabled, snapshotRYWDisabled, self, &doingCommit, &memLimit ) );
 							} else if( operationType == 3 && !disableCommit ) {
 								if( !self->rarelyCommit || g_random->random01() < 1.0 / self->numOps ) {
-									Future<Void> commit = self->commitAndUpdateMemory( &tr, self, &cancelled, readYourWritesDisabled, snapshotRYWDisabled, readAheadDisabled, &doingCommit, &startTime, timebombStr );
+									Future<Void> commit = self->commitAndUpdateMemory( &tr, self, &cancelled, readYourWritesDisabled, snapshotRYWDisabled, readAheadDisabled, useBatchPriority, &doingCommit, &startTime, timebombStr );
 									operations.push_back( commit );
 									commits.add( commit );
 								}
@@ -785,10 +790,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 								self->memoryDatabase[ key ] = value;
 							}
 						} catch( Error &e ) {
-							if( e.code() == error_code_used_during_commit )
+							if( e.code() == error_code_used_during_commit ) {
 								ASSERT( doingCommit );
-							else if( e.code() != error_code_transaction_cancelled )
+							} else if( e.code() != error_code_transaction_cancelled ) {
 								throw;
+							}
 						}
 					}
 

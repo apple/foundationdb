@@ -21,8 +21,18 @@
 .. |error-raise-type| replace:: raise
 .. |future-cancel| replace:: :func:`Future.cancel`
 .. |max-watches-database-option| replace:: :func:`Database.options.set_max_watches`
+.. |retry-limit-database-option| replace:: :func:`Database.options.set_transaction_retry_limit`
+.. |timeout-database-option| replace:: :func:`Database.options.set_transaction_timeout`
+.. |max-retry-delay-database-option| replace:: :func:`Database.options.set_transaction_max_retry_delay`
+.. |snapshot-ryw-enable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :ref:`future <api-python-future>`
 .. |read-your-writes-disable-option| replace:: :func:`Transaction.options.set_read_your_writes_disable`
+.. |retry-limit-transaction-option| replace:: :func:`Transaction.options.set_retry_limit`
+.. |timeout-transaction-option| replace:: :func:`Transaction.options.set_timeout`
+.. |max-retry-delay-transaction-option| replace:: :func:`Transaction.options.set_max_retry_delay`
+.. |snapshot-ryw-enable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_enable`
+.. |snapshot-ryw-disable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_disable`
 .. |lazy-iterator-object| replace:: generator
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :ref:`DirectorySubspace <api-python-directory-subspace>`
@@ -53,7 +63,7 @@ Python API
 Installation
 ============
 
-The FoundationDB Python API is compatible with Python 2.7 - 3.6. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.
+The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
 On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
 
@@ -116,6 +126,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_trace_roll_size(bytes)
 
        |option-trace-roll-size-blurb|
+
+    .. method :: fdb.options.set_trace_format(format)
+
+       |option-trace-format-blurb|
 
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
@@ -351,6 +365,26 @@ Database options
 .. method:: Database.options.set_datacenter_id(id)
 
     |option-datacenter-id-blurb|
+
+.. method:: Database.options.set_transaction_timeout(timeout)
+
+    |option-db-tr-timeout-blurb|
+
+.. method:: Database.options.set_transaction_retry_limit(retry_limit)
+
+    |option-db-tr-retry-limit-blurb|
+
+.. method:: Database.options.set_transaction_max_retry_delay(delay_limit)
+
+    |option-db-tr-max-retry-delay-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_enable()
+
+    |option-db-snapshot-ryw-enable-blurb|
+
+.. method:: Database.options.set_snapshot_ryw_disable()
+
+    |option-db-snapshot-ryw-disable-blurb|
 
 .. _api-python-transactional-decorator:
 

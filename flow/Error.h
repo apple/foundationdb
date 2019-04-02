@@ -83,10 +83,27 @@ extern Error internal_error_impl( const char* file, int line );
 
 extern bool isAssertDisabled( int line );
 //#define ASSERT( condition ) ((void)0)
-#define ASSERT( condition ) if (!((condition) || isAssertDisabled(__LINE__))) { throw internal_error(); }
-#define ASSERT_ABORT( condition ) if (!((condition) || isAssertDisabled(__LINE__))) { internal_error(); abort(); }   // For use in destructors, where throwing exceptions is extremely dangerous
-#define UNSTOPPABLE_ASSERT( condition ) if (!(condition)) { throw internal_error(); }
-#define UNREACHABLE() { throw internal_error(); }
+#define ASSERT(condition)                                                                                              \
+	do {                                                                                                               \
+		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+			throw internal_error();                                                                                    \
+		}                                                                                                              \
+	} while (false);
+#define ASSERT_ABORT(condition)                                                                                        \
+	do {                                                                                                               \
+		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+			internal_error();                                                                                          \
+			abort();                                                                                                   \
+		}                                                                                                              \
+	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
+#define UNSTOPPABLE_ASSERT(condition)                                                                                  \
+	do {                                                                                                               \
+		if (!(condition)) {                                                                                            \
+			throw internal_error();                                                                                    \
+		}                                                                                                              \
+	} while (false)
+#define UNREACHABLE()                                                                                                  \
+	{ throw internal_error(); }
 
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too
 // risky to evaluate at runtime, because the code should work even if they are false and throwing internal_error() would
@@ -97,6 +114,8 @@ extern bool isAssertDisabled( int line );
 	try { code_to_run; } \
 	catch(Error &e) { criticalError(FDB_EXIT_ABORT, "AbortOnError", e.what()); } \
 	catch(...) { criticalError(FDB_EXIT_ABORT, "AbortOnError", "Aborted due to unknown error"); }
+
+EXTERNC void breakpoint_me();
 
 #ifdef FDB_CLEAN_BUILD
 #  define NOT_IN_CLEAN BOOST_STATIC_ASSERT_MSG(0, "This code can not be enabled in a clean build.");

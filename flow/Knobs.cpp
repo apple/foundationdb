@@ -47,6 +47,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
+	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
+	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
+	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
@@ -79,6 +82,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_SUBMIT,                                           10 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
+	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
 
 	//AsyncFileNonDurable
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;

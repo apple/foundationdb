@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/WorkerInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -39,8 +39,9 @@ public:
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
-	IRepPolicyRef tLogPolicy;
-	LocalitySetRef logServerSet;
+	TLogVersion tLogVersion;
+	Reference<IReplicationPolicy> tLogPolicy;
+	Reference<LocalitySet> logServerSet;
 	std::vector<int> logIndexArray;
 	std::vector<LocalityEntry> logEntryArray;
 	bool isLocal;
@@ -83,7 +84,7 @@ public:
 			used_servers.insert(std::make_pair(0,i));
 		}
 
-		LocalitySetRef serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
+		Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
 		LocalityMap<std::pair<int,int>>* serverMap = (LocalityMap<std::pair<int,int>>*) serverSet.getPtr();
 		std::vector<std::pair<int,int>> resultPairs;
 		for(int loc = 0; loc < satelliteTagLocations.size(); loc++) {
@@ -164,15 +165,18 @@ public:
 
 		bool foundDuplicate = false;
 		std::set<Optional<Key>> zones;
+		std::set<Optional<Key>> dcs;
 		for(auto& loc : tLogLocalities) {
 			if(zones.count(loc.zoneId())) {
 				foundDuplicate = true;
 				break;
 			}
 			zones.insert(loc.zoneId());
+			dcs.insert(loc.dcId());
 		}
+		bool moreThanOneDC = dcs.size() > 1 ? true : false;
 
-		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() && !foundDuplicate ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest).detail("DuplicateZones", foundDuplicate);
+		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() && !foundDuplicate && !moreThanOneDC ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest).detail("DuplicateZones", foundDuplicate).detail("NumOfDCs", dcs.size());
 	}
 
 	int bestLocationFor( Tag tag ) {
@@ -188,7 +192,7 @@ public:
 	void updateLocalitySet( vector<LocalityData> const& localities ) {
 		LocalityMap<int>* logServerMap;
 
-		logServerSet = LocalitySetRef(new LocalityMap<int>());
+		logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
 		logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
 
 		logEntryArray.clear();
@@ -411,7 +415,7 @@ struct ILogSystem {
 		int tLogReplicationFactor;
 
 		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
-		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
+		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
@@ -627,9 +631,9 @@ struct ILogSystem {
 	virtual Reference<IPeekCursor> peekSpecial( UID dbgid, Version begin, Tag tag, int8_t peekLocality, Version localEnd ) = 0;
 		// Same contract as peek(), but it allows specifying a preferred peek locality for tags that do not have locality
 
-	virtual Version getKnownCommittedVersion(int8_t loc) = 0;
+	virtual Version getKnownCommittedVersion() = 0;
 
-	virtual Future<Void> onKnownCommittedVersionChange(int8_t loc) = 0;
+	virtual Future<Void> onKnownCommittedVersionChange() = 0;
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
@@ -649,7 +653,7 @@ struct ILogSystem {
 	static Reference<ILogSystem> fromOldLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const& );
 		// Constructs a new ILogSystem implementation from the old log data within a ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery);
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool* forceRecovery);
 		// Constructs a new ILogSystem implementation based on the given oldState and rejoining log servers
 		// Ensures that any calls to push or confirmEpochLive in the current epoch but strictly later than change_epoch will not return
 		// Whenever changes in the set of available log servers require restarting recovery with a different end sequence, outLogSystem will be changed to a new ILogSystem
@@ -769,14 +773,12 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Arena getArena() { return arena; }
-	StringRef getMessages(int loc) {
-		return StringRef( arena, messagesWriter[loc].toStringRef() );  // FIXME: Unnecessary copy!
+	Standalone<StringRef> getMessages(int loc) {
+		return messagesWriter[loc].toValue();
 	}
 
 private:
 	Reference<ILogSystem> logSystem;
-	Arena arena;
 	vector<Tag> next_message_tags;
 	vector<Tag> prev_tags;
 	vector<BinaryWriter> messagesWriter;

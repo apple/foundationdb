@@ -30,9 +30,6 @@
 struct FlowReceiver : private NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
-	Endpoint endpoint;
-	bool m_isLocalEndpoint;
-
 	FlowReceiver() : m_isLocalEndpoint(false) {}
 	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
 		FlowTransport::transport().addPeerReference(endpoint, this);
@@ -64,6 +61,10 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		endpoint.token = token;
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
+
+protected:
+	Endpoint endpoint;
+	bool m_isLocalEndpoint;
 };
 
 template <class T>
@@ -111,7 +112,7 @@ public:
 	bool isValid() const { return sav != NULL; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	ReplyPromise(ReplyPromise&& rhs) noexcept(true) : sav(rhs.sav) { rhs.sav = 0; }
+	ReplyPromise(ReplyPromise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
@@ -122,7 +123,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(ReplyPromise && rhs) noexcept(true) {
+	void operator=(ReplyPromise && rhs) BOOST_NOEXCEPT {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -149,15 +150,15 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
-	auto const& ep = value.getEndpoint();
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
-	ASSERT(!ep.address.isValid() || ep.address.isPublic()); // No re-serializing non-public addresses (the reply connection won't be available to any other process)
 }
 
 template <class Ar, class T>
 void load(Ar& ar, ReplyPromise<T>& value) {
-	Endpoint endpoint;
-	FlowTransport::transport().loadEndpoint(ar, endpoint);
+	UID token;
+	ar >> token;
+	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromise<T>(endpoint);
 	networkSender(value.getFuture(), endpoint);
 }
@@ -317,18 +318,23 @@ public:
 		return waitValueOrSignal(getReply(value), makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope), getEndpoint());
 	}
 
+	template <class X>
+	Future<ErrorOr<X>> getReplyUnlessFailedFor(double sustainedFailureDuration, double sustainedFailureSlope) const {
+		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
+	}
+
 	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T>(0, 1, endpoint)) {}
 
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
 	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) noexcept(true) : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(RequestStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(RequestStream&& rhs) noexcept(true) {
+	void operator=(RequestStream&& rhs) BOOST_NOEXCEPT {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
@@ -357,13 +363,13 @@ template <class Ar, class T>
 void save(Ar& ar, const RequestStream<T>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
-	UNSTOPPABLE_ASSERT(ep.address.isValid());  // No serializing PromiseStreams on a client with no public address
+	UNSTOPPABLE_ASSERT(ep.getPrimaryAddress().isValid());  // No serializing PromiseStreams on a client with no public address
 }
 
 template <class Ar, class T>
 void load(Ar& ar, RequestStream<T>& value) {
 	Endpoint endpoint;
-	FlowTransport::transport().loadEndpoint(ar, endpoint);
+	ar >> endpoint;
 	value = RequestStream<T>(endpoint);
 }
 
