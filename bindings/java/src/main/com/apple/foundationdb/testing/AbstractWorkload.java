@@ -21,16 +21,13 @@
 package com.apple.foundationdb.testing;
 
 import com.apple.foundationdb.Database;
-import com.apple.foundationdb.FDB;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.SynchronousQueue;
@@ -38,7 +35,7 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.Map;
 
 public abstract class AbstractWorkload {
-	private static final Class[] parameters = new Class[]{URL.class};
+	private static final Class<?>[] parameters = new Class<?>[]{URL.class};
 	protected WorkloadContext context;
 	private ThreadPoolExecutor executorService;
 
@@ -121,7 +118,7 @@ public abstract class AbstractWorkload {
 
 	private static void addURL(URL u) throws IOException {
 		URLClassLoader sysLoader = (URLClassLoader) ClassLoader.getSystemClassLoader();
-		Class sysClass = URLClassLoader.class;
+		Class<URLClassLoader> sysClass = URLClassLoader.class;
 
 		try {
 			Method method = sysClass.getDeclaredMethod("addURL", parameters);
