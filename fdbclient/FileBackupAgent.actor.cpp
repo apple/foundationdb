@@ -192,7 +192,7 @@ public:
 		Version endVersion;  // not meaningful for range files
 
 		Tuple pack() const {
-			fprintf(stderr, "Filename:%s\n", fileName.c_str());
+			//fprintf(stderr, "Filename:%s\n", fileName.c_str());
 			return Tuple()
 				.append(version)
 				.append(StringRef(fileName))
@@ -3423,9 +3423,9 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					fprintf(stderr, "taskBucket->keepRunning start\n");
+					//fprintf(stdout, "taskBucket->keepRunning start\n");
 					wait(taskBucket->keepRunning(tr, task));
-					fprintf(stderr, "taskBucket->keepRunning end\n");
+					//fprintf(stdout, "taskBucket->keepRunning end\n");
 
 					state std::vector<RestoreConfig::RestoreFile>::iterator i = start;
 
@@ -3434,19 +3434,19 @@ namespace fileBackup {
 					state int nFiles = 0;
 					auto fileSet = restore.fileSet();
 					for(; i != end && txBytes < 1e6; ++i) {
-						fprintf(stderr, "txBytes:%d\n", txBytes);
+						//fprintf(stdout, "txBytes:%d\n", txBytes);
 						txBytes += fileSet.insert(tr, *i);
 						nFileBlocks += (i->fileSize + i->blockSize - 1) / i->blockSize;
 						++nFiles;
 					}
 
-					fprintf(stderr, "nFiles:%d nFileBlocks:%d\n", nFiles, nFileBlocks);
+					//fprintf(stdout, "nFiles:%d nFileBlocks:%d\n", nFiles, nFileBlocks);
 					// Increment counts
 					restore.fileCount().atomicOp(tr, nFiles, MutationRef::Type::AddValue);
 					restore.fileBlockCount().atomicOp(tr, nFileBlocks, MutationRef::Type::AddValue);
 
 					wait(tr->commit());
-					fprintf(stderr, "nFiles:%d nFileBlocks:%d committed\n", nFiles, nFileBlocks);
+					//fprintf(stdout, "nFiles:%d nFileBlocks:%d committed\n", nFiles, nFileBlocks);
 
 					TraceEvent("FileRestoreLoadedFiles")
 						.detail("RestoreUID", restore.getUid())
@@ -3458,7 +3458,7 @@ namespace fileBackup {
 					start = i;
 					tr->reset();
 				} catch(Error &e) {
-					fprintf(stderr, "Error at FileRestoreLoadedFiles. Error:%s\n", e.what());
+					//fprintf(stdout, "Error at FileRestoreLoadedFiles. Error:%s\n", e.what());
 					wait(tr->onError(e));
 				}
 			}

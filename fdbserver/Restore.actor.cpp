@@ -224,7 +224,7 @@ public:
 		int64_t cursor; //The start block location to be restored. All blocks before cursor have been scheduled to load and restore
 
 		Tuple pack() const {
-			fprintf(stderr, "MyRestoreFile, filename:%s\n", fileName.c_str());
+			//fprintf(stderr, "MyRestoreFile, filename:%s\n", fileName.c_str());
 			return Tuple()
 					.append(version)
 					.append(StringRef(fileName))
