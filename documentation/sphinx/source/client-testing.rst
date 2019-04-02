@@ -115,7 +115,8 @@ A test file might look like this:
    testTitle=MyTest
      testName=JavaWorkload
      workloadClass=my.package.MinimalWorkload
-     jvmOptions=-Djava.class.path=*PATH_TO_JARS*,*other options you want to pass to the JVM*
+     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
 
      testName=Attrition
      testDuration=5.0
@@ -124,9 +125,16 @@ A test file might look like this:
 
    testTitle=AnotherTest
      workloadClass=my.package.MinimalWorkload
-     workloadClass=com.snowflake.foundationdb.testing.SimpleWorkload
-     jvmOptions=-Djava.class.path=*PATH_TO_JARS*,*other options you want to pass to the JVM*
+     workloadClass=my.package.MinimalWorkload
+     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
      someOpion=foo
+
+     workloadClass=my.package.AnotherWorkload
+     workloadClass=my.package.AnotherWorkload
+     jvmOptions=-Djava.class.path=*PATH_TO_FDB_CLIENT_JAR*,*other options you want to pass to the JVM*
+     classPath=PATH_TO_JAR_OR_DIR_CONTAINING_WORKLOAD,OTHER_DEPENDENCIES
+     anotherOption=foo
 
 This test will do the following:
 
@@ -136,7 +144,22 @@ This test will do the following:
    work in the simulator).
 3. When all workloads are finished, it will run ``MinimalWorkload``
    again. This time it will have the option ``someOption`` set to
-   ``foo``.
+   ``foo``. Additionally it will run ``AnotherWorkload`` in parallel.
+
+How to set the Class Path correctly
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+As you can see from above example, we can set the classpath through two different mechanisms. However, one has
+to be careful as they can't be used interchangeably.
+
+- You can set a class path through the JVM argument ``-Djava.class.path=...``. This is how you have to pass the
+  path to the FoundationDB client library (as the client library is needed during the initialization phase). However,
+  only the first specified section will have any effect as the other Workloads will run in the same VM (and arguments,
+  by nature, can only be passed once).
+- The ``classPath`` option. This option will add all paths (directories or JAR-files) to the classPath of the JVM
+  while it is running. Not being able to add the path will result in a test failure. This is useful to add different
+  dependencies to different workloads. A path can appear more than once across sections. However, they must not
+  conflict with each other as we never remove something from the classpath.
 
 Run the simulator
 -----------------
