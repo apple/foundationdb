@@ -148,10 +148,11 @@ func (f *futureByteSlice) Get() ([]byte, error) {
 
 		if err := C.fdb_future_get_value(f.ptr, &present, &value, &length); err != 0 {
 			f.e = Error{int(err)}
-		} else {
-			if present != 0 {
-				f.v = C.GoBytes(unsafe.Pointer(value), length)
-			}
+			return
+		}
+
+		if present != 0 {
+			f.v = C.GoBytes(unsafe.Pointer(value), length)
 		}
 
 		C.fdb_future_release_memory(f.ptr)
@@ -201,10 +202,10 @@ func (f *futureKey) Get() (Key, error) {
 
 		if err := C.fdb_future_get_key(f.ptr, &value, &length); err != 0 {
 			f.e = Error{int(err)}
-		} else {
-			f.k = C.GoBytes(unsafe.Pointer(value), length)
+			return
 		}
 
+		f.k = C.GoBytes(unsafe.Pointer(value), length)
 		C.fdb_future_release_memory(f.ptr)
 	})
 
