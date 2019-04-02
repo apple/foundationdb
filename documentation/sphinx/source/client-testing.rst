@@ -35,10 +35,12 @@ A minimal implementation will look like this:
            log(20, "WorkloadSetup", null);
        }
 
+       @Override
        public void start(Database db) {
            log(20, "WorkloadStarted", null);
        }
 
+       @Override
        public boolean check(Database db) {
            log(20, "WorkloadFailureCheck", null);
            return true;
