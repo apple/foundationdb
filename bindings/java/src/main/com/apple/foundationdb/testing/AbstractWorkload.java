@@ -41,7 +41,7 @@ public abstract class AbstractWorkload {
             10, TimeUnit.SECONDS,
 			new SynchronousQueue<>()) {
 			@Override
-			protected void beforeExecute​(Thread t, Runnable r) {
+			protected void beforeExecute(Thread t, Runnable r) {
 				setProcessID(context.getProcessID());
 				super.beforeExecute(t, r);
 			}
