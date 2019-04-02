@@ -2968,6 +2968,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 						break;
 					}
 					LoadingParam param;
+					rd->files[curFileIndex].cursor = 0; // This is a hacky way to make sure cursor is correct in current version when we load 1 file at a time
 					param.url = request.url;
 					param.version = rd->files[curFileIndex].version;
 					param.filename = rd->files[curFileIndex].fileName;
@@ -3010,6 +3011,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 
 					if ( (phaseType == RestoreCommandEnum::Assign_Loader_Log_File && rd->files[curFileIndex].isRange) 
 						|| (phaseType == RestoreCommandEnum::Assign_Loader_Range_File && !rd->files[curFileIndex].isRange) ) {
+						rd->files[curFileIndex].cursor = 0;
 						curFileIndex++;
 					} else { // load the type of file in the phaseType
 						rd->cmdID.nextCmd();
