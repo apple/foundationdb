@@ -104,13 +104,23 @@ struct JVMContext {
 		int i = 0;
 		for (const auto& t : methods) {
 			auto& w = workloadMethods[i];
-			charArrays.push_back(new char[std::get<0>(t).size()]);
+			StringRef nameStr = std::get<0>(t);
+			StringRef sigStr = std::get<1>(t);
+			charArrays.push_back(new char[nameStr.size() + 1]);
 			char* name = charArrays.back();
-			charArrays.push_back(new char[std::get<1>(t).size()]);
+			charArrays.push_back(new char[sigStr.size() + 1]);
 			char* sig = charArrays.back();
+			memcpy(name, nameStr.begin(), nameStr.size());
+			memcpy(sig, sigStr.begin(), sigStr.size());
+			name[nameStr.size()] = '\0';
+			sig[sigStr.size()] = '\0';
 			w.name = name;
 			w.signature = sig;
 			w.fnPtr = std::get<2>(t);
+			TraceEvent("PreparedNativeMethod")
+				.detail("Name", w.name)
+				.detail("Signature", w.signature)
+				.detail("Ptr", reinterpret_cast<uintptr_t>(w.fnPtr));
 			++i;
 		}
 	}
