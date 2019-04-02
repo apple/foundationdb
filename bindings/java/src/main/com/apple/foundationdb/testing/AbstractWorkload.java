@@ -64,13 +64,9 @@ public abstract class AbstractWorkload {
 		return 3000;
 	}
 
-	public void spanThread(Runnable runnable) {
-		getExecutor().execute(runnable);
-	}
-
 	private void setup(Database db, long voidCallback) {
 		AbstractWorkload self = this;
-		spanThread(new Runnable(){
+		getExecutor().execute(new Runnable(){
 			public void run() {
 				self.setup(db);
 				self.sendVoid(voidCallback);
@@ -79,7 +75,7 @@ public abstract class AbstractWorkload {
 	}
 	private void start(Database db, long voidCallback) {
 		AbstractWorkload self = this;
-		spanThread(new Runnable(){
+		getExecutor().execute(new Runnable(){
 			public void run() {
 				self.start(db);
 				self.sendVoid(voidCallback);
@@ -88,7 +84,7 @@ public abstract class AbstractWorkload {
 	}
 	private void check(Database db, long boolCallback) {
 		AbstractWorkload self = this;
-		spanThread(new Runnable(){
+		getExecutor().execute(new Runnable(){
 			public void run() {
 				boolean res = self.check(db);
 				self.sendBool(boolCallback, res);
