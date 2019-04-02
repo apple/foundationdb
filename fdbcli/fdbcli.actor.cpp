@@ -40,6 +40,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 
+#include <type_traits>
 #include <signal.h>
 
 #ifdef __unixish__
@@ -1311,7 +1312,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputStringCache = outputString;
 				try {
 					// constructs process performance details output
-					std::map<int, std::string> workerDetails;
+					std::map<NetworkAddress, std::string> workerDetails;
 					for (auto proc : processesMap.obj()){
 						StatusObjectReader procObj(proc.second);
 						std::string address;
@@ -1319,26 +1320,23 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						std::string line;
 
-						// Windows does not support the "hh" width specifier so just using unsigned int to be safe.
-						unsigned int a, b, c, d, port;
-						int tokens = sscanf(address.c_str(), "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port);
-
-						// If did not get exactly 5 tokens, or one of the integers is too large, address is invalid.
-						if (tokens != 5 || a & ~0xFF || b & ~0xFF || c & ~0xFF || d & ~0xFF || port & ~0xFFFF)
-						{
+						NetworkAddress parsedAddress;
+						try {
+							parsedAddress = NetworkAddress::parse(address);
+						} catch (Error& e) {
+							// Groups all invalid IP address/port pair in the end of this detail group.
 							line = format("  %-22s (invalid IP address or port)", address.c_str());
-							std::string &lastline = workerDetails[std::numeric_limits<int>::max()];
+							IPAddress::IPAddressStore maxIp;
+							for (int i = 0; i < maxIp.size(); ++i) {
+								maxIp[i] = std::numeric_limits<std::remove_reference<decltype(maxIp[0])>::type>::max();
+							}
+							std::string& lastline =
+							    workerDetails[NetworkAddress(IPAddress(maxIp), std::numeric_limits<uint16_t>::max())];
 							if (!lastline.empty())
 								lastline.append("\n");
 							lastline += line;
 							continue;
 						}
-
-						// Create addrNum as a 48 bit number {A}{B}{C}{D}{PORT}
-						uint64_t addrNum = 0;
-						for (auto i : { a, b, c, d })
-							addrNum = (addrNum << 8) | i;
-						addrNum = (addrNum << 16) | port;
 
 						try {
 							double tx = -1, rx = -1, mCPUUtil = -1;
@@ -1401,12 +1399,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 								}
 							}
 
-							workerDetails[addrNum] = line;
+							workerDetails[parsedAddress] = line;
 						}
 
 						catch (std::runtime_error& ) {
 							std::string noMetrics = format("  %-22s (no metrics available)", address.c_str());
-							workerDetails[addrNum] = noMetrics;
+							workerDetails[parsedAddress] = noMetrics;
 						}
 					}
 					for (auto w : workerDetails)
