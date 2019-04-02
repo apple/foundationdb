@@ -1289,6 +1289,51 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	}
 }
 
+ACTOR Future<Void> printHealthyZone( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			Optional<Value> val = wait( tr.get(healthyZoneKey) );
+			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
+				printf("No ongoing maintenance.\n");
+			} else {
+				auto healthyZone = decodeHealthyZoneValue(val.get());
+				printf("Maintenance for zone %s will continue for %d seconds.\n", healthyZone.first.toString().c_str(), (healthyZone.second-tr.getReadVersion().get())/CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+			}
+			return Void();
+		} catch( Error &e ) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> clearHealthyZone( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.clear(healthyZoneKey);
+			wait(tr.commit());
+			return Void();
+		} catch( Error &e ) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			Version readVersion = wait(tr.getReadVersion());
+			tr.set(healthyZoneKey, healthyZoneValue(zoneId, readVersion + (seconds*CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+			wait(tr.commit());
+			return Void();
+		} catch( Error &e ) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	state Transaction tr(cx);
 	state int oldMode = -1;

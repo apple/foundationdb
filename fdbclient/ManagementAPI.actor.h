@@ -177,6 +177,10 @@ ACTOR Future<int> setDDMode( Database  cx, int  mode );
 
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId );
 
+ACTOR Future<Void> printHealthyZone( Database cx );
+ACTOR Future<Void> clearHealthyZone( Database cx );
+ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds );
+
 ACTOR Future<Void> waitForPrimaryDC( Database  cx, StringRef  dcId );
 
 // Gets the cluster connection string

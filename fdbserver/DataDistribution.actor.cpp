@@ -597,6 +597,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
 
 	std::vector<DDTeamCollection*> teamCollections;
+	AsyncVar<Optional<Key>> healthyZone;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -2726,6 +2727,31 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection* self, FutureStream<Vo
 	}
 }
 
+ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
+	state ReadYourWritesTransaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			if(val.present()) {
+				auto p = decodeHealthyZoneValue(val.get());
+				if(p.second > tr.getReadVersion().get()) {
+					self->healthyZone.set(p.first);
+				} else {
+					self->healthyZone.set(Optional<Key>());
+				}
+			} else {
+				self->healthyZone.set(Optional<Key>());
+			}
+			state Future<Void> watchFuture = tr.watch(healthyZoneKey);
+			wait(tr.commit());
+			wait(watchFuture);
+		} catch(Error& e) {
+			wait( tr.onError(e) );
+		}
+	}
+}
+
 ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 	state double lastUpdate = now();
 	loop {
@@ -2777,6 +2803,11 @@ ACTOR Future<Void> storageServerFailureTracker(
 {
 	state StorageServerInterface interf = server->lastKnownInterface;
 	loop {
+		state bool inHealthyZone = self->healthyZone.get().present() && interf.locality.zoneId() == self->healthyZone.get();
+		if(inHealthyZone) {
+			status->isFailed = false;
+		}
+
 		if( self->server_status.get(interf.id()).initialized ) {
 			bool unhealthy = self->server_status.get(interf.id()).isUnhealthy();
 			if(unhealthy && !status->isUnhealthy()) {
@@ -2794,15 +2825,23 @@ ACTOR Future<Void> storageServerFailureTracker(
 			self->restartRecruiting.trigger();
 
 		state double startTime = now();
+		Future<Void> healthChanged = Never();
+		if(status->isFailed) {
+			ASSERT(!inHealthyZone);
+			healthChanged = IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false));
+		} else if(!inHealthyZone) {
+			healthChanged = waitFailureClient(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution);
+		}
 		choose {
-			when ( wait( status->isFailed
-				? IFailureMonitor::failureMonitor().onStateEqual( interf.waitFailure.getEndpoint(), FailureStatus(false) )
-				: waitFailureClient(interf.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution) ) )
-			{
+			when ( wait(healthChanged) ) {
 				double elapsed = now() - startTime;
 				if(!status->isFailed && elapsed < SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME) {
 					wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
+					if(!IFailureMonitor::failureMonitor().getState( interf.waitFailure.getEndpoint() ).isFailed()) {
+						continue;
+					}
 				}
+
 				status->isFailed = !status->isFailed;
 				if(!status->isFailed && !server->teams.size()) {
 					self->doBuildTeams = true;
@@ -2812,6 +2851,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 					.detail("Available", IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when ( wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never() ) ) { break; }
+			when ( wait( self->healthyZone.onChange() ) ) {}
 		}
 	}
 
@@ -3303,6 +3343,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(waitServerListChange( self, serverRemoved.getFuture() ));
 		self->addActor.send(trackExcludedServers( self ));
 		self->addActor.send(monitorHealthyTeams( self ));
+		self->addActor.send(waitHealthyZoneChange( self ));
 
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
