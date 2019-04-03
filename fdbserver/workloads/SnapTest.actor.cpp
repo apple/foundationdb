@@ -70,7 +70,7 @@ void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
 
 void printMessages(std::vector<Future<TraceEventFields>>& messages) {
 	for (int i = 0; i < messages.size(); i++) {
-		TraceEvent("MESSAGES").detail("I", i).detail("VALUE", messages[i].get().toString());
+		TraceEvent("SnapTestMessages").detail("I", i).detail("Value", messages[i].get().toString());
 	}
 	return;
 }
@@ -84,12 +84,14 @@ public: // variables
 	int testID; // test id
 	UID snapUID; // UID used for snap name
 	std::string restartInfoLocation; // file location to store the snap restore info
+	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), numSnaps(0), maxSnapDelay(0.0), snapCheck(false), testID(0), snapUID() {
 		TraceEvent("SnapTestWorkload Constructor");
 		std::string workloadName = "SnapTest";
+		maxRetryCntToRetrieveMessage = 10;
 
 		numSnaps = getOption(options, LiteralStringRef("numSnaps"), 0);
 		maxSnapDelay = getOption(options, LiteralStringRef("maxSnapDelay"), 25.0);
@@ -151,6 +153,7 @@ public: // workload functions
 		}
 		default: { break; }
 		}
+		TraceEvent(SevError, "InvalidPathCheckOptions");
 		return false;
 	}
 
@@ -246,7 +249,7 @@ public: // workload functions
 				try {
 					Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, CLIENT_KNOBS->TOO_MANY));
 					if (!kvRange.more && kvRange.size() == 0) {
-						TraceEvent("NoMoreEntries");
+						TraceEvent("SnapTestNoMoreEntries");
 						break;
 					}
 
@@ -271,7 +274,7 @@ public: // workload functions
 					cnt = 0;
 				}
 			}
-			TraceEvent("VerifyCntValue").detail("Value", cnt);
+			TraceEvent("SnapTestVerifyCntValue").detail("Value", cnt);
 			if (cnt != 1000) {
 				throw operation_failed();
 			}
@@ -428,30 +431,30 @@ public: // workload functions
 			loop {
 				retry = false;
 				try {
-					TraceEvent("WaitingForTlogMessages");
+					TraceEvent(SevDebug, "WaitingForTlogMessages");
 					wait(waitForAll(tLogMessages));
 					break;
 				} catch (Error& e) {
-					TraceEvent("VerifyTLogTrackLatest")
-					    .detail("Token", eventTokenRef.toString())
-					    .detail("Reason", "Failed to get tLogMessages")
-					    .detail("Code", e.what());
 					if (e.code() != error_code_timed_out) {
+						TraceEvent(SevError, "VerifyTLogTrackLatest")
+							.detail("Token", eventTokenRef.toString())
+							.detail("Reason", "Failed to get tLogMessages")
+							.detail("Code", e.what());
 						return false;
 					} else {
 						retry = true;
 						++retryCnt;
 					}
 				}
-				if (retryCnt >= 4) {
-					TraceEvent("Unable to retrieve TLog messages");
+				if (retryCnt >= self->maxRetryCntToRetrieveMessage  ) {
+					TraceEvent(SevError, "UnableToRetrieveTLogMessages");
 					return false;
 				}
 			}
 			printMessages(tLogMessages);
 			filterEmptyMessages(tLogMessages);
 			if (tLogMessages.size() != 1) {
-				TraceEvent("VerifyTLogTrackLatestMessageNotFound")
+				TraceEvent(SevError, "VerifyTLogTrackLatestMessageNotFound")
 				    .detail("Address", tLogWorkers[i].address())
 				    .detail("Token", eventTokenRef.toString());
 				return false;
@@ -509,10 +512,10 @@ public: // workload functions
 				wait(waitForAll(storageMessages));
 				wait(waitForAll(coordMessages));
 			} catch (Error& e) {
-				TraceEvent("VerifyExecTraceVersionFailure")
-				    .detail("Reason", "Failed to get proxy or storage messages")
-				    .detail("code", e.what());
 				if (e.code() != error_code_timed_out) {
+					TraceEvent(SevError, "VerifyExecTraceVersionFailure")
+						.detail("Reason", "FailedToGetProxyOrStorageMessages")
+						.detail("Code", e.what());
 					return false;
 				} else {
 					retry = true;
@@ -524,33 +527,26 @@ public: // workload functions
 			}
 
 			if (retry && retryCnt >= 4) {
-				TraceEvent("Unable to retrieve proxy/storage/coord messages "
-				           "after retries");
-				ASSERT(1 == 0);
-				std::terminate();
+				TraceEvent(SevError, "UnableToRetrieveProxyStorageCoordMessages");
 				return false;
 			}
 		}
 
-		printMessages(proxyMessages);
-		printMessages(storageMessages);
-		printMessages(coordMessages);
 		// filter out empty messages
 		filterEmptyMessages(proxyMessages);
 		filterEmptyMessages(storageMessages);
 		filterEmptyMessages(coordMessages);
 
-		TraceEvent("ProxyMessages");
+		TraceEvent("SnapTestProxyMessages");
 		printMessages(proxyMessages);
-		TraceEvent("StorageMessages");
+		TraceEvent("SnapTestStorageMessages");
 		printMessages(storageMessages);
-		TraceEvent("CoorMessages");
+		TraceEvent("SnapTestCoordMessages");
 		printMessages(coordMessages);
 
 		if (proxyMessages.size() != 1) {
 			// if no message from proxy or more than one fail the check
-			TraceEvent("No ExecTrace message from Proxy");
-			std::terminate();
+			TraceEvent(SevError, "NoExecTraceMessageFromProxy");
 			return false;
 		}
 
@@ -558,8 +554,7 @@ public: // workload functions
 		    .detail("CoordMessageSize", coordMessages.size())
 		    .detail("CoordAddrssize", coordAddrs.size());
 		if (coordMessages.size() < (coordAddrs.size() + 1) / 2) {
-			TraceEvent("No ExecTrace message from Quorum of coordinators");
-			std::terminate();
+			TraceEvent(SevError, "NoExecTraceMessageFromQuorumOfCoordinators");
 			return false;
 		}
 
@@ -579,13 +574,10 @@ public: // workload functions
 			for (; (execVersion != -1) && j < storageMessages.size(); j++) {
 				// for each message that has this verison, get the tag and
 				// the durable version
-				// FIXME: sramamoorthy, for now allow default values
 				state Tag tag;
 				state Tag invalidTag;
-				// FIXME: sramamoorthy, for now allow default values
 				state Version durableVersion = -1;
 				TraceEvent("RelevantStorageMessage").detail("Msg", storageMessages[j].get().toString());
-				// FIXME: sramamoorthy, how to compare with empty string
 				ASSERT(storageMessages[j].get().toString() != emptyStr);
 				getTagAndDurableVersion(storageMessages[j].get(), execVersion, tag, durableVersion);
 				TraceEvent("SearchingTLogMessages").detail("Tag", tag.toString());
@@ -595,7 +587,6 @@ public: // workload functions
 					retry = false;
 					tLogMessages.clear();
 
-					// for (int m = 0; (tag != -1) && m < tLogWorkers.size(); m++) {
 					for (int m = 0; (tag != invalidTag) && m < tLogWorkers.size(); m++) {
 						visitedStorageTags[tag] = true;
 						std::string eventToken = "ExecTrace/TLog/" + tag.toString() + "/" + self->snapUID.toString();
@@ -610,10 +601,10 @@ public: // workload functions
 							wait(waitForAll(tLogMessages));
 						}
 					} catch (Error& e) {
-						TraceEvent("VerifyExecTraceVersionFailure")
-						    .detail("Reason", "Failed to get tLogMessages")
-						    .detail("Code", e.what());
 						if (e.code() != error_code_timed_out) {
+							TraceEvent(SevError, "VerifyExecTraceVersionFailure")
+								.detail("Reason", "FailedToGetTLogMessages")
+								.detail("Code", e.what());
 							return false;
 						} else {
 							retry = true;
@@ -623,11 +614,8 @@ public: // workload functions
 					if (retry == false) {
 						break;
 					}
-					if (retry && retryCnt > 20) {
-						TraceEvent("Unable to retrieve tLog messages after "
-						           "retries");
-						ASSERT(1 == 0);
-						std::terminate();
+					if (retry && retryCnt > self->maxRetryCntToRetrieveMessage) {
+						TraceEvent(SevError, "UnableToRetrieveTLogMessagesAfterRetries");
 						return false;
 					}
 				}
@@ -638,14 +626,12 @@ public: // workload functions
 				numDurableVersionChecks = 0;
 				for (; (tag != invalidTag) && k < tLogMessages.size(); k++) {
 					// for each of the message that has this version and tag
-					// verify that the minVersioninTlog < durableVersion <
-					// maxVersioninTlog
+					// verify that
+					// 1) durableVersion >= minTLogVersion -1
+					// 2) durableVersion < maxTLogVersion
 					Version minTLogVersion = -1;
 					Version maxTLogVersion = -1;
-
 					TraceEvent("TLogMessage").detail("Msg", tLogMessages[k].get().toString());
-
-					// FIXME, sramamoorthy, handle empty string
 					ASSERT(tLogMessages[k].get().toString() != emptyStr);
 					getMinAndMaxTLogVersions(tLogMessages[k].get(), execVersion, tag, minTLogVersion, maxTLogVersion);
 					if (minTLogVersion != -1 && maxTLogVersion != -1) {
@@ -655,12 +641,10 @@ public: // workload functions
 						}
 					}
 				}
-				// if we did not find even one tlog for a given tag fail the
-				// check
+				// if we did not find even one tlog for a given tag fail the check
 				if (numDurableVersionChecks < 1) {
-					TraceEvent("NoTLogFoundForATag");
-					ASSERT(1 == 0);
-					std::terminate();
+					TraceEvent(SevError, "NoTLogFoundForATag");
+					return false;
 				}
 				tLogMessages.clear();
 			}
@@ -668,9 +652,7 @@ public: // workload functions
 
 		// validates that we encountered unique tags of value numTags
 		if (numTags != visitedStorageTags.size()) {
-			TraceEvent("StorageMessagesWereNotFound");
-			ASSERT(1 == 0);
-			std::terminate();
+			TraceEvent(SevError, "StorageMessagesWereNotFound");
 			return false;
 		}
 		TraceEvent("VerifyExecTraceVersionSuccess");

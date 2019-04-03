@@ -1705,7 +1705,7 @@ ACTOR Future<Void> masterProxyServerCore(
 						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 1.0));
 						++numSucc;
 					} catch (Error& e) {
-						TraceEvent("ExecReqFailed").detail("what", e.what());
+						TraceEvent("ExecReqFailed").detail("What", e.what());
 					}
 				}
 			}

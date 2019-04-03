@@ -329,10 +329,10 @@ struct TLogData : NonCopyable {
 	FlowLock concurrentLogRouterReads;
 	FlowLock persistentDataCommitLock;
 
-    bool ignorePopRequest;    // ignore pop request from storage servers
-    double ignorePopDeadline; // time until which the ignorePopRequest will be
+	bool ignorePopRequest;    // ignore pop request from storage servers
+	double ignorePopDeadline; // time until which the ignorePopRequest will be
                               // honored
-    std::string ignorePopUid; // callers that set ignorePopRequest will set this
+	std::string ignorePopUid; // callers that set ignorePopRequest will set this
                               // extra state, used to validate the ownership of
                               // the set and for callers that unset will
                               // be able to match it up
@@ -1698,9 +1698,9 @@ ACTOR Future<Void> tLogCommit(
 		qe.id = logData->logId;
 
 		if (req.hasExecOp) {
-			// inspect the messages to find if there is an Exec type and print
-            // it. message are prefixed by the length of the message and each
-            // field is prefixed by the length too
+		// inspect the messages to find if there is an Exec type and print
+		// it. message are prefixed by the length of the message and each
+		// field is prefixed by the length too
 			uint8_t type = MutationRef::MAX_ATOMIC_OP;
 			{
 				ArenaReader rd(req.arena, qe.messages, Unversioned());
@@ -1850,14 +1850,11 @@ ACTOR Future<Void> tLogCommit(
         auto uidStr = execArg.getBinaryArgValue("uid");
         state Future<int> cmdErr;
         if (!g_network->isSimulated()) {
-            // Run the exec command
+            // get bin path
             auto snapBin = execArg.getBinaryPath();
             auto dataFolder = "path=" + self->dataFolder;
-
-			TraceEvent("TLogSnapCommand").detail("cmdLine", param2.toString()).detail("folderPath", dataFolder);
-
+			TraceEvent("TLogSnapCommand").detail("CmdLine", param2.toString()).detail("FolderPath", dataFolder);
 			vector<std::string> paramList;
-            // bin path
             paramList.push_back(snapBin);
             // user passed arguments
             auto listArgs = execArg.getBinaryArgs();
@@ -1879,24 +1876,13 @@ ACTOR Future<Void> tLogCommit(
             // copy the entire directory
             state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
             state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
-
-            std::string tLogFolderToCreateCmd = "mkdir " + tLogFolderTo;
-            std::string tLogFolderCopyCmd =
-                "cp " + tLogFolderFrom + " " + tLogFolderTo;
-
-			TraceEvent("TLogExecSnapcommands")
-			    .detail("TLogFolderToCreateCmd", tLogFolderToCreateCmd)
-			    .detail("TLogFolderCopyCmd", tLogFolderCopyCmd);
-
 			vector<std::string> paramList;
             std::string mkdirBin = "/bin/mkdir";
-
             paramList.push_back(mkdirBin);
             paramList.push_back(tLogFolderTo);
 			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 			wait(success(cmdErr));
 			err = cmdErr.get();
-			TraceEvent("MkdirStatus").detail("Errno", err);
             if (err == 0) {
 				vector<std::string> paramList;
 				std::string cpBin = "/bin/cp";
