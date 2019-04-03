@@ -65,6 +65,7 @@ ERROR( lookup_failed, 1041, "DNS lookup failed" )
 ERROR( proxy_memory_limit_exceeded, 1042, "Proxy commit memory limit exceeded" )
 ERROR( shutdown_in_progress, 1043, "Operation no longer supported due to shutdown" )
 ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
+ERROR( transaction_not_permitted, 1045, "Operation not permitted")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
