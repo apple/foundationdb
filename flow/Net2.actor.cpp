@@ -55,7 +55,7 @@ using namespace boost::asio::ip;
 //
 //                                                       xyzdev
 //                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061050001LL;
+const uint64_t currentProtocolVersion        = 0x0FDB00B061060001LL;
 const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
