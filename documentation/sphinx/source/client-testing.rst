@@ -13,6 +13,16 @@ This tutorial explains how one can implement a workload, how one can orchestrate
 how one can run a workload within a simulator. Running in a simulator is also useful as it does not require any setup: you can simply
 run one command that will provide you with a fully functional FoundationDB cluster.
 
+Preparing the fdbserver Binary
+==============================
+
+In order to run a Java workload, ``fdbserver`` needs to be able to embed a JVM. Because of that it needs to be linked against JNI.
+The official FDB binaries do not link against JNI and therefore one can't use that to run a Java workload. Instead you need to
+download the sources and build them. Make sure that ``cmake`` can find Java and pass ``-DWITH_JAVA_WORKLOAD=ON`` to cmake.
+
+After FoundationDB was built, you can use ``bin/fdbserver`` to run the server. The jar file containing the client library can be
+found in ``packages/fdb-VERSION.jar``. Both of these are in the build directory.
+
 Implementing a Workload
 =======================
 
