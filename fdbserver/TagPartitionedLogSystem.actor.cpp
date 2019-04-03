@@ -1111,16 +1111,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations) {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
-			// FIXME: sramamoorthy, remove after debugging
-			if (allLocations) {
-				TraceEvent("AllLocationsDetails")
-				    .detail("NumLogServers", log->logServers.size())
-				    .detail("NumLogRouters", log->logRouters.size())
-				    .detail("SatelliteTagLocations", log->satelliteTagLocations.size())
-				    .detail("IsLocal", log->isLocal)
-				    .detail("LogServerString", log->logServerString())
-				    .detail("LogRouterString", log->logRouterString());
-			}
 			if(log->isLocal && log->logServers.size()) {
 				log->getPushLocations(tags, locations, locationOffset, allLocations);
 				locationOffset += log->logServers.size();

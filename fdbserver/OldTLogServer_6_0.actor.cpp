@@ -286,7 +286,7 @@ struct TLogData : NonCopyable {
 	                          // the set and for callers that unset will
 	                          // be able to match it up
 	std::string dataFolder; // folder where data is stored
-    std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
+	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
                                        // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
 
@@ -1481,15 +1481,11 @@ ACTOR Future<Void> tLogCommit(
 		state Future<int> cmdErr;
 		auto uidStr = execArg.getBinaryArgValue("uid");
 		if (!g_network->isSimulated()) {
-			// Run the exec command
-			// std::string snapBin = extractBinPath(param2.toString());
+			// get the bin path
 			auto snapBin = execArg.getBinaryPath();
 			auto dataFolder = "path=" + self->dataFolder;
-
-			TraceEvent("oldTLog6SnapCommand").detail("cmdLine", param2.toString()).detail("folderPath", dataFolder);
-
+			TraceEvent("TLogSnapCommand").detail("CmdLine", param2.toString()).detail("FolderPath", dataFolder);
 			vector<std::string> paramList;
-			// bin path
 			paramList.push_back(snapBin);
 			// user passed arguments
 			auto listArgs = execArg.getBinaryArgs();
@@ -1511,17 +1507,8 @@ ACTOR Future<Void> tLogCommit(
 			// copy the entire directory
 			state std::string tLogFolderFrom = "./" + self->dataFolder + "/.";
 			state std::string tLogFolderTo = "./" + self->dataFolder + "-snap-" + uidStr;
-
-			std::string tLogFolderToCreateCmd = "mkdir " + tLogFolderTo;
-			std::string tLogFolderCopyCmd = "cp " + tLogFolderFrom + " " + tLogFolderTo;
-
-			TraceEvent("ExecSnapCommands")
-			    .detail("TLogFolderToCreateCmd", tLogFolderToCreateCmd)
-			    .detail("TLogFolderCopyCmd", tLogFolderCopyCmd);
-
 			vector<std::string> paramList;
 			std::string mkdirBin = "/bin/mkdir";
-
 			paramList.push_back(mkdirBin);
 			paramList.push_back(tLogFolderTo);
 			cmdErr = spawnProcess(mkdirBin, paramList, 3.0);

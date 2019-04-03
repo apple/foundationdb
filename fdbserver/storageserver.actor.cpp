@@ -1883,19 +1883,18 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 	state Future<int> cmdErr;
 
 	if (!g_network->isSimulated() || cmd != execSnap) {
-		// Run the exec command
+		// get bin path
 		auto binPath = execArg.getBinaryPath();
 		auto dataFolder = "path=" + data->folder;
 		vector<std::string> paramList;
-		// bin path
 		paramList.push_back(binPath);
-		// user passed arguments
+		// get user passed arguments
 		auto listArgs = execArg.getBinaryArgs();
 		execArg.dbgPrint();
 		for (auto elem : listArgs) {
 			paramList.push_back(elem);
 		}
-		// additional arguments
+		// get additional arguments
 		paramList.push_back(dataFolder);
 		const char* version = FDB_VT_VERSION;
 		std::string versionString = "version=";
@@ -1908,23 +1907,9 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		err = cmdErr.get();
 	} else {
 		// copy the files
-		TraceEvent("ExecTraceStorage")
-		    .detail("StorageFolder", data->folder)
-		    .detail("LocalMachineId", data->thisServerID.toString())
-		    .detail("DurableVersion", data->durableVersion.get());
-
 		std::string folder = abspath(data->folder);
-
 		state std::string folderFrom = folder + "/.";
 		state std::string folderTo = folder + "-snap-" + uidStr;
-
-		std::string folderToCreateCmd = "mkdir " + folderTo;
-		std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
-
-		TraceEvent("ExecTraceStorageSnapcommands")
-		    .detail("FolderToCreateCmd", folderToCreateCmd)
-		    .detail("FolderCopyCmd", folderCopyCmd);
-
 		vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 
@@ -1933,7 +1918,6 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 		cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
-		TraceEvent("MkdirStatus").detail("Errno", err);
 		if (err == 0) {
 			vector<std::string> paramList;
 			std::string cpBin = "/bin/cp";
@@ -2090,7 +2074,6 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 							ASSERT(execIdxVec.size() == 0);
 							splitMutations(data, data->shards, *u, execIdxVec);
 							for (auto execIdx : execIdxVec) {
-								TraceEvent("TIMEFORSNAP");
 								wait(snapHelper(data, u->mutations[execIdx], u->version));
 							}
 							execIdxVec.clear();
@@ -2702,7 +2685,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
 				if (pUpdate->mutations[mutationNum].type == MutationRef::Exec) {
-					TraceEvent("TIMEFORSNAP");
 					wait(snapHelper(data, pUpdate->mutations[mutationNum], pUpdate->version));
 				}
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
@@ -2778,7 +2760,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 							break;
 					}
 					if (msg.type == MutationRef::Exec) {
-						TraceEvent("TIMETOTAKESNAP");
 						wait(snapHelper(data, msg, ver));
 					}
 				}

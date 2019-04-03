@@ -1181,18 +1181,17 @@ ACTOR Future<Void> workerServer(
 				state int err = 0;
 				state Future<int> cmdErr;
 				if (!g_network->isSimulated()) {
-					// bin path
+					// get bin path
 					auto snapBin = execArg.getBinaryPath();
 					auto dataFolder = "path=" + coordFolder;
 					vector<std::string> paramList;
-					// bin path
 					paramList.push_back(snapBin);
-					// user passed arguments
+					// get user passed arguments
 					auto listArgs = execArg.getBinaryArgs();
 					for (auto elem : listArgs) {
 						paramList.push_back(elem);
 					}
-					// additional arguments
+					// get additional arguments
 					paramList.push_back(dataFolder);
 					const char* version = FDB_VT_VERSION;
 					std::string versionString = "version=";
@@ -1208,23 +1207,13 @@ ACTOR Future<Void> workerServer(
 					std::string folder = coordFolder;
 					state std::string folderFrom = "./" + folder + "/.";
 					state std::string folderTo = "./" + folder + "-snap-" + uidStr;
-
-					std::string folderToCreateCmd = "mkdir " + folderTo;
-					std::string folderCopyCmd = "cp " + folderFrom + " " + folderTo;
-
-					TraceEvent("ExecTraceCoordSnapcommands")
-					    .detail("FolderToCreateCmd", folderToCreateCmd)
-					    .detail("FolderCopyCmd", folderCopyCmd);
-
 					vector<std::string> paramList;
 					std::string mkdirBin = "/bin/mkdir";
-
 					paramList.push_back(mkdirBin);
 					paramList.push_back(folderTo);
 					cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
 					wait(success(cmdErr));
 					err = cmdErr.get();
-					TraceEvent("MkdirStatus").detail("Errno", err);
 					if (err == 0) {
 						vector<std::string> paramList;
 						std::string cpBin = "/bin/cp";

@@ -1413,6 +1413,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
 			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, tlsOptions, extraDB, whiteListBinPaths), 100.0 ) );
+			// FIXME: snapshot restore does not support multi-region restore, hence restore it as single region always
 			if (restoring) {
 				std::string config =  "usable_regions=1";
 				startingConfiguration = makeString(config.size());
