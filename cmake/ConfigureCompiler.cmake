@@ -126,6 +126,13 @@ else()
     -Wreturn-type
     -fdiagnostics-color=always
     -fPIC)
+  if (GPERFTOOLS_FOUND AND GCC)
+    add_compile_options(
+      -fno-builtin-malloc
+      -fno-builtin-calloc
+      -fno-builtin-realloc
+      -fno-builtin-free)
+  endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(USE_LTO OFF CACHE BOOL "Do link time optimization")

@@ -51,11 +51,6 @@ mark_as_advanced(
   GPERFTOOLS_INCLUDE_DIR)
 
 if (GPERFTOOLS_FOUND)
-  add_compile_options(
-    -fno-builtin-malloc
-    -fno-builtin-calloc
-    -fno-builtin-realloc
-    -fno-builtin-free)
   add_library(gperftools UNKNOWN IMPORTED)
   set_target_properties(gperftools PROPERTIES
     IMPORTED_LOCATION ${GPERFTOOLS_TCMALLOC_AND_PROFILER}
