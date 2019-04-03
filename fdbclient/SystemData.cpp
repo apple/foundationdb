@@ -607,3 +607,20 @@ const Key restoreWorkerKeyFor( UID const& agentID ) {
 	wr << agentID;
 	return wr.toValue();
 }
+
+const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
+
+const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << zoneId;
+	wr << version;
+	return wr.toValue();
+}
+std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& value) {
+	Key zoneId;
+	Version version;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> zoneId;
+	reader >> version;
+	return std::make_pair(zoneId, version);
+}
