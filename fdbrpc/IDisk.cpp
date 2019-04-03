@@ -96,7 +96,7 @@ struct EBSDisk : public NormalDisk, public ReferenceCounted<EBSDisk> {
     static const double constexpr epochLength = 1.0;
 
     EBSDisk(int64_t iops, int64_t bandwidth) : NormalDisk(iops, bandwidth) {}
-    
+
     void addref() override { ReferenceCounted<EBSDisk>::addref(); }
     void delref() override { ReferenceCounted<EBSDisk>::delref(); }
 
