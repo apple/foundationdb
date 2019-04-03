@@ -31,3 +31,8 @@ if(NOT OPEN_FOR_IDE)
     FILE_NAME fdbbackup
     LINK_NAME fdbdr)
 endif()
+
+if (GPERFTOOLS_FOUND)
+  add_compile_definitions(USE_GPERFTOOLS)
+  target_link_libraries(fdbbackup PRIVATE gperftools)
+endif()

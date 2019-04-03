@@ -6,6 +6,10 @@ set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
+if(USE_GPERFTOOLS)
+  find_package(Gperftools REQUIRED)
+endif()
+
 add_compile_options(-DCMAKE_BUILD)
 add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
