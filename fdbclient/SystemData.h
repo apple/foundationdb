@@ -277,4 +277,9 @@ extern const KeyRangeRef restoreWorkersKeys;
 
 const Key restoreWorkerKeyFor( UID const& agentID );
 
+extern const KeyRef healthyZoneKey;
+
+const Value healthyZoneValue( StringRef const& zoneId, Version version );
+std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
+
 #endif
