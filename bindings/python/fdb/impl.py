@@ -1159,8 +1159,8 @@ class KeySelector(object):
     def first_greater_or_equal(cls, key):
         return cls(key, False, 1)
 
-    def __str__(self):
-        return 'KeySelector(%s, %r, %d)' % (self.key, self.or_equal, self.offset)
+    def __repr__(self):
+        return 'KeySelector(%r, %r, %r)' % (self.key, self.or_equal, self.offset)
 
 
 class KVIter(object):

@@ -176,9 +176,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::WorstFit;
 		}
-	case ProcessClass::RateKeeper:
+	case ProcessClass::Ratekeeper:
 		switch( _class ) {
-		case ProcessClass::RateKeeperClass:
+		case ProcessClass::RatekeeperClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;

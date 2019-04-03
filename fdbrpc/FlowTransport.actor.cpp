@@ -28,6 +28,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/crc32c.h"
 #include "fdbrpc/simulator.h"
+#include <unordered_map>
 
 #if VALGRIND
 #include <memcheck.h>
@@ -168,7 +169,7 @@ public:
 
 	NetworkAddressList localAddresses;
 	std::vector<Future<Void>> listeners;
-	std::map<NetworkAddress, struct Peer*> peers;
+	std::unordered_map<NetworkAddress, struct Peer*> peers;
 	bool warnAlwaysForLargePacket;
 
 	// These declarations must be in exactly this order
@@ -913,11 +914,8 @@ Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress l
 	return listenF;
 }
 
-void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
-	if (endpoint.getPrimaryAddress().isValid()) return;
-	ASSERT( !(endpoint.token.first() & TOKEN_STREAM_FLAG) );  // Only reply promises are supposed to be unaddressed
-	ASSERT( g_currentDeliveryPeerAddress.address.isValid() );
-	endpoint.addresses = g_currentDeliveryPeerAddress;
+Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
+	return Endpoint(g_currentDeliveryPeerAddress, token);
 }
 
 void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
@@ -978,7 +976,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		what.serializeBinaryWriter(wr);
-		Standalone<StringRef> copy = wr.toStringRef();
+		Standalone<StringRef> copy = wr.toValue();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif

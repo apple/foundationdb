@@ -65,7 +65,7 @@ then
        python setup.py install
        successOr "Installing python bindings failed"
        popd
-       python -c 'import fdb; fdb.api_version(600)'
+       python -c 'import fdb; fdb.api_version(610)'
        successOr "Loading python bindings failed"
    }
 

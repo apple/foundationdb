@@ -40,6 +40,7 @@
 
 #include "fdbcli/FlowLineNoise.h"
 
+#include <type_traits>
 #include <signal.h>
 
 #ifdef __unixish__
@@ -527,6 +528,10 @@ void initHelp() {
 		"force_recovery_with_data_loss <DCID>",
 		"Force the database to recover into DCID",
 		"A forced recovery will cause the database to lose the most recently committed mutations. The amount of mutations that will be lost depends on how far behind the remote datacenter is. This command will change the region configuration to have a positive priority for the chosen DCID, and a negative priority for all other DCIDs. This command will set usable_regions to 1. If the database has already recovered, this command does nothing.\n");
+	helpMap["maintenance"] = CommandHelp(
+		"maintenance [on|off] [ZONEID] [SECONDS]",
+		"mark a zone for maintenance",
+		"Calling this command with `on' prevents data distribution from moving data away from the processes with the specified ZONEID. Data distribution will automatically be turned back on for ZONEID after the specified SECONDS have elapsed, or after a storage server with a different ZONEID fails. Only one ZONEID can be marked for maintenance. Calling this command with no arguments will display any ongoing maintenance. Calling this command with `off' will disable maintenance.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -1311,7 +1316,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputStringCache = outputString;
 				try {
 					// constructs process performance details output
-					std::map<int, std::string> workerDetails;
+					std::map<NetworkAddress, std::string> workerDetails;
 					for (auto proc : processesMap.obj()){
 						StatusObjectReader procObj(proc.second);
 						std::string address;
@@ -1319,26 +1324,23 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						std::string line;
 
-						// Windows does not support the "hh" width specifier so just using unsigned int to be safe.
-						unsigned int a, b, c, d, port;
-						int tokens = sscanf(address.c_str(), "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port);
-
-						// If did not get exactly 5 tokens, or one of the integers is too large, address is invalid.
-						if (tokens != 5 || a & ~0xFF || b & ~0xFF || c & ~0xFF || d & ~0xFF || port & ~0xFFFF)
-						{
+						NetworkAddress parsedAddress;
+						try {
+							parsedAddress = NetworkAddress::parse(address);
+						} catch (Error& e) {
+							// Groups all invalid IP address/port pair in the end of this detail group.
 							line = format("  %-22s (invalid IP address or port)", address.c_str());
-							std::string &lastline = workerDetails[std::numeric_limits<int>::max()];
+							IPAddress::IPAddressStore maxIp;
+							for (int i = 0; i < maxIp.size(); ++i) {
+								maxIp[i] = std::numeric_limits<std::remove_reference<decltype(maxIp[0])>::type>::max();
+							}
+							std::string& lastline =
+							    workerDetails[NetworkAddress(IPAddress(maxIp), std::numeric_limits<uint16_t>::max())];
 							if (!lastline.empty())
 								lastline.append("\n");
 							lastline += line;
 							continue;
 						}
-
-						// Create addrNum as a 48 bit number {A}{B}{C}{D}{PORT}
-						uint64_t addrNum = 0;
-						for (auto i : { a, b, c, d })
-							addrNum = (addrNum << 8) | i;
-						addrNum = (addrNum << 16) | port;
 
 						try {
 							double tx = -1, rx = -1, mCPUUtil = -1;
@@ -1401,12 +1403,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 								}
 							}
 
-							workerDetails[addrNum] = line;
+							workerDetails[parsedAddress] = line;
 						}
 
 						catch (std::runtime_error& ) {
 							std::string noMetrics = format("  %-22s (no metrics available)", address.c_str());
-							workerDetails[addrNum] = noMetrics;
+							workerDetails[parsedAddress] = noMetrics;
 						}
 					}
 					for (auto w : workerDetails)
@@ -2848,6 +2850,30 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					wait( makeInterruptable( forceRecovery( ccf, tokens[1] ) ) );
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "maintenance")) {
+					if (tokens.size() == 1) {
+						wait( makeInterruptable( printHealthyZone(db) ) );
+					}
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
+						wait( makeInterruptable( clearHealthyZone(db) ) );
+					}
+					else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
+						double seconds;
+						int n=0;
+						auto secondsStr = tokens[3].toString();
+						if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait( makeInterruptable( setHealthyZone( db, tokens[2], seconds ) ) );
+						}
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
 					continue;
 				}
 

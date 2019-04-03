@@ -311,7 +311,7 @@ TEST_CASE("/flow/flow/networked futures")
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() && locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
-		BinaryReader rd(wr.toStringRef(), IncludeVersion());
+		BinaryReader rd(wr.toValue(), IncludeVersion());
 		RequestStream<int> remoteInt;
 		rd >> remoteInt;
 
@@ -328,7 +328,7 @@ TEST_CASE("/flow/flow/networked futures")
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal());
 
-		BinaryReader rd(wr.toStringRef(), IncludeVersion());
+		BinaryReader rd(wr.toValue(), IncludeVersion());
 		ReplyPromise<int> remoteInt;
 		rd >> remoteInt;
 

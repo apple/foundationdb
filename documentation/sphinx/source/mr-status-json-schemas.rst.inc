@@ -1,38 +1,17 @@
-/*
- * Schemas.cpp
- *
- * This source file is part of the FoundationDB open source project
- *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+.. -*- mode: rst; -*-
 
-#include "fdbclient/Schemas.h"
-
-const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
-{
+.. |json-status-format| replace::
    "cluster":{
       "layers":{
          "_valid":true,
          "_error":"some error description"
       },
       "processes":{
-         "$map":{
-            "version":"3.0.0",
+         "$map_key=zoneid":{
+            "version":"3.0.0", // a process version will not be reported if it is not protocol-compatible; it will be absent from status
             "machine_id":"0ccb4e0feddb5583010f6b77d9d10ece",
-            "locality":{
-                "$map":"value"
+            "locality":{ // This will contain any locality fields that are provided on the command line
+                "$map_key=localityName":"value"
             },
             "class_source":{
                "$enum":[
@@ -128,21 +107,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
-                  "grv_latency_bands":{
-                     "$map": 1
+                  "grv_latency_bands":{ // How many GRV requests belong to the latency (in seconds) band (e.g., How many requests belong to [0.01,0.1] latency band). The key is the upper bound of the band and the lower bound is the next smallest band (or 0, if none). Example: {0.01: 27, 0.1: 18, 1: 1, inf: 98,filtered: 10}, we have 18 requests in [0.01, 0.1) band.
+                     "$map_key=upperBoundOfBand": 1
                   },
                   "read_latency_bands":{
-                     "$map": 1
+                     "$map_key=upperBoundOfBand": 1
                   },
                   "commit_latency_bands":{
-                     "$map": 1
+                     "$map_key=upperBoundOfBand": 1
                   }
                }
             ],
             "command_line":"-r simulation",
             "memory":{
-               "available_bytes":0,
-               "limit_bytes":0,
+               "available_bytes":0, //an estimate of the process' fair share of the memory available to fdbservers
+               "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
                "used_bytes":0
             },
@@ -150,7 +129,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                {
                   "time":12345.12312,
                   "type":"x",
-                  "name":{
+                  "name":{ // when not limiting
                      "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
@@ -171,23 +150,23 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "excluded":false,
             "address":"1.2.3.4:1234",
             "disk":{
-               "free_bytes":3451233456234,
+               "free_bytes":3451233456234, // an estimate of how many bytes are free to allocate to fdbservers without swapping
                "reads":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
                },
-               "busy":0.0,
+               "busy":0.0, // from 0.0 (idle) to 1.0 (fully busy)
                "writes":{
                   "hz":0.0,
                   "counter":0,
                   "sectors":0
                },
-               "total_bytes":123412341234
+               "total_bytes":123412341234 // an estimate of total physical RAM
             },
             "uptime_seconds":1234.2345,
             "cpu":{
-               "usage_cores":0.0
+               "usage_cores":0.0 // average number of logical cores utilized by the process over the recent past; value may be > 1.0
             },
             "network":{
                "current_connections":0,
@@ -211,7 +190,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "old_logs":[
          {
-            "logs":[
+            "logs":[ // this field will be absent if a value has not been explicitly set
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
@@ -237,7 +216,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "batch_performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
             "reason_id":0,
-            "name":{
+            "name":{ // when not limiting
                "$enum":[
                   "workload",
                   "storage_server_write_queue_size",
@@ -256,7 +235,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "performance_limited_by":{
             "reason_server_id":"7f8d623d0cb9966e",
             "reason_id":0,
-            "name":{
+            "name":{ // when not limiting
                "$enum":[
                   "workload",
                   "storage_server_write_queue_size",
@@ -282,19 +261,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "worst_version_lag_storage_server":0
       },
       "incompatible_connections":[
-
       ],
       "datacenter_version_difference":0,
       "degraded_processes":0,
       "database_available":true,
       "database_locked":false,
       "generation":2,
-      "latency_probe":{
-         "read_seconds":7,
-         "immediate_priority_transaction_start_seconds":0.0,
-         "batch_priority_transaction_start_seconds":0.0,
-         "transaction_start_seconds":0.0,
-         "commit_seconds":0.02
+      "latency_probe":{ // all measurements are based on running sample transactions
+         "read_seconds":7, // time to perform a single read
+         "immediate_priority_transaction_start_seconds":0.0, // time to start a sample transaction at system immediate priority
+         "batch_priority_transaction_start_seconds":0.0, // time to start a sample transaction at batch priority
+         "transaction_start_seconds":0.0, // time to start a sample transaction at normal priority
+         "commit_seconds":0.02 // time to commit a sample transaction
       },
       "clients":{
          "count":1,
@@ -304,8 +282,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default",
-                         "connected_coordinators":2
+                         "log_group":"default"
                      }
                  ],
                  "count" : 1,
@@ -326,7 +303,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "address":"1.2.3.4:1234"
                }
             ],
-            "name":{
+            "name":{ // when not limiting
                "$enum":[
                   "unreachable_master_worker",
                   "unreachable_dataDistributor_worker",
@@ -348,7 +325,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             },
             "issues":[
                {
-                  "name":{
+                  "name":{ // when not limiting
                      "$enum":[
                         "incorrect_cluster_file_contents"
                      ]
@@ -359,11 +336,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema" R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
-         "name":{
+         "name":{ // "fully_recovered" is the healthy state; other states are normal to transition through but not to persist in
             "$enum":[
                "reading_coordinated_state",
                "locking_coordinated_state",
@@ -404,7 +380,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "roughness":0.0
             }
          },
-         "bytes":{
+         "bytes":{ // of operations (independent of hz). Perfectly spaced operations will have a roughness of 1.0 . Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
             "written":{
                "hz":0.0,
                "counter":0,
@@ -494,9 +470,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "usable_regions":1,
          "repopulate_anti_quorum":1,
          "storage_replicas":1,
-         "resolvers":1,
+         "resolvers":1, // this field will be absent if a value has not been explicitly set
          "storage_replication_policy":"(zoneid^3x1)",
-         "logs":2,
+         "logs":2, // this field will be absent if a value has not been explicitly set
          "log_version":2,
          "log_engine":1,
          "log_spill":1,
@@ -506,9 +482,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
-             "memory",
-             "memory-1",
-             "memory-2"
+             "memory"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -519,7 +493,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5
+         "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -527,7 +501,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "state":{
             "healthy":true,
             "min_replicas_remaining":0,
-            "name":{
+            "name":{ // when not limiting
                "$enum":[
                   "initializing",
                   "missing_data",
@@ -544,7 +518,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "least_operating_space_ratio_storage_server":0.1,
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
-         "total_kv_size_bytes":0,
+         "total_kv_size_bytes":0, // estimated
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,
@@ -560,7 +534,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 "state":{
                     "healthy":true,
                     "min_replicas_remaining":0,
-                    "name":{
+                    "name":{ // when not limiting
                        "$enum":[
                           "initializing",
                           "missing_data",
@@ -580,7 +554,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "max_machine_failures_without_losing_data":0
       },
       "machines":{
-         "$map":{
+         "$map_key=machineid":{
             "network":{
                "megabits_sent":{
                   "hz":0.0
@@ -593,20 +567,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                }
             },
             "memory":{
-               "free_bytes":0,
+               "free_bytes":0, // an estimate of how many bytes are free to allocate to fdbservers without swapping
                "committed_bytes":0,
-               "total_bytes":0
+               "total_bytes":0 // an estimate of total physical RAM
             },
             "contributing_workers":4,
             "datacenter_id":"6344abf1813eb05b",
             "excluded":false,
             "address":"1.2.3.4",
             "machine_id":"6344abf1813eb05b",
-            "locality":{
-                "$map":"value"
+            "locality":{ // This will contain any locality fields that are provided on the command line
+                "$map_key=localityName":"value"
             },
             "cpu":{
-               "logical_core_utilization":0.4
+               "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
             }
          }
       }
@@ -627,7 +601,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "messages":[
          {
-            "name":{
+            "name":{ // when not limiting
                "$enum":[
                   "inconsistent_cluster_file",
                   "unreachable_cluster_controller",
@@ -649,94 +623,3 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "up_to_date":true
       }
    }
-})statusSchema");
-
-const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"configSchema(
-{
-    "create":{
-    "$enum":[
-        "new"
-    ]},
-    "log_anti_quorum":0,
-    "log_replicas":2,
-    "log_replication_policy":"(zoneid^3x1)",
-    "redundancy_mode":{
-    "$enum":[
-        "single",
-        "double",
-        "triple",
-        "three_datacenter",
-        "three_datacenter_fallback",
-        "three_data_hall"
-    ]},
-    "regions":[{
-        "datacenters":[{
-            "id":"mr",
-            "priority":1,
-            "satellite":1
-        }],
-        "satellite_redundancy_mode":{
-        "$enum":[
-            "one_satellite_single",
-            "one_satellite_double",
-            "one_satellite_triple",
-            "two_satellite_safe",
-            "two_satellite_fast"
-        ]},
-        "satellite_log_replicas":1,
-        "satellite_usable_dcs":1,
-        "satellite_anti_quorum":0,
-        "satellite_log_policy":"(zoneid^3x1)",
-        "satellite_logs":2
-    }],
-    "remote_redundancy_mode":{
-    "$enum":[
-        "remote_default",
-        "remote_single",
-        "remote_double",
-        "remote_triple",
-        "remote_three_data_hall"
-    ]},
-    "remote_log_replicas":3,
-    "remote_logs":5,
-    "log_routers":10,
-    "usable_regions":1,
-    "repopulate_anti_quorum":1,
-    "storage_replicas":1,
-    "resolvers":1,
-    "storage_replication_policy":"(zoneid^3x1)",
-    "logs":2,
-    "storage_engine":{
-    "$enum":[
-        "ssd",
-        "ssd-1",
-        "ssd-2",
-        "memory"
-    ]},
-    "auto_proxies":3,
-    "auto_resolvers":1,
-    "auto_logs":3,
-    "proxies":5
-})configSchema");
-
-const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
-{
-    "get_read_version":{
-        "bands":[
-            0.0
-        ]
-    },
-    "read":{
-        "bands":[
-            0.0
-        ],
-        "max_key_selector_offset":0,
-        "max_read_bytes":0
-    },
-    "commit":{
-        "bands":[
-            0.0
-        ],
-        "max_commit_bytes":0
-    }
-})configSchema");
