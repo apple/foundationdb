@@ -40,6 +40,7 @@ struct ConflictBatch {
 		TransactionConflict = 0,
 		TransactionTooOld,
 		TransactionCommitted,
+		TransactionNotPermitted,
 	};
 
 	void addTransaction( const CommitTransactionRef& transaction );

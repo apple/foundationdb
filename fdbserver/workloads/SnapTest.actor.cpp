@@ -355,7 +355,7 @@ public: // workload functions
 				// snap create with different UID
 				try {
 					tr.reset();
-					StringRef snapPayload = LiteralStringRef("empty-binary:uid=ba61e9612a561d60bd83ad83e1b63568");
+					StringRef snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=ba61e9612a561d60bd83ad83e1b63568");
 					tr.execute(execSnap, snapPayload);
 					wait(tr.commit());
 					break;
@@ -364,6 +364,30 @@ public: // workload functions
 					wait(tr.onError(e));
 				}
 			}
+		} else if (self->testID == 8) {
+			// create a snapshot with a non whitelisted binary path and operation
+			// should fail
+			state bool testedFailure = false;
+			retry = 0;
+			loop {
+				self->snapUID = g_random->randomUniqueID();
+				try {
+					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create1.sh");
+					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					wait(status);
+					break;
+				} catch (Error& e) {
+					++retry;
+					if (retry >= 5) {
+						break;
+					}
+					if (e.code() == error_code_transaction_not_permitted) {
+						testedFailure = true;
+						break;
+					}
+				}
+			}
+			ASSERT(testedFailure == true);
 		}
 		wait(delay(0.0));
 		return Void();

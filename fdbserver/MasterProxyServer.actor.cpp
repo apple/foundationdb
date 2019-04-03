@@ -233,6 +233,7 @@ struct ProxyCommitData {
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
 	bool popRemoteTxs;
+	vector<std::string> whiteListedBinPathVec;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -412,6 +413,34 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 		out.send({ std::move(batch), batchBytes });
 		lastBatch = now();
 	}
+}
+
+void createWhiteListBinPathVec(const std::string& binPath, vector<std::string>& binPathVec) {
+	int p = 0;
+	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
+	for (; p < binPath.size(); ) {
+		int pComma = binPath.find_first_of(',', p);
+		if (pComma == binPath.npos) {
+			pComma = binPath.size();
+		}
+		std::string token = binPath.substr(p, pComma - p);
+		TraceEvent(SevDebug, "BinPathItem").detail("Element", token);
+		binPathVec.push_back(token);
+		p = pComma + 1;
+		while (binPath[p] == ' ' && p < binPath.size()) {
+			p++;
+		}
+	}
+	return;
+}
+
+bool isWhiteListed(const vector<std::string>& binPathVec, const std::string& binPath) {
+	for (auto item : binPathVec) {
+		if (item == binPath) {
+			return true;
+		}
+	}
+	return false;
 }
 
 ACTOR Future<Void> commitBatch(
@@ -750,7 +779,19 @@ ACTOR Future<Void> commitBatch(
 					}
 					toCommit.addTypedMessage(m);
 				} else if (m.type == MutationRef::Exec) {
-					if(self->db->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+					state std::string param2 = m.param2.toString();
+					state ExecCmdValueString execArg(param2);
+					execArg.dbgPrint();
+					state std::string binPath = execArg.getBinaryPath();
+					state std::string uidStr = execArg.getBinaryArgValue("uid");
+
+					if (m.param1 != execDisableTLogPop
+						&& m.param1 != execEnableTLogPop
+						&& !isWhiteListed(self->whiteListedBinPathVec, binPath)) {
+						TraceEvent("ExecTransactionNotPermitted")
+							.detail("TransactionNum", transactionNum);
+						committed[transactionNum] = ConflictBatch::TransactionNotPermitted;
+					} else if (self->db->get().recoveryState != RecoveryState::FULLY_RECOVERED)  {
 						// Cluster is not fully recovered and needs TLogs
 						// from previous generation for full recovery.
 						// Currently, snapshot of old tlog generation is not
@@ -816,12 +857,8 @@ ACTOR Future<Void> commitBatch(
 							allSources.insert(localTags.begin(), localTags.end());
 						}
 
-						auto param2 = m.param2.toString();
-						ExecCmdValueString execArg(param2);
-						execArg.dbgPrint();
-						auto uidStr = execArg.getBinaryArgValue("uid");
-						auto tokenStr = "ExecTrace/Proxy/" + uidStr;
 
+						std::string tokenStr = "ExecTrace/Proxy/" + uidStr;
 						auto te1 = TraceEvent("ProxyCommitTo", self->dbgid);
 						te1.detail("To", "all sources");
 						te1.detail("Mutation", m.toString());
@@ -1060,6 +1097,9 @@ ACTOR Future<Void> commitBatch(
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
+		}
+		else if (committed[t] == ConflictBatch::TransactionNotPermitted) {
+			trs[t].reply.sendError(transaction_not_permitted());
 		}
 		else {
 			trs[t].reply.sendError(not_committed());
@@ -1505,7 +1545,8 @@ ACTOR Future<Void> masterProxyServerCore(
 	Reference<AsyncVar<ServerDBInfo>> db,
 	LogEpoch epoch,
 	Version recoveryTransactionVersion,
-	bool firstProxy)
+	bool firstProxy,
+	std::string whiteListBinPaths)
 {
 	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
@@ -1546,6 +1587,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, Reference<AsyncVar<PeekSpecialInfo>>(), false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
+	createWhiteListBinPathVec(whiteListBinPaths, commitData.whiteListedBinPathVec);
 
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
 	// COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an estimate based on experiments and not an accurate one.
@@ -1757,10 +1799,11 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 ACTOR Future<Void> masterProxyServer(
 	MasterProxyInterface proxy,
 	InitializeMasterProxyRequest req,
-	Reference<AsyncVar<ServerDBInfo>> db)
+	Reference<AsyncVar<ServerDBInfo>> db,
+	std::string whiteListBinPaths)
 {
 	try {
-		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy);
+		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whiteListBinPaths);
 		loop choose{
 			when(wait(core)) { return Void(); }
 			when(wait(checkRemoved(db, req.recoveryCount, proxy))) {}

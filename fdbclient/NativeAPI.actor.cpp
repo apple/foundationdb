@@ -2706,7 +2706,11 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
+			if (e.code() != error_code_transaction_too_old
+				&& e.code() != error_code_not_committed
+				&& e.code() != error_code_database_locked
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_transaction_not_permitted)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
