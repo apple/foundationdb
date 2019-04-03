@@ -44,6 +44,7 @@
 #ifdef __linux__
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
+#include "gperftools/heap-profiler.h"
 #endif
 #include <unistd.h>
 #include <thread>
@@ -431,6 +432,11 @@ void updateCpuProfiler(ProfilerRequest req) {
 			break;
 		}
 		break;
+	case ProfilerRequest::Type::GPROF_HEAP:
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+		HeapProfilerDump("User triggered heap dump");
+#endif
+		break;
 	}
 }
 
@@ -438,9 +444,11 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.action == ProfilerRequest::Action::RUN) {
 		req.action = ProfilerRequest::Action::ENABLE;
 		updateCpuProfiler(req);
-		wait(delay(req.duration));
-		req.action = ProfilerRequest::Action::DISABLE;
-		updateCpuProfiler(req);
+		if (req.type != ProfilerRequest::Type::GPROF_HEAP) {
+			wait(delay(req.duration));
+			req.action = ProfilerRequest::Action::DISABLE;
+			updateCpuProfiler(req);
+		}
 		return Void();
 	} else {
 		updateCpuProfiler(req);
