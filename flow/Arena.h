@@ -422,6 +422,13 @@ private:
 	bool valid;
 };
 
+template<class T>
+struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Optional<T>& value) {
+		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
+	}
+};
+
 //#define STANDALONE_ALWAYS_COPY
 
 template <class T>
