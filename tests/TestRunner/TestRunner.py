@@ -300,8 +300,6 @@ def run_simulation_test(basedir, options):
             tmp[0] = options.old_binary
         if not first:
             tmp.append('-R')
-            if options.restoring == 'YES':
-                tmp.append('--restoring')
         first = False
         tmp.append('-f')
         tmp.append(testfile)
@@ -370,9 +368,6 @@ if __name__ == '__main__':
                         choices=['xml', 'json'], help='Log format (json or xml)')
     parser.add_argument('-O', '--old-binary', required=False, default=None,
                         help='Path to the old binary to use for upgrade tests')
-    parser.add_argument('-RO', '--restoring', required=False, default='NO',
-                        choices=['YES', 'NO'],
-                        help='Set if you want asnapshot to be restored')
     parser.add_argument('--aggregate-traces', default='NONE',
                         choices=['NONE', 'FAILED', 'ALL'])
     parser.add_argument('--keep-logs', default='FAILED',

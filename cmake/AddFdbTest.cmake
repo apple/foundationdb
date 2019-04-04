@@ -54,7 +54,7 @@ endfunction()
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
 function(add_fdb_test)
-  set(options UNIT IGNORE RESTORE)
+  set(options UNIT IGNORE)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
