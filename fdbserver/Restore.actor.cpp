@@ -253,9 +253,12 @@ public:
 
 		std::string toString() const {
 //			return "UNSET4TestHardness";
-			return "version:" + std::to_string(version) + " fileName:" + fileName +" isRange:" + std::to_string(isRange)
-				   + " blockSize:" + std::to_string(blockSize) + " fileSize:" + std::to_string(fileSize)
-				   + " endVersion:" + std::to_string(endVersion) + std::to_string(beginVersion)  + " cursor:" + std::to_string(cursor);
+			std::stringstream ss;
+			ss << "version:" << std::to_string(version) << " fileName:" << fileName  << " isRange:" << std::to_string(isRange)
+				   << " blockSize:" << std::to_string(blockSize) << " fileSize:" << std::to_string(fileSize)
+				   << " endVersion:" << std::to_string(endVersion) << std::to_string(beginVersion)  
+				   << " cursor:" << std::to_string(cursor);
+			return ss.str();
 		}
 	};
 
@@ -375,8 +378,9 @@ public:
 	}
 
 	std::string toString() {
-		std::string ret = "uid:" + uid.toString() + " prefix:" + prefix.contents().toString();
-		return ret;
+		std::stringstream ss;
+		ss << "uid:" << uid.toString() << " prefix:" << prefix.contents().toString();
+		return ss.str();
 	}
 
 };
@@ -782,7 +786,10 @@ struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 
 	// Describe the node information
 	std::string describeNode() {
-		return "[Role:" + getRoleStr(localNodeStatus.role) + "] [NodeID:" + localNodeStatus.nodeID.toString().c_str() + "] [NodeIndex:" + std::to_string(localNodeStatus.nodeIndex) + "]";
+		std::stringstream ss;
+		ss << "[Role:" << getRoleStr(localNodeStatus.role) << "] [NodeID:" << localNodeStatus.nodeID.toString().c_str()
+			<< "] [NodeIndex:" << std::to_string(localNodeStatus.nodeIndex) << "]";
+		return ss.str();
 	}
 
 	void resetPerVersionBatch() {
