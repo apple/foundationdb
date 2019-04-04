@@ -433,27 +433,38 @@ void updateCpuProfiler(ProfilerRequest req) {
 		}
 		break;
 	case ProfilerRequest::Type::GPROF_HEAP:
-#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
-		HeapProfilerDump("User triggered heap dump");
-#endif
 		break;
 	}
 }
 
-ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	if (req.action == ProfilerRequest::Action::RUN) {
 		req.action = ProfilerRequest::Action::ENABLE;
 		updateCpuProfiler(req);
-		if (req.type != ProfilerRequest::Type::GPROF_HEAP) {
-			wait(delay(req.duration));
-			req.action = ProfilerRequest::Action::DISABLE;
-			updateCpuProfiler(req);
-		}
+		wait(delay(req.duration));
+		req.action = ProfilerRequest::Action::DISABLE;
+		updateCpuProfiler(req);
 		return Void();
 	} else {
 		updateCpuProfiler(req);
 		return Void();
 	}
+}
+
+void runHeapProfiler() {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+		HeapProfilerDump("User triggered heap dump");
+#endif
+}
+
+ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
+		runHeapProfiler();
+		return Void();
+	}
+	Future<Void> f = runCpuProfiler(req);
+	wait(f);
+	return Void();
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit, IKeyValueStore* store ) {
