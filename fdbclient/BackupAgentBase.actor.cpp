@@ -149,7 +149,7 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 
 	Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
-	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", StringRef(baLogRangePrefix));
+	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", baLogRangePrefix);
 
 	for (int64_t vblock = beginVersion / blockSize; vblock < (endVersion + blockSize - 1) / blockSize; ++vblock) {
 		int64_t tb = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
