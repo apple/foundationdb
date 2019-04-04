@@ -1101,6 +1101,29 @@ Future<T> tagError( Future<Void> future, Error e) {
 	throw e;
 }
 
+template <class T>
+Future<T> orYield( Future<T> f ) {
+	if(f.isReady()) {
+		if(f.isError())
+			return tagError<T>(yield(), f.getError());
+		else
+			return tag(yield(), f.get());
+	}
+	else
+		return f;
+}
+
+static Future<Void> orYield( Future<Void> f ) {
+	if(f.isReady()) {
+		if(f.isError())
+			return tagError<Void>(yield(), f.getError());
+		else
+			return yield();
+	}
+	else
+		return f;
+}
+
 ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 	choose {
 		when ( T t = wait(lhs) ) { return t; }

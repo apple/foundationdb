@@ -38,6 +38,53 @@
 #include "generated-constants.cpp"
 #pragma GCC target("sse4.2")
 
+static uint32_t append_trivial(uint32_t crc, const uint8_t * input, size_t length)
+{
+    for (size_t i = 0; i < length; ++i)
+    {
+        crc = crc ^ input[i];
+        for (int j = 0; j < 8; j++)
+            crc = (crc >> 1) ^ 0x80000000 ^ ((~crc & 1) * POLY);
+    }
+    return crc;
+}
+
+/* Table-driven software version as a fall-back.  This is about 15 times slower
+   than using the hardware instructions.  This assumes little-endian integers,
+   as is the case on Intel processors that the assembler code here is for. */
+static uint32_t append_adler_table(uint32_t crci, const uint8_t * input, size_t length)
+{
+    const uint8_t * next = input;
+    uint64_t crc;
+
+    crc = crci ^ 0xffffffff;
+    while (length && ((uintptr_t)next & 7) != 0)
+    {
+        crc = table[0][(crc ^ *next++) & 0xff] ^ (crc >> 8);
+        --length;
+    }
+    while (length >= 8)
+    {
+        crc ^= *(uint64_t *)next;
+        crc = table[7][crc & 0xff]
+            ^ table[6][(crc >> 8) & 0xff]
+            ^ table[5][(crc >> 16) & 0xff]
+            ^ table[4][(crc >> 24) & 0xff]
+            ^ table[3][(crc >> 32) & 0xff]
+            ^ table[2][(crc >> 40) & 0xff]
+            ^ table[1][(crc >> 48) & 0xff]
+            ^ table[0][crc >> 56];
+        next += 8;
+        length -= 8;
+    }
+    while (length)
+    {
+        crc = table[0][(crc ^ *next++) & 0xff] ^ (crc >> 8);
+        --length;
+    }
+    return (uint32_t)crc ^ 0xffffffff;
+}
+
 /* Table-driven software version as a fall-back.  This is about 15 times slower
    than using the hardware instructions.  This assumes little-endian integers,
    as is the case on Intel processors that the assembler code here is for. */
