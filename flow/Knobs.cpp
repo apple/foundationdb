@@ -64,6 +64,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
+	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 

@@ -138,6 +138,12 @@ FailureStatus SimpleFailureMonitor::getState( Endpoint const& endpoint ) {
 	}
 }
 
+FailureStatus SimpleFailureMonitor::getState( NetworkAddress const& address ) {
+	auto a = addressStatus.find(address);
+	if (a == addressStatus.end()) return FailureStatus();
+	else return a->second;
+}
+
 bool SimpleFailureMonitor::onlyEndpointFailed( Endpoint const& endpoint ) {
 	if(!endpointKnownFailed.get(endpoint))
 		return false;
