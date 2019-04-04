@@ -432,7 +432,8 @@ void updateCpuProfiler(ProfilerRequest req) {
 			break;
 		}
 		break;
-	case ProfilerRequest::Type::GPROF_HEAP:
+	default:
+		ASSERT(false);
 		break;
 	}
 }
