@@ -2523,7 +2523,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", StringRef(line));
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line);
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
