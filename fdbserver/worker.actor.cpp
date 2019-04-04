@@ -454,17 +454,23 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 
 void runHeapProfiler() {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	if (IsHeapProfilerRunning()) {
 		HeapProfilerDump("User triggered heap dump");
+	} else {
+		TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
+	}
+#else
+	TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
 #endif
 }
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
 		runHeapProfiler();
-		return Void();
+	} else {
+		wait( runCpuProfiler(req) );
 	}
-	Future<Void> f = runCpuProfiler(req);
-	wait(f);
+
 	return Void();
 }
 
