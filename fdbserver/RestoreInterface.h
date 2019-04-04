@@ -99,12 +99,12 @@ template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>
 
 
 // NOTE: is cmd's Endpoint token the same with the request's token for the same node?
-struct RestoreCommandInterface {
+struct RestoreInterface {
 	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
 //	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
 
-	bool operator == (RestoreCommandInterface const& r) const { return id() == r.id(); }
-	bool operator != (RestoreCommandInterface const& r) const { return id() != r.id(); }
+	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
+	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
 	UID id() const { return cmd.getEndpoint().token; }
 
 	NetworkAddress address() const { return cmd.getEndpoint().addresses.address; }

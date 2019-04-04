@@ -52,8 +52,8 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 Future<Void> registerMutationsToApplier(Reference<RestoreData> const& rd);
 Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> const& rd);
 Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> const& rd);
-Future<Void> sampleHandler(Reference<RestoreData> const& rd, RestoreCommandInterface const& interf, RestoreCommandInterface const& leaderInter);
-Future<Void> receiveSampledMutations(Reference<RestoreData> const& rd, RestoreCommandInterface const& interf);
+Future<Void> sampleHandler(Reference<RestoreData> const& rd, RestoreInterface const& interf, RestoreInterface const& leaderInter);
+Future<Void> receiveSampledMutations(Reference<RestoreData> const& rd, RestoreInterface const& interf);
 static Future<Void> finishRestore(Database const& cx, Standalone<VectorRef<RestoreRequest>> const& restoreRequests); // Forward declaration
 void sanityCheckMutationOps(Reference<RestoreData> rd);
 void printRestorableFileSet(Optional<RestorableFileSet> files);
@@ -712,7 +712,7 @@ bool IsCmdInPreviousPhase(RestoreCommandEnum curCmd, RestoreCommandEnum received
 // RestoreData is the context for each restore process (worker and master)
 struct RestoreData : NonCopyable, public ReferenceCounted<RestoreData>  {
 	//---- Declare status structure which records the progress and status of each worker in each role
-	std::map<UID, RestoreCommandInterface> workers_interface; // UID is worker's node id, RestoreCommandInterface is worker's communication interface
+	std::map<UID, RestoreInterface> workers_interface; // UID is worker's node id, RestoreInterface is worker's communication interface
 	UID masterApplier; //TODO: Remove this variable. The first version uses 1 applier to apply the mutations
 
 	RestoreNodeStatus localNodeStatus; //Each worker node (process) has one such variable.
@@ -1530,7 +1530,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> rd, Database cx) {
  	state Transaction tr(cx);
 
-	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
+	state vector<RestoreInterface> agents; // agents is cmdsInterf
 	printf("[INFO][Worker] Node:%s Get the interface for all workers\n", rd->describeNode().c_str());
 	loop {
 		try {
@@ -1541,8 +1541,8 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> rd, Database cx) {
 			ASSERT(!agentValues.more);
 			if(agentValues.size()) {
 				for(auto& it : agentValues) {
-					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
-					// Save the RestoreCommandInterface for the later operations
+					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
+					// Save the RestoreInterface for the later operations
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
 				break;
@@ -1566,7 +1566,7 @@ ACTOR Future<Void> setWorkerInterface(Reference<RestoreData> rd, Database cx) {
 ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //, VectorRef<RestoreInterface> ret_agents
 	state Transaction tr(cx);
 
-	state vector<RestoreCommandInterface> agents; // agents is cmdsInterf
+	state vector<RestoreInterface> agents; // agents is cmdsInterf
 	printf("%s:Start configuring roles for workers\n", rd->describeNode().c_str());
 	loop {
 		try {
@@ -1578,8 +1578,8 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 			// If agentValues.size() < min_num_workers, we should wait for coming workers to register their interface before we read them once for all
 			if(agentValues.size() >= min_num_workers) {
 				for(auto& it : agentValues) {
-					agents.push_back(BinaryReader::fromStringRef<RestoreCommandInterface>(it.value, IncludeVersion()));
-					// Save the RestoreCommandInterface for the later operations
+					agents.push_back(BinaryReader::fromStringRef<RestoreInterface>(it.value, IncludeVersion()));
+					// Save the RestoreInterface for the later operations
 					rd->workers_interface.insert(std::make_pair(agents.back().id(), agents.back()));
 				}
 				break;
@@ -1724,7 +1724,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 
 // MX: Function is refactored
 // Handle restore command request on workers
-ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> configureRolesHandler(Reference<RestoreData> rd, RestoreInterface interf) {
 	printf("[Worker] Node::%s yet, starts configureRolesHandler\n", rd->describeNode().c_str());
 	loop {
 		choose {
@@ -1824,7 +1824,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 				KeyRangeRef keyRange = applier.second;
 				UID nodeID = applier.first;
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[CMD] Node:%s, Assign KeyRange:%s [begin:%s end:%s] to applier ID:%s\n", rd->describeNode().c_str(),
 						keyRange.toString().c_str(),
 						getHexString(keyRange.begin).c_str(), getHexString(keyRange.end).c_str(),
@@ -1862,7 +1862,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 			for (auto& applier : appliers) {
 				KeyRangeRef keyRange = applier.second;
 				UID nodeID = applier.first;
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				rd->cmdID.nextCmd();
 				printf("[CMD] Node:%s Finish assigning KeyRange %s to applier ID:%s\n",rd->describeNode().c_str(), keyRange.toString().c_str(), nodeID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Applier_KeyRange_Done, rd->cmdID, nodeID)) );
@@ -1893,7 +1893,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 
 // MXNOTE: Revise Done
 // Handle restore command request on workers
-ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> assignKeyRangeToAppliersHandler(Reference<RestoreData> rd, RestoreInterface interf) {
 	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -1951,7 +1951,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 			rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange );
 			for (auto& nodeID : loaders) {
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[CMD] Node:%s Notify node:%s about appliers key range\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 				state std::map<Standalone<KeyRef>, UID>::iterator applierRange;
 				for (applierRange = rd->range2Applier.begin(); applierRange != rd->range2Applier.end(); applierRange++) {
@@ -1969,7 +1969,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 			cmdReplies.clear();
 			rd->cmdID.initPhase( RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done );
 			for (auto& nodeID : loaders) {
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				rd->cmdID.nextCmd();
 				printf("[CMD] Node:%s Notify node:%s cmd Notify_Loader_ApplierKeyRange_Done\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Notify_Loader_ApplierKeyRange_Done, rd->cmdID, nodeID)) );
@@ -2000,7 +2000,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 
 // MXNOTE: revise doen
 // Handle  Notify_Loader_ApplierKeyRange cmd
-ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> notifyAppliersKeyRangeToLoaderHandler(Reference<RestoreData> rd, RestoreInterface interf) {
 	if ( rd->localNodeStatus.role != RestoreRole::Loader) {
 		printf("[ERROR] non-loader node:%s (role:%d) is waiting for cmds for Loader\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -2102,7 +2102,7 @@ std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreDat
 
 // MXNOTE: Revise done
 // Master applier calculate the key range for appliers
-ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreInterface interf) {
 	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -2174,7 +2174,7 @@ ACTOR Future<Void> calculateApplierKeyRange(Reference<RestoreData> rd, RestoreCo
 
 
 // Receive mutations sent from loader
-ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreInterface interf) {
 	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -2243,7 +2243,7 @@ ACTOR Future<Void> receiveMutations(Reference<RestoreData> rd, RestoreCommandInt
 }
 
 // MXINFO: Revise done
-ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreCommandInterface interf, Database cx) {
+ACTOR Future<Void> applyMutationToDB(Reference<RestoreData> rd, RestoreInterface interf, Database cx) {
 	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -2609,7 +2609,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				UID nodeID = loaderID;
 
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[Sampling][CMD] Node:%s Loading %s on node %s\n", rd->describeNode().c_str(), param.toString().c_str(), nodeID.toString().c_str());
 
 				if (!rd->files[curFileIndex].isRange) {
@@ -2683,7 +2683,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				UID nodeID = loaderID;
 
 				ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[Sampling][CMD] Node:%s Signal the end of sampling to node %s\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 				RestoreCommandEnum cmdType = RestoreCommandEnum::Sample_File_Done;
 
@@ -2723,7 +2723,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 		try {
 			cmdReplies.clear();
 			ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
-			RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+			RestoreInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier_Done);
 			rd->cmdID.nextCmd();
 			printf("[Sampling] Node:%s Signal master applier %s Loader_Send_Sample_Mutation_To_Applier_Done\n", rd->describeNode().c_str(), rd->masterApplier.toString().c_str());
@@ -2750,7 +2750,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 	state int numKeyRanges = 0;
 	loop {
 		try {
-			RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+			RestoreInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
 			printf("[Sampling][CMD] Ask master applier %s for the key ranges for appliers\n", rd->masterApplier.toString().c_str());
 			ASSERT(applierIDs.size() > 0);
 			rd->cmdID.initPhase(RestoreCommandEnum::Calculate_Applier_KeyRange);
@@ -2794,7 +2794,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 						rd->describeNode().c_str(), rd->cmdID.toString().c_str(),
 						rd->masterApplier.toString().c_str(), applierID.toString().c_str());
 				ASSERT(rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
-				RestoreCommandInterface& masterApplierCmdInterf = rd->workers_interface[rd->masterApplier];
+				RestoreInterface& masterApplierCmdInterf = rd->workers_interface[rd->masterApplier];
 				cmdReplies.push_back( masterApplierCmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Get_Applier_KeyRange, rd->cmdID, rd->masterApplier, i)) );
 			}
 			std::vector<RestoreCommandReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout) );
@@ -2835,7 +2835,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 			rd->cmdID.initPhase(RestoreCommandEnum::Get_Applier_KeyRange_Done);
 			rd->cmdID.nextCmd();
 			printf("[Sampling] Node:%s Singal master applier the end of sampling\n", rd->describeNode().c_str());
-			RestoreCommandInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
+			RestoreInterface& cmdInterf = rd->workers_interface[rd->masterApplier];
 			RestoreCommandReply rep = wait( timeoutError( cmdInterf.cmd.getReply(
 					RestoreCommand(RestoreCommandEnum::Get_Applier_KeyRange_Done, rd->cmdID, rd->masterApplier, applierIDs.size())), FastRestore_Failure_Timeout) );
 			printf("[Sampling] Node:%s master applier has acked the cmd Get_Applier_KeyRange_Done\n", rd->describeNode().c_str());
@@ -2867,7 +2867,7 @@ bool isBackupEmpty(Reference<RestoreData> rd) {
 }
 
 // Distribution workload per version batch
-ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
+ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request, Reference<RestoreConfig> restoreConfig) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -2996,7 +2996,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 					rd->loadingStatus.insert(std::make_pair(loadingCmdIndex, loadingStatus));
 
 					ASSERT(rd->workers_interface.find(nodeID) != rd->workers_interface.end());
-					RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+					RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 
 					printf("[CMD] Loading fileIndex:%d fileInfo:%s loadingParam:%s on node %s\n",
 							curFileIndex, rd->files[curFileIndex].toString().c_str(), 
@@ -3086,7 +3086,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 			rd->cmdID.initPhase(RestoreCommandEnum::Assign_Loader_File_Done);
 			for (auto& loaderID : loaderIDs) {
 				UID nodeID = loaderID;
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				printf("[CMD] Assign_Loader_File_Done for node ID:%s\n", nodeID.toString().c_str());
 				rd->cmdID.nextCmd();
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Assign_Loader_File_Done, rd->cmdID, nodeID)) );
@@ -3122,7 +3122,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done);
 			for (auto& id : applierIDs) {
 				UID nodeID = id;
-				RestoreCommandInterface& cmdInterf = rd->workers_interface[nodeID];
+				RestoreInterface& cmdInterf = rd->workers_interface[nodeID];
 				rd->cmdID.nextCmd();
 				printf("[CMD] Loader_Send_Mutations_To_Applier_Done for node ID:%s\n", nodeID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Loader_Send_Mutations_To_Applier_Done, rd->cmdID, nodeID)) );
@@ -3163,7 +3163,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreCommandInterf
 
 // loadingHandler: Loader will load file from blob and send mutations directly to appliers
 // It is the command executor for master, and also the command initializer for applier
-ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreInterface interf, RestoreInterface leaderInter) {
 	printf("[INFO] Worker Node:%s starts loadingHandler\n", rd->describeNode().c_str());
 
 	state LoadingParam param;
@@ -3338,7 +3338,7 @@ ACTOR Future<Void> loadingHandler(Reference<RestoreData> rd, RestoreCommandInter
 
 
 // Loader: sample's loading handler
-ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreInterface interf, RestoreInterface leaderInter) {
 	printf("[sampleHandler] Worker Node:%s starts\n",
 			rd->describeNode().c_str());
 
@@ -3489,7 +3489,7 @@ ACTOR Future<Void> sampleHandler(Reference<RestoreData> rd, RestoreCommandInterf
 }
 
 
-ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> rd, RestoreCommandInterface interf, RestoreCommandInterface leaderInter) {
+ACTOR Future<Void> applyToDBHandler(Reference<RestoreData> rd, RestoreInterface interf, RestoreInterface leaderInter) {
 	printf("[INFO] Worker Node:%s Role:%s starts applyToDBHandler\n",
 			rd->describeNode().c_str(),
 			getRoleStr(rd->localNodeStatus.role).c_str());
@@ -3625,14 +3625,14 @@ ACTOR Future<Void> applyRestoreOpsToDB(Reference<RestoreData> rd, Database cx) {
 
 
 
-static Future<Version> processRestoreRequest(RestoreCommandInterface const &interf, Reference<RestoreData> const &rd, Database const &cx, RestoreRequest const &request);
+static Future<Version> processRestoreRequest(RestoreInterface const &interf, Reference<RestoreData> const &rd, Database const &cx, RestoreRequest const &request);
 
 
 ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 	state Database cx = cx_input;
-	state RestoreCommandInterface interf;
+	state RestoreInterface interf;
 	interf.initEndpoints();
-	state Optional<RestoreCommandInterface> leaderInterf;
+	state Optional<RestoreInterface> leaderInterf;
 	//Global data for the worker
 	state Reference<RestoreData> rd = Reference<RestoreData>(new RestoreData());
 
@@ -3644,7 +3644,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leader = wait(tr.get(restoreLeaderKey));
 			if(leader.present()) {
-				leaderInterf = BinaryReader::fromStringRef<RestoreCommandInterface>(leader.get(), IncludeVersion());
+				leaderInterf = BinaryReader::fromStringRef<RestoreInterface>(leader.get(), IncludeVersion());
 				// NOTE: Handle the situation that the leader's commit of its key causes error(commit_unknown_result)
 				// In this situation, the leader will try to register its key again, which will never succeed.
 				// We should let leader escape from the infinite loop
@@ -3655,7 +3655,7 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 					wait(tr.commit());
 					 // reset leaderInterf to invalid for the leader process
 					 // because a process will not execute leader's logic unless leaderInterf is invalid
-					leaderInterf = Optional<RestoreCommandInterface>();
+					leaderInterf = Optional<RestoreInterface>();
 					break;
 				}
 				printf("[Worker] Leader key exists:%s. Worker registers its restore interface id:%s\n",
@@ -3950,7 +3950,7 @@ ACTOR static Future<Void> _lockDB(Database cx, UID uid, bool lockDB) {
 }
 
 // MXTODO: Change name to restoreProcessor()
-ACTOR static Future<Version> processRestoreRequest(RestoreCommandInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request) {
+ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Reference<RestoreData> rd, Database cx, RestoreRequest request) {
 	state Key tagName = request.tagName;
 	state Key url = request.url;
 	state bool waitForComplete = request.waitForComplete;
@@ -4578,7 +4578,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 			rd->describeNode().c_str(), rd->masterApplier.toString().c_str(),
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 
-	state RestoreCommandInterface applierCmdInterf; // = rd->workers_interface[rd->masterApplier];
+	state RestoreInterface applierCmdInterf; // = rd->workers_interface[rd->masterApplier];
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 1;
 	state int kvCount = 0;
@@ -4692,7 +4692,7 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 			rd->workers_interface.find(rd->masterApplier) != rd->workers_interface.end());
 	//printAppliersKeyRange(rd);
 
-	state RestoreCommandInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
+	state RestoreInterface applierCmdInterf = rd->workers_interface[rd->masterApplier];
 	state UID applierID = rd->masterApplier;
 	state int packMutationNum = 0;
 	state int packMutationThreshold = 1;
@@ -4752,7 +4752,7 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 }
 
 // Master applier: Receive sampled mutations sent from loader
-ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreCommandInterface interf) {
+ACTOR Future<Void> receiveSampledMutations(Reference<RestoreData> rd, RestoreInterface interf) {
 	if ( rd->localNodeStatus.role != RestoreRole::Applier) {
 		printf("[ERROR] non-applier node:%s (role:%d) is waiting for cmds for appliers\n",
 				rd->describeNode().c_str(), rd->localNodeStatus.role);
@@ -4841,7 +4841,7 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 			state std::vector<UID> applierIDs = rd->getBusyAppliers();
 			state int applierIndex = 0;
 			state UID applierID;
-			state RestoreCommandInterface applierCmdInterf;
+			state RestoreInterface applierCmdInterf;
 
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Notify_Appler_To_Apply_Mutation);
 			printf("Num_ApplierID:%d\n", applierIDs.size());
