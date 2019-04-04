@@ -879,7 +879,7 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #if defined(__FreeBSD__)
-void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
+void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
 
