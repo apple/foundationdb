@@ -76,7 +76,7 @@ struct ProfilerRequest {
 	int duration;
 	Standalone<StringRef> outputFile;
 
-	ProfilerRequest() {}
+	ProfilerRequest() = default;
 	explicit ProfilerRequest(Type t, Action a, int d) : type(t), action(a), duration(d) {}
 
 	template<class Ar>
