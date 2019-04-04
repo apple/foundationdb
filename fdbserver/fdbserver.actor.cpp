@@ -1425,7 +1425,7 @@ int main(int argc, char* argv[]) {
 			if(buggifyOverride.present())
 				buggifyEnabled = buggifyOverride.get();
 		}
-		enableBuggify( buggifyEnabled );
+		enableBuggify(buggifyEnabled, BuggifyType::General);
 
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
