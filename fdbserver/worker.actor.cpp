@@ -457,7 +457,7 @@ void runHeapProfiler() {
 	if (IsHeapProfilerRunning()) {
 		HeapProfilerDump("User triggered heap dump");
 	} else {
-		TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
+		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
 	}
 #else
 	TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
