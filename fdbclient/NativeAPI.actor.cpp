@@ -963,6 +963,20 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
+		case FDBNetworkOptions::CLIENTBUGGIFY_ENABLE:
+			enableBuggify(true, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENTBUGGIFY_DISABLE:
+			enableBuggify(false, BuggifyType::Client);
+			break;
+		case FDBNetworkOptions::CLIENTBUGGIFY_SECTION_ACTIVATED_PROBABILITY:
+			validateOptionValue(value, true);
+			P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
+			break;
+		case FDBNetworkOptions::CLIENTBUGGIFY_SECTION_FIRED_PROBABILITY:
+			validateOptionValue(value, true);
+			P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = 100.0/double(extractIntOption(value, 0, 100));
+			break;
 		case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
 			validateOptionValue(value, false);
 			networkOptions.logClientInfo = false;
@@ -1832,6 +1846,11 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
+				if (CLIENT_BUGGIFY) {
+					throw g_random->randomChoice(std::vector<Error>{
+							transaction_too_old(), future_version()
+								});
+				}
 				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 
 				if( info.debugID.present() ) {
@@ -2562,6 +2581,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
+	if(CLIENT_BUGGIFY) {
+		throw g_random->randomChoice(std::vector<Error>{
+				not_committed(),
+				transaction_too_old(),
+				commit_unknown_result()});
+	}
+
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -3005,6 +3031,9 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
 	}
 	if (!readVersion.isValid()) {
+		if (CLIENT_BUGGIFY) {
+			throw database_locked();
+		}
 		Promise<GetReadVersionReply> p;
 		batcher.stream.send( std::make_pair( p, info.debugID ) );
 		startTime = now();

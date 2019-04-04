@@ -36,6 +36,9 @@
 #include "fdbclient/ClientLogEvents.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+#define CLIENT_BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && g_random->random01() < (x))
+#define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
+
 // Incomplete types that are reference counted
 class DatabaseContext;
 template <> void addref( DatabaseContext* ptr );
