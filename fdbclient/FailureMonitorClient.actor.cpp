@@ -53,6 +53,14 @@ ACTOR Future<Void> failureMonitorClientLoop(
 		monitor->setStatus(controlAddr.secondaryAddress.get(), FailureStatus(false));
 		fmState->knownAddrs.insert(controlAddr.secondaryAddress.get());
 	}
+	
+	state NetworkAddressList myAddr = g_network->getLocalAddresses();
+	monitor->setStatus(myAddr.address, FailureStatus(false));
+	fmState->knownAddrs.insert(myAddr.address);
+	if(myAddr.secondaryAddress.present()) {
+		monitor->setStatus(myAddr.secondaryAddress.get(), FailureStatus(false));
+		fmState->knownAddrs.insert(myAddr.secondaryAddress.get());
+	}
 
 	//The cluster controller's addresses (controller.failureMonitoring.getEndpoint().addresses) are treated specially because we can declare that it is down independently
 	//of the response from the cluster controller. It still needs to be in knownAddrs in case the cluster controller changes, so the next cluster controller resets its state
@@ -70,7 +78,10 @@ ACTOR Future<Void> failureMonitorClientLoop(
 						if(controller.failureMonitoring.getEndpoint().addresses.secondaryAddress.present()) {
 							fmState->knownAddrs.erase( controller.failureMonitoring.getEndpoint().addresses.secondaryAddress.get() );
 						}
-
+						fmState->knownAddrs.erase( myAddr.address);
+						if(myAddr.secondaryAddress.present()) {
+							fmState->knownAddrs.erase( myAddr.secondaryAddress.get());
+						}
 						std::set<NetworkAddress> changedAddresses;
 						for(int c=0; c<reply.changes.size(); c++) {
 							changedAddresses.insert( reply.changes[c].addresses.address );
@@ -95,7 +106,13 @@ ACTOR Future<Void> failureMonitorClientLoop(
 						monitor->setStatus(controlAddr.secondaryAddress.get(), FailureStatus(false));
 						fmState->knownAddrs.insert(controlAddr.secondaryAddress.get());
 					}
-
+					monitor->setStatus(myAddr.address, FailureStatus(false));
+					fmState->knownAddrs.insert(myAddr.address);
+					if(myAddr.secondaryAddress.present()) {
+						monitor->setStatus(myAddr.secondaryAddress.get(), FailureStatus(false));
+						fmState->knownAddrs.insert(myAddr.secondaryAddress.get());
+					}
+					
 					//if (version != reply.failureInformationVersion)
 					//	printf("Client '%s': update from %lld to %lld (%d changes, aof=%d)\n", g_network->getLocalAddress().toString().c_str(), version, reply.failureInformationVersion, reply.changes.size(), reply.allOthersFailed);
 
