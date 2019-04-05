@@ -169,6 +169,13 @@ ACTOR Future<Void> failureMonitorClientLoop(
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
 	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
 	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
+	
+	// Set my own address state as good. This helps in clients doing failuremonitoring on their own endpoints. ConsistencyCheck running as a standalone process does this.
+	NetworkAddressList myAddr = g_network->getLocalAddresses();
+	monitor->setStatus(myAddr.address, FailureStatus(false));
+	if(myAddr.secondaryAddress.present()) {
+		monitor->setStatus(myAddr.secondaryAddress.get(), FailureStatus(false));
+	}
 
 	loop {
 		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();
