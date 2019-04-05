@@ -794,8 +794,8 @@ ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fi
 }
 
 TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
-	if (!g_network
-	         ->isSimulated()) { // This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network->isSimulated()) {
 		state Reference<IAsyncFile> f;
 		try {
 			Reference<IAsyncFile> f_ = wait(AsyncFileKAIO::open(
