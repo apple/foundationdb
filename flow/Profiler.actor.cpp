@@ -32,6 +32,7 @@
 #include <link.h>
 
 #include "flow/Platform.h"
+#include "flow/actorcompiler.h" // This must be the last include.
 
 extern volatile thread_local int profilingEnabled;
 
