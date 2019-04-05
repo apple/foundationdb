@@ -44,6 +44,7 @@
 #ifdef __linux__
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
+#include "gperftools/heap-profiler.h"
 #endif
 #include <unistd.h>
 #include <thread>
@@ -431,10 +432,13 @@ void updateCpuProfiler(ProfilerRequest req) {
 			break;
 		}
 		break;
+	default:
+		ASSERT(false);
+		break;
 	}
 }
 
-ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	if (req.action == ProfilerRequest::Action::RUN) {
 		req.action = ProfilerRequest::Action::ENABLE;
 		updateCpuProfiler(req);
@@ -446,6 +450,28 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 		updateCpuProfiler(req);
 		return Void();
 	}
+}
+
+void runHeapProfiler() {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	if (IsHeapProfilerRunning()) {
+		HeapProfilerDump("User triggered heap dump");
+	} else {
+		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
+	}
+#else
+	TraceEvent("ProfilerError").detail("Message", "HeapProfiler Unsupported");
+#endif
+}
+
+ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
+		runHeapProfiler();
+	} else {
+		wait( runCpuProfiler(req) );
+	}
+
+	return Void();
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit, IKeyValueStore* store ) {

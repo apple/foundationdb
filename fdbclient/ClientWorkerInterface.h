@@ -61,7 +61,8 @@ struct ProfilerRequest {
 
 	enum class Type : std::int8_t {
 		GPROF = 1,
-		FLOW = 2
+		FLOW = 2,
+		GPROF_HEAP = 3,
 	};
 
 	enum class Action : std::int8_t {
@@ -74,6 +75,9 @@ struct ProfilerRequest {
 	Action action;
 	int duration;
 	Standalone<StringRef> outputFile;
+
+	ProfilerRequest() = default;
+	explicit ProfilerRequest(Type t, Action a, int d) : type(t), action(a), duration(d) {}
 
 	template<class Ar>
 	void serialize( Ar& ar ) {

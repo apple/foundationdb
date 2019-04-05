@@ -2879,7 +2879,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					if (tokens.size() == 1) {
-						printf("ERROR: Usage: profile <client|list|flow>\n");
+						printf("ERROR: Usage: profile <client|list|flow|heap>\n");
 						is_error = true;
 						continue;
 					}
@@ -3008,10 +3008,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
 								for (const auto& pair : interfaces) {
-									ProfilerRequest profileRequest;
-									profileRequest.type = ProfilerRequest::Type::FLOW;
-									profileRequest.action = ProfilerRequest::Action::RUN;
-									profileRequest.duration = duration;
+									ProfilerRequest profileRequest(ProfilerRequest::Type::FLOW, ProfilerRequest::Action::RUN, duration);
 									profileRequest.outputFile = tokens[4];
 									all_profiler_addresses.push_back(pair.first);
 									all_profiler_responses.push_back(pair.second.profiler.tryGetReply(profileRequest));
@@ -3026,10 +3023,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								}
 								if (!is_error) {
 									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
-										ProfilerRequest profileRequest;
-										profileRequest.type = ProfilerRequest::Type::FLOW;
-										profileRequest.action = ProfilerRequest::Action::RUN;
-										profileRequest.duration = duration;
+										ProfilerRequest profileRequest(ProfilerRequest::Type::FLOW, ProfilerRequest::Action::RUN, duration);
 										profileRequest.outputFile = tokens[4];
 										all_profiler_addresses.push_back(tokens[tokenidx]);
 										all_profiler_responses.push_back(interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
@@ -3049,6 +3043,36 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							all_profiler_responses.clear();
 							continue;
 						}
+					}
+					if (tokencmp(tokens[1], "heap")) {
+						if (tokens.size() != 3) {
+							printf("ERROR: Usage: profile heap host\n");
+							is_error = true;
+							continue;
+						}
+						getTransaction(db, tr, options, intrans);
+						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+								tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+																					LiteralStringRef("\xff\xff\xff")),
+															1)));
+						std::map<Key, ClientWorkerInterface> interfaces;
+						for (const auto& pair : kvs) {
+							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
+						}
+						state Key ip_port = tokens[2];
+						if (interfaces.find(ip_port) == interfaces.end()) {
+							printf("ERROR: host %s not found\n", printable(ip_port).c_str());
+							is_error = true;
+							continue;
+						}
+						ProfilerRequest profileRequest(ProfilerRequest::Type::GPROF_HEAP, ProfilerRequest::Action::RUN, 0);
+						profileRequest.outputFile = LiteralStringRef("heapz");
+						ErrorOr<Void> response = wait(interfaces[ip_port].profiler.tryGetReply(profileRequest));
+						if (response.isError()) {
+							printf("ERROR: %s: %s: %s\n", printable(ip_port).c_str(), response.getError().name(), response.getError().what());
+						}
+						continue;
 					}
 					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
 					is_error = true;
