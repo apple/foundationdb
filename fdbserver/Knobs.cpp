@@ -417,7 +417,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,                5.0 );
-	init( HEAP_PROFILE_THRESHOLD,                         2147483648 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
 
 	// Test harness

@@ -79,7 +79,7 @@
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE, OPT_TRACE_FORMAT };
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, OPT_TRACE_FORMAT };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
@@ -94,6 +94,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,               "--listen_address",            SO_REQ_SEP },
 #ifdef __linux__
 	{ OPT_FILESYSTEM,           "--data_filesystem",           SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,           "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,           "--datadir",                   SO_REQ_SEP },
@@ -542,6 +543,9 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 mounted at the specified PATH. This checks that the device at PATH\n"
 		   "                 is currently mounted and that any data files get written to the\n"
 		   "                 same device.\n");
+	printf("  --rsssize SIZE\n"
+		   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
+		   "                 the given threshold.\n");
 #endif
 	printf("  -d PATH, --datadir PATH\n"
 		   "                 Store data files in the given folder (must be unique for each\n");
@@ -916,6 +920,7 @@ int main(int argc, char* argv[]) {
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
+		uint64_t rsssize = -1;
 
 		if( argc == 1 ) {
 			printUsage(argv[0], false);
@@ -1042,6 +1047,17 @@ int main(int argc, char* argv[]) {
 	#ifdef __linux__
 				case OPT_FILESYSTEM: {
 					fileSystemPath = args.OptionArg();
+					break;
+				}
+				case OPT_PROFILER_RSS_SIZE:{
+					const char *a = args.OptionArg();
+					char *end;
+					rsssize = strtoull(a, &end, 10);
+					if(*end) {
+						fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
 					break;
 				}
 	#endif
@@ -1624,7 +1640,7 @@ int main(int argc, char* argv[]) {
 				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
+			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );
