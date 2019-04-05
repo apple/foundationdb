@@ -42,6 +42,11 @@
 #include "flow/Profiler.h"
 
 #ifdef __linux__
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
 #include "gperftools/heap-profiler.h"
@@ -452,10 +457,10 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	}
 }
 
-void runHeapProfiler() {
+void runHeapProfiler(const char* msg) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	if (IsHeapProfilerRunning()) {
-		HeapProfilerDump("User triggered heap dump");
+		HeapProfilerDump(msg);
 	} else {
 		TraceEvent("ProfilerError").detail("Message", "HeapProfiler not running");
 	}
@@ -466,9 +471,60 @@ void runHeapProfiler() {
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
-		runHeapProfiler();
+		runHeapProfiler("User triggered heap dump");
 	} else {
 		wait( runCpuProfiler(req) );
+	}
+
+	return Void();
+}
+
+bool checkHighMemory(bool* error) {
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+	*error = false;
+	uint64_t page_size = sysconf(_SC_PAGESIZE);
+	int fd = open("/proc/self/statm", O_RDONLY);
+	if (fd < 0) {
+		TraceEvent("OpenStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	const int buf_sz = 256;
+	char stat_buf[buf_sz];
+	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
+	if (stat_nread < 0) {
+		TraceEvent("ReadStatmFileFailure");
+		*error = true;
+		return false;
+	}
+
+	uint64_t vmsize, rss;
+	sscanf(stat_buf, "%lu %lu", &vmsize, &rss);
+	rss *= page_size;
+	if (rss >= SERVER_KNOBS->HEAP_PROFILE_THRESHOLD) {
+		if (IsHeapProfilerRunning()) {
+			HeapProfilerDump("Highmem heap dump");
+		}
+		return true;
+	}
+	return false;
+#else
+	TraceEvent("CheckHighMemoryUnsupported");
+	*error = true;
+	return false;
+#endif
+}
+
+// Runs heap profiler when RSS memory usage is high.
+ACTOR Future<Void> monitorHighMemory() {
+	loop {
+		bool err = false;
+		bool highmem = checkHighMemory(&err);
+		if (err) break;
+
+		if (highmem) runHeapProfiler("Highmem heap dump");
+		wait( delay(SERVER_KNOBS->HEAP_PROFILER_INTERVAL) );
 	}
 
 	return Void();
@@ -682,6 +738,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
+	errorForwarders.add(monitorHighMemory());
 
 	filesClosed.add(stopping.getFuture());
 
