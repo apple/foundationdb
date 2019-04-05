@@ -1342,15 +1342,21 @@ ACTOR Future<Void> tLogCommit(
 				uint32_t sub;
 				while (!rd.empty()) {
 					Tag tmpTag;
+					bool hasTxsTag = false;
 					rd.checkpoint();
 					rd >> messageLength >> sub >> tagCount;
 					for (int i = 0; i < tagCount; i++) {
 						rd >> tmpTag;
+						if (tmpTag == txsTag) {
+							hasTxsTag = true;
+						}
 						execTags.push_back(tmpTag);
 					}
-					rd >> type;
-					if (type == MutationRef::Exec) {
-						break;
+					if (!hasTxsTag) {
+						rd >> type;
+						if (type == MutationRef::Exec) {
+							break;
+						}
 					}
 					rawLength = messageLength + sizeof(messageLength);
 					rd.rewind();
@@ -1365,7 +1371,7 @@ ACTOR Future<Void> tLogCommit(
 					rd >> len;
 					param2 = StringRef((uint8_t const*)rd.readBytes(len), len);
 
-					TraceEvent("TLogExecCommandType", self->dbgid).detail("Value", execCmd.toString());
+					TraceEvent(SevDebug, "TLogExecCommandType", self->dbgid).detail("Value", execCmd.toString());
 
 					execArg.setCmdValueString(param2.toString());
 					execArg.dbgPrint();
