@@ -40,8 +40,11 @@ BINARY_SERIALIZABLE( RestoreRole );
 // Timeout threshold in seconds for restore commands
 extern int FastRestore_Failure_Timeout;
 
-struct RestoreSetRoleRequest;
 struct RestoreCommonReply;
+struct GetKeyRangeReply;
+struct GetKeyRangeReply;
+struct RestoreSetRoleRequest;
+
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -210,6 +213,89 @@ struct RestoreSetRoleRequest : TimedRequest {
 	}
 };
 
+// Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
+struct RestoreLoadFileRequest : TimedRequest {
+	CMDUID cmdID;
+	LoadingParam param;
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreLoadFileRequest() : cmdID(CMDUID()) {}
+	explicit RestoreLoadFileRequest(CMDUID cmdID, LoadingParam param) : cmdID(cmdID), param(param) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, param, reply);
+	}
+};
+
+// Send mutation from loader to applier
+// Loader_Send_Sample_Mutation_To_Applier and Loader_Send_Mutations_To_Applier
+struct RestoreSendMutationRequest : TimedRequest {
+	CMDUID cmdID;
+	uint64_t commitVersion;
+	MutationRef kvm;
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSendMutationRequest() : cmdID(CMDUID()), commitVersion(0), kvm(MutationRef()) {}
+	explicit RestoreSendMutationRequest(CMDUID cmdID, uint64_t commitVersion, MutationRef kvm) : cmdID(cmdID), commitVersion(commitVersion),  kvm(kvm) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, commitVersion, kvm, reply);
+	}
+};
+
+// CalculateApplierKeyRange, applyToDB
+struct RestoreSimpleRequest : TimedRequest {
+	CMDUID cmdID;
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSimpleRequest() : cmdID(CMDUID()) {}
+	explicit RestoreSimpleRequest(CMDUID cmdID) : cmdID(cmdID) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, reply);
+	}
+};
+
+struct RestoreGetApplierKeyRangeRequest : TimedRequest {
+	CMDUID cmdID;
+	UID applierID; // The applier ID whose key range will be replied
+
+	ReplyPromise<GetKeyRangeReply> reply;
+
+	RestoreGetApplierKeyRangeRequest() : cmdID(CMDUID()), applierID(UID()) {}
+	explicit RestoreGetApplierKeyRangeRequest(CMDUID cmdID, UID applierID) : cmdID(cmdID), applierID(applierID) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, applierID, reply);
+	}
+};
+
+// Notify the server node about the key range the applier node (nodeID) is responsible for
+struct RestoreSetApplierKeyRangeRequest : TimedRequest {
+	CMDUID cmdID;
+	UID applierID;
+	KeyRange range; // the key range that will be assigned to the node
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSetApplierKeyRangeRequest() : cmdID(CMDUID()), applierID(UID()), range(KeyRange()) {}
+	explicit RestoreSetApplierKeyRangeRequest(CMDUID cmdID, UID applierID, KeyRange range) : cmdID(cmdID), applierID(applierID), range(range) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, applierID, range, reply);
+	}
+};
+
+
+
 // Reply type
 struct RestoreCommonReply { 
 	UID id; // unique ID of the server who sends the reply
@@ -230,23 +316,25 @@ struct RestoreCommonReply {
 	}
 };
 
-struct GetLowerBoundReply : RestoreCommonReply {
+struct GetKeyRangeReply : RestoreCommonReply {
 	int index;
-	Standalone<KeyRef> lowerBound;
+	KeyRef lowerBound; // inclusive
+	KeyRef upperBound; // exclusive
 
-	GetLowerBoundReply() : index(0), lowerBound(KeyRef()) {}
-	explicit GetLowerBoundReply(int index, KeyRef lowerBound) : index(index), lowerBound(lowerBound) {}
+	GetKeyRangeReply() : index(0), lowerBound(KeyRef()), upperBound(KeyRef()) {}
+	explicit GetKeyRangeReply(int index, KeyRef lowerBound,  KeyRef upperBound) : index(index), lowerBound(lowerBound), upperBound(upperBound) {}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString() 
-			<< " index:" << std::to_string(index) << " lowerBound:" << lowerBound.toHexString();
+			<< " index:" << std::to_string(index) << " lowerBound:" << lowerBound.toHexString()
+			<< " upperBound:" << upperBound.toHexString();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreCommonReply *) this, index, lowerBound);
+		serializer(ar, *(RestoreCommonReply *) this, index, lowerBound, upperBound);
 	}
 };
 
