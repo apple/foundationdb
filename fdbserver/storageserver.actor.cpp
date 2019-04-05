@@ -2245,8 +2245,8 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value()==latestVersion || r->value() >= version;
 		/*TraceEvent("CSKRange", data->thisServerID)
-		  .detail("KeyBegin", range.begin)
-		  .detail("KeyEnd", range.end)
+			.detail("KeyBegin", range.begin)
+			.detail("KeyEnd", range.end)
 			.detail("Available", dataAvailable)
 			.detail("NowAssigned", nowAssigned)
 			.detail("NewestAvailable", r->value())

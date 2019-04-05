@@ -101,6 +101,7 @@ struct ExtStringRef {
 	}
 
 private:
+	friend struct Traceable<ExtStringRef>;
 	StringRef base;
 	int extra_zero_bytes;
 };
@@ -112,6 +113,19 @@ inline bool operator < ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { re
 inline bool operator > ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>0; }
 inline bool operator <= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)<=0; }
 inline bool operator >= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>=0; }
+
+template<>
+struct Traceable<ExtStringRef> : std::true_type {
+	static std::string toString(const ExtStringRef str) {
+		std::string result;
+		result.reserve(str.size());
+		std::copy(str.base.begin(), str.base.end(), std::back_inserter(result));
+		for (int i = 0; i < str.extra_zero_bytes; ++i) {
+			result.push_back('\0');
+		}
+		return Traceable<std::string>::toString(result);
+	}
+};
 
 class SnapshotCache {
 private:

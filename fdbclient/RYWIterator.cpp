@@ -665,7 +665,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 		if (it.is_operation()) {
 			ASSERT(setIter != setEnd);
 			TraceEvent("RWMT_CheckOperation")
-				.detail("WmKey", it.beginKey().toStandaloneStringRef())
+				.detail("WmKey", it.beginKey())
 				.detail("WmSize", it.op().size())
 				.detail("WmValue", it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
 				.detail("WmType", (int)it.op().top().type)
@@ -679,7 +679,7 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 	}
 
 	TraceEvent("RWMT_CheckOperationFinal")
-		.detail("WmKey", it.beginKey().toStandaloneStringRef())
+		.detail("WmKey", it.beginKey())
 		.detail("SmIter", setIter == setEnd);
 
 	ASSERT(it.beginKey() >= allKeys.end && setIter == setEnd);

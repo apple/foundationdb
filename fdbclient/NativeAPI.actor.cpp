@@ -1334,7 +1334,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
-				  .detail("Key", key)
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("Servers", describe(ssi.second->get()));*/
 			}
@@ -1356,7 +1356,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-				  .detail("Key", key)
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1367,7 +1367,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-				  .detail("Key", key)
+					.detail("Key", key)
 					.detail("ReqVersion", ver)
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
@@ -1551,13 +1551,13 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.Before");
 					/*TraceEvent("TransactionDebugGetExactRangeInfo", info.debugID.get())
-					  .detail("ReqBeginKey", req.begin.getKey())
-					  .detail("ReqEndKey", req.end.getKey())
-					.detail("ReqLimit", req.limit)
-					.detail("ReqLimitBytes", req.limitBytes)
-					.detail("ReqVersion", req.version)
-					.detail("Reverse", reverse)
-					.detail("Servers", locations[shard].second->description());*/
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
+						.detail("ReqLimit", req.limit)
+						.detail("ReqLimitBytes", req.limitBytes)
+						.detail("ReqVersion", req.version)
+						.detail("Reverse", reverse)
+						.detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
 				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
@@ -1816,8 +1816,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
-					  .detail("ReqBeginKey", req.begin.getKey())
-					  .detail("ReqEndKey", req.end.getKey())
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("OriginalBegin", originalBegin.toString())
 						.detail("OriginalEnd", originalEnd.toString())
 						.detail("Begin", begin.toString())
@@ -1837,8 +1837,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
-					  .detail("ReqBeginKey", req.begin.getKey())
-					  .detail("ReqEndKey", req.end.getKey())
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
 						.detail("RepIsMore", rep.more)
 						.detail("VersionReturned", rep.version)
 						.detail("RowsReturned", rep.data.size());*/

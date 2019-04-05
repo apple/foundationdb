@@ -38,8 +38,8 @@ public:
 				if (kv) key = kv->key;
 			}
 			TraceEvent("RYWDump")
-			    .detail("Begin", it.beginKey().toStandaloneStringRef())
-			    .detail("End", it.endKey().toStandaloneStringRef())
+			    .detail("Begin", it.beginKey())
+			    .detail("End", it.endKey())
 			    .detail("Unknown", it.is_unknown_range())
 			    .detail("Empty", it.is_empty_range())
 			    .detail("KV", it.is_kv())
@@ -512,8 +512,8 @@ public:
 				.detail("Reached", limits.isReached())
 				.detail("ItemsPastEnd", itemsPastEnd)
 				.detail("EndOffset", -end.offset)
-				.detail("ItBegin", it.beginKey().toStandaloneStringRef())
-				.detail("ItEnd", itEnd.beginKey().toStandaloneStringRef())
+				.detail("ItBegin", it.beginKey())
+				.detail("ItEnd", itEnd.beginKey())
 				.detail("Unknown", it.is_unknown_range())
 				.detail("Requests", requestCount);*/
 
@@ -606,7 +606,7 @@ public:
 				ASSERT( !requestLimit.hasRowLimit() || requestLimit.rows > 0 );
 				ASSERT( requestLimit.hasRowLimit() || requestLimit.hasByteLimit() );
 				
-				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey().toStandaloneStringRef()).detail("MinRows", requestLimit.minRows);
+				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey()).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
 				Standalone<RangeResultRef> snapshot_read = wait( ryw->tr.getRange( read_begin, read_end, requestLimit, true, false ) );
@@ -636,7 +636,7 @@ public:
 
 				itemsPastEnd += maxCount - count;
 				
-				//TraceEvent("RYWaddKV", randomID).detail("Key", it.beginKey().toStandaloneStringRef()).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastEnd", itemsPastEnd);
+				//TraceEvent("RYWaddKV", randomID).detail("Key", it.beginKey()).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastEnd", itemsPastEnd);
 				if( count ) result.append( result.arena(), start, count );
 				++it;
 			} else
@@ -785,8 +785,8 @@ public:
 				.detail("Reached", limits.isReached())
 				.detail("ItemsPastBegin", itemsPastBegin)
 				.detail("EndOffset", end.offset)
-				.detail("ItBegin", it.beginKey().toStandaloneStringRef())
-				.detail("ItEnd", itEnd.beginKey().toStandaloneStringRef())
+				.detail("ItBegin", it.beginKey())
+				.detail("ItEnd", itEnd.beginKey())
 				.detail("Unknown", it.is_unknown_range())
 				.detail("Kv", it.is_kv())
 				.detail("Requests", requestCount);*/
@@ -883,7 +883,7 @@ public:
 				ASSERT( !requestLimit.hasRowLimit() || requestLimit.rows > 0 );
 				ASSERT( requestLimit.hasRowLimit() || requestLimit.hasByteLimit() );
 
-				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey().toStandaloneStringRef()).detail("MinRows", requestLimit.minRows);
+				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey()).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
 				Standalone<RangeResultRef> snapshot_read = wait( ryw->tr.getRange( read_begin, read_end, requestLimit, true, true ) );
@@ -917,7 +917,7 @@ public:
 					}
 
 					itemsPastBegin += maxCount - count;
-					//TraceEvent("RYWaddKV", randomID).detail("Key", it.beginKey().toStandaloneStringRef()).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastBegin", itemsPastBegin);
+					//TraceEvent("RYWaddKV", randomID).detail("Key", it.beginKey()).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastBegin", itemsPastBegin);
 					if( count ) {
 						int size = result.size();
 						result.resize(result.arena(),size+count);
@@ -1982,7 +1982,7 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 				if(error.present())
 					trace.error(error.get(), true);
 				if(!transactionDebugInfo->transactionName.empty())
-					trace.detail("TransactionName", StringRef(transactionDebugInfo->transactionName));
+					trace.detail("TransactionName", transactionDebugInfo->transactionName);
 				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);
 			}
 			transactionDebugInfo->lastRetryLogTime = now();

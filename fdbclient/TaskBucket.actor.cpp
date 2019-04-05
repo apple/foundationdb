@@ -710,13 +710,13 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
 		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", subspace.key()).detail("Count", values.size()).detail("Msg", msg);
-		/*
-		printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
+		
+		/*printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
-		printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
-		TraceEvent("TaskBucket").detail("DebugPrintRange", msg)
-			.detail("Key", s.key)
-			.detail("Value", s.value);
+			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
+			TraceEvent("TaskBucket").detail("DebugPrintRange", msg)
+				.detail("Key", s.key)
+				.detail("Value", s.value);
 		}*/
 
 		return Void();

@@ -701,8 +701,8 @@ struct DDQueueData {
 			busyString += describe(rd.src[i]) + " - (" + busymap[ rd.src[i] ].toString() + "); ";
 
 		TraceEvent(title, distributorId)
-						   .detail("KeyBegin", rd.keys.begin)
-						   .detail("KeyEnd", rd.keys.end)
+			.detail("KeyBegin", rd.keys.begin)
+			.detail("KeyEnd", rd.keys.end)
 			.detail("Priority", rd.priority)
 			.detail("WorkFactor", rd.workFactor)
 			.detail("SourceServerCount", rd.src.size())
@@ -759,9 +759,9 @@ struct DDQueueData {
 						it->value().priority >= rd.priority &&
 						rd.priority < PRIORITY_TEAM_REDUNDANT ) {
 					/*TraceEvent("OverlappingInFlight", distributorId)
-					  .detail("KeyBegin", it->value().keys.begin)
-					  .detail("KeyEnd", it->value().keys.end)
-						.detail("Priority", it->value().priority); */
+						.detail("KeyBegin", it->value().keys.begin)
+						.detail("KeyEnd", it->value().keys.end)
+						.detail("Priority", it->value().priority);*/
 					overlappingInFlight = true;
 					break;
 				}

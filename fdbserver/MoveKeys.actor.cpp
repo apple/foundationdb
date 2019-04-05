@@ -301,8 +301,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						decodeKeyServersValue( old[i].value, src, dest );
 
 						/*TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-						  .detail("KeyBegin", rangeIntersectKeys.begin.c_str())
-						  .detail("KeyEnd", rangeIntersectKeys.end.c_str())
+							.detail("KeyBegin", rangeIntersectKeys.begin.c_str())
+							.detail("KeyEnd", rangeIntersectKeys.end.c_str())
 							.detail("OldSrc", describe(src))
 							.detail("OldDest", describe(dest))
 							.detail("ReadVersion", tr.getReadVersion().get());*/

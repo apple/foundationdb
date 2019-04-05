@@ -569,33 +569,7 @@ public:
 	std::string toString() const { return std::string( (const char*)data, length ); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
-	std::string printable() const {
-		std::string result;
-		int nonPrintables = 0;
-		int numBackslashes = 0;
-		for (auto c : *this) {
-			if (!isPrintable(c)) {
-				++nonPrintables;
-			} else if (c == '\\') {
-				++numBackslashes;
-			}
-		}
-		result.reserve(size() - nonPrintables + (nonPrintables * 4) + numBackslashes);
-		for (auto c : *this) {
-			if (isPrintable(c)) {
-				result.push_back(c);
-			} else if (c == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
-			} else {
-				result.push_back('\\');
-				result.push_back('x');
-				result.push_back(base16Char((c / 16) % 16));
-				result.push_back(base16Char(c % 16));
-			}
-		}
-		return result;
-	}
+	inline std::string printable() const;
 
 	std::string toHexString(int limit = -1) const {
 		if(limit < 0)
@@ -680,11 +654,26 @@ private:
 #pragma pack( pop )
 
 template<>
-struct Traceable<StringRef> : std::true_type {
+struct TraceableString<StringRef> {
+	static const char* begin(StringRef value) {
+		return reinterpret_cast<const char*>(value.begin());
+	}
+
+	static bool atEnd(const StringRef& value, const char* iter) {
+		return iter == reinterpret_cast<const char*>(value.end());
+	}
+
 	static std::string toString(const StringRef& value) {
-		return value.printable();
+		return value.toString();
 	}
 };
+
+template<>
+struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
+
+inline std::string StringRef::printable() const {
+	return Traceable<StringRef>::toString(*this);
+}
 
 template<class T>
 struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {

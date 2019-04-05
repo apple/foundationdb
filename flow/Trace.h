@@ -216,95 +216,140 @@ struct Traceable<UID> : std::true_type {
 	}
 };
 
+template<class S>
+struct IsTraceableString : std::false_type {};
+
 template<>
-struct Traceable<const char*> : std::true_type {
-	static bool isPrintable(char c) { return c > 32 && c < 127; }
+struct IsTraceableString<std::string> : std::false_type {};
+
+template<>
+struct IsTraceableString<const char*> : std::false_type {};
+
+template<class Str>
+struct TraceableString {
+	static auto begin(const Str& value) -> decltype(value.begin()) {
+		return value.begin();
+	}
+
+	static bool atEnd(const Str& value, decltype(value.begin()) iter) {
+		return iter == value.end();
+	}
+
+	static std::string toString(const Str& value) {
+		return value.toString();
+	}
+};
+
+template<>
+struct TraceableString<std::string> {
+	static auto begin(const std::string& value) -> decltype(value.begin()) {
+		return value.begin();
+	}
+
+	static bool atEnd(const std::string& value, decltype(value.begin()) iter) {
+		return iter == value.end();
+	}
+
+	template<class S>
+	static std::string toString(S&& value) {
+		return std::forward<S>(value);
+	}
+};
+
+template<>
+struct TraceableString<const char*> {
+	static const char* begin(const char* value) {
+		return value;
+	}
+
+	static bool atEnd(const char* value, const char* iter) {
+		return *iter == '\0';
+	}
+
 	static std::string toString(const char* value) {
-		// if all characters are printable ascii, we simply return the string
-		int nonPrintables = 0;
-		int numBackslashes = 0;
-		auto val = value;
-		int size = 0;
-		while (auto c = *(val++)) {
-			++size;
-			if (!Traceable<const char*>::isPrintable(c)) {
-				++nonPrintables;
-			} else if (c == '\\') {
-				++numBackslashes;
-			}
-		}
-		if (nonPrintables == 0 && numBackslashes == 0) {
-			return std::string(value);
-		}
-		std::string result;
-		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
-		while (auto c = *(val++)) {
-			if (Traceable<const char*>::isPrintable(c)) {
-				result.push_back(c);
-			} else if (c == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
-			} else {
-				result.push_back('\\');
-				result.push_back('x');
-				result.push_back(base16Char((c / 16) % 16));
-				result.push_back(base16Char(c % 16));
-			}
-		}
-		return result;
+		return std::string(value);
 	}
 };
 
 template<size_t S>
-struct Traceable<char[S]> : std::true_type {
+struct TraceableString<char[S]> {
+	static const char* begin(const char* value) {
+		return value;
+	}
+
+	static bool atEnd(const char* value, const char* iter) {
+		return iter - value == S;
+	}
+
 	static std::string toString(const char* value) {
-		return Traceable<const char*>::toString(value);
+		return std::string(value, S);
 	}
 };
 
 template<>
-struct Traceable<char*> : std::true_type {
-	static std::string toString(const char* value) {
-		return Traceable<const char*>::toString(value);
+struct TraceableString<char*> {
+	static const char* begin(char* value) {
+		return value;
+	}
+
+	static bool atEnd(char* value, const char* iter) {
+		return *iter == '\0';
+	}
+
+	static std::string toString(char* value) {
+		return std::string(value);
 	}
 };
 
-template<>
-struct Traceable<std::string> : std::true_type {
-	static bool isPrintable(char c) { return c >= 32 && c < 127; }
+template<class T>
+struct TraceableStringImpl : std::true_type {
+	static constexpr bool isPrintable(char c) { return c > 32 && c < 127; }
+
 	template<class Str>
 	static std::string toString(Str&& value) {
 		// if all characters are printable ascii, we simply return the string
 		int nonPrintables = 0;
 		int numBackslashes = 0;
-		for (auto c : value) {
-			if (!isPrintable(c)) {
+		auto val = value;
+		int size = 0;
+		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
+			++size;
+			if (!isPrintable(char(*iter))) {
 				++nonPrintables;
-			} else if (c == '\\') {
+			} else if (*iter == '\\') {
 				++numBackslashes;
 			}
 		}
 		if (nonPrintables == 0 && numBackslashes == 0) {
-			return std::forward<Str>(value);
+			return TraceableString<T>::toString(std::forward<Str>(value));
 		}
 		std::string result;
-		result.reserve(value.size() - nonPrintables + (nonPrintables * 4) + numBackslashes);
-		for (auto c : value) {
-			if (isPrintable(c)) {
-				result.push_back(c);
-			} else if (c == '\\') {
+		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
+			if (isPrintable(*iter)) {
+				result.push_back(*iter);
+			} else if (*iter == '\\') {
 				result.push_back('\\');
 				result.push_back('\\');
 			} else {
 				result.push_back('\\');
 				result.push_back('x');
-				result.push_back(base16Char((c / 16) % 16));
-				result.push_back(base16Char(c % 16));
+				result.push_back(base16Char((*iter / 16) % 16));
+				result.push_back(base16Char(*iter % 16));
 			}
 		}
 		return result;
 	}
 };
+
+template<>
+struct Traceable<const char*> : TraceableStringImpl<const char*> {};
+template<>
+struct Traceable<char*> : TraceableStringImpl<char*> {};
+template<size_t S>
+struct Traceable<char[S]> : TraceableStringImpl<char[S]> {};
+template<>
+struct Traceable<std::string> : TraceableStringImpl<std::string> {};
 
 template<class T>
 struct SpecialTraceMetricType

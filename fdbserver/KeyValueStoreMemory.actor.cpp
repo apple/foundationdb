@@ -485,8 +485,8 @@ private:
 					if (h.op == OpSnapshotItem) { // snapshot data item
 						/*if (p1 < uncommittedNextKey) {
 							TraceEvent(SevError, "RecSnapshotBack", self->id)
-							.detail("NextKey", uncommittedNextKey)
-							.detail("P1", p1)
+								.detail("NextKey", uncommittedNextKey)
+								.detail("P1", p1)
 								.detail("Nextlocation", self->log->getNextReadLocation());
 						}
 						ASSERT( p1 >= uncommittedNextKey );*/
