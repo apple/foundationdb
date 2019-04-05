@@ -41,6 +41,7 @@ BINARY_SERIALIZABLE( RestoreRole );
 extern int FastRestore_Failure_Timeout;
 
 struct RestoreSetRoleRequest;
+struct RestoreCommonReply;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -198,7 +199,7 @@ struct RestoreSetRoleRequest : TimedRequest {
 	CMDUID cmdID;
 	RestoreRole role;
 
-	ReplyPromise<RestoreCommandReply> reply;
+	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSetRoleRequest() : cmdID(CMDUID()), role(RestoreRole::Invalid) {}
 	explicit RestoreSetRoleRequest(CMDUID cmdID, RestoreRole role) : cmdID(cmdID), role(role) {}
