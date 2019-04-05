@@ -1,6 +1,7 @@
 set(FDBMONITOR_SRCS ConvertUTF.h SimpleIni.h fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
+strip_debug_symbols(fdbmonitor)
 assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)
     target_link_libraries(fdbmonitor rt)
