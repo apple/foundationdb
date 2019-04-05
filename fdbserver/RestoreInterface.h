@@ -23,6 +23,7 @@
 #pragma once
 
 #include <sstream>
+#include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 //#include "fdbclient/NativeAPI.h" //MX: Cannot have NativeAPI.h in this .h
@@ -187,8 +188,67 @@ struct RestoreCommand {
 		//ar & cmd  & cmdIndex & id & masterApplier & role & keyRange &  commitVersion & mutation & applierKeyRangeLB &  applierID & keyRangeIndex & loadingParam & reply;
 	}
 };
+
 typedef RestoreCommand::LoadingParam LoadingParam;
 
+
+struct RestoreSetRoleRequest : TimedRequest {
+	CMDUID cmdID;
+	RestoreRole role;
+
+	ReplyPromise<RestoreCommandReply> reply;
+
+	RestoreSetRoleRequest() : cmdID(CMDUID()), role(RestoreRole::Invalid) {}
+	explicit RestoreSetRoleRequest(CMDUID cmdID, RestoreRole role) : cmdID(cmdID), role(role) {}
+
+	template <class Ar> 
+	void serialize( Ar& ar ) {
+		serializer(ar, cmdID, role, reply);
+	}
+};
+
+// Reply type
+struct RestoreCommonReply { 
+	UID id; // unique ID of the server who sends the reply
+	CMDUID cmdID; // The restore command for the reply
+	
+	RestoreCommonReply() : id(UID()), cmdID(CMDUID()) {}
+	explicit RestoreCommonReply(UID id, CMDUID cmdID) : id(id), cmdID(cmdID) {}
+	
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString();
+		return ss.str();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, cmdID);
+	}
+};
+
+struct GetLowerBoundReply : RestoreCommonReply {
+	int index;
+	Standalone<KeyRef> lowerBound;
+
+	GetLowerBoundReply() : index(0), lowerBound(KeyRef()) {}
+	explicit GetLowerBoundReply(int index, KeyRef lowerBound) : index(index), lowerBound(lowerBound) {}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString() 
+			<< " index:" << std::to_string(index) << " lowerBound:" << lowerBound.toHexString();
+		return ss.str();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, *(RestoreCommonReply *) this, index, lowerBound);
+	}
+};
+
+
+// ToDelete
 struct RestoreCommandReply {
 	UID id; // placeholder, which reply the worker's node id back to master
 	CMDUID cmdID;
@@ -203,7 +263,8 @@ struct RestoreCommandReply {
 
 	std::string toString() const {
 		std::stringstream ret;
-		ret << "ServerNodeID:" + id.toString() + " CMDID:" + cmdID.toString() + " num:" + std::to_string(num) + " lowerBound:" + lowerBound.toHexString();
+		ret << "ServerNodeID:" << id.toString() << " CMDID:" << cmdID.toString() 
+			<< " num:" << std::to_string(num) << " lowerBound:" << lowerBound.toHexString();
 		return ret.str();
 	}
 
