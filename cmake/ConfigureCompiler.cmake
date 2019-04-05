@@ -6,6 +6,10 @@ set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
+if(USE_GPERFTOOLS)
+  find_package(Gperftools REQUIRED)
+endif()
+
 add_compile_options(-DCMAKE_BUILD)
 add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
@@ -122,6 +126,13 @@ else()
     -Wreturn-type
     -fdiagnostics-color=always
     -fPIC)
+  if (GPERFTOOLS_FOUND AND GCC)
+    add_compile_options(
+      -fno-builtin-malloc
+      -fno-builtin-calloc
+      -fno-builtin-realloc
+      -fno-builtin-free)
+  endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(USE_LTO OFF CACHE BOOL "Do link time optimization")

@@ -298,4 +298,9 @@ RestoreRequest decodeRestoreRequestValue( ValueRef const& value );
 const  Key restoreStatusKeyFor( StringRef statusType);
 const Value restoreStatusValue( double const& val );
 
+extern const KeyRef healthyZoneKey;
+
+const Value healthyZoneValue( StringRef const& zoneId, Version version );
+std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
+
 #endif
