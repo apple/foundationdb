@@ -44,7 +44,11 @@ struct RestoreCommonReply;
 struct GetKeyRangeReply;
 struct GetKeyRangeReply;
 struct RestoreSetRoleRequest;
-
+struct RestoreSimpleRequest;
+struct RestoreSendMutationRequest;
+struct RestoreLoadFileRequest;
+struct RestoreGetApplierKeyRangeRequest;
+struct RestoreSetApplierKeyRangeRequest;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -106,24 +110,43 @@ template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>
 
 // NOTE: is cmd's Endpoint token the same with the request's token for the same node?
 struct RestoreInterface {
+	UID nodeID;
+
 	RequestStream<RestoreSetRoleRequest> setRole;
+	RequestStream<RestoreLoadFileRequest> sampleRangeFile;
+	RequestStream<RestoreLoadFileRequest> sampleLogFile;
+	RequestStream<RestoreSendMutationRequest> sendSampleMutation;
+
+	RequestStream<RestoreSimpleRequest> calculateApplierKeyRange;
+	RequestStream<RestoreGetApplierKeyRangeRequest> getApplierKeyRangeRequest;
+	RequestStream<RestoreSetApplierKeyRangeRequest> setApplierKeyRangeRequest;
+
+	RequestStream<RestoreLoadFileRequest> loadRangeFile;
+	RequestStream<RestoreLoadFileRequest> loadLogFile;
+	RequestStream<RestoreSendMutationRequest> sendMutation;
+	RequestStream<RestoreSimpleRequest> applyToDB;
+
+	// ToDelete
 	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
 //	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
 
 	bool operator == (RestoreInterface const& r) const { return id() == r.id(); }
 	bool operator != (RestoreInterface const& r) const { return id() != r.id(); }
-	UID id() const { return cmd.getEndpoint().token; }
+
+	void initNodeID() { nodeID = setRole.getEndpoint().token; }
+	UID id() const { return nodeID; } //cmd.getEndpoint().token;
 
 	NetworkAddress address() const { return cmd.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
-		cmd.getEndpoint( TaskClusterController );
+		cmd.getEndpoint( TaskClusterController ); // Q: Why do we need this? 
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, cmd);
-//		ar & cmd & request;
+		serializer(ar, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
+				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
+				loadRangeFile, loadLogFile, sendMutation, applyToDB);
 	}
 };
 
