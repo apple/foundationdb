@@ -40,6 +40,7 @@ BINARY_SERIALIZABLE( RestoreRole );
 // Timeout threshold in seconds for restore commands
 extern int FastRestore_Failure_Timeout;
 
+struct RestoreSetRoleRequest;
 
 // RestoreCommandEnum is also used as the phase ID for CMDUID
 enum class RestoreCommandEnum {Init = 0,
@@ -101,6 +102,7 @@ template <class Ar> void save( Ar& ar, CMDUID const& uid ) { const_cast<CMDUID&>
 
 // NOTE: is cmd's Endpoint token the same with the request's token for the same node?
 struct RestoreInterface {
+	RequestStream<RestoreSetRoleRequest> setRole;
 	RequestStream< struct RestoreCommand > cmd; // Restore commands from master to loader and applier
 //	RequestStream< struct RestoreRequest > request; // Restore requests used by loader and applier
 

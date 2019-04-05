@@ -1645,17 +1645,17 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 	loop {
 		try {
 			wait(delay(1.0));
-			std::vector<Future<RestoreCommandReply>> cmdReplies;
+			std::vector<Future<RestoreCommonReply>> cmdReplies;
 			for(auto& cmdInterf : agents) {
 				role = rd->globalNodeStatus[index].role;
 				nodeID = rd->globalNodeStatus[index].nodeID;
 				rd->cmdID.nextCmd();
 				printf("[CMD:%s] Node:%s Set role (%s) to node (index=%d uid=%s)\n", rd->cmdID.toString().c_str(), rd->describeNode().c_str(),
 						getRoleStr(role).c_str(), index, nodeID.toString().c_str());
-				cmdReplies.push_back( cmdInterf.cmd.getReply(RestoreCommand(RestoreCommandEnum::Set_Role, rd->cmdID, nodeID, role, index, rd->masterApplier)));
+				cmdReplies.push_back( cmdInterf.setRole.getReply(RestoreSetRoleRequest(rd->cmdID, role)) );
 				index++;
 			}
-			std::vector<RestoreCommandReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
+			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 			for (int i = 0; i < reps.size(); ++i) {
 				printf("[INFO] Node:%s, CMDReply for CMD:%s, node:%s\n", rd->describeNode().c_str(), reps[i].cmdID.toString().c_str(),
 						reps[i].id.toString().c_str());
