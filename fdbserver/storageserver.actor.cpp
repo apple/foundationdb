@@ -1405,7 +1405,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		state KeyRange shard = getShardKeyRange( data, req.sel );
 
 		state int offset;
-	Key k = wait( findKey( data, req.sel, version, shard, &offset ) );
+		Key k = wait( findKey( data, req.sel, version, shard, &offset ) );
 
 		data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k) ) );
 

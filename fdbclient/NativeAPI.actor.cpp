@@ -3034,7 +3034,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_process_behind)
 	{
 		if(e.code() == error_code_not_committed)
-		cx->transactionsNotCommitted++;
+			cx->transactionsNotCommitted++;
 		if(e.code() == error_code_commit_unknown_result)
 			cx->transactionsMaybeCommitted++;
 		if (e.code() == error_code_proxy_memory_limit_exceeded)
