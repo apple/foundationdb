@@ -2316,7 +2316,7 @@ ACTOR Future<Void> executeCoordinators(DatabaseContext* cx, StringRef execPayLoa
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "NativeAPI.executeCoordinatorsError").error(e);
+		TraceEvent("NativeAPI.executeCoordinatorsError").error(e);
 		throw;
 	}
 }
