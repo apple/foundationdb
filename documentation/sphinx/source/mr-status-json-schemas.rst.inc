@@ -434,7 +434,8 @@
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
