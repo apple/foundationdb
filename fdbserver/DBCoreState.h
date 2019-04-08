@@ -20,10 +20,10 @@
 
 #ifndef FDBSERVER_DBCORESTATE_H
 #define FDBSERVER_DBCORESTATE_H
-#pragma once
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
 
 // This structure is stored persistently in CoordinatedState and must be versioned carefully!
@@ -95,9 +95,9 @@ struct DBCoreState {
 	int32_t logRouterTags;
 	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
-	int logSystemType;
+	LogSystemType logSystemType;
 	
-	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(0) {}
+	DBCoreState() : logRouterTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;

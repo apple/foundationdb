@@ -20,7 +20,6 @@
 
 #ifndef FDBSERVER_LOGSYSTEM_H
 #define FDBSERVER_LOGSYSTEM_H
-#pragma once
 
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"

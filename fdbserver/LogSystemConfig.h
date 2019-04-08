@@ -155,8 +155,14 @@ struct OldTLogConf {
 	}
 };
 
+enum class LogSystemType {
+	empty = 0,
+	tagPartitioned = 2,
+};
+BINARY_SERIALIZABLE(LogSystemType);
+
 struct LogSystemConfig {
-	int32_t logSystemType;
+	LogSystemType logSystemType;
 	std::vector<TLogSet> tLogs;
 	int32_t logRouterTags;
 	std::vector<OldTLogConf> oldTLogs;
@@ -165,7 +171,7 @@ struct LogSystemConfig {
 	bool stopped;
 	Optional<Version> recoveredAt;
 
-	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0), stopped(false) {}
+	LogSystemConfig() : logSystemType(LogSystemType::empty), logRouterTags(0), expectedLogSets(0), stopped(false) {}
 
 	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
