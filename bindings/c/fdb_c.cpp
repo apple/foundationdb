@@ -77,7 +77,9 @@ fdb_bool_t fdb_error_predicate( int predicate_test, fdb_error_t code ) {
 		return code == error_code_not_committed ||
 				code == error_code_transaction_too_old ||
 				code == error_code_future_version ||
-				code == error_code_database_locked;
+				code == error_code_database_locked ||
+				code == error_code_proxy_memory_limit_exceeded ||
+				code == error_code_process_behind;
 	}
 	return false;
 }
@@ -260,7 +262,7 @@ fdb_error_t fdb_future_get_keyvalue_array_impl(
 	CATCH_AND_RETURN(
 		Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
 		*out_kv = (FDBKeyValue*)rrr.begin();
-		*out_count = rrr.size();
+	*out_count = rrr.size();
 		*out_more = rrr.more; );
 }
 

@@ -2,6 +2,19 @@
 Release Notes
 #############
 
+6.1.1
+=====
+
+Fixes
+-----
+
+* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable.
+
+Other changes
+-------------
+
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable.
+
 6.1.0
 =====
 
