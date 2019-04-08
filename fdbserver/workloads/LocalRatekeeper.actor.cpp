@@ -4,7 +4,7 @@
 
 namespace {
 
-ACTOR Future<StorageServerInterface> getRandomStrage(Database cx) {
+ACTOR Future<StorageServerInterface> getRandomStorage(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -94,7 +94,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
 		wait(delay(self->startAfter));
-		state StorageServerInterface ssi = wait(getRandomStrage(cx));
+		state StorageServerInterface ssi = wait(getRandomStorage(cx));
 		g_simulator.disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), self->blockWritesFor);
 		state Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
