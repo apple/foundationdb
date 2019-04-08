@@ -6,11 +6,11 @@ if(WIN32)
   target_compile_options(coveragetool PRIVATE "/langversion:6")
   set_property(TARGET coveragetool PROPERTY VS_DOTNET_REFERENCES
     "System"
-    "ystem.Core"
+    "System.Core"
     "System.Xml.Linq"
-    "ystem.Data.DataSetExtensions"
+    "System.Data.DataSetExtensions"
     "Microsoft.CSharp"
-    "ystem.Data"
+    "System.Data"
     "System.Xml")
 else()
   set(COVERAGETOOL_COMPILER_REFERENCES
