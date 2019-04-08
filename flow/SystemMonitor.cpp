@@ -45,7 +45,7 @@ SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	return getSystemStatistics(
-		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState);
+		machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getApproximateMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
@@ -54,7 +54,7 @@ SystemStatistics getSystemStatistics() {
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "",
-	                                                    &ipAddr, &statState->systemState);
+	                                                    &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
