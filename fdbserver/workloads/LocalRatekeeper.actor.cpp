@@ -50,7 +50,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				expectedRateLimit = double(durabilityLag) / double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX);
 			}
 			if (expectedRateLimit < metrics.localRateLimit - 0.01 || expectedRateLimit > metrics.localRateLimit + 0.01) {
-				self->testFailed;
+				self->testFailed = true;
 				TraceEvent(SevError, "StorageRateLimitTooFarOff")
 					.detail("Storage", ssi.id())
 					.detail("Expected", expectedRateLimit)
