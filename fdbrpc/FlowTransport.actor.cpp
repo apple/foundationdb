@@ -149,7 +149,9 @@ public:
 		lastIncompatibleMessage(0),
 		transportId(transportId),
 		numIncompatibleConnections(0)
-	{}
+	{
+		degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	}
 
 	~TransportData();
 
@@ -170,6 +172,8 @@ public:
 	NetworkAddressList localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, struct Peer*> peers;
+	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
+	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
 
 	// These declarations must be in exactly this order
@@ -481,6 +485,17 @@ struct Peer : NonCopyable {
 				}
 				else {
 					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
+				}
+
+				if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+					auto& it = self->transport->closedPeers[self->destination];
+					if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
+						it.first = now();
+					} else if(now() - it.first > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT) {
+						TraceEvent(SevWarnAlways, "TooManyConnectionsClosed", conn ? conn->getDebugID() : UID()).suppressFor(5.0).detail("PeerAddr", self->destination);
+						self->transport->degraded->set(true);
+					}
+					it.second = now();
 				}
 
 				if (conn) {
@@ -1098,6 +1113,10 @@ void FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint
 
 int FlowTransport::getEndpointCount() {
 	return -1;
+}
+
+Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
+	return self->degraded;
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

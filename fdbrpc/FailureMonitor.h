@@ -84,6 +84,9 @@ public:
 	// Returns the currently known status for the endpoint
 	virtual FailureStatus getState( Endpoint const& endpoint ) = 0;
 
+	// Returns the currently known status for the address
+	virtual FailureStatus getState( NetworkAddress const& address ) = 0;
+
 	// Only use this function when the endpoint is known to be failed
 	virtual void endpointNotFound( Endpoint const& ) = 0;
 
@@ -130,6 +133,7 @@ public:
 
 	virtual Future<Void> onStateChanged( Endpoint const& endpoint );
 	virtual FailureStatus getState( Endpoint const& endpoint );
+	virtual FailureStatus getState( NetworkAddress const& address );
 	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint );
 	virtual bool onlyEndpointFailed( Endpoint const& endpoint );
 	virtual bool permanentlyFailed( Endpoint const& endpoint );
