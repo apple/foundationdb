@@ -2269,7 +2269,8 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 		adding->addMutation(version, mutation);
 	else if (readWrite)
 		readWrite->addMutation(version, mutation, this->keys, readWrite->updateEagerReads);
-	else if (mutation.type != MutationRef::ClearRange) {
+	else if ((mutation.type != MutationRef::ClearRange)
+	         && (mutation.type != MutationRef::Exec)) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation.toString());
 		ASSERT(false);  // Mutation delivered to notAssigned shard!
 	}
