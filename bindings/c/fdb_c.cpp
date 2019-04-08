@@ -262,7 +262,7 @@ fdb_error_t fdb_future_get_keyvalue_array_impl(
 	CATCH_AND_RETURN(
 		Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
 		*out_kv = (FDBKeyValue*)rrr.begin();
-	*out_count = rrr.size();
+		*out_count = rrr.size();
 		*out_more = rrr.more; );
 }
 
