@@ -8,12 +8,12 @@ Release Notes
 Fixes
 -----
 
-* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable.
+* The ``proxy_memory_limit_exceeded`` error was treated as retryable, but ``fdb_error_predicate`` returned that it is not retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
 
 Other changes
 -------------
 
-* The ``process_behind`` error can now be thrown by clients and is treated as retryable.
+* The ``process_behind`` error can now be thrown by clients and is treated as retryable. `(PR #1438) <https://github.com/apple/foundationdb/pull/1438>`_.
 
 6.1.0
 =====
