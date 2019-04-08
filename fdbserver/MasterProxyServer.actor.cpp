@@ -1702,7 +1702,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				if (coordinatorsAddrSet.find(workers[i].interf.address()) != coordinatorsAddrSet.end()) {
 					TraceEvent("ExecReqToCoordinator").detail("WorkerAddr", workers[i].interf.address());
 					try {
-						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 1.0));
+						wait(timeoutError(workers[i].interf.execReq.getReply(ExecuteRequest(execReq.execPayLoad)), 3.0));
 						++numSucc;
 					} catch (Error& e) {
 						TraceEvent("ExecReqFailed").detail("What", e.what());
