@@ -451,7 +451,7 @@ typedef decltype(&tLog) TLogFn;
 
 // spawns a process pointed by `binPath` and the arguments provided at `paramList`,
 // if the process spawned takes more than `maxWaitTime` then it will be killed
-ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime);
+ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime, bool isSync = false);
 
 #include "flow/unactorcompiler.h"
 #endif
