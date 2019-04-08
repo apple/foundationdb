@@ -1211,7 +1211,7 @@ ACTOR Future<Void> workerServer(
 					std::string mkdirBin = "/bin/mkdir";
 					paramList.push_back(mkdirBin);
 					paramList.push_back(folderTo);
-					cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+					cmdErr = spawnProcess(mkdirBin, paramList, 3.0, true);
 					wait(success(cmdErr));
 					err = cmdErr.get();
 					if (err == 0) {
@@ -1432,7 +1432,7 @@ ACTOR Future<Void> fdbd(
 	}
 }
 
-ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime)
+ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramList, double maxWaitTime, bool isSync)
 {
 	state pid_t pid = -1;
 	try {
@@ -1443,6 +1443,10 @@ ACTOR Future<int> spawnProcess(std::string binPath, vector<std::string> paramLis
 	}
 	if (pid < 0) {
 		return -1;
+	}
+
+	if (!isSync && g_network->isSimulated()) {
+		wait(delay(g_random->random01()));
 	}
 
 	state double sleepTime = 0;

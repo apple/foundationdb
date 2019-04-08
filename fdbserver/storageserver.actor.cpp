@@ -1915,7 +1915,7 @@ snapHelper(StorageServer* data, MutationRef m, Version ver)
 
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, 3.0);
+		cmdErr = spawnProcess(mkdirBin, paramList, 3.0, true);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {
