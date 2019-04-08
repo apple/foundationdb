@@ -312,7 +312,7 @@ public:
 	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration, double sustainedFailureSlope, int taskID) const {
 		// If it is local endpoint, no need for failure monitoring
 		return waitValueOrSignal(getReply(value, taskID),
-				getEndpoint(taskID).isLocal() ? Never() : makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(taskID), sustainedFailureDuration, sustainedFailureSlope),
+				makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(taskID), sustainedFailureDuration, sustainedFailureSlope),
 				getEndpoint(taskID));
 	}
 
@@ -320,7 +320,7 @@ public:
 	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value, double sustainedFailureDuration, double sustainedFailureSlope) const {
 		// If it is local endpoint, no need for failure monitoring
 		return waitValueOrSignal(getReply(value),
-				getEndpoint().isLocal() ? Never() : makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope),
+				makeDependent<T>(IFailureMonitor::failureMonitor()).onFailedFor(getEndpoint(), sustainedFailureDuration, sustainedFailureSlope),
 				getEndpoint());
 	}
 
