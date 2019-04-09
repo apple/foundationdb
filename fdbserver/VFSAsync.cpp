@@ -57,8 +57,6 @@
 #define PENDING_LOCK    3
 #define EXCLUSIVE_LOCK  4
 const uint32_t RESERVED_COUNT = 1U<<29;
-const uint32_t PENDING_COUNT = 1U<<30;
-const uint32_t EXCLUSIVE_COUNT = 1U<<31;
 
 /*
 ** When using this VFS, the sqlite3_file* handles that SQLite uses are

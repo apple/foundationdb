@@ -1246,7 +1246,6 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if(platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
-					size_t index = 0;
 					for(auto value : parseOptionValues(valueStr)) {
 						Standalone<StringRef> currentValue = StringRef(value);
 						{ // lock scope

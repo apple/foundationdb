@@ -219,9 +219,10 @@ ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string
 		return Void();
 
 	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
-	// printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(), printable(subspace).c_str(), results.size());
+	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
+	       printable(subspace).c_str(), results.size());
 	for (auto & s : results) {
-		// printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
+		printf("=====key:%s, value:%s\n", printable(StringRef(s.key)).c_str(), printable(StringRef(s.value)).c_str());
 	}
 
 	return Void();

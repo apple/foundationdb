@@ -1020,7 +1020,6 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		PacketBuffer* pb = peer->unsent.getWriteBuffer();
 		ReliablePacket* rp = reliable ? new ReliablePacket : 0;
 
-		void*p = pb->data+pb->bytes_written;
 		int prevBytesWritten = pb->bytes_written;
 		PacketBuffer* checksumPb = pb;
 

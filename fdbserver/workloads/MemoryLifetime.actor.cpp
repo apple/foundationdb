@@ -27,8 +27,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-const int sampleSize = 10000;
-
 struct MemoryLifetime : KVWorkload {
 	double testDuration;
 	vector<Future<Void>> clients;

@@ -265,7 +265,6 @@ typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 
 ACTOR void coroSwitcher( Future<Void> what, int taskID, Coro* coro ) {
 	try {
-		state double t = now();
 		wait(what);
 		//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
 		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
@@ -279,8 +278,7 @@ ACTOR void coroSwitcher( Future<Void> what, int taskID, Coro* coro ) {
 void CoroThreadPool::waitFor( Future<Void> what ) {
 	ASSERT (current_coro != main_coro);
 	if (what.isReady()) return;
-	//double t = now();
-	coroSwitcher( what, g_network->getCurrentTask(), current_coro );
+	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
 	Coro_switchTo_( swapCoro(main_coro), main_coro );
 	//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
 	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed", now()-t).backtrace("Coro");

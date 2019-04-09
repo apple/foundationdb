@@ -79,5 +79,4 @@ TEST_CASE("/flow/Deque/max_size") {
 	return Void();
 }
 
-
 void forceLinkDequeTests() {}

@@ -626,7 +626,6 @@ pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const
 
 bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::pair<KeyRange,Reference<LocationInfo>>>& result, int limit, bool reverse ) {
 	result.clear();
-	auto locRanges = locationCache.intersectingRanges(range);
 
 	auto begin = locationCache.rangeContaining(range.begin);
 	auto end = locationCache.rangeContainingKeyBefore(range.end);

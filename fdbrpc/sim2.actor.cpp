@@ -40,9 +40,7 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 	auto p = g_simulator.getCurrentProcess();
 
 	if (p->fault_injection_p2 && g_random->random01() < p->fault_injection_p2 && !g_simulator.speedUpSimulation) {
-		uint32_t
-			h1 = line + (p->fault_injection_r>>32),
-			h2 = p->fault_injection_r;
+		uint32_t h1 = line + (p->fault_injection_r >> 32);
 
 		if (h1 < p->fault_injection_p1*std::numeric_limits<uint32_t>::max()) {
 			TEST(true);                                     // A fault was injected
@@ -100,7 +98,6 @@ bool onlyBeforeSimulatorInit() {
 }
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
-const uint64_t TOKEN_STREAM_FLAG = 1;
 
 ISimulator* g_pSimulator = 0;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
@@ -879,8 +876,6 @@ public:
 			}
 			numFiles++;
 		}
-
-		bool ok = false;
 
 		if(diskSpace.totalSpace == 0) {
 			diskSpace.totalSpace = 5e9 + g_random->random01() * 100e9; //Total space between 5GB and 105GB

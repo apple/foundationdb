@@ -64,6 +64,7 @@ public:
 	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
 		static int _ = checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
+		(void)_;
 
 		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some implementations.
 		checksumHistoryBudget -= checksumHistory.capacity();

@@ -618,7 +618,6 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 			std::sort(sortedVersions.begin(), sortedVersions.end());
 			locations.clear();
 			for(auto sortedVersion : sortedVersions) {
-				auto& locality = logSets[logIdx]->tLogLocalities[sortedVersion.second];
 				locations.push_back(logSets[logIdx]->logEntryArray[sortedVersion.second]);
 				if( locations.size() >= logSets[logIdx]->tLogReplicationFactor && logSets[logIdx]->satisfiesPolicy(locations) ) {
 					messageVersion = sortedVersion.first;

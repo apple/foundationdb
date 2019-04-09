@@ -121,6 +121,7 @@ else()
   endif()
   add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
   add_compile_options(-Wno-error=format
+    -Wunused-variable
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type

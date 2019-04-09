@@ -734,7 +734,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 	int64_t elapsed = tscEnd-tscBegin;
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
 		int i = std::min<double>(NetworkMetrics::SLOW_EVENT_BINS-1, log( elapsed/1e6 ) / log(2.));
-		int s = ++networkMetrics.countSlowEvents[i];
+		++networkMetrics.countSlowEvents[i];
 		int64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
 
 		//printf("SlowTask: %d, %d yields\n", (int)(elapsed/1e6), numYields);

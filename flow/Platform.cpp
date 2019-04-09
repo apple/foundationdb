@@ -839,8 +839,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	writeSectors = 0;
 	readSectors = 0;
 
-	const int kMaxDiskNameSize = 64;
-
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();

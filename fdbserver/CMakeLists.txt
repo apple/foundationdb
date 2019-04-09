@@ -182,6 +182,11 @@ set(SQLITE_SRCS
 add_library(sqlite ${SQLITE_SRCS})
 target_compile_definitions(sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
 
+# Suppress warnings in sqlite since it's third party
+if(NOT WIN32)
+  target_compile_options(sqlite BEFORE PRIVATE -w) # disable warnings for third party
+endif()
+
 set(java_workload_docstring "Build the Java workloads (makes fdbserver link against JNI)")
 set(WITH_JAVA_WORKLOAD OFF CACHE BOOL "${java_workload_docstring}")
 if(WITH_JAVA_WORKLOAD)
