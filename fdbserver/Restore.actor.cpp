@@ -813,7 +813,7 @@ void printAppliersKeyRange(Reference<RestoreData> rd) {
 
 //Print out the works_interface info
 void printWorkersInterface(Reference<RestoreData> rd) {
-	printf("[INFO] workers_interface info: num of workers:%d\n", rd->workers_interface.size());
+	printf("[INFO] workers_interface info: num of workers:%ld\n", rd->workers_interface.size());
 	int index = 0;
 	for (auto &interf : rd->workers_interface) {
 		printf("\t[INFO][Worker %d] NodeID:%s, Interface.id():%s\n", index,
@@ -836,7 +836,7 @@ std::pair<int, int> getNumLoaderAndApplier(Reference<RestoreData> rd){
 	}
 
 	if ( numLoaders + numAppliers != rd->globalNodeStatus.size() ) {
-		printf("[ERROR] Number of workers does not add up! numLoaders:%d, numApplier:%d, totalProcess:%d\n",
+		printf("[ERROR] Number of workers does not add up! numLoaders:%d, numApplier:%d, totalProcess:%ld\n",
 				numLoaders, numAppliers, rd->globalNodeStatus.size());
 	}
 
@@ -921,7 +921,7 @@ std::vector<UID> getWorkerIDs(Reference<RestoreData> rd) {
 
 void printGlobalNodeStatus(Reference<RestoreData> rd) {
 	printf("---Print globalNodeStatus---\n");
-	printf("Number of entries:%d\n", rd->globalNodeStatus.size());
+	printf("Number of entries:%ld\n", rd->globalNodeStatus.size());
 	for(int i = 0; i < rd->globalNodeStatus.size(); ++i) {
 		printf("[Node:%d] %s, role:%s\n", i, rd->globalNodeStatus[i].toString().c_str(),
 				getRoleStr(rd->globalNodeStatus[i].role).c_str());
@@ -936,7 +936,7 @@ bool allOpsAreKnown(Reference<RestoreData> rd);
 
 
 void printBackupFilesInfo(Reference<RestoreData> rd) {
-	printf("[INFO] The backup files for current batch to load and apply: num:%d\n", rd->files.size());
+	printf("[INFO] The backup files for current batch to load and apply: num:%ld\n", rd->files.size());
 	for (int i = 0; i < rd->files.size(); ++i) {
 		printf("\t[INFO][File %d] %s\n", i, rd->files[i].toString().c_str());
 	}
@@ -944,7 +944,7 @@ void printBackupFilesInfo(Reference<RestoreData> rd) {
 
 
 void printAllBackupFilesInfo(Reference<RestoreData> rd) {
-	printf("[INFO] All backup files: num:%d\n", rd->allFiles.size());
+	printf("[INFO] All backup files: num:%ld\n", rd->allFiles.size());
 	for (int i = 0; i < rd->allFiles.size(); ++i) {
 		printf("\t[INFO][File %d] %s\n", i, rd->allFiles[i].toString().c_str());
 	}
@@ -952,7 +952,7 @@ void printAllBackupFilesInfo(Reference<RestoreData> rd) {
 
 void buildForbiddenVersionRange(Reference<RestoreData> rd) {
 
-	printf("[INFO] Build forbidden version ranges for all backup files: num:%d\n", rd->allFiles.size());
+	printf("[INFO] Build forbidden version ranges for all backup files: num:%ld\n", rd->allFiles.size());
 	for (int i = 0; i < rd->allFiles.size(); ++i) {
 		if (!rd->allFiles[i].isRange) {
 			rd->forbiddenVersions.insert(std::make_pair(rd->allFiles[i].beginVersion, rd->allFiles[i].endVersion));
@@ -961,7 +961,7 @@ void buildForbiddenVersionRange(Reference<RestoreData> rd) {
 }
 
 bool isForbiddenVersionRangeOverlapped(Reference<RestoreData> rd) {
-	printf("[INFO] Check if forbidden version ranges is overlapped: num of ranges:%d\n", rd->forbiddenVersions.size());
+	printf("[INFO] Check if forbidden version ranges is overlapped: num of ranges:%ld\n", rd->forbiddenVersions.size());
 	if (rd->forbiddenVersions.empty()) {
 		return false;
 	}
@@ -1002,7 +1002,7 @@ bool isVersionInForbiddenRange(Reference<RestoreData> rd, Version endVersion, bo
 }
 
 void printForbiddenVersionRange(Reference<RestoreData> rd) {
-	printf("[INFO] Number of forbidden version ranges:%d\n", rd->forbiddenVersions.size());
+	printf("[INFO] Number of forbidden version ranges:%ld\n", rd->forbiddenVersions.size());
 	int i = 0;
 	for (auto &range : rd->forbiddenVersions) {
 		printf("\t[INFO][Range%d] [%ld, %ld)\n", i, range.first, range.second);
@@ -1011,7 +1011,7 @@ void printForbiddenVersionRange(Reference<RestoreData> rd) {
 }
 
 void constructFilesWithVersionRange(Reference<RestoreData> rd) {
-	printf("[INFO] constructFilesWithVersionRange for num_files:%d\n", rd->files.size());
+	printf("[INFO] constructFilesWithVersionRange for num_files:%ld\n", rd->files.size());
 	rd->allFiles.clear();
 	for (int i = 0; i < rd->files.size(); i++) {
 		printf("\t[File:%d] %s\n", i, rd->files[i].toString().c_str());
@@ -1027,7 +1027,7 @@ void constructFilesWithVersionRange(Reference<RestoreData> rd) {
 			int pos = rd->files[i].fileName.find_last_of("/");
 			std::string fileName = rd->files[i].fileName.substr(pos);
 			printf("\t[File:%d] Log filename:%s, pos:%d\n", i, fileName.c_str(), pos);
-			sscanf(fileName.c_str(), "/log,%lld,%lld,%*[^,],%u%n", &beginVersion, &endVersion, &blockSize, &len);
+			sscanf(fileName.c_str(), "/log,%ld,%ld,%*[^,],%u%n", &beginVersion, &endVersion, &blockSize, &len);
 			printf("\t[File:%d] Log filename:%s produces beginVersion:%lld endVersion:%lld\n",i, fileName.c_str(), beginVersion, endVersion);
 		}
 		ASSERT(beginVersion <= endVersion);
@@ -1558,10 +1558,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 				index++;
 			}
 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
-			for (int i = 0; i < reps.size(); ++i) {
-				printf("[INFO] Node:%s, CMDReply for CMD:%s, node:%s\n", rd->describeNode().c_str(), reps[i].cmdID.toString().c_str(),
-						reps[i].id.toString().c_str());
-			}
+			printf("[SetRole] Finished\n");
 
 			break;
 		} catch (Error &e) {
@@ -1592,7 +1589,7 @@ ACTOR Future<Void> configureRoles(Reference<RestoreData> rd, Database cx)  { //,
 
 
 void printApplierKeyRangeInfo(std::map<UID, Standalone<KeyRangeRef>>  appliers) {
-	printf("[INFO] appliers num:%d\n", appliers.size());
+	printf("[INFO] appliers num:%ld\n", appliers.size());
 	int index = 0;
 	for(auto &applier : appliers) {
 		printf("\t[INFO][Applier:%d] ID:%s --> KeyRange:%s\n", index, applier.first.toString().c_str(), applier.second.toString().c_str());
@@ -1606,7 +1603,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 	std::vector<Standalone<KeyRangeRef>> keyRanges;
 	std::vector<UID> applierIDs;
 
-	printf("[INFO] Node:%s, Assign key range to appliers. num_appliers:%d\n", rd->describeNode().c_str(), rd->range2Applier.size());
+	printf("[INFO] Node:%s, Assign key range to appliers. num_appliers:%ld\n", rd->describeNode().c_str(), rd->range2Applier.size());
 	for (auto& applier : rd->range2Applier) {
 		lowerBounds.push_back(applier.first);
 		applierIDs.push_back(applier.second);
@@ -1631,7 +1628,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 	appliers.clear(); // If this function is called more than once in multiple version batches, appliers may carry over the data from earlier version batch
 	for (int i = 0; i < applierIDs.size(); ++i) {
 		if (appliers.find(applierIDs[i]) != appliers.end()) {
-			printf("[ERROR] ApplierID appear more than once!appliers size:%d applierID: %s\n",
+			printf("[ERROR] ApplierID appear more than once. appliers size:%ld applierID: %s\n",
 					appliers.size(), applierIDs[i].toString().c_str());
 			printApplierKeyRangeInfo(appliers);
 		}
@@ -1658,7 +1655,7 @@ ACTOR Future<Void> assignKeyRangeToAppliers(Reference<RestoreData> rd, Database 
 				cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, nodeID, keyRange)) );
 
 			}
-			printf("[INFO] Wait for %d applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
+			printf("[INFO] Wait for %ld applier to accept the cmd Assign_Applier_KeyRange\n", appliers.size());
 			std::vector<RestoreCommonReply> reps = wait( timeoutError(getAll(cmdReplies), FastRestore_Failure_Timeout) );
 			for (int i = 0; i < reps.size(); ++i) {
 				printf("[INFO] Get reply:%s for Assign_Applier_KeyRange\n",
@@ -1702,7 +1699,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 					cmdReplies.push_back( cmdInterf.setApplierKeyRangeRequest.getReply(RestoreSetApplierKeyRangeRequest(rd->cmdID, applierRange->second, range)) );
 				}
 			}
-			printf("[INFO] Wait for %d loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
+			printf("[INFO] Wait for %ld loaders to accept the cmd Notify_Loader_ApplierKeyRange\n", loaders.size());
 			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 			for (int i = 0; i < reps.size(); ++i) {
 				printf("[INFO] Get reply:%s from Notify_Loader_ApplierKeyRange cmd for node.\n",
@@ -1730,7 +1727,7 @@ ACTOR Future<Void> notifyAppliersKeyRangeToLoader(Reference<RestoreData> rd, Dat
 
 
 void printLowerBounds(std::vector<Standalone<KeyRef>> lowerBounds) {
-	printf("[INFO] Print out %d keys in the lowerbounds\n", lowerBounds.size());
+	printf("[INFO] Print out %ld keys in the lowerbounds\n", lowerBounds.size());
 	for (int i = 0; i < lowerBounds.size(); i++) {
 		printf("\t[INFO][%d] %s\n", i, getHexString(lowerBounds[i]).c_str());
 	}
@@ -1760,18 +1757,18 @@ std::vector<Standalone<KeyRef>> _calculateAppliersKeyRanges(Reference<RestoreDat
 	}
 
 	if ( lowerBounds.size() != numAppliers ) {
-		printf("[WARNING] calculateAppliersKeyRanges() WE MAY NOT USE ALL APPLIERS efficiently! num_keyRanges:%d numAppliers:%d\n",
+		printf("[WARNING] calculateAppliersKeyRanges() WE MAY NOT USE ALL APPLIERS efficiently! num_keyRanges:%ld numAppliers:%d\n",
 				lowerBounds.size(), numAppliers);
 		printLowerBounds(lowerBounds);
 	}
 
 	//ASSERT(lowerBounds.size() <= numAppliers + 1); // We may have at most numAppliers + 1 key ranges
 	if ( lowerBounds.size() >= numAppliers ) {
-		printf("[WARNING] Key ranges number:%d > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
+		printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
 	}
 
 	while ( lowerBounds.size() >= numAppliers ) {
-		printf("[WARNING] Key ranges number:%d > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
+		printf("[WARNING] Key ranges number:%ld > numAppliers:%d. Merge the last ones\n", lowerBounds.size(), numAppliers);
 		lowerBounds.pop_back();
 	}
 
@@ -1867,7 +1864,7 @@ ACTOR Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Datab
 
 void printRestorableFileSet(Optional<RestorableFileSet> files) {
 
-	printf("[INFO] RestorableFileSet num_of_range_files:%d num_of_log_files:%d\n",
+	printf("[INFO] RestorableFileSet num_of_range_files:%ld num_of_log_files:%ld\n",
 			files.get().ranges.size(), files.get().logs.size());
 	int index = 0;
  	for(const RangeFile &f : files.get().ranges) {
@@ -1931,11 +1928,11 @@ ACTOR static Future<Void> collectBackupFiles(Reference<RestoreData> rd, Database
 	}
 
 	if (!rd->files.empty()) {
-		printf("[WARNING] global files are not empty! files.size() is %d. We forcely clear files\n", rd->files.size());
+		printf("[WARNING] global files are not empty! files.size() is %ld. We forcely clear files\n", rd->files.size());
 		rd->files.clear();
 	}
 
-	printf("[INFO] Found backup files: num of files:%d\n", rd->files.size());
+	printf("[INFO] Found backup files: num of files:%ld\n", rd->files.size());
  	for(const RangeFile &f : restorable.get().ranges) {
  		TraceEvent("FoundRangeFileMX").detail("FileInfo", f.toString());
  		printf("[INFO] FoundRangeFile, fileInfo:%s\n", f.toString().c_str());
@@ -2008,7 +2005,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 
 			cmdReplies.clear();
 
-			printf("[Sampling] Node:%s We will sample the workload among %d backup files.\n", rd->describeNode().c_str(), rd->files.size());
+			printf("[Sampling] Node:%s We will sample the workload among %ld backup files.\n", rd->describeNode().c_str(), rd->files.size());
 			printf("[Sampling] Node:%s totalBackupSizeB:%.1fB (%.1fMB) samplePercent:%.2f, sampleB:%d, loadSize:%dB sampleIndex:%d\n", rd->describeNode().c_str(),
 				totalBackupSizeB,  totalBackupSizeB / 1024 / 1024, samplePercent, sampleB, loadSizeB, sampleIndex);
 			for (auto &loaderID : loaderIDs) {
@@ -2116,7 +2113,7 @@ ACTOR static Future<Void> sampleWorkload(Reference<RestoreData> rd, RestoreReque
 				++loadingCmdIndex;
 			}
 
-			printf("[Sampling] Wait for %d loaders to accept the cmd Sample_Range_File or Sample_Log_File\n", cmdReplies.size());
+			printf("[Sampling] Wait for %ld loaders to accept the cmd Sample_Range_File or Sample_Log_File\n", cmdReplies.size());
 
 			if ( !cmdReplies.empty() ) {
 				std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) ); //TODO: change to getAny. NOTE: need to keep the still-waiting replies
@@ -2341,7 +2338,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 				wait(delay(1.0));
 
 				state std::vector<Future<RestoreCommonReply>> cmdReplies;
-				printf("[INFO] Number of backup files:%d\n", rd->files.size());
+				printf("[INFO] Number of backup files:%ld\n", rd->files.size());
 				rd->cmdID.initPhase(phaseType);
 				for (auto &loaderID : loaderIDs) {
 					while ( rd->files[curFileIndex].fileSize == 0 && curFileIndex < rd->files.size()) {
@@ -2423,7 +2420,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(RestoreInterface int
 					++loadingCmdIndex; // Replaced by cmdUID
 				}
 
-				printf("[INFO] Wait for %d loaders to accept the cmd Assign_Loader_File\n", cmdReplies.size());
+				printf("[INFO] Wait for %ld loaders to accept the cmd Assign_Loader_File\n", cmdReplies.size());
 
 				// Question: How to set reps to different value based on cmdReplies.empty()?
 				if ( !cmdReplies.empty() ) {
@@ -2493,9 +2490,9 @@ ACTOR Future<Void> notifyApplierToApplyMutations(Reference<RestoreData> rd) {
 				printf("[CMD] Node:%s Notify node:%s to apply mutations to DB\n", rd->describeNode().c_str(), nodeID.toString().c_str());
 				cmdReplies.push_back( cmdInterf.applyToDB.getReply(RestoreSimpleRequest(rd->cmdID)) );
 			}
-			printf("[INFO] Wait for %d appliers to apply mutations to DB\n", appliers.size());
+			printf("[INFO] Wait for %ld appliers to apply mutations to DB\n", appliers.size());
 			std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
-			printf("[INFO] %d appliers finished applying mutations to DB\n", appliers.size());
+			printf("[INFO] %ld appliers finished applying mutations to DB\n", appliers.size());
 
 			cmdReplies.clear();
 
@@ -2613,41 +2610,6 @@ ACTOR Future<Void> _restoreWorker(Database cx_input, LocalityData locality) {
 		wait( setWorkerInterface(rd, cx) );
 
 		wait( workerCore(rd, interf, cx) );
-		
-
-		// // Step: prepare restore info: applier waits for the responsible keyRange,
-		// // loader waits for the info of backup block it needs to load
-		// state int restoreBatch = 0;
-		// loop {
-		// 	printf("[Batch:%d] Node:%s Start...\n", restoreBatch, rd->describeNode().c_str());
-		// 	rd->resetPerVersionBatch();
-		// 	if ( rd->localNodeStatus.role == RestoreRole::Applier ) {
-		// 		wait( applierCore(rd, interf) );
-		// 	} else if ( rd->localNodeStatus.role == RestoreRole::Loader ) {
-		// 		printf("[Batch:%d][INFO][Loader] Waits to sample backup data\n", restoreBatch);
-		// 		wait( sampleHandler(rd, interf, leaderInterf.get()) );
-
-		// 		printf("[Batch:%d][INFO][Loader] Waits for appliers' key range\n", restoreBatch);
-		// 		wait( notifyAppliersKeyRangeToLoaderHandler(rd, interf) );
-		// 		printAppliersKeyRange(rd);
-
-		// 		printf("[Batch:%d][INFO][Loader] Waits for the backup file assignment after reset processedFiles\n", restoreBatch);
-		// 		rd->processedFiles.clear();
-		// 		wait( loadingHandler(rd, interf, leaderInterf.get()) );
-
-		// 		//printf("[INFO][Loader] Waits for the command to ask applier to apply mutations to DB\n");
-		// 		//wait( applyToDBHandler(rd, interf, leaderInterf.get()) );
-		// 	} else {
-		// 		printf("[Batch:%d][ERROR][Worker] In an invalid role:%d\n", restoreBatch, rd->localNodeStatus.role);
-		// 	}
-
-		// 	restoreBatch++;
-		// };
-
-		// The workers' logic ends here. Should not proceed
-//		printf("[INFO][Worker:%s] LocalNodeID:%s Role:%s will exit now\n", interf.id().toString().c_str(),
-//				rd->describeNode().c_str(), getRoleStr(rd->localNodeStatus.role).c_str());
-//		return Void();
 	}
 
 	//we are the leader
@@ -3003,12 +2965,12 @@ ACTOR static Future<Version> processRestoreRequest(RestoreInterface interf, Refe
 					isRange = rd->allFiles[curBackupFilesEndIndex].isRange;
 					validVersion = !isVersionInForbiddenRange(rd, endVersion, isRange);
 					curWorkloadSize += rd->allFiles[curBackupFilesEndIndex].fileSize;
-					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:ld, files.size:%d\n",
-						restoreBatchIndex, endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
+					printf("[DEBUG][Batch:%d] Calculate backup files for a version batch: endVersion:%lld isRange:%d validVersion:%d curWorkloadSize:%.2fB curBackupFilesBeginIndex:%ld curBackupFilesEndIndex:ld, files.size:%ld\n",
+						restoreBatchIndex, (long long) endVersion, isRange, validVersion, curWorkloadSize, curBackupFilesBeginIndex, curBackupFilesEndIndex, rd->allFiles.size());
 				}
 				if ( (validVersion && curWorkloadSize >= loadBatchSizeThresholdB) || curBackupFilesEndIndex >= rd->allFiles.size() )  {
 					if ( curBackupFilesEndIndex >= rd->allFiles.size() && curWorkloadSize <= 0 ) {
-						printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%d, curWorkloadSize:%.2f\n",
+						printf("Restore finishes: curBackupFilesEndIndex:%ld, allFiles.size:%ld, curWorkloadSize:%.2f\n",
 								curBackupFilesEndIndex, rd->allFiles.size(), curWorkloadSize);
 						break;
 					}
@@ -3172,10 +3134,10 @@ void printBackupMutationRefValueHex(Standalone<StringRef> val_input, std::string
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
 		if ( debug_verbose ) {
-			printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
+			printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", prefix.c_str(), val_length_decode, val.size());
 		}
 	}
 
@@ -3227,9 +3189,9 @@ void printBackupLogKeyHex(Standalone<StringRef> key_input, std::string prefix) {
 	printf("----------------------------------------------------------\n");
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n", prefix.c_str(), val_length_decode, val.size());
+		fprintf(stderr, "%s[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n", prefix.c_str(), val_length_decode, val.size());
 	} else {
-		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", prefix.c_str(), val_length_decode, val.size());
+		printf("%s[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", prefix.c_str(), val_length_decode, val.size());
 	}
 
 	// Get the mutation header
@@ -3265,7 +3227,7 @@ void printKVOps(Reference<RestoreData> rd) {
 	printf("PrintKVOPs num_of_version:%d\n", rd->kvOps.size());
 	for ( auto it = rd->kvOps.begin(); it != rd->kvOps.end(); ++it ) {
 		TraceEvent("PrintKVOPs\t").detail("Version", it->first).detail("OpNum", it->second.size());
-		printf("PrintKVOPs Version:%08lx num_of_ops:%d\n",  it->first, it->second.size());
+		printf("PrintKVOPs Version:%08lx num_of_ops:%ld\n",  it->first, it->second.size());
 		for ( auto m = it->second.begin(); m != it->second.end(); ++m ) {
 			if (  m->type >= MutationRef::Type::SetValue && m->type <= MutationRef::Type::MAX_ATOMIC_OP )
 				typeStr = typeString[m->type];
@@ -3343,9 +3305,9 @@ void registerBackupMutation(Reference<RestoreData> rd, Standalone<StringRef> val
 	printf("----------------------------------------------------------Register Backup Mutation into KVOPs version:%08lx\n", file_version);
 	printf("To decode value:%s\n", getHexString(val).c_str());
 	if ( val_length_decode != (val.size() - 12) ) {
-		printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%d\n",  val_length_decode, val.size());
+		printf("[PARSE ERROR]!!! val_length_decode:%d != val.size:%ld\n",  val_length_decode, val.size());
 	} else {
-		printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%d - 12)\n", val_length_decode, val.size());
+		printf("[PARSE SUCCESS] val_length_decode:%d == (val.size:%ld - 12)\n", val_length_decode, val.size());
 	}
 
 	// Get the mutation header
@@ -3394,7 +3356,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	bool concatenated = false;
 
 	if ( logRangeMutationFirstLength < 0 ) {
-		printf("[ERROR]!!! logRangeMutationFirstLength:%d < 0, key_input.size:%d\n", logRangeMutationFirstLength, key_input.size());
+		printf("[ERROR]!!! logRangeMutationFirstLength:%d < 0, key_input.size:%ld\n", logRangeMutationFirstLength, key_input.size());
 	}
 
 	if ( debug_verbose ) {
@@ -3407,7 +3369,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	StringRefReaderMX readerPart(partStr, restore_corrupted_data());
 	uint32_t part_direct = readerPart.consumeNetworkUInt32(); //Consume a bigEndian value
 	if ( debug_verbose  ) {
-		printf("[DEBUG] Process prefix:%s and partStr:%s part_direct:%08x fromm key_input:%s, size:%d\n",
+		printf("[DEBUG] Process prefix:%s and partStr:%s part_direct:%08x fromm key_input:%s, size:%ld\n",
 			   getHexKey(id_old, logRangeMutationFirstLength).c_str(),
 			   getHexString(partStr).c_str(),
 			   part_direct,
@@ -3433,7 +3395,7 @@ bool concatenateBackupMutationForLogFile(Reference<RestoreData> rd, Standalone<S
 	Standalone<StringRef> id = StringRef((uint8_t*) &commitVersion, 8);
 
 	if ( debug_verbose ) {
-		printf("[DEBUG] key_input_size:%d longRangeMutationFirst:%s hashValue:%02x commitVersion:%016lx (BigEndian:%016lx) part:%08x (BigEndian:%08x), part_direct:%08x mutationMap.size:%d\n",
+		printf("[DEBUG] key_input_size:%d longRangeMutationFirst:%s hashValue:%02x commitVersion:%016lx (BigEndian:%016lx) part:%08x (BigEndian:%08x), part_direct:%08x mutationMap.size:%ld\n",
 			   key_input.size(), longRangeMutationFirst.printable().c_str(), hashValue,
 			   commitVersion, commitVersionBE,
 			   part, partBE,
@@ -3578,7 +3540,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 							kvCount++;
 							if (packMutationNum >= packMutationThreshold) {
 								ASSERT( packMutationNum == packMutationThreshold );
-								printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+								printf("[INFO][Loader] Waits for applier to receive %ld mutations\n", cmdReplies.size());
 								std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 								cmdReplies.clear();
 								packMutationNum = 0;
@@ -3602,7 +3564,7 @@ ACTOR Future<Void> registerMutationsToApplier(Reference<RestoreData> rd) {
 						kvCount++;
 						if (packMutationNum >= packMutationThreshold) {
 							ASSERT( packMutationNum == packMutationThreshold );
-							printf("[INFO][Loader] Waits for applier to receive %d mutations\n", cmdReplies.size());
+							printf("[INFO][Loader] Waits for applier to receive %ld mutations\n", cmdReplies.size());
 							std::vector<RestoreCommonReply> reps = wait( timeoutError( getAll(cmdReplies), FastRestore_Failure_Timeout ) );
 							cmdReplies.clear();
 							packMutationNum = 0;

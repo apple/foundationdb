@@ -164,7 +164,7 @@ struct RestoreInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
+		serializer(ar, nodeID, setRole, sampleRangeFile, sampleLogFile, sendSampleMutation,
 				calculateApplierKeyRange, getApplierKeyRangeRequest, setApplierKeyRangeRequest,
 				loadRangeFile, loadLogFile, sendMutation, applyToDB, initVersionBatch);
 	}
