@@ -46,7 +46,6 @@ extern bool buggifyActivated;
 extern "C" int g_expect_full_pointermap;
 extern const char* getHGVersion();
 
-const int PROCESS_START_TIME = 4;
 const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;

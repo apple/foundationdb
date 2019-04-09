@@ -301,7 +301,6 @@ struct TraceableStringImpl : std::true_type {
 		// if all characters are printable ascii, we simply return the string
 		int nonPrintables = 0;
 		int numBackslashes = 0;
-		auto val = value;
 		int size = 0;
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
 			++size;

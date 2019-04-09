@@ -829,6 +829,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).log( std::tuple_element<Is, typename Descriptor<E>::fields>::type::get( static_cast<E&>(*this) ), t, l, overflow, bytes ), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -838,6 +839,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).init(), Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -847,6 +849,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).nextKey(t, l),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -865,6 +868,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).flushField( mk, rollTime, batch ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -879,6 +883,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).rollMetric( t ),Void())...
 		};
+		(void)_;
 #endif
 	}
 
@@ -893,6 +898,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		auto _ = {
 			(std::get<Is>(values).registerField( mk, fieldKeys ),Void())...
 		};
+		(void)_;
 #endif
 	}
 protected:

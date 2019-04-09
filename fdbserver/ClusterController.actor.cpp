@@ -1413,7 +1413,6 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		return;
 	}
 
-	auto& masterWorker = self->id_worker[self->masterProcessId.get()];
 	const ServerDBInfo& db = self->db.serverInfo->get();
 	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);

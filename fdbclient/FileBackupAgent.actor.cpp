@@ -1575,11 +1575,6 @@ namespace fileBackup {
 				countShardsExpectedPerNormalWindow = (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
 			}
 
-			// countShardsThisDispatch is how many total shards are to be dispatched by this dispatch cycle.
-			// Since this dispatch cycle can span many incrementally progressing separate executions of the BackupSnapshotDispatchTask
-			// instance, this is calculated as the number of shards dispatched so far in the dispatch batch plus the number of shards
-			// the current execution is going to attempt to do.
-			int countShardsThisDispatch = countShardsToDispatch + snapshotBatchSize.get();
 			// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are being dispatched, if any.
 			int countShardsBehind = std::max<int64_t>(0, countShardsToDispatch + snapshotBatchSize.get() - countShardsExpectedPerNormalWindow); 
 			Params.shardsBehind().set(task, countShardsBehind);
