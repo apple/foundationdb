@@ -111,7 +111,7 @@ Reference<IDisk> createSimulatedDisk(DiskType diskType) {
         case DiskType::Normal:
             return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
         case DiskType::Slow:
-            return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS / 2, FLOW_KNOBS->SIM_DISK_BANDWIDTH / 2));
+            return Reference<IDisk>(new NormalDisk(FLOW_KNOBS->SIM_DISK_IOPS / 1e3, FLOW_KNOBS->SIM_DISK_BANDWIDTH / 1e3));
         case DiskType::Dead:
             return Reference<IDisk>(new NeverDisk());
         case DiskType::EBS:
