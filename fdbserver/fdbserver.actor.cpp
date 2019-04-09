@@ -543,9 +543,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 mounted at the specified PATH. This checks that the device at PATH\n"
 		   "                 is currently mounted and that any data files get written to the\n"
 		   "                 same device.\n");
-	printf("  --rsssize SIZE\n"
-		   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
-		   "                 the given threshold.\n");
 #endif
 	printf("  -d PATH, --datadir PATH\n"
 		   "                 Store data files in the given folder (must be unique for each\n");
@@ -619,6 +616,12 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  --num_testers NUM\n");
 		printf("                 A multitester will wait for NUM testers before starting\n");
 		printf("                 (defaults to 1).\n");
+#ifdef __linux__
+		printf("  --rsssize SIZE\n"
+			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
+			   "                 the given threshold. fdbserver needs to be compiled with\n"
+			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
+#endif
 		printf("  --testservers ADDRESSES\n");
 		printf("                 The addresses of networktestservers\n");
 		printf("                 specified as ADDRESS:PORT,ADDRESS:PORT...\n");
