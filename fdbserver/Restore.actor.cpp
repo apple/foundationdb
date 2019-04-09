@@ -106,7 +106,7 @@ struct StringRefReaderMX {
 	Error failure_error;
 };
 
-bool debug_verbose = true;
+bool debug_verbose = false;
 
 
 ////-- Restore code declaration START
@@ -1420,8 +1420,7 @@ ACTOR static Future<Void> prepareRestoreFilesV2(Reference<RestoreData> rd, Datab
 				printf("%s[PARSE ERROR]!!!! kLen:%d(0x%04x) vLen:%d(0x%04x)\n", prefix.c_str(), kLen, kLen, vLen, vLen);
 			}
 
-			//if ( debug_verbose ) {
-			if ( true ) {
+			if ( debug_verbose ) {
 				printf("%s---LogFile parsed mutations. Prefix:[%d]: Version:%016lx Type:%d K:%s V:%s k_size:%d v_size:%d\n", prefix.c_str(),
 					   kvCount,
 					   commitVersion, type,  getHexString(KeyRef(k, kLen)).c_str(), getHexString(KeyRef(v, vLen)).c_str(), kLen, vLen);
@@ -3658,6 +3657,7 @@ ACTOR Future<Void> registerMutationsToMasterApplier(Reference<RestoreData> rd) {
 
 	loop {
 		try {
+			packMutationNum = 0;
 			rd->cmdID.initPhase(RestoreCommandEnum::Loader_Send_Sample_Mutation_To_Applier); 
 			// TODO: Consider using a different EndPoint for loader and applier communication.
 			// Otherwise, applier may receive loader's message while applier is waiting for master to assign key-range
