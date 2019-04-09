@@ -2743,6 +2743,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait( data->desiredOldestVersion.whenAtLeast( data->storageVersion()+1 ) );
 		wait( delay(0, TaskUpdateStorage) );
 
+		if (g_network->isSimulated()) {
+			auto dt = g_pSimulator->getDiskType(data->thisServerID.toString().substr(0,16));
+			if (dt != DiskType::Normal) {
+				g_pSimulator->getCurrentProcess()->machine->changeDisk(dt);
+			}
+		}
+
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
 

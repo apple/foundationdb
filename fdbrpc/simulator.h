@@ -155,6 +155,8 @@ public:
 	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual void changeDisk(std::string desc, DiskType dt) = 0;
+	virtual DiskType getDiskType(std::string desc) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;

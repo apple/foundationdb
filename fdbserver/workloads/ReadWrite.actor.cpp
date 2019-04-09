@@ -56,7 +56,26 @@ static Future<Version> getInconsistentReadVersion( Database const& db ) {
 	else
 		return lastRV;
 }
-
+ACTOR static Future<Void> slowRandomStorageActor(Database cx) {
+    state Transaction tr(cx);
+    loop {
+        try {
+            tr.reset();
+            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+            Standalone<RangeResultRef> range = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+            if (range.size() > 0) {
+                auto ssi = decodeServerListValue(g_random->randomChoice(range).value);
+				TraceEvent("SlowingStorageDisk").detail("Id", ssi.toString()).detail("Address", ssi.address());
+				g_pSimulator->changeDisk(ssi.toString(), DiskType::Slow);
+				return Void();
+            } else {
+                wait(delay(1.0));
+            }
+        } catch(Error& e) {
+            wait(tr.onError(e));
+        }
+    }
+}
 
 DESCR struct TransactionSuccessMetric {
 	int64_t totalLatency; // ns
@@ -97,6 +116,7 @@ struct ReadWriteWorkload : KVWorkload {
 	bool rampTransactionType;
 	bool rampUpConcurrency;
 	bool batchPriority;
+	bool slowRandomStorage;
 
 	Standalone<StringRef> descriptionString;
 
@@ -178,6 +198,7 @@ struct ReadWriteWorkload : KVWorkload {
 		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		doSetup = getOption(options, LiteralStringRef("setup"), true);
 		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
+		slowRandomStorage = getOption(options, LiteralStringRef("slowRandomStorage"), false);
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
 
 		if (rampUpConcurrency) ASSERT( rampSweepCount == 2 );  // Implementation is hard coded to ramp up and down
@@ -446,6 +467,9 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, ReadWriteWorkload *self ) {
+		if (self->slowRandomStorage && self->clientId == 0)
+			wait(slowRandomStorageActor(cx));
+
 		if(!self->doSetup)
 			return Void();
 

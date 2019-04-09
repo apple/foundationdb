@@ -1513,6 +1513,8 @@ public:
 
 		return (kt == ktMin);
 	}
+	virtual void override changeDisk(std::string desc, DiskType dt) { diskTypes[desc] = dt; }
+	virtual DiskType override getDiskType(std::string desc) { return diskTypes[desc]; }
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) {
 		if (mode == ClogDefault) {
 			double a = g_random->random01();
@@ -1674,6 +1676,9 @@ public:
 	//Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit;  // how many more times yield may return false before next returning true
+
+private:
+	std::map<std::string, DiskType> diskTypes;
 };
 
 void startNewSimulator() {
